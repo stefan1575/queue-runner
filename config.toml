@@ -1,0 +1,10 @@
+# The repos the queue runner serves, in priority order: the first one with work gets the next job.
+# State and logs live outside every served repo.
+state_dir = "~/.queue-runner/state"
+log_dir = "~/.queue-runner/logs"
+
+[[repos]]
+name = "leads-dashboard"
+github = "RoyalBullyAgency-RBA/leads-dashboard"
+path = "~/Code/Work/leads-dashboard"
+base = "main"
