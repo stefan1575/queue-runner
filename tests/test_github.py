@@ -16,7 +16,7 @@ class FakeGh:
 
     def __call__(self, args):
         self.calls.append(args)
-        endpoint = next(a for a in args if a.startswith('repos/'))
+        endpoint = next(a for a in args if a.startswith('repos/') or a == 'graphql')
         data = self.responses[endpoint]
         # --paginate --slurp wraps each page in an outer list
         return json.dumps([data] if '--slurp' in args else data)
@@ -30,15 +30,22 @@ class GhCliTest(unittest.TestCase):
              'sub_issues_summary': {'total': 5, 'completed': 2}},
             {'number': 8, 'title': 'A PR', 'body': '', 'pull_request': {'url': 'x'}},
             {'number': 9, 'title': 'Old', 'body': 'b'},
-        ]})
+        ], 'graphql': {'data': {'repository': {'issues': {
+            'pageInfo': {'hasNextPage': False, 'endCursor': None},
+            'nodes': [{'number': 9, 'closedByPullRequestsReferences': {'nodes': [
+                          {'state': 'OPEN'}, {'state': 'MERGED'}, {'state': 'OPEN'}]}},
+                      {'number': 7, 'closedByPullRequestsReferences': {'nodes': []}}]}}}}})
         self.assertEqual(GhCli(gh).ready_issues(REPO), [
             Issue(7, 'T', '', open_blockers=1, open_sub_issues=3),
-            Issue(9, 'Old', 'b'),
+            Issue(9, 'Old', 'b', open_linked_pulls=2),
         ])
+        query = next(c for c in gh.calls if 'graphql' in c)
+        self.assertIn('owner=owner', query)
+        self.assertIn('name=demo', query)
 
     def test_issue_state(self):
         gh = FakeGh({'repos/owner/demo/issues/3': {'number': 3, 'state': 'closed'}})
-        self.assertEqual(GhCli(gh).issue_state(REPO, 3), 'closed')
+        self.assertEqual(GhCli(gh).issue_state('owner/demo', 3), 'closed')
 
     def test_open_pulls(self):
         gh = FakeGh({'repos/owner/demo/pulls?state=open&per_page=100': [

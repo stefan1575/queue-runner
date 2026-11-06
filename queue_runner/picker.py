@@ -7,8 +7,11 @@ from .github import Issue
 
 _HEADING = re.compile(r'^\s{0,3}#{1,6}\s')
 _BLOCKED_BY = re.compile(r'^[\s>*_#-]*blocked by\b', re.IGNORECASE)
-_REF = re.compile(r'(?<![\w/#])#(\d+)\b')
-_CLOSES = re.compile(r'\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?):?\s+#(\d+)\b', re.IGNORECASE)
+# An issue reference: a github.com URL, `owner/name#N`, or `#N` (this repo).
+_REF = (r'(?:https://github\.com/(?P<url_repo>[\w.-]+/[\w.-]+)/issues/(?P<url_n>\d+)'
+        r'|(?<![\w/#.-])(?:(?P<repo>[\w.-]+/[\w.-]+))?#(?P<n>\d+)\b)')
+_REFS = re.compile(_REF)
+_CLOSES = re.compile(r'\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?):?\s+' + _REF, re.IGNORECASE)
 _CLAUDE_BRANCH = re.compile(r'^claude/.+-(\d+)$')
 
 
@@ -27,32 +30,46 @@ def slug(title: str, words: int = 4) -> str:
     return '-'.join(_WORD.findall(title.lower())[:words]) or 'issue'
 
 
-def blockers(body: str) -> list[int]:
-    """Issue numbers named as blockers: on a `Blocked by:` line, or under a `## Blocked by` heading
-    up to the next heading. Refs elsewhere in the body don't block."""
+def _refs(pattern, text: str, here: str) -> list[tuple[str, int]]:
+    """(owner/name, number) for each reference; a bare `#N` is in `here`."""
+    found = []
+    for m in pattern.finditer(text):
+        if m['url_n']:
+            found.append((m['url_repo'].lower(), int(m['url_n'])))
+        else:
+            found.append(((m['repo'] or here).lower(), int(m['n'])))
+    return found
+
+
+def blockers(body: str, here: str) -> list[tuple[str, int]]:
+    """Issues named as blockers, as (owner/name, number): on a `Blocked by:` line, or under a
+    `## Blocked by` heading up to the next heading. Refs elsewhere in the body don't block."""
     found = []
     lines = (body or '').splitlines()
     for i, line in enumerate(lines):
         if not _BLOCKED_BY.match(line):
             continue
-        found += _REF.findall(line)
+        found += _refs(_REFS, line, here)
         if _HEADING.match(line):
             for later in lines[i + 1:]:
                 if _HEADING.match(later):
                     break
-                found += _REF.findall(later)
-    return sorted({int(n) for n in found})
+                found += _refs(_REFS, later, here)
+    return sorted(set(found))
 
 
 def _unblocked(repo: Repo, github, issue: Issue) -> bool:
     if issue.open_blockers:
         return False
-    return all(github.issue_state(repo, n) == 'closed' for n in blockers(issue.body))
+    return all(github.issue_state(where, n) == 'closed'
+               for where, n in blockers(issue.body, repo.github))
 
 
 def _in_flight(repo: Repo, github) -> set[int]:
     """Issues something is already building: a `claude/*-<issue>` branch, or an open PR on one or
-    with a closing keyword for the issue."""
+    with a closing keyword for the issue in this repo. PRs GitHub links to an issue (by keyword or
+    by hand) are counted on the issue itself (`open_linked_pulls`)."""
+    here = repo.github.lower()
     taken = set()
     for branch in github.branches(repo, 'claude/'):
         if m := _CLAUDE_BRANCH.match(branch):
@@ -60,7 +77,7 @@ def _in_flight(repo: Repo, github) -> set[int]:
     for pr in github.open_pulls(repo):
         if m := _CLAUDE_BRANCH.match(pr.branch):
             taken.add(int(m.group(1)))
-        taken.update(int(n) for n in _CLOSES.findall(pr.body or ''))
+        taken.update(n for where, n in _refs(_CLOSES, pr.body or '', here) if where == here)
     return taken
 
 
@@ -69,7 +86,7 @@ def pick(repo: Repo, github) -> BuildJob | None:
     built. A spec or map with open sub-issues isn't built itself; its children are."""
     taken = _in_flight(repo, github)
     for issue in sorted(github.ready_issues(repo), key=lambda i: i.number):
-        if issue.number in taken or issue.open_sub_issues:
+        if issue.number in taken or issue.open_linked_pulls or issue.open_sub_issues:
             continue
         if _unblocked(repo, github, issue):
             return BuildJob(repo=repo, issue=issue, base=f'origin/{repo.base}',

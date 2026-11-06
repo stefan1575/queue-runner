@@ -15,8 +15,9 @@ class FakeGitHub:
     def ready_issues(self, repo):
         return list(self.issues)
 
-    def issue_state(self, repo, number):
-        return self.states.get(number, 'closed')
+    def issue_state(self, github, number):
+        """States keyed by (owner/name, number), or by number alone for the served repo."""
+        return self.states.get((github, number), self.states.get(number, 'closed'))
 
     def open_pulls(self, repo):
         return list(self.prs)
@@ -28,9 +29,10 @@ class FakeGitHub:
         return list(self.comments.get(number, []))
 
 
-def issue(number, title='A ticket', body='', open_blockers=0, open_sub_issues=0):
+def issue(number, title='A ticket', body='', open_blockers=0, open_sub_issues=0,
+          open_linked_pulls=0):
     return Issue(number=number, title=title, body=body, open_blockers=open_blockers,
-                 open_sub_issues=open_sub_issues)
+                 open_sub_issues=open_sub_issues, open_linked_pulls=open_linked_pulls)
 
 
 def pr(number, branch, body=''):

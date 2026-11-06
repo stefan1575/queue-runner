@@ -59,6 +59,33 @@ class PickerTest(unittest.TestCase):
         gh = FakeGitHub(issues=[issue(5), issue(9)], branches=['claude/old-try-5', 'claude/x-95'])
         self.assertEqual(pick(REPO, gh).issue.number, 9)
 
+    def test_skips_an_issue_with_an_open_pr_linked_by_hand(self):
+        gh = FakeGitHub(issues=[issue(5, open_linked_pulls=1), issue(9)])
+        self.assertEqual(pick(REPO, gh).issue.number, 9)
+
+    def test_a_qualified_blocker_in_this_repo_counts(self):
+        gh = FakeGitHub(issues=[issue(5, body='Blocked by: owner/demo#3'), issue(9)],
+                        states={3: 'open'})
+        self.assertEqual(pick(REPO, gh).issue.number, 9)
+
+    def test_a_blocker_in_another_repo_is_checked_there(self):
+        gh = FakeGitHub(issues=[issue(5, body='Blocked by: other/lib#3'), issue(9)],
+                        states={3: 'closed', ('other/lib', 3): 'open'})
+        self.assertEqual(pick(REPO, gh).issue.number, 9)
+
+    def test_a_blocker_given_as_a_url_counts(self):
+        body = '## Blocked by\n\n- https://github.com/other/lib/issues/3'
+        gh = FakeGitHub(issues=[issue(5, body=body), issue(9)], states={('other/lib', 3): 'open'})
+        self.assertEqual(pick(REPO, gh).issue.number, 9)
+
+    def test_skips_an_issue_a_pr_closes_by_qualified_ref(self):
+        gh = FakeGitHub(issues=[issue(5), issue(9)], prs=[pr(20, 'feature/x', 'Fixes owner/demo#5')])
+        self.assertEqual(pick(REPO, gh).issue.number, 9)
+
+    def test_a_pr_closing_the_same_number_in_another_repo_doesnt_count(self):
+        gh = FakeGitHub(issues=[issue(5)], prs=[pr(20, 'feature/x', 'Fixes other/lib#5')])
+        self.assertEqual(pick(REPO, gh).issue.number, 5)
+
     def test_skips_a_spec_with_open_sub_issues(self):
         gh = FakeGitHub(issues=[issue(2, open_sub_issues=4), issue(9)])
         self.assertEqual(pick(REPO, gh).issue.number, 9)
