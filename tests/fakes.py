@@ -117,6 +117,10 @@ class FakeGitHubForReviews(FakeGitHubWithPulls):
         self.states[number] = 'closed'
         self.open_issue_list = [i for i in self.open_issue_list if i.number != number]
 
+    def close_not_planned(self, repo, number):
+        self._write('close', number)
+        self.states[number] = 'closed'
+
     def set_status(self, repo, sha, state, description, target_url='', context='sol-review'):
         self._write('status', sha, state, description, target_url)
 

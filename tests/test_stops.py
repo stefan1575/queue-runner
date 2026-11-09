@@ -14,11 +14,11 @@ from queue_runner.merge import Merger
 from queue_runner.review import Reviewer
 from queue_runner.run import Runner
 from queue_runner.state import JobLog
-from queue_runner.stops import NEEDS_INFO, needs_info_mark
+from queue_runner.stops import NEEDS_INFO, held, needs_info_mark
 from queue_runner.toast import toast_xml, WindowsToaster
 from tests.fakes import FakeGitHubWithPulls, FakeGitHubForReviews, FakeToaster, \
     full_pr, issue
-from tests.fakes_t3 import FakeGit, FakeReviewGit, FakeSol, FakeT3
+from tests.fakes_t3 import FakeGit, FakeReviewGit, FakeSol, FakeT3, decision_reply
 from tests.test_ledger import H2, H3, important, old_marker, reply
 
 NOW = datetime.datetime(2026, 11, 9, 12, 0)
@@ -109,12 +109,16 @@ class StopsTest(unittest.TestCase):
         self.assertIn('F2 repeats the class "write logged wrongly" of F1', stop.reason)
         self.assertEqual(len(self.toaster.toasts), 1)
 
-    def test_review_3_still_blocking_stops_without_a_fourth_review(self):
+    def test_review_3_still_blocking_waits_for_its_approach_note_without_a_fourth_review(self):
         self.review_ended('approach-note', round=3)
-        self.reviewer().review_pass()
-        [stop] = self.stops()
-        self.assertEqual(stop.stop, 'approach-note')
-        self.assertIn('review 3', stop.reason)
+        self.gh.prs = [full_pr(20, 'claude/red-5', H3, title='Red widget')]   # a push since
+        self.git.heads[20] = H3
+        r = self.reviewer()
+        self.assertEqual(r.review_pass(), 'idle')
+        self.assertEqual(self.stops(), [])   # the decision thread files it, with its note
+        self.assertEqual(self.sol.briefs, [])
+        self.assertIn('its Approach note goes to Stefan first',
+                      held(self.jobs, self.repo, 20))
 
     def test_a_reopened_finding_and_a_kept_decline_are_review_stops(self):
         self.review_ended('stop', signals=['reopened', 'decline-kept'])
@@ -229,8 +233,26 @@ class StopsTest(unittest.TestCase):
         r.review_pass()
         self.assertEqual(self.sol.briefs, [])
         self.gh.replies[20] = [Comment('stefan1575', LATER, 'Rerun it, it was flaky.')]
-        self.assertEqual(r.review_pass(), 'started')
+        self.assertEqual(r.review_pass(), 'idle')   # a decision on the reply comes first
         self.assertEqual(self.stops()[0].answer, 'replied')
+        self.assertIn('a decision on his reply comes first', held(self.jobs, self.repo, 20))
+
+    def test_a_reply_on_the_needs_info_issue_answers_the_stop(self):
+        r = self.stopped_then_pushed()
+        self.gh.comments[901] = [Comment('stefan1575', LATER, 'hold')]
+        r.review_pass()
+        self.assertEqual(self.stops()[0].answer, 'replied')
+
+    def test_the_runners_own_comment_on_the_needs_info_issue_is_no_answer(self):
+        self.fail_check()
+        self.reviewer().review_pass()
+        self.gh.conflicts.add(20)
+        self.reviewer().review_pass()   # a second stop: added to issue 901 as a comment
+        [(n, added)] = [c for c in self.calls('comment') if c[0] == 901]
+        self.assertIn('Another stop on PR #20', added)
+        self.gh.comments[901] = [Comment('stefan1575', LATER, added)]
+        self.reviewer().review_pass()
+        self.assertEqual({s.outcome for s in self.stops()}, {'filed'})
 
     def test_release_puts_a_stopped_pr_back(self):
         r = self.stopped_then_pushed()
@@ -262,29 +284,38 @@ class StopsTest(unittest.TestCase):
 
 
 class WaitingToastTest(unittest.TestCase):
-    """T3's thread notifications can't be limited to threads that need Stefan, so they stay off
-    and the runner toasts for a job thread that waits for an answer (exit 2)."""
+    """T3's thread notifications can't be limited to threads that need Stefan, so they stay off.
+    A job thread that waits for an answer (exit 2) gets a decision first; only when it's Stefan's
+    does the runner toast, and the click opens the waiting thread."""
 
-    def build(self, *outcomes):
-        """One build pass of issue #4 whose thread ends as given; returns the toasts."""
+    def passes(self, n, *outcomes):
+        """`n` passes over issue #4, T3's threads ending as given; returns the toasts."""
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         repo = Repo(name='first', github='owner/first', path=tmp.name)
         config = Config(repos=[repo], state_dir=os.path.join(tmp.name, 'state'),
                         log_dir=os.path.join(tmp.name, 'logs'))
         toaster = FakeToaster()
-        Runner(config, github=FakeGitHubWithPulls(issues=[issue(4)]), t3=FakeT3(list(outcomes)),
-               git=FakeGit(), out=io.StringIO(), log_line=lambda line: None,
-               toaster=toaster).run_pass()
+        self.gh = FakeGitHubForReviews(issues=[issue(4)])
+        r = Runner(config, github=self.gh, t3=FakeT3(list(outcomes)), git=FakeGit(),
+                   out=io.StringIO(), log_line=lambda line: None, toaster=toaster)
+        for _ in range(n):
+            r.run_pass()
         return toaster.toasts
 
-    def test_a_build_that_waits_for_an_answer_toasts_with_its_thread_link(self):
-        [t] = self.build((2, 'waiting'))
+    def test_a_waiting_build_toasts_only_once_a_decision_finds_its_question_is_stefans(self):
+        self.assertEqual(self.passes(1, (2, 'waiting')), [])
+        [t] = self.passes(2, (2, 'waiting'),
+                          (0, 'completed', decision_reply('stop', question='Red or blue?')))
         self.assertEqual(t['url'], 'https://app.t3.codes/threads/env/mcp:t1')
-        self.assertIn('build on issue #4 waits for your answer', t['text'])
+        self.assertIn('Red or blue?', t['text'])
+        [(n, said)] = [p[1:] for p in self.gh.posts if p[0] == 'comment']
+        self.assertEqual(n, 4)
+        self.assertIn('Answer it in the waiting thread: https://app.t3.codes/threads/env/mcp:t1',
+                      said)
 
     def test_a_build_that_completes_does_not_toast(self):
-        self.assertEqual(self.build((0, 'completed')), [])
+        self.assertEqual(self.passes(1, (0, 'completed')), [])
 
 
 class ToastTest(unittest.TestCase):

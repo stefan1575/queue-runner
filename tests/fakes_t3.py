@@ -2,15 +2,24 @@
 from queue_runner.t3 import RunResult, T3Error, Thread
 
 
+def decision_reply(action, version=1, prose='I read the sources.', **fields) -> str:
+    """A decision thread's reply ending in its answer block."""
+    import json
+    block = json.dumps({'version': version, 'action': action, **fields})
+    return f'{prose}\n\n```queue-runner-decision\n{block}\n```\n'
+
+
 class FakeT3:
     """`outcomes` are what successive `start` calls do: (exit code, status), or a T3Error.
     Each started thread is kept, so `show` and `list` can find it; tests change its status
     to play a thread that moves on (Stefan answered it, or it was still running)."""
 
     def __init__(self, outcomes=()):
-        self.outcomes = list(outcomes)
+        self.outcomes = list(outcomes)   # (code, status) or (code, status, reply), or a T3Error
         self.starts = []
+        self.sends = []
         self.threads: dict[str, Thread] = {}
+        self.messages: dict[str, list] = {}   # thread id -> its last messages (Message)
 
     def add(self, thread_id, title, status, created_at='2099-01-01T00:00:00.000Z', **extra):
         self.threads[thread_id] = Thread(
@@ -30,18 +39,31 @@ class FakeT3:
         outcome = self.outcomes.pop(0)
         if isinstance(outcome, Exception):
             raise outcome
-        code, status = outcome
         thread_id = f'mcp:t{len(self.starts)}'
-        self.add(thread_id, title, status, branch=branch,
+        self.add(thread_id, title, outcome[1], branch=branch,
                  worktree_path=f'C:/t3/worktrees/{thread_id}')
+        return self._result(thread_id, outcome)
+
+    @staticmethod
+    def _result(thread_id, outcome):
+        code, status = outcome[:2]
+        reply = outcome[2] if len(outcome) > 2 else ('Done.' if code == 0 else None)
         return RunResult(exit_code=code, thread_id=thread_id, run_id=f'run:{thread_id}:1',
-                         status=status, reply='Done.' if code == 0 else None,
-                         error='It broke.' if code == 1 else None)
+                         status=status, reply=reply, error='It broke.' if code == 1 else None)
+
+    def send(self, thread_id, message):
+        """A message to an existing thread: the next outcome is how its new run ends."""
+        self.sends.append(dict(thread_id=thread_id, message=message))
+        outcome = self.outcomes.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        self.set_status(thread_id, outcome[1])
+        return self._result(thread_id, outcome)
 
     def show(self, thread_id, messages=3):
         if thread_id not in self.threads:
             raise T3Error(f'no thread {thread_id}')
-        return self.threads[thread_id], []
+        return self.threads[thread_id], list(self.messages.get(thread_id, []))[-messages:]
 
     def list(self, project):
         return sorted(self.threads.values(), key=lambda t: t.created_at, reverse=True)

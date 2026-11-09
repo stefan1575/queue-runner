@@ -35,9 +35,11 @@ OPEN = ('open', 'decline-kept')
 # (pr-review.md: no fourth review without his answer). The old script did it at review 3 only,
 # with its spend guard behind it; with that guard gone, every later blocking review does too.
 APPROACH_REVIEW = 3
-# The hidden line on the runner's comment recording a stop on a PR (`stops.py`): the runner's
-# own post, never a reply from Stefan, though it's on his account.
-STOP_MARK = '<!-- queue-runner stop '
+# Every comment the runner posts outside a review carries a hidden line starting with this: the
+# runner's own post, never a reply from Stefan, though it's on his account.
+RUNNER_MARK = '<!-- queue-runner '
+# The hidden line on the runner's comment recording a stop on a PR (`stops.py`).
+STOP_MARK = RUNNER_MARK + 'stop '
 # Where a comment's collapsed ledger starts: everything after it is the ledger and the marker.
 LEDGER = '<details><summary>Ledger</summary>'
 
@@ -118,10 +120,11 @@ def newest_on(comments, sha: str, verdict: str) -> dict | None:
 
 
 def runner_post(body: str) -> bool:
-    """A review (any format) or a stop the runner recorded: not something a person said."""
+    """A review (any format), or a stop, an Approach note or anything else the runner posted:
+    not something a person said."""
     body = body or ''
     return (read_review(body) is not None or '<!-- sol-pr-review' in body
-            or STOP_MARK in body)
+            or RUNNER_MARK in body)
 
 
 def said_since(comments, at: str) -> list:

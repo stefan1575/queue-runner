@@ -3,8 +3,9 @@
     python -m queue_runner                    # run: pass after pass (what logon will start)
     python -m queue_runner --once             # one pass of each lane: settle, at most one build
                                               # and at most one Sol review
-    python -m queue_runner --once --dry-run   # name the next Claude job (a fix round's brief
-                                              # first, else a build's), the PRs Sol would review
+    python -m queue_runner --once --dry-run   # name the next Claude job (a decision first, then
+                                              # a fix round, else a build, with its brief), the
+                                              # stops, the PRs Sol would review
                                               # and the PRs that would merge
     python -m queue_runner --release NAME#N   # let the picker take a held issue again
     python -m queue_runner --review NAME#N    # Sol reviews that PR's head now
@@ -37,8 +38,9 @@ def _jobs(config) -> JobLog:
     return JobLog(os.path.join(config.state_dir, 'jobs.jsonl'))
 
 
-def _dry_run(config, github, git, out, log_line) -> int:
-    if not _dry_run_fix(config, github, git, out, log_line):
+def _dry_run(config, github, git, out, log_line, t3=None) -> int:
+    if not _dry_run_decision(config, github, t3, out, log_line) and \
+            not _dry_run_fix(config, github, git, out, log_line):
         _dry_run_build(config, github, out, log_line)
     _dry_run_stops(config, github, out)
     _dry_run_reviews(config, github, out)
@@ -61,6 +63,31 @@ def _dry_run_stops(config, github, out) -> None:
                       file=out)
             if why := held(jobs, repo, pr.number):
                 print(f'  {repo.name}#{pr.number}: {why}', file=out)
+
+
+def _dry_run_decision(config, github, t3, out, log_line) -> bool:
+    """Prints the decision the Claude lane would take first, with its brief (a reply to an
+    Approach note that names rework, fix on or hold needs no thread)."""
+    from .decisions import Decider, read_reply
+    from .stops import Stopper
+    jobs = _jobs(config)
+    decider = Decider(config, github=github, t3=t3, jobs=jobs, say=lambda line: None,
+                      stopper=Stopper(config, github=github, jobs=jobs, say=lambda line: None))
+    case = decider.next_case()
+    if case is None:
+        return False
+    what = f'{case.repo.name}#{case.number} ({case.question})'
+    log_line(f'dry run: would decide {what}')
+    print(f'Would start a decision on {what} (dry run: nothing started or posted)', file=out)
+    if case.question == 'reply' and case.about.stop == 'approach-note' and \
+            (answer := read_reply(case.said)):
+        print(f'  Stefan answered the Approach note: {answer.action}, with no thread', file=out)
+        return True
+    print('  brief:', file=out)
+    print('-' * 72, file=out)
+    print(decider.brief(case), file=out)
+    print('-' * 72, file=out)
+    return True
 
 
 def _dry_run_fix(config, github, git, out, log_line) -> bool:
@@ -220,8 +247,11 @@ def main(argv=None, github=None, out=None, t3=None, git=None, sleep=time.sleep,
     if git is None:
         from .git import GitCli
         git = GitCli()
-    if args.dry_run:
-        return _dry_run(config, github, git, out, log_line)
+    if args.dry_run:   # T3 only read: a waiting or failed thread's last messages for a brief
+        if t3 is None:
+            from .t3 import T3Cli
+            t3 = T3Cli()
+        return _dry_run(config, github, git, out, log_line, t3)
     if sol is None:
         from .sol import SolCli
         sol = SolCli(script=config.sol_script, bash=config.sol_bash)

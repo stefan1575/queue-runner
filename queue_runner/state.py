@@ -2,9 +2,14 @@
 line, so a restarted runner knows what ran and what's still open.
 
 Job kinds: `build` (an issue), `review` (Sol on a PR's head H), `fix` (a Claude fix round on a
-blocking PR, from H), `merge` (the runner merging a clean PR at H) and `stop` (a stop filed for
+blocking PR, from H), `merge` (the runner merging a clean PR at H), `stop` (a stop filed for
 Stefan on a PR at H: `filed`, then `answered` once he closes its `needs-info` issue or replies on
-the PR; `failed` if the issue couldn't be filed, so the next pass files it).
+the PR or the issue; `failed` if the issue couldn't be filed, so the next pass files it) and
+`decision` (a one-off Claude decision thread, or Stefan's reply read directly, on a case the flow
+doesn't cover: `about` the job it decides on, its outcome the action taken).
+
+A build or fix started by a decision continues an earlier job's thread: its start record has
+`thread_id` (that thread) and `about` (the earlier job).
 
 Events: `start` (a job is about to start), `end` (how it ended; a later `end` for the same job
 replaces the earlier one, e.g. when a waiting thread later completes) and `release` (Stefan
@@ -46,7 +51,7 @@ def _now() -> str:
 @dataclass(frozen=True)
 class Job:
     id: str
-    kind: str                 # build, review, fix or merge
+    kind: str                 # build, review, fix, merge, stop or decision
     repo: str                 # the repo's name in config.toml
     issue: int | None         # the issue; for a review, fix or merge, the PR
     branch: str | None
@@ -73,6 +78,8 @@ class Job:
     stop: str | None = None        # a stop: its kind (stops.KINDS)
     reason: str | None = None      # a stop: why, as the issue and the toast say it
     answer: str | None = None      # a stop: how Stefan answered (issue-closed, replied)
+    about: str | None = None       # a decision: the job it decides on; a continued job: the earlier
+    question: str | None = None    # a decision: which question (decisions.QUESTIONS)
 
     @property
     def open(self) -> bool:
@@ -115,18 +122,21 @@ class JobLog:
 
     def started(self, *, kind: str, repo: str, issue: int | None, branch: str | None,
                 title: str, sha: str | None = None, round: int | None = None,
-                stop: str | None = None) -> Job:
+                stop: str | None = None, thread_id: str | None = None, about: str | None = None,
+                question: str | None = None) -> Job:
         at = _now()
         stamp = at[:19].replace('-', '').replace(':', '').replace('T', '-')
         job = Job(id=f'{stamp}-{kind}-{repo}-{issue}-{uuid.uuid4().hex[:6]}', kind=kind,
                   repo=repo, issue=issue, branch=branch, title=title, started_at=at, sha=sha,
-                  round=round, stop=stop)
+                  round=round, stop=stop, thread_id=thread_id, about=about, question=question)
         record = {'event': 'start', 'job': job.id, 'kind': kind, 'repo': repo, 'issue': issue,
                   'branch': branch, 'title': title, 'at': at}
         if sha:
             record.update(sha=sha, round=round)
-        if stop:
-            record['stop'] = stop
+        for k, v in (('stop', stop), ('thread_id', thread_id), ('about', about),
+                     ('question', question)):
+            if v:
+                record[k] = v
         self._append(record)
         return job
 
@@ -149,7 +159,9 @@ class JobLog:
             if kind == 'start':
                 job = Job(id=e['job'], kind=e['kind'], repo=e['repo'], issue=e['issue'],
                           branch=e['branch'], title=e['title'], started_at=e['at'],
-                          sha=e.get('sha'), round=e.get('round'), stop=e.get('stop'))
+                          sha=e.get('sha'), round=e.get('round'), stop=e.get('stop'),
+                          thread_id=e.get('thread_id'), about=e.get('about'),
+                          question=e.get('question'))
                 jobs[job.id] = job
                 if job.kind == 'build':
                     held[(job.repo, job.issue)] = True
@@ -219,6 +231,13 @@ class JobLog:
         it's never filed twice."""
         return any(j.stop == kind and j.outcome in ('filed', 'answered')
                    for j in self.on('stop', repo, number, sha, released=True))
+
+    def decided(self, job_id: str) -> Job | None:
+        """The decision on this job, if one ran (or is running): a release doesn't undo it, so a
+        case is decided once. One cut off before its thread (`not-started`) doesn't count."""
+        found = [j for j in self.jobs() if j.kind == 'decision' and j.about == job_id
+                 and j.outcome != NOT_STARTED]
+        return found[-1] if found else None
 
     def sol_resume_at(self) -> str | None:
         """When the Sol lane may run again, if the newest ended review found Sol out of usage."""

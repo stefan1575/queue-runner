@@ -9,7 +9,7 @@ from queue_runner.cli import main
 from queue_runner.state import JobLog
 from queue_runner.t3 import T3Error
 from tests.fakes import FakeGitHubForReviews, FakeGitHubWithPulls, FakeToaster, full_pr, issue
-from tests.fakes_t3 import FakeGit, FakeReviewGit, FakeSol, FakeT3
+from tests.fakes_t3 import FakeGit, FakeReviewGit, FakeSol, FakeT3, decision_reply
 from tests.test_ledger import H2, important, reply
 
 PR = {'number': 12, 'url': 'https://github.com/owner/first/pull/12', 'state': 'open'}
@@ -87,10 +87,13 @@ path = "{self.dir}"
 
     def test_a_failed_run_is_recorded_and_its_issue_not_picked_again(self):
         gh = FakeGitHubWithPulls(issues=[issue(4), issue(5)])
-        t3 = FakeT3([(1, 'interrupted'), (0, 'completed')])
-        self.run_main(['--once'], gh, t3)
-        self.run_main(['--once'], gh, t3)
-        self.assertEqual([s['branch'] for s in t3.starts], ['claude/a-ticket-4', 'claude/a-ticket-5'])
+        stop = decision_reply('stop', question='Why?')
+        t3 = FakeT3([(1, 'interrupted'), (0, 'completed', stop), (0, 'completed')])
+        for _ in range(3):   # the build, a decision on its failure, the next build
+            self.run_main(['--once'], gh, t3)
+        self.assertEqual([s['branch'] for s in t3.starts],
+                         ['claude/a-ticket-4', None, 'claude/a-ticket-5'])
+        self.assertEqual(t3.starts[1]['title'], 'Queue runner decision: first#4')
         failed = self.log.jobs()[0]
         self.assertEqual((failed.issue, failed.exit_code, failed.outcome, failed.status),
                          (4, 1, 'failed', 'interrupted'))
@@ -98,10 +101,12 @@ path = "{self.dir}"
 
     def test_a_run_waiting_for_an_answer_holds_its_issue(self):
         gh = FakeGitHubWithPulls(issues=[issue(4)])
-        t3 = FakeT3([(2, 'waiting')])
+        stop = decision_reply('stop', question='Which colour?')
+        t3 = FakeT3([(2, 'waiting'), (0, 'completed', stop)])
         self.run_main(['--once'], gh, t3)
+        self.run_main(['--once'], gh, t3)   # a decision on its question: Stefan's
         code, out = self.run_main(['--once'], gh, t3)
-        self.assertEqual(len(t3.starts), 1)
+        self.assertEqual(len(t3.starts), 2)
         self.assertEqual(self.log.jobs()[0].outcome, 'waiting')
         self.assertIn('Nothing to start', out)
 
@@ -125,7 +130,7 @@ path = "{self.dir}"
         self.assertEqual([j.outcome for j in self.log.jobs()], ['not-started', 'done-no-pr'])
 
     def test_t3_failing_after_its_thread_started_leaves_the_job_open_for_the_next_pass(self):
-        gh = FakeGitHubWithPulls(issues=[issue(4)])
+        gh = FakeGitHubWithPulls(issues=[issue(4)], pulls_by_branch={'claude/a-ticket-4': PR})
 
         class LostWait(FakeT3):
             def start(self, *args, **kwargs):
@@ -138,10 +143,11 @@ path = "{self.dir}"
         t3.set_status('mcp:t1', 'completed')
         self.run_main(['--once'], gh, t3)
         [job] = self.log.jobs()
-        self.assertEqual((job.thread_id, job.exit_code, job.outcome), ('mcp:t1', 0, 'done-no-pr'))
+        self.assertEqual((job.thread_id, job.exit_code, job.outcome), ('mcp:t1', 0, 'done'))
 
     def test_a_job_still_running_from_a_dead_runner_blocks_a_second_claude_job(self):
-        gh = FakeGitHubWithPulls(issues=[issue(4), issue(5)])
+        gh = FakeGitHubWithPulls(issues=[issue(4), issue(5)],
+                                 pulls_by_branch={'claude/a-ticket-4': PR})
         job = self.log.started(kind='build', repo='first', issue=4, branch='claude/a-ticket-4',
                                title='Queue runner build: first#4')
         t3 = FakeT3([(0, 'completed')])
@@ -180,13 +186,25 @@ path = "{self.dir}"
         self.assertEqual(len(t3.starts), 2)
 
     def test_dry_run_skips_held_issues(self):
-        gh = FakeGitHubWithPulls(issues=[issue(4), issue(5)])
-        self.run_main(['--once'], gh, FakeT3([(1, 'failed')]))
+        gh = FakeGitHubWithPulls(issues=[issue(4), issue(5)], pulls_by_branch={
+            'claude/a-ticket-4': PR})
+        self.run_main(['--once'], gh, FakeT3([(0, 'completed')]))
         code, out = self.run_main(['--once', '--dry-run'], gh, FakeT3())
         self.assertIn('#5 A ticket', out)
 
+    def test_dry_run_names_a_pending_decision_first_with_its_brief(self):
+        gh = FakeGitHubWithPulls(issues=[issue(4), issue(5)])
+        t3 = FakeT3([(1, 'failed')])
+        self.run_main(['--once'], gh, t3)
+        code, out = self.run_main(['--once', '--dry-run'], gh, t3)
+        self.assertIn('Would start a decision on first#4 (failed)', out)
+        self.assertIn('the build thread for issue #4 ended failed', out)
+        self.assertNotIn('#5 A ticket', out)
+        self.assertEqual(len(t3.starts), 1)
+        self.assertEqual([j.kind for j in self.log.jobs()], ['build'])
+
     def test_continuous_mode_runs_pass_after_pass_and_sleeps_when_idle(self):
-        gh = FakeGitHubWithPulls(issues=[issue(4)])
+        gh = FakeGitHubWithPulls(issues=[issue(4)], pulls_by_branch={'claude/a-ticket-4': PR})
         t3 = FakeT3([(0, 'completed')])
         sleeps = []
 

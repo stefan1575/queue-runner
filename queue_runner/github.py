@@ -250,6 +250,11 @@ class GhCli:
         return self._send('POST', f'repos/{repo.github}/issues',
                           {'title': title, 'body': body, 'labels': list(labels)})['html_url']
 
+    def close_not_planned(self, repo, number) -> None:
+        """Closes an issue as not planned (a decision found it isn't needed)."""
+        self._send('PATCH', f'repos/{repo.github}/issues/{number}',
+                   {'state': 'closed', 'state_reason': 'not_planned'})
+
     def set_status(self, repo, sha, state, description, target_url='', context=SOL_REVIEW):
         """A commit status on exactly `sha`."""
         self._send('POST', f'repos/{repo.github}/statuses/{sha}',

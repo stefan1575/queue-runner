@@ -1,7 +1,8 @@
 """The run loop: two lanes side by side, one Claude job and one Sol job at a time.
 
-The Claude lane settles what earlier passes left open, then starts at most one job: a fix round
-on a PR the runner found blocking (`fix.py`) before any new build, so open PRs finish first. It
+The Claude lane settles what earlier passes left open, then starts at most one job: a decision on a
+case the flow doesn't cover (`decisions.py`), then a fix round on a PR the runner found blocking
+(`fix.py`), before any new build, so open PRs finish first. It
 blocks on `t3 thread start --wait` while the job runs. The Sol lane (`review.py`) reviews at most one
 PR a pass, under `<state_dir>/sol.lock`. A second runner process is kept out by a lock on
 `<state_dir>/runner.lock`.
@@ -13,11 +14,13 @@ import traceback
 
 from .brief import build_brief
 from .config import Config, Repo
+from .decisions import Decider
 from .fix import Fixer, fix_branch, fix_title
 from .lock import RunnerBusy, runner_lock  # noqa: F401 (the CLI takes them from here)
 from .picker import BuildJob, pick
 from .review import Reviewer
 from .state import NOT_STARTED, Job, JobLog
+from .stops import Stopper
 from .t3 import T3Error, Thread
 from .toast import NoToaster
 
@@ -53,6 +56,9 @@ class Runner:
         self.reviewer = Reviewer(config, github=github, git=git, sol=sol, jobs=self.jobs,
                                  say=self.say, toaster=self.toaster) if sol is not None else None
         self.fixer = Fixer(config, github=github, git=git, jobs=self.jobs)
+        self.decider = Decider(config, github=github, t3=t3, jobs=self.jobs, say=self.say,
+                               stopper=Stopper(config, github=github, jobs=self.jobs,
+                                               say=self.say, toaster=self.toaster))
         self._last_why: dict[tuple[str, int], str | None] = {}
 
     def say(self, line: str) -> None:
@@ -68,9 +74,11 @@ class Runner:
 
     def plan(self):
         """Settles, then chooses this pass's Claude job: a callable that runs it, or BUSY or
-        IDLE. A fix round comes before any build."""
+        IDLE. A decision comes first, then a fix round, then a build."""
         if self.settle() == BUSY:
             return BUSY
+        if case := self.decider.next_case():
+            return lambda: self.decider.run(case, self.continue_job)
         if fix := self.next_fix():
             return lambda: self.run_fix(*fix)
         for repo in self.config.repos:
@@ -108,6 +116,11 @@ class Runner:
         BUSY if one of their threads is still running."""
         busy = None
         for job in self.jobs.open_jobs():
+            if job.kind == 'decision':   # cut off with its runner: decided again
+                self.jobs.ended(job.id, exit_code=None, outcome=NOT_STARTED,
+                                error='The runner stopped mid-decision.')
+                self.say(f'{self._name(job)}: cut off with its runner; decided again')
+                continue
             if job.kind not in ('build', 'fix'):
                 continue   # an open review or merge is the Sol lane's to settle
             thread = self._find_thread(job)
@@ -196,6 +209,29 @@ class Runner:
                     result.run_id)
         return STARTED
 
+    # --- a decision's retry or answer ------------------------------------------------------
+
+    def continue_job(self, old: Job, message: str) -> str:
+        """Sends `message` to an earlier build or fix job's thread (a decision's retry, or the
+        answer to its question) and records the run as a new job of its kind, which carries the
+        thread in its start record so a dead runner's settle finds it. The earlier job, if it
+        was waiting, ends `continued`."""
+        job = self.jobs.started(kind=old.kind, repo=old.repo, issue=old.issue, branch=old.branch,
+                                title=old.title, sha=old.sha, round=old.round,
+                                thread_id=old.thread_id, about=old.id)
+        if old.outcome == 'waiting':
+            self.jobs.ended(old.id, exit_code=old.exit_code, outcome='continued')
+        self.say(f'Continuing {self._name(job)} in {old.link or old.thread_id}')
+        try:
+            result = self.t3.send(old.thread_id, message)
+        except T3Error as e:
+            self.say(f'{self._name(job)}: sending to its thread failed ({e}); '
+                     'the next pass settles it')
+            return STARTED
+        self.finish(job, result.thread_id, result.exit_code, result.status, result.error,
+                    result.run_id)
+        return STARTED
+
     # --- a fix round ----------------------------------------------------------------------
 
     def run_fix(self, repo: Repo, pr, review: Job) -> str:
@@ -263,8 +299,6 @@ class Runner:
                  f', head still {job.sha[:7]}' if head else ', head unknown')
         self.say(f'{self._name(job)} ended: {outcome} (exit {exit_code}{moved}) '
                  f'{link or thread_id}')
-        if outcome == 'waiting':
-            self._toast_waiting(job, link)
         return job
 
     def finish(self, job: Job, thread_id: str, exit_code: int, status: str, error: str | None,
@@ -299,25 +333,7 @@ class Runner:
         pr_note = f', PR #{pr["number"]}' if pr else ''
         self.say(f'{self._name(job)} ended: {outcome} (exit {exit_code}, {len(commits)} commits'
                  f'{pr_note}) {link or thread_id}')
-        if outcome == 'waiting':
-            self._toast_waiting(job, link)
         return job
-
-    def _toast_waiting(self, job: Job, link: str | None) -> None:
-        """A job thread that stopped to ask Stefan something: T3's own notifications are off
-        (they can't be limited to threads that need him), so the runner toasts; the click opens
-        the thread."""
-        if not link:
-            self.say(f'{self._name(job)}: no thread link, so no toast')
-            return
-        what = 'PR' if job.kind == 'fix' else 'issue'
-        try:
-            self.toaster.toast(f'{job.repo}: a {job.kind} thread asks you something',
-                               f'The {job.kind} on {what} #{job.issue} waits for your answer.',
-                               link, tag=f'{job.repo}-{job.kind}-{job.issue}',
-                               button='Open the thread')
-        except Exception as e:
-            self.say(f'{self._name(job)}: the toast failed: {e}')
 
     @staticmethod
     def _name(job: Job) -> str:

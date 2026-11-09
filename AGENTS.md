@@ -13,14 +13,14 @@ completed step, with a message that says what changed and why.
 
 ```
 python3 -m queue_runner                       # run: both lanes, pass after pass (nothing starts it at logon yet)
-python3 -m queue_runner --once                # one pass of each lane: at most one Claude job (a fix round or a build), merges, at most one Sol review
-python3 -m queue_runner --once --dry-run      # print the next Claude job's brief (a fix round first), list the stops it would file, what Sol would review and what would merge
+python3 -m queue_runner --once                # one pass of each lane: at most one Claude job (a decision, a fix round or a build), merges, at most one Sol review
+python3 -m queue_runner --once --dry-run      # print the next Claude job's brief (a decision first, then a fix round), list the stops it would file, what Sol would review and what would merge
 python3 -m queue_runner --release NAME#N      # let the picker take a held issue again (a PR: retry its failed reviews, merges and fix round; let a stopped PR go)
 python3 -m queue_runner --review NAME#N       # Sol reviews that PR's head now, if adoption says it needs one
 ```
 
-**`--once`, the bare command and `--review` start real Claude builds and fix rounds and real Sol
-reviews** in the configured repos, **a review posts on GitHub** (its comment, the `sol-review`
+**`--once`, the bare command and `--review` start real Claude builds, fix rounds and decision
+threads and real Sol reviews** in the configured repos, **a review posts on GitHub** (its comment, the `sol-review`
 status, follow-up issues and the PR body's Review row), **a clean review merges**, and **a stop
 files a `needs-info` issue, comments on the PR and toasts**. Don't run
 them against leads-dashboard to try something: use the live checks (below). `--dry-run` posts,
@@ -58,10 +58,16 @@ and it gets no other fix round.
    running: the pass starts nothing (one Claude job at a time). Ended: its outcome is recorded.
    No thread: `not-started`. A `waiting` job whose thread has since completed or failed is
    recorded again. One that's running again, or that T3 can't read, also makes the pass start
-   nothing: if its thread is gone for good, `--release` the issue.
-2. **A fix round** (`fix.py`), before any build, so open PRs finish first. A PR gets one when
+   nothing: if its thread is gone for good, `--release` the issue. A decision left open was cut
+   off with its runner: `not-started`, so it's decided again.
+2. **A decision** (`decisions.py`; Decision threads, below), before any fix round or build: the
+   first case the fixed flow doesn't cover.
+3. **A fix round** (`fix.py`), before any build, so open PRs finish first. A PR gets one when
    the runner's own newest review of its head H is `blocking` (decide()'s `fix`; a stop or an
-   approach note goes to Stefan) and that review is still the PR's newest review comment. PRs
+   approach note goes to Stefan) and that review is still the PR's newest review comment, or
+   when that review stopped and a decision has since ordered a round (`Fixer.order`: Stefan's
+   rework or fix on, or a decision thread's `fix`; one more round on H, its text first in the
+   brief under `## Direction first`). PRs
    whose newest review was hand-run are left to the session that ran it. **One round per head:**
    once a round on H ended (except `not-started`), H gets no other until `--release NAME#PR`. The
    runner fetches the PR's head (moved since listing: nothing starts, Sol reviews it first),
@@ -74,7 +80,7 @@ and it gets no other fix round.
    declined before, from the newest review's ledger; the PR's description and the issues it
    closes; its commits and changed files from git (`origin/<base>..H`); the earlier build and
    fix threads' links from the job log (as T3 gave them).
-3. **Pick and build** (`run.py`): the first repo with a pickable issue gets one build. The runner
+4. **Pick and build** (`run.py`): the first repo with a pickable issue gets one build. The runner
    fetches `origin/<base>`, writes a start record, then blocks on
    `t3 thread start --wait --json --worktree origin/<base> --branch claude/<slug>-<n>` with the
    brief on stdin. Afterwards it records the outcome.
@@ -84,6 +90,7 @@ JSON object per line, each synced to disk as it's written. A last line torn by a
 ignored and cut off by the next write; a bad line anywhere else is an error. An end record has the thread id and link, run id, T3's exit code and
 status, the branch's commits, the PR found by branch, the worktree path and any error.
 Outcomes: `done` (exit 0, a PR found), `done-no-pr`, `failed` (exit 1), `waiting` (exit 2),
+`continued` (it was waiting, and a decision's answer went to its thread as a later job),
 `branch-exists` (a local `claude/*` branch left over, so T3 couldn't make it again) and
 `not-started` (T3 failed before any thread existed). Every build that got that far holds its
 issue: the picker skips it until `--release`. Only `not-started` holds nothing, so the next pass
@@ -96,6 +103,55 @@ and `head` (the PR's head afterwards, read from GitHub), with `commits` the ones
 `head-unknown` (exit 0, but GitHub couldn't say afterwards; the Sol lane still reads the real
 head), `failed`,
 `waiting`, `branch-exists` and `not-started`, as for builds.
+
+**A continued job** (a decision's `retry` or `answer`): a new build or fix job of the same issue,
+branch, title and H, whose start record carries the earlier job's `thread_id` and `about` (its
+id). The runner sends the message with `t3 thread send --wait --json`, and records the end as for
+any job of its kind; a dead runner's settle finds the thread by its id.
+
+## Decision threads
+
+`decisions.py` and `templates/decision.md` (ticket 07; `orchestration.md`, Judgement). When the
+fixed flow can't say what to do next, the Claude lane starts a one-off thread, `Queue runner
+decision: <repo>#<n>`, in the repo's T3 project with no worktree (it changes nothing), with one
+question and the state it needs: the PR and its open findings and classes from the ledger, the
+issue, the job's thread link, error and commits, the thread's last 3 messages (`thread show
+--messages 3`), Stefan's words since a stop, and the earlier threads' links. Each source is
+clipped to 3000 characters, so a decision costs about one fresh-thread call.
+
+**The answer** is the reply's last ```` ```queue-runner-decision ```` block: one JSON object,
+`"version": 1`, `action` one the question allows, with its fields as non-empty strings. Anything
+else (no block, bad JSON, another version, an action not allowed, a missing field, a thread that
+failed or asked back) is a stop that says why.
+
+| Question | When | Actions |
+| --- | --- | --- |
+| `approach-note` | the runner's review 3 or later of H is `approach-note` | `approach-note` (`note`, `recommend`: rework, fix on or hold): posted on the PR under `## Approach note`, then the `approach-note` stop links it; `stop` |
+| `reply` | Stefan replied to a stop (the PR or its `needs-info` issue) | `fix` (`add`), `carry-on`, `hold`, `stop` |
+| `failed` | a build or fix thread ended failed, nothing pushed | `retry` (`add`), `close` (`reason`, builds only), `stop` |
+| `waiting` | a build or fix thread waits for an answer | `answer` (`text`), `stop` |
+| `no-pr` | a build ended `done-no-pr` | `retry`, `close`, `stop` |
+
+**Stefan's answer to an Approach note** needs no thread when his newest words (on the PR or the
+issue) start with `rework`, `fix on` or `hold`: `fix on` and `rework` order one more fix round
+(rework's brief says to rework the approach as the note and his reply say), `hold` leaves the PR
+until `--release`. **No fourth review without it** (`stops.held`): while the newest review is an
+approach note, the PR gets no review (even on a new head) and no fix round until a decision says
+`fix` or `carry-on`, or he closes the issue. A reply not yet decided on holds the PR too.
+
+**Acting:** `retry` and `answer` continue the earlier thread (above); `close` comments and closes
+the issue as not planned; `fix`, `carry-on` and `hold` are read from the decision's record. A
+stop goes where Stefan answers it: on a PR, the `needs-info` issue (kind `decision`, or
+`approach-note`); on a build, a comment on its issue, which the build holds until `--release`; on
+a waiting thread, a comment that links the thread, and a toast that opens it. **Once each:** a
+case is decided once (`JobLog.decided`, a release included), and after 3 decisions on one issue's
+or PR's failed, waiting or PR-less jobs the next goes straight to Stefan with no thread.
+
+**Decision job records** (kind `decision`, `issue` the issue or PR, `sha` H on a PR, `about` the
+job decided on: the review, the stop, or the build or fix; `question`): the outcome is the action
+taken, `reason` the text acted on, `link` the thread (an approach note: the note's comment),
+`error` why an answer couldn't be read; `not-started` when T3 started no thread, so the next pass
+tries again.
 
 ## A Sol pass
 
@@ -185,10 +241,11 @@ reviewed), `failed`, `out-of-usage` and `head-moved` (nothing counts).
 old script has, nor one a Claude job is writing to), the runner looks for stops on its head H, and
 files each kind once per H (`JobLog.stopped`). The kinds: `review` (the runner's review of H
 stopped: a repeated class, a reopened finding, a kept decline; the reason is decide()'s text from
-the run folder's `decision.json`), `approach-note` (review 3 or later still blocking; the
-Approach note itself is ticket 07's, so until then it stops without one), `no-push` (a fix round
-on H ended without pushing), `failed-check` and `conflict`. A review that stops files right after
-it posts.
+the run folder's `decision.json`), `no-push` (a fix round on H ended without pushing),
+`failed-check` and `conflict`. A review that stops files right after it posts. Two kinds are
+filed by decisions in the Claude lane: `approach-note` (review 3 or later still blocking, filed
+with the Approach note; the Sol pass files it again from the decision's record if filing failed)
+and `decision` (a decision thread's question on a PR).
 
 **Filing** (automated posts, no go-ahead): the PR's one open `needs-info` issue, found by its
 hidden `<!-- queue-runner needs-info owner/name#N -->` line, gets the stop as a comment; with
@@ -202,9 +259,11 @@ the issue, `reason`; outcomes `filed`, `answered` (with `answer`: `issue-closed`
 
 **Left alone until Stefan answers:** while a stop is `filed`, the PR gets no review (even on a new
 head), no fix round and no merge (`stops.held`). It's answered when its issue is closed or someone
-(not a bot, not the runner's own posts) says something on the PR after the stop; `--release
-NAME#PR` lets it go too. Answers are read at the start of each Sol pass. What a reply asks for is
-ticket 07's decision thread; until then a reply only puts the PR back in the loop.
+(not a bot, not the runner's own posts) says something on the PR or on that issue after the
+stop; `--release NAME#PR` lets it go too. Answers are read at the start of each Sol pass. A
+closed issue puts the PR back in the loop; a reply holds it until a decision acts on what it asks
+(Decision threads, above). Every comment the runner posts outside a review carries a hidden
+`<!-- queue-runner ... -->` line (`ledger.RUNNER_MARK`), so none counts as a reply.
 
 **Toasts** (`toast.py`): a native Windows toast under the runner's own name and icon. The runner
 registers its AppUserModelID `Stefan.QueueRunner` under
@@ -214,8 +273,9 @@ the toast through WinRT's `CreateToastNotifier(<that id>)`, hidden; Windows show
 name and icon, not PowerShell's. The toast is `activationType="protocol"` with the URL as its
 `launch` (and its one button), so a click opens it with no activator. Checked live on
 2026-11-10: a test toast showed as "Queue runner" with the icon. A stop's toast opens its
-`needs-info` issue; a build or fix thread that exits waiting for an answer (exit 2) gets one
-that opens the thread, because T3's own notifications stay off (below). Tests use a fake
+`needs-info` issue. A build or fix thread that exits waiting for an answer (exit 2) gets a
+decision first; only when its question is Stefan's does it toast, opening the thread, because
+T3's own notifications stay off (below). Tests use a fake
 toaster; `Runner` and `Reviewer` default to `NoToaster`, and the CLI passes `WindowsToaster`.
 
 **T3's thread notifications stay off** (`notificationMode` in `~/.t3/userdata/client-settings.json`).
@@ -327,7 +387,10 @@ order; a call named in `fail` raises), `FakeReviewGit` and `FakeSol` (`tests/tes
 `tests/test_ledger.py`; the codex-sol.sh adapter in `tests/test_sol.py`. Stops and toasts are in `tests/test_stops.py` (a fake toaster). Merging
 (`tests/test_merge.py`) plays GitHub moving on through `FakeGitHubForReviews.now` (a PR's fields
 now), `threads` and `push_before_merge`; fix rounds (`tests/test_fix.py`) run the real `Runner`
-with a T3 fake whose thread pushes. `tests/test_git.py` runs `GitCli` on a real local repo in a
+with a T3 fake whose thread pushes. Decisions (`tests/test_decisions.py`): the answer block
+parsed, and each case and action through the real `Runner`, `FakeT3` giving a decision thread's
+reply (`decision_reply`), each thread's last messages and the runs `send` starts.
+`tests/test_git.py` runs `GitCli` on a real local repo in a
 temp folder.
 
 ## Layout
@@ -346,7 +409,10 @@ temp folder.
   a review's checkout (the PR's head, a detached worktree, diffs), a fix brief's commits and
   files, and removing a job's worktree after its PR merged.
 - `queue_runner/state.py`: the job log.
-- `queue_runner/run.py`: the two lanes, a build job, a fix round's thread and the loop.
+- `queue_runner/run.py`: the two lanes, a build job, a fix round's thread, a continued job and
+  the loop.
+- `queue_runner/decisions.py` and `templates/decision.md`: decision threads: the cases, the
+  brief, the answer and acting on it.
 - `queue_runner/fix.py` and `templates/fix.md`: which PRs get a fix round, and its brief.
 - `queue_runner/merge.py`: the pre-merge re-check, the expected-head merge and the worktrees
   removed after. A fix round's local branch name (`fix_branch`) is `fix.py`'s.

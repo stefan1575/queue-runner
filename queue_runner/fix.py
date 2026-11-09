@@ -42,18 +42,33 @@ class Fixer:
     def __init__(self, config, *, github, git, jobs: JobLog):
         self.config, self.github, self.git, self.jobs = config, github, git, jobs
 
+    def order(self, repo, pr):
+        """A decision that ordered a fix round on the PR's head H (Stefan's `rework` or `fix on`,
+        or a decision thread's `fix`), unless a release settled it: the newest, or None."""
+        found = [d for d in self.jobs.on('decision', repo.name, pr.number, pr.head_sha)
+                 if d.outcome == 'fix']
+        return found[-1] if found else None
+
     def review_to_fix(self, repo, pr):
-        """The runner's newest review of the PR's head, if it says fix: else None."""
+        """The runner's newest review of the PR's head, if it says fix, or if it stopped and a
+        decision ordered a fix round since: else None."""
         if any(lb in OLD_LABELS for lb in pr.labels):
             return None
         review = self.jobs.runner_review(repo.name, pr.number, pr.head_sha)
-        return review if review and review.outcome == 'blocking' else None
+        if review and (review.outcome == 'blocking' or (
+                review.outcome in ('stop', 'approach-note') and self.order(repo, pr))):
+            return review
+        return None
 
     def why_not(self, repo, pr) -> str | None:
         """Why a PR whose head the runner found blocking gets no fix round now, or None."""
         h7 = pr.head_sha[:7]
-        if done := [j for j in self.jobs.on('fix', repo.name, pr.number, pr.head_sha)
-                    if j.outcome != NOT_STARTED]:   # T3 failed before any thread: try again
+        done = [j for j in self.jobs.on('fix', repo.name, pr.number, pr.head_sha)
+                if j.outcome != NOT_STARTED]   # T3 failed before any thread: try again
+        if order := self.order(repo, pr):   # one more round on H, ordered after the last
+            pos = {j.id: i for i, j in enumerate(self.jobs.jobs())}
+            done = [j for j in done if pos[j.id] > pos[order.id]]
+        if done:
             last = done[-1]
             if last.open:
                 return 'its fix round is still running'
@@ -96,7 +111,14 @@ class Fixer:
         closes = [f'#{k}' if where == here else f'{where}#{k}'
                   for where, k in closed_issues(pr.body, here)]
         threads = [j for j in self.jobs.pr_jobs(repo.name, pr.number, pr.branch) if j.link]
+        order = self.order(repo, pr)
+        by = order and (order.link or "Stefan's reply on the PR")
+        direction = '' if order is None else (
+            f'## Direction first\n\nThe loop stopped on this head, and a decision ordered this '
+            f'round ({by}). Follow it; it comes before the findings below.\n\n'
+            f'{(order.reason or "").strip()}\n\n')
         return _template().substitute(
+            direction=direction,
             number=pr.number, github=repo.github, title=pr.title, round=review.round,
             sha=h, sha7=h[:7], work=fix_branch(pr.number, h), branch=pr.branch, base=pr.base,
             agents=_agents_pointer(repo.path),

@@ -3,13 +3,15 @@
 When the loop has to come to Stefan, the runner files the stop: one `needs-info` issue per PR
 (opened, or a comment on the one still open), a comment on the PR that records the stop and links
 the issue, and a toast whose click opens the issue. Then it leaves the PR alone (no review, fix
-round or merge) until Stefan answers: he closes the issue or replies on the PR (07's decision
-thread will read the reply), or `--release NAME#PR`.
+round or merge) until Stefan answers: he closes the issue, or replies on the PR or the issue
+(a decision on his reply comes first, `decisions.py`), or `--release NAME#PR`.
 
 The kinds (KINDS): a review that stopped (a new Important finding in an earlier class, a fixed
-finding reopening, a decline Sol kept), review 3 or later still blocking (`approach-note`; the
-Approach note itself comes with ticket 07), a failed check or a conflict on H, and a fix round
-that ended without pushing (H was reviewed already). Each kind is filed once per head H.
+finding reopening, a decline Sol kept), a failed check or a conflict on H, and a fix round that
+ended without pushing (H was reviewed already): each found here, and filed once per head H. Two
+come from decisions (`decisions.py`): review 3 or later still blocking (`approach-note`, filed
+with the Approach note a decision thread wrote) and a decision thread's own question
+(`decision`).
 
 Filing is an automated post in the repo's own issues and PRs, which needs no go-ahead
 (`~/.claude/CLAUDE.md`).
@@ -19,7 +21,8 @@ import json
 import os
 
 from .github import OLD_LABELS
-from .ledger import STOP_MARK, said_since
+from .ledger import RUNNER_MARK, STOP_MARK, said_since
+from .state import REVIEWED
 from .toast import NoToaster
 
 NEEDS_INFO = 'needs-info'
@@ -29,6 +32,7 @@ KINDS = {
     'failed-check': 'A check failed',
     'conflict': 'It conflicts with its base',
     'no-push': 'The fix round pushed nothing',
+    'decision': 'A decision needs you',
 }
 SIGNALS = {   # decide()'s stop signals, when the review's run folder can't say more
     'repeated-class': 'a new Important finding repeats an earlier class',
@@ -81,9 +85,13 @@ class Stopper:
             found.append(('review', f'review {review.round} on {h7}: {_signal_texts(review)}',
                           review.link))
         elif review and review.outcome == 'approach-note':
-            found.append(('approach-note', f'review {review.round} on {h7} is still blocking; '
-                          'no further review runs without your answer: rework, fix on or hold?',
-                          review.link))
+            # Review 3 or later still blocking: a decision thread writes the Approach note and
+            # files the stop (decisions.py), `held` keeping the PR alone until then. Found here
+            # only once that decision ended, in case filing it failed.
+            d = self.jobs.decided(review.id)
+            if d and not d.open and d.outcome in ('approach-note', 'stop'):
+                found.append(('approach-note', d.reason or f'review {review.round} on {h7} is '
+                              'still blocking', d.link))
         fixes = [j for j in self.jobs.on('fix', repo.name, n, h) if not j.open]
         if fixes and fixes[-1].outcome == 'no-push':
             found.append(('no-push', f'the fix round after review {fixes[-1].round} ended '
@@ -168,7 +176,8 @@ class Stopper:
         mark = needs_info_mark(repo.github, n)
         had = next((i for i in self.github.open_issues(repo) if mark in i.body), None)
         if had:
-            self.github.post_comment(repo, had.number, f'Another stop on PR #{n}: {line}')
+            self.github.post_comment(repo, had.number, f'Another stop on PR #{n}: {line}\n\n'
+                                     f'{RUNNER_MARK}stop added -->\n')
             return had.url, False
         body = (f'The queue runner stopped the review loop on PR #{n} ({pr.url or pr.title}) '
                 f'and left it for Stefan.\n\n- {line}\n\n'
@@ -180,9 +189,35 @@ class Stopper:
 
     # --- answers ------------------------------------------------------------------------------
 
+    def file_on_issue(self, repo, n: int, why: str, link: str | None = None,
+                      open_url: str | None = None, after: str | None = None) -> None:
+        """A decision on a build (or on a thread waiting for an answer) stops for Stefan: the
+        question goes on the issue or PR, which its job holds until `--release` (or the thread
+        ends), and a toast opens `open_url` (default: that comment)."""
+        name = f'stop {repo.name}#{n}'
+        line = f'**{KINDS["decision"]}**: {why}' + (f' ([the decision]({link}))' if link else '')
+        url = open_url
+        after = after or f'The issue stays held until `--release {repo.name}#{n}`.'
+        try:
+            posted = self.github.post_comment(repo, n, (
+                f'**The queue runner stopped here for Stefan.** {line}\n\n{after}\n\n'
+                f'{STOP_MARK}kind=decision issue={n} -->\n'))
+            url = url or posted
+        except Exception as e:
+            self.say(f'{name}: recording the stop on the issue failed: {e}')
+        self.say(f'{name}: a decision needs Stefan ({why})')
+        if not url:
+            return
+        try:
+            self.toaster.toast(f'{repo.name} #{n} needs you', f'{KINDS["decision"]}: {why}'[:250],
+                               url, tag=f'{repo.name}-{n}-decision', button='Open')
+        except Exception as e:
+            self.say(f'{name}: the toast failed: {e}')
+
     def answers(self, repo) -> None:
-        """Each filed stop Stefan has since answered (its issue closed, or a reply on the PR
-        after it) is recorded `answered`, and the PR goes back to the loop."""
+        """Each filed stop Stefan has since answered (its issue closed, or a reply on the PR or
+        on the issue after it) is recorded `answered`, and the PR goes back to the loop: after a
+        reply, through a decision on it (`decisions.py`)."""
         for n in sorted({j.issue for j in self.jobs.jobs()
                          if j.kind == 'stop' and j.repo == repo.name}):
             stops = self.jobs.open_stops(repo.name, n)
@@ -193,25 +228,48 @@ class Stopper:
                           if self.github.issue_state(repo.github, _number(u)) == 'closed'}
                 said = (self.github.issue_comments(repo, n)
                         + self.github.review_replies(repo, n))
+                on_issue = {u: self.github.issue_comments(repo, _number(u))
+                            for u in {j.link for j in stops if j.link} - closed}
             except Exception as e:
                 self.say(f'stop {repo.name}#{n}: reading its answer failed ({e}); next pass')
                 continue
             for j in stops:
                 how = ('issue-closed' if j.link in closed else
-                       'replied' if said_since(said, _utc(j.started_at)) else None)
+                       'replied' if said_since(said + on_issue.get(j.link, []),
+                                               _utc(j.started_at)) else None)
                 if how:
                     self.jobs.ended(j.id, exit_code=None, outcome='answered', link=j.link,
                                     reason=j.reason, answer=how)
                     self.say(f'stop {repo.name}#{n}: answered ('
-                             + ('its issue was closed' if how == 'issue-closed' else
-                                'a reply on the PR') + f'); the PR is back in the loop')
+                             + ('its issue was closed); the PR is back in the loop'
+                                if how == 'issue-closed' else
+                                'a reply); a decision on the reply comes first'))
 
 
 def held(jobs, repo, n: int) -> str | None:
-    """Why a PR is left alone for Stefan, or None."""
+    """Why a PR is left alone for Stefan, or None: a stop he hasn't answered, his reply not yet
+    decided on, his `hold`, or review 3 or later still blocking without his answer (no further
+    review or fix round without it). `--release NAME#PR` lets every one of them go."""
     stops = jobs.open_stops(repo.name, n)
-    if not stops:
+    if stops:
+        last = stops[-1]
+        return (f'stopped for Stefan ({KINDS.get(last.stop, last.stop).lower()}): left alone '
+                f'until {last.link} is closed, he replies, or --release {repo.name}#{n}')
+    decisions = jobs.on('decision', repo.name, n)
+    if any(d.outcome == 'hold' for d in decisions):
+        return f'Stefan said hold: left alone until --release {repo.name}#{n}'
+    answered = [s for s in jobs.on('stop', repo.name, n) if s.outcome == 'answered']
+    if any(s.answer == 'replied' and not jobs.decided(s.id) for s in answered):
+        return 'Stefan replied to a stop: a decision on his reply comes first'
+    reviews = [j for j in jobs.on('review', repo.name, n) if j.outcome in REVIEWED]
+    if not reviews or reviews[-1].outcome != 'approach-note':
         return None
-    last = stops[-1]
-    return (f'stopped for Stefan ({KINDS.get(last.stop, last.stop).lower()}): left alone until '
-            f'{last.link} is closed, he replies on the PR, or --release {repo.name}#{n}')
+    r = reviews[-1]
+    pos = {j.id: i for i, j in enumerate(jobs.jobs())}
+    if any(pos[d.id] > pos[r.id] and d.outcome in ('fix', 'carry-on') for d in decisions) or \
+            any(pos[s.id] > pos[r.id] and s.answer == 'issue-closed' for s in answered):
+        return None
+    if not jobs.stopped(repo.name, n, r.sha, 'approach-note'):
+        return f'review {r.round} is still blocking: its Approach note goes to Stefan first'
+    return (f'review {r.round} is still blocking: no further review or fix round without '
+            "Stefan's answer (rework, fix on or hold)")

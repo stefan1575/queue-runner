@@ -12,7 +12,7 @@ files.
 - **Push to the PR's branch, not to `$work`:** `git push origin HEAD:$branch`. If the push is
   rejected because `$branch` moved, don't force-push: say so on the PR and end your turn.
 
-## What Sol's review $round found
+${direction}## What Sol's review $round found
 
 The review: $review_link
 
