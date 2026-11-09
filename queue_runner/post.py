@@ -12,7 +12,7 @@ import datetime
 import os
 import re
 
-from .ledger import LEDGER, OPEN, _cell, _where, with_issues
+from .ledger import OPEN, _cell, _where, with_issues
 
 TRIAGE = 'needs-triage'
 OUTCOMES = {'stop': 'stopped for Stefan', 'approach-note': 'approach note for Stefan',
@@ -131,12 +131,7 @@ class GitHubPoster:
         """Posts the review; returns its comment's URL. PostFailed if the comment didn't post."""
         n, name = pr.number, f'review {repo.name}#{pr.number}'
         urls, failed = self._file(repo, pr, d, run_dir)
-        body = with_issues(d, urls)
-        if failed:
-            i = body.rindex(LEDGER)
-            body = (f'{body[:i]}Filing {", ".join(failed)} as follow-up issues failed; the '
-                    f'runner left {"it" if len(failed) == 1 else "them"} for Stefan to file.'
-                    f'\n\n{body[i:]}')
+        body = with_issues(d, urls, failed)
         _write(os.path.join(run_dir, 'comment.md'), body)
         try:
             url = self.github.post_comment(repo, n, body)

@@ -306,8 +306,9 @@ def decide(repo: str, n: int, sha: str, rnd: int, earlier: list[dict], has_revie
     if over := [f['id'] for f in found if f['tag'] == 'nit'][MAX_NITS:]:
         found = [f for f in found if f['id'] not in over]
         notes.append(f'Nits past the first {MAX_NITS} are left out: {", ".join(over)}.')
+    # Filed already: every earlier Pre-existing finding but one whose filing failed (`unfiled`).
     filed = {f.get('id') for m in earlier for f in m['findings']
-             if isinstance(f, dict) and f.get('tag') == 'pre-existing'}
+             if isinstance(f, dict) and f.get('tag') == 'pre-existing' and not f.get('unfiled')}
     pre = [f for f in found if f['tag'] == 'pre-existing']
     if again := [f['id'] for f in pre if f['id'] in filed]:
         notes.append(f'Already filed after an earlier review, so not filed again: '
@@ -418,31 +419,46 @@ def decide(repo: str, n: int, sha: str, rnd: int, earlier: list[dict], has_revie
             "the queue runner from Stefan's PC.</sub>\n\n"
             f'{text}\n\n{old}### Findings\n\n{table.rstrip()}\n\n'
             + ''.join(f'{s}\n\n' for s in notes)
-            + f'{LEDGER}\n\n' + ledger_block(rnd, verdict, sha, now)
-            + '\n\n</details>\n\n' + mark(rnd, verdict, sha, now) + '\n')
-    return {'round': rnd, 'sha': sha, 'verdict': verdict, 'outcome': outcome, 'signals': signals, 'findings': now,
+            + _trailer(rnd, verdict, sha, now))
+    return {'round': rnd, 'sha': sha, 'verdict': verdict, 'outcome': outcome, 'signals': signals,
+            'findings': now,
             'kept': kept, 'unaddressed': unaddressed,
             'status': {'state': 'failure' if important else 'success',
                        'description': desc[:140]},
+            # New ones, and earlier ones whose filing failed that Sol didn't list again.
             'issues': [{'id': f['id'], 'title': issue_title(f), 'finding': f}
-                       for f in pre if f['id'] not in filed],
+                       for f in [*(f for f in pre if f['id'] not in filed),
+                                 *(f for f in now if f.get('unfiled') and f['id'] not in new)]],
             'body': body}
 
 
+def _trailer(rnd: int, verdict: str, sha: str, findings: list[dict]) -> str:
+    """The end of a review comment: the collapsed ledger, then the hidden marker."""
+    return (f'{LEDGER}\n\n' + ledger_block(rnd, verdict, sha, findings) + '\n\n</details>\n\n'
+            + mark(rnd, verdict, sha, findings) + '\n')
 
-def with_issues(d: dict, urls: dict[str, str]) -> str:
+
+def with_issues(d: dict, urls: dict[str, str], failed=()) -> str:
     """The comment with each filed Pre-existing finding's issue linked ({finding id: url}) and
-    its URL recorded in the ledger and the marker (`issue`), so no later review files it again."""
-    if not urls:
+    its URL recorded in the ledger and the marker (`issue`), so no later review files it again.
+    One whose filing `failed` is marked `unfiled`, so the next review files it."""
+    if not urls and not failed:
         return d['body']
     for f in d['findings']:
         if f['id'] in urls:
             f['issue'] = urls[f['id']]
-    links = ', '.join(f'{fid} → [#{url.rstrip("/").rsplit("/", 1)[-1]}]({url})'
-                      for fid, url in urls.items())
+            f.pop('unfiled', None)
+        elif f['id'] in failed:
+            f['unfiled'] = True
+    said = ''
+    if urls:
+        said += 'Filed as follow-up issues: ' + ', '.join(
+            f'{fid} → [#{url.rstrip("/").rsplit("/", 1)[-1]}]({url})'
+            for fid, url in urls.items()) + '.\n\n'
+    if failed:
+        one = len(failed) == 1
+        said += (f'Filing {", ".join(failed)} as {"a follow-up issue" if one else "follow-up issues"}'
+                 f' failed; the next review files {"it" if one else "them"}.\n\n')
     body = d['body']
-    head = body[:body.rindex(LEDGER)]
-    return (f'{head}Filed as follow-up issues: {links}.\n\n{LEDGER}\n\n'
-            + ledger_block(d['round'], d['verdict'], d['sha'], d['findings'])
-            + '\n\n</details>\n\n' + mark(d['round'], d['verdict'], d['sha'], d['findings'])
-            + '\n')
+    return (body[:body.rindex(LEDGER)] + said
+            + _trailer(d['round'], d['verdict'], d['sha'], d['findings']))

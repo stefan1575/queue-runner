@@ -340,11 +340,28 @@ class ReviewerTest(unittest.TestCase):
         self.assertEqual([p[0] for p in self.gh.posts], ['comment', 'status'])
         self.assertIn('F2 → [#77](https://github.com/owner/first/issues/77)', self.gh.posts[0][2])
 
+    def test_a_finding_whose_filing_failed_is_filed_by_the_next_review(self):
+        # Sol didn't list F2 again in review 2: it's still filed, from the ledger.
+        sol = FakeSol([reply(findings=[pre_existing('F2')]), reply()])
+        r = self.one_pr(sol=sol, ancestors={(H2, H3)}, fail={'open_issues'})
+        r.review_pass()
+        self.gh.fail.clear()
+        self.gh.prs = [dataclasses.replace(self.gh.prs[0], head_sha=H3)]
+        self.git.heads[20] = H3
+        r.review_pass()
+        self.assertEqual([p[0] for p in self.gh.posts],
+                         ['comment', 'status', 'issue', 'comment', 'status'])
+        url = 'https://github.com/owner/first/issues/902'
+        [rv] = read_reviews([Comment('x', '', self.gh.posts[3][2])])
+        self.assertEqual([(f['id'], f.get('issue'), f.get('unfiled')) for f in state([rv])],
+                         [('F2', url, None)])
+
     def test_open_issues_unreadable_files_nothing_and_says_so_on_the_pr(self):
         sol = FakeSol([reply(findings=[pre_existing('F2')])])
         self.one_pr(sol=sol, fail={'open_issues'}).review_pass()
         self.assertEqual([p[0] for p in self.gh.posts], ['comment', 'status'])
-        self.assertIn('Filing F2 as follow-up issues failed', self.gh.posts[0][2])
+        self.assertIn('Filing F2 as a follow-up issue failed; the next review files it',
+                      self.gh.posts[0][2])
 
     def test_a_comment_that_cant_be_posted_fails_the_review_and_it_is_reviewed_again(self):
         sol = FakeSol([reply(findings=[important('F1')]), reply(findings=[important('F1')])])

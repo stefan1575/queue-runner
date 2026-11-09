@@ -19,17 +19,19 @@ python3 -m queue_runner --release NAME#N      # let the picker take a held issue
 python3 -m queue_runner --review NAME#N       # Sol reviews that PR's head now, if adoption says it needs one
 ```
 
-**`--once` and the bare command start real Claude builds and real Sol reviews** in the
-configured repos. Don't run them against leads-dashboard to try something: use
-`scripts/live_sandbox.py` and `scripts/live_review.py` (below).
+**`--once`, the bare command and `--review` start real Claude builds and real Sol reviews** in
+the configured repos, and **a review posts on GitHub**: its comment, the `sol-review` status,
+follow-up issues and the PR body's Review row. Don't run them against leads-dashboard to try
+something: use `scripts/live_sandbox.py` and `scripts/live_review.py` (below), which post
+nothing. `--dry-run` posts nothing either.
 
 In production it runs under `pythonw`, so it never needs a console: every subprocess runs with
 no window. A lock on `<state_dir>/runner.lock` keeps a second runner out (exit 3); `--dry-run`,
 `--release` and `--review` don't take it. Each Sol review holds `<state_dir>/sol.lock`, so
 `--review` and the running lane never run two at once.
 
-`config.toml` names the repos it serves (GitHub repo, local clone, base branch), in priority
-order; the runner's `state_dir` and `log_dir` (`~/.queue-runner/`, outside every served repo);
+`config.toml` names the repos it serves (GitHub repo, local clone, base branch, and
+`review_table` for a repo whose PR bodies keep a `## Review` table), in priority order; the runner's `state_dir` and `log_dir` (`~/.queue-runner/`, outside every served repo);
 `runs_dir` and `checkouts_dir` for reviews; `poll_seconds`, the pause after a pass that started
 nothing; `[claude]`, the T3 provider instance and model for Claude jobs; and `[sol]`,
 `codex-sol.sh` and the Git bash that runs it. `--config <path>` reads another one.
@@ -72,7 +74,8 @@ The review loop's rules are `~/.claude/docs/pr-review.md`; leads-dashboard's
 1. **Settle.** Under `sol.lock`, a review the log shows open was cut off with its runner: it
    counts as `failed`.
 2. **Adopt** (`Reviewer.why_not`): open PRs, lowest number first. A PR is left alone, and why is
-   logged once, while a build job is still writing to its branch, once the runner reviewed its
+   logged once, while it's labelled `needs-sol-review` or `sol-reviewed` (the old
+   `~/sol-pr-review.py` reviews those until the cutover, ticket 13), while a build job is still writing to its branch, once the runner reviewed its
    head H, after two failed reviews on H (until a push or `--release NAME#N`), while a review
    comment is on H already (any of the three formats below), while H's checks are running or
    none have reported (`sol-review` isn't counted), and when a check failed or it conflicts with
@@ -95,11 +98,28 @@ The review loop's rules are `~/.claude/docs/pr-review.md`; leads-dashboard's
    more, so every blocking review from 3 comes to Stefan), `merge` (clean), `fix`. An Important
    finding without file, line and a scenario (or a cost and rule) counts as a nit; nits past five
    are dropped and named. No readable block: `failed`.
-5. **Write, don't post (ticket 03).** `comment.md` (the would-be comment: heading, Sol's prose
-   with links made GitHub-relative, findings tables, notes, a visible `sol-findings` ledger of
-   the PR's whole state, and the old script's hidden marker) and `decision.json` (verdict,
-   outcome, signals, the would-be `sol-review` status, follow-up issues). `DryRunPoster` posts
-   nothing; ticket 04 replaces it.
+5. **Write.** `comment.md` (heading, Sol's prose with links made GitHub-relative, findings
+   tables, notes, a visible `sol-findings` ledger of the PR's whole state, and the old script's
+   hidden marker) and `decision.json` (verdict, outcome, signals, the `sol-review` status,
+   follow-up issues).
+6. **Post** (`post.GitHubPoster`; automated posts need no go-ahead, `~/.claude/CLAUDE.md`). In
+   order: each new Pre-existing finding as a `needs-triage` issue, with a hidden
+   `<!-- sol-finding owner/name#N ID -->` line (an open issue with that line, the old script's
+   footer for the PR and ID, or the same title is linked instead of filed again); the comment,
+   linking them, its ledger recording each issue's URL (`issue`); `sol-review` on H, never the
+   PR's head now; with `review_table`, a row in the PR body's `## Review` table, read afresh
+   (`with_review_row`, ported from the old script). The comment is the review's record: if it
+   can't be posted the review is `failed` and the PR is reviewed again. A failure after it is
+   said and left. A filing that fails is marked `unfiled` in the ledger, and the next review
+   files it. Issues go before the comment, as the old script did, so the comment can link them;
+   a comment that fails after them leaves the issues, which the retry links by their hidden
+   line. `DryRunPoster` posts nothing (`live_review.py`, `--dry-run`).
+
+**Findings across reviews** (`decide`): Sol reuses IDs. A finding listed again under a new ID
+with the same tag, class, file and line as an open or filed one, and no status given for the old
+one, takes the old ID (so it's no new finding in an earlier class), and a finding listed again
+is shown under Earlier findings, not as new. An earlier Pre-existing finding counts as filed
+unless it's `unfiled`.
 
 **Review numbering carries on** from the PR's comments, whichever wrote them: the old script's
 and the runner's marker `<!-- sol-pr-review round=N verdict=V sha=H findings=<base64> -->`, and a
@@ -174,7 +194,7 @@ python3 scripts/live_review.py NAME#N
 This has Sol review one real PR's head through `Reviewer.review`, as a dry run: it prints what
 adoption would say and reviews anyway, posting nothing. Its job log, run folder and checkout
 stay in `~/.queue-runner/live-review/`, apart from the runner's state, so the runner still
-reviews that head for real once reviews post. It costs one Sol review (not gated).
+reviews that head for real. It costs one Sol review (not gated).
 
 ## Tests
 
@@ -187,8 +207,8 @@ network: GitHub is the `GhCli` adapter in `queue_runner/github.py`, faked in tes
 `tests/fakes.py` (`FakeGitHub`) or with canned `gh api` JSON (`tests/test_github.py`). T3 is the
 `T3Cli` adapter (`queue_runner/t3.py`), tested on output captured from the real CLI
 (`tests/fixtures/t3/`), and faked with git in `tests/fakes_t3.py` for the run loop
-(`tests/test_run.py`). The Sol lane is tested against `FakeGitHubForReviews`, `FakeReviewGit`
-and `FakeSol` (`tests/test_review.py`); `decide()` and the marker formats in
+(`tests/test_run.py`). The Sol lane is tested against `FakeGitHubForReviews` (every write goes to its `posts`, in
+order; a call named in `fail` raises), `FakeReviewGit` and `FakeSol` (`tests/test_review.py`); `decide()` and the marker formats in
 `tests/test_ledger.py`; the codex-sol.sh adapter in `tests/test_sol.py`.
 
 ## Layout
@@ -209,6 +229,8 @@ and `FakeSol` (`tests/test_review.py`); `decide()` and the marker formats in
 - `queue_runner/run.py`: the two lanes, a build job and the loop.
 - `queue_runner/review.py` and `templates/review.md`: the Sol lane: adoption, the brief, a review.
 - `queue_runner/ledger.py`: earlier reviews from a PR's comments, and `decide()`.
+- `queue_runner/post.py`: posting a review: follow-up issues, the comment, `sol-review`, the
+  PR body's Review row.
 - `queue_runner/sol.py`: the Sol seam and its codex-sol.sh adapter.
 - `queue_runner/lock.py`: `runner.lock` and `sol.lock`.
 - `queue_runner/cli.py`: the command line.
