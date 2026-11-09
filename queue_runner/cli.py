@@ -68,7 +68,7 @@ def _dry_run_stops(config, github, out) -> None:
 def _dry_run_decision(config, github, t3, out, log_line) -> bool:
     """Prints the decision the Claude lane would take first, with its brief (a reply to an
     Approach note that names rework, fix on or hold needs no thread)."""
-    from .decisions import Decider, read_reply
+    from .decisions import Decider
     from .stops import Stopper
     jobs = _jobs(config)
     decider = Decider(config, github=github, t3=t3, jobs=jobs, say=lambda line: None,
@@ -79,8 +79,7 @@ def _dry_run_decision(config, github, t3, out, log_line) -> bool:
     what = f'{case.repo.name}#{case.number} ({case.question})'
     log_line(f'dry run: would decide {what}')
     print(f'Would start a decision on {what} (dry run: nothing started or posted)', file=out)
-    if case.question == 'reply' and case.about.stop == 'approach-note' and \
-            (answer := read_reply(case.said)):
+    if answer := decider.direct_answer(case):
         print(f'  Stefan answered the Approach note: {answer.action}, with no thread', file=out)
         return True
     print('  brief:', file=out)

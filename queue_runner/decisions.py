@@ -30,14 +30,15 @@ and PRs (`~/.claude/CLAUDE.md`).
 """
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from importlib import resources
 from string import Template
 
 from .github import OLD_LABELS
 from .ledger import OPEN, RUNNER_MARK, norm, read_reviews, said_since, state
-from .state import NOT_STARTED, Job
-from .stops import KINDS, _number, _utc
+from .review import _open_line
+from .state import NOT_SENT, NOT_STARTED, Job
+from .stops import KINDS, approach_review, number_of, undecided_replies, utc
 from .t3 import T3Error
 
 VERSION = 1
@@ -70,7 +71,9 @@ ENDED = {'failed': 'failed', 'waiting': 'waiting', 'done-no-pr': 'no-pr'}   # jo
 RECOMMEND = ('rework', 'fix on', 'hold')
 WORDS = re.compile(r'^\W*(rework|fix on|hold)\b', re.I)   # Stefan's answer to an Approach note
 MAX_CHAIN = 3
-CLIP = 3000
+CLIP = 3000        # characters of any one source in a brief
+MAX_SAID = 5       # Stefan's newest comments quoted in a reply's brief
+MAX_FINDINGS = 12  # open findings listed in a brief
 EXAMPLES = {
     'retry': {'add': 'The test failed because ...; run it with ... and carry on.'},
     'answer': {'text': 'Use the existing ... helper; ...'},
@@ -101,6 +104,12 @@ class Answer:
     action: str
     fields: dict
     unreadable: str | None = None   # why the reply couldn't be acted on (then it's a stop)
+
+    @property
+    def text(self) -> str:
+        """The text the runner acts on: what it sends, orders, posts or asks."""
+        f = self.fields
+        return f.get('add') or f.get('text') or f.get('reason') or f.get('question') or ''
 
 
 def stop_answer(why: str) -> Answer:
@@ -212,18 +221,22 @@ class Decider:
             pr = prs[n]
             if jobs.writer(repo.name, pr.branch):
                 continue
-            mine = jobs.on('review', repo.name, n, pr.head_sha)   # a release lets it go
-            r = jobs.runner_review(repo.name, n, pr.head_sha)
-            if (r and r.outcome == 'approach-note' and r in mine and not jobs.decided(r.id)
-                    and not jobs.stopped(repo.name, n, pr.head_sha, 'approach-note')):
-                yield Case('approach-note', repo, n, r, pr)
+            # The newest review, on whatever head it was (the PR may have moved since): the
+            # note is about that review, and the PR is held until it's written.
+            r = approach_review(jobs, repo, n)
+            if (r and not jobs.decided(r.id)
+                    and not jobs.stopped(repo.name, n, r.sha, 'approach-note')):
+                yield Case('approach-note', repo, n, r, replace(pr, head_sha=r.sha))
         for n in sorted(prs):
-            for s in jobs.on('stop', repo.name, n):
-                if s.outcome == 'answered' and s.answer == 'replied' and not jobs.decided(s.id):
-                    yield Case('reply', repo, n, s, prs[n], tuple(self._said(repo, n, s)))
+            # One reply may answer several stops: one decision reads it, about the newest
+            # Approach note among them if there is one (its answer may need no thread).
+            if waiting := undecided_replies(jobs, repo, n):
+                s = next((s for s in reversed(waiting) if s.stop == 'approach-note'),
+                         waiting[-1])
+                yield Case('reply', repo, n, s, prs[n], tuple(self._said(repo, n, s)))
         newest = {}   # each issue's newest build and each PR's newest fix: earlier ones are past
         for j in jobs.jobs():
-            if j.kind in ('build', 'fix') and j.repo == repo.name:
+            if j.kind in ('build', 'fix') and j.repo == repo.name and j.outcome != NOT_SENT:
                 newest[(j.kind, j.issue)] = j
         for (kind, n), j in sorted(newest.items(), key=lambda kv: kv[0][1]):
             if (j.open or j.outcome not in ENDED or not j.thread_id or jobs.decided(j.id)
@@ -237,8 +250,16 @@ class Decider:
     def _said(self, repo, n, stop: Job) -> list:
         said = self.github.issue_comments(repo, n) + self.github.review_replies(repo, n)
         if stop.link:
-            said += self.github.issue_comments(repo, _number(stop.link))
-        return sorted(said_since(said, _utc(stop.started_at)), key=lambda c: c.created_at)
+            said += self.github.issue_comments(repo, number_of(stop.link))
+        return sorted(said_since(said, utc(stop.started_at)),
+                      key=lambda c: c.created_at)[-MAX_SAID:]
+
+    @staticmethod
+    def direct_answer(case: Case) -> Answer | None:
+        """Stefan's answer to an Approach note, when it needs no thread (`read_reply`)."""
+        if case.question == 'reply' and case.about.stop == 'approach-note':
+            return read_reply(case.said)
+        return None
 
     # --- the brief --------------------------------------------------------------------------
 
@@ -315,7 +336,6 @@ class Decider:
     def _pr_part(self, case: Case) -> str:
         pr, repo = case.pr, case.repo
         found = state(read_reviews(self.github.issue_comments(repo, pr.number)))
-        from .review import _open_line
         important = [f for f in found if f['tag'] == 'important' and f['status'] in OPEN]
         classes = list(dict.fromkeys(f['class'] for f in important if norm(f['class'])))
         reviews = [j for j in self.jobs.on('review', repo.name, pr.number, released=True)
@@ -323,7 +343,9 @@ class Decider:
         return (f'### The PR\n\n#{pr.number} {pr.title} ({pr.url}), head `{pr.head_sha[:7]}`, '
                 f'branch `{pr.branch}` into `{pr.base}`.\n\n{_clip(pr.body) or "(No description.)"}'
                 '\n\n### Open Important findings (from the newest review\'s ledger)\n\n'
-                + ('\n'.join(map(_open_line, important)) or 'None.')
+                + ('\n'.join(map(_open_line, important[:MAX_FINDINGS])) or 'None.')
+                + (f'\n- ... and {len(important) - MAX_FINDINGS} more'
+                   if len(important) > MAX_FINDINGS else '')
                 + '\n\nClasses so far: ' + ('; '.join(f'"{c}"' for c in classes) or 'none')
                 + '\n\nThe runner\'s reviews: ' + (', '.join(
                     f'[review {j.round}]({j.link}) {j.outcome}' for j in reviews) or 'none'))
@@ -360,24 +382,24 @@ class Decider:
 
     # --- deciding ---------------------------------------------------------------------------
 
-    def run(self, case: Case, cont) -> str:
-        """Decides the case and acts. `cont(job, message)` continues an earlier job's thread
-        (`Runner.continue_job`). 'started', or 'idle' if T3 started no thread."""
+    def run(self, case: Case, continue_thread) -> str:
+        """Decides the case and acts. `continue_thread(job, message)` sends an earlier job's
+        thread a message as a new job (`Runner.continue_job`). 'started', or 'idle' if T3
+        started no thread."""
         repo, n = case.repo, case.number
         sha = case.pr.head_sha if case.pr is not None else case.about.sha
         job = self.jobs.started(kind='decision', repo=repo.name, issue=n, branch=None,
                                 title=decision_title(repo, n), sha=sha, about=case.about.id,
                                 question=case.question)
-        if case.question == 'reply' and case.about.stop == 'approach-note' and \
-                (answer := read_reply(case.said)):
+        if answer := self.direct_answer(case):
             self.say(f'{case.name}: Stefan answered the Approach note: {answer.action}')
-            return self.act(case, job, answer, None, cont)
+            return self.act(case, job, answer, None, continue_thread)
         chain = [d for d in self.jobs.on('decision', repo.name, n)
                  if d.question in ENDED.values() and d.id != job.id and d.outcome != NOT_STARTED]
         if case.question in ENDED.values() and len(chain) >= MAX_CHAIN:
             return self.act(case, job, Answer('stop', {'question': (
                 f'{len(chain)} decisions on this {case.about.kind} already, and it ended '
-                f'{case.about.outcome} again')}), None, cont)
+                f'{case.about.outcome} again')}), None, continue_thread)
         try:
             brief = self.brief(case)
             result = self.t3.start(repo.path, brief, title=job.title,
@@ -395,10 +417,10 @@ class Decider:
                    + (f': {_clip(result.reply or result.error, 600)}'
                       if result.reply or result.error else ''))
             answer = Answer('stop', {'question': why}, unreadable=why)
-        return self.act(case, job, answer, result, cont)
+        return self.act(case, job, answer, result, continue_thread)
 
-    def act(self, case: Case, job: Job, answer: Answer, result, cont) -> str:
-        repo, n, a, f = case.repo, case.number, answer.action, answer.fields
+    def act(self, case: Case, job: Job, answer: Answer, result, continue_thread) -> str:
+        repo, n, a, fields = case.repo, case.number, answer.action, answer.fields
         link = None
         if result is not None:
             try:
@@ -408,7 +430,7 @@ class Decider:
         ran = {} if result is None else dict(
             thread_id=result.thread_id, run_id=result.run_id, status=result.status)
         code = None if result is None else result.exit_code
-        text = f.get('add') or f.get('text') or f.get('reason') or f.get('question') or ''
+        text = answer.text
 
         def end(outcome, **extra):
             fields = dict(ran, link=link, reason=text or None, error=answer.unreadable)
@@ -418,7 +440,7 @@ class Decider:
                      + (f' {link}' if link else ''))
 
         if a == 'approach-note':
-            return self._approach_note(case, end, f, link)
+            return self._approach_note(case, end, fields, link)
         if a == 'stop':   # filed first: the decision ends once its stop exists
             end('stop', reason=self._stop(case, text, link))
             return 'started'
@@ -445,12 +467,17 @@ class Decider:
                    if a == 'retry' else
                    f"The answer to your question, from the queue runner's decision{by}:\n\n"
                    f"{text}\n\nCarry on, and end as the job's brief says.")
-        return cont(case.about, message)
+        if continue_thread(case.about, message) == 'idle':   # never reached the thread
+            self.jobs.ended(job.id, exit_code=code, outcome=NOT_STARTED, link=link,
+                            reason=text or None, error='sending to the earlier thread failed')
+            return 'idle'
+        return 'started'
 
-    def _approach_note(self, case: Case, end, f, link) -> str:
+    def _approach_note(self, case: Case, end, fields, link) -> str:
         repo, pr, r = case.repo, case.pr, case.about
         h7 = pr.head_sha[:7]
-        body = (f'## Approach note\n\n{f["note"]}\n\n**Recommendation:** {f["recommend"]}.\n\n'
+        body = (f'## Approach note\n\n{fields["note"]}\n\n'
+                f'**Recommendation:** {fields["recommend"]}.\n\n'
                 f'Review {r.round} on `{h7}` is still blocking, so no further review or fix round '
                 'runs on this PR until Stefan answers: reply **rework**, **fix on** or **hold**, '
                 'here or on its `needs-info` issue.'
@@ -465,7 +492,7 @@ class Decider:
             end('stop', reason=why)
             return 'started'
         why = (f'review {r.round} on {h7} is still blocking; the Approach note recommends '
-               f'{f["recommend"]}: reply rework, fix on or hold')
+               f'{fields["recommend"]}: reply rework, fix on or hold')
         # If filing fails, the Sol lane's stop pass files it from this record (stops.detect).
         self.stopper.file(repo, pr, 'approach-note', why, url)
         end('approach-note', link=url, reason=why)

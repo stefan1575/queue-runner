@@ -107,7 +107,10 @@ head), `failed`,
 **A continued job** (a decision's `retry` or `answer`): a new build or fix job of the same issue,
 branch, title and H, whose start record carries the earlier job's `thread_id` and `about` (its
 id). The runner sends the message with `t3 thread send --wait --json`, and records the end as for
-any job of its kind; a dead runner's settle finds the thread by its id.
+any job of its kind; a dead runner's settle finds the thread by its id. A message that never
+reached a run (T3 failed and the thread isn't running) ends the new job `not-sent` (it counts for
+nothing; the issue stays held), puts a waiting job back to `waiting`, and the decision
+`not-started`, so the case is decided again.
 
 ## Decision threads
 
@@ -135,9 +138,12 @@ failed or asked back) is a stop that says why.
 **Stefan's answer to an Approach note** needs no thread when his newest words (on the PR or the
 issue) start with `rework`, `fix on` or `hold`: `fix on` and `rework` order one more fix round
 (rework's brief says to rework the approach as the note and his reply say), `hold` leaves the PR
-until `--release`. **No fourth review without it** (`stops.held`): while the newest review is an
-approach note, the PR gets no review (even on a new head) and no fix round until a decision says
-`fix` or `carry-on`, or he closes the issue. A reply not yet decided on holds the PR too.
+until `--release`. **No fourth review without it** (`stops.held`): while the runner's newest
+review of the PR (on any head) is an approach note, the PR gets no review (even on a new head)
+and no fix round until that note's own stop is filed and answered, by a closed issue or by a
+decision after it that says `fix` or `carry-on`; another stop's answer doesn't count. The note is
+written for that review even if the head has moved since. A reply not yet decided on holds the PR
+too, and one reply that answers several stops is decided once (`stops.undecided_replies`).
 
 **Acting:** `retry` and `answer` continue the earlier thread (above); `close` comments and closes
 the issue as not planned; `fix`, `carry-on` and `hold` are read from the decision's record. A

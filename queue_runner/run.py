@@ -19,7 +19,7 @@ from .fix import Fixer, fix_branch, fix_title
 from .lock import RunnerBusy, runner_lock  # noqa: F401 (the CLI takes them from here)
 from .picker import BuildJob, pick
 from .review import Reviewer
-from .state import NOT_STARTED, Job, JobLog
+from .state import NOT_SENT, NOT_STARTED, Job, JobLog
 from .stops import Stopper
 from .t3 import T3Error, Thread
 from .toast import NoToaster
@@ -225,9 +225,21 @@ class Runner:
         try:
             result = self.t3.send(old.thread_id, message)
         except T3Error as e:
-            self.say(f'{self._name(job)}: sending to its thread failed ({e}); '
-                     'the next pass settles it')
-            return STARTED
+            try:
+                running = self.t3.show(old.thread_id)[0].active
+            except T3Error:
+                running = True   # T3 can't say: leave the job open for the next pass to settle
+            if running:
+                self.say(f'{self._name(job)}: lost track of its thread ({e}); '
+                         'the next pass settles it')
+                return STARTED
+            # The message never reached a run: as it was, and the case is decided again.
+            # (`not-sent`, not `not-started`: the issue stays held.)
+            self.jobs.ended(job.id, exit_code=None, outcome=NOT_SENT, error=str(e))
+            if old.outcome == 'waiting':
+                self.jobs.ended(old.id, exit_code=old.exit_code, outcome='waiting')
+            self.say(f'{self._name(job)} not continued: {e}')
+            return IDLE
         self.finish(job, result.thread_id, result.exit_code, result.status, result.error,
                     result.run_id)
         return STARTED

@@ -25,6 +25,9 @@ from dataclasses import dataclass, field, replace
 # An ended build job holds its issue, so a failed or waiting run never loops, unless it never
 # got a thread to begin with.
 NOT_STARTED = 'not-started'
+# A decision's message that never reached the earlier job's thread: the new job counts for
+# nothing, and the earlier one stands (its issue stays held).
+NOT_SENT = 'not-sent'
 
 # A review job's outcomes. These four mean Sol reviewed the head: it isn't reviewed again.
 REVIEWED = frozenset({'clean', 'blocking', 'stop', 'approach-note'})

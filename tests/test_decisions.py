@@ -8,7 +8,7 @@ import unittest
 from queue_runner.config import Config, Repo
 from queue_runner.decisions import QUESTIONS, parse, read_reply
 from queue_runner.fix import fix_branch
-from queue_runner.github import Comment
+from queue_runner.github import Checks, Comment
 from queue_runner.ledger import RUNNER_MARK, runner_post
 from queue_runner.run import Runner
 from queue_runner.stops import held
@@ -189,6 +189,41 @@ class DecisionTest(unittest.TestCase):
         self.assertEqual([s.outcome for s in self.jobs('stop')], ['failed', 'filed'])
         self.assertIn('recommends rework', self.jobs('stop')[-1].reason)
 
+    def test_another_stops_answer_does_not_lift_the_hold_before_the_approach_note(self):
+        r = self.runner()
+        self.review_3()
+        self.gh.check_states[H2] = Checks('failed', failed=('ci',))
+        r.reviewer.review_pass()   # files the failed-check stop; the note isn't written yet
+        [stop] = self.jobs('stop')
+        self.gh.close_issue(901)   # Stefan closes that one
+        self.gh.now[20] = {'head_sha': H3}
+        self.git.heads[20] = H3
+        self.gh.check_states.pop(H2)
+        self.assertEqual(r.reviewer.review_pass(), 'idle')
+        self.assertIn('its Approach note goes to Stefan first', held(r.jobs, self.repo, 20))
+
+    def test_an_approach_note_still_pending_after_a_push_is_written_for_its_review(self):
+        r = self.runner((0, 'completed', decision_reply('approach-note', note='N.',
+                                                        recommend='hold')))
+        self.review_3()
+        self.gh.now[20] = {'head_sha': H3}
+        r.run_pass()
+        self.assertIn(f'sha={H2} round=3', self.calls('comment')[0][1])
+        [stop] = self.jobs('stop')
+        self.assertEqual((stop.stop, stop.sha), ('approach-note', H2))
+
+    def test_one_reply_answering_two_stops_is_decided_once(self):
+        self.noted()
+        self.r.reviewer.stopper.file(self.repo, self.gh.pull(self.repo, 20), 'conflict',
+                                     'it conflicts with main')
+        self.answer('fix on')
+        self.assertEqual([s.answer for s in self.jobs('stop')], ['replied', 'replied'])
+        self.t3.outcomes = []
+        self.r.run_pass()
+        [_, d] = self.jobs('decision')
+        self.assertEqual((d.about, d.outcome), (self.jobs('stop')[0].id, 'fix'))
+        self.assertIsNone(self.r.decider.next_case())
+
     # --- Stefan's answer ------------------------------------------------------------------
 
     def test_fix_on_read_from_the_pr_orders_one_fix_round_with_his_words_first(self):
@@ -285,6 +320,19 @@ class DecisionTest(unittest.TestCase):
                          (first.id, 'mcp:t1', 'done-no-pr'))
         self.assertEqual(first.outcome, 'failed')
         self.assertEqual(self.r.jobs.held_issues('first'), {4})
+
+    def test_a_message_that_never_reaches_the_thread_leaves_the_case_to_decide_again(self):
+        self.build((2, 'waiting'), (0, 'completed', decision_reply('answer', text='Blue.')),
+                   T3Error('T3 is down'),
+                   (0, 'completed', decision_reply('answer', text='Blue.')), (0, 'completed'))
+        self.assertEqual(self.r.run_pass(), 'idle')
+        first, second = self.jobs('build')
+        self.assertEqual((first.outcome, second.outcome), ('waiting', 'not-sent'))
+        self.assertEqual(self.jobs('decision')[0].outcome, 'not-started')
+        self.assertEqual(self.r.jobs.held_issues('first'), {4})
+        self.r.run_pass()
+        self.assertEqual([j.outcome for j in self.jobs('build')],
+                         ['continued', 'not-sent', 'done-no-pr'])
 
     def test_a_waiting_build_answered_by_a_decision_continues_and_the_old_job_is_done(self):
         self.build((2, 'waiting'), (0, 'completed', decision_reply('answer', text='Use blue.')),

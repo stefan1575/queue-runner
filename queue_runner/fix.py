@@ -19,8 +19,8 @@ from .brief import _agents_pointer
 from .github import OLD_LABELS
 from .ledger import OPEN, STATUSES, newest_on, norm, read_reviews, state
 from .picker import closed_issues
-from .state import NOT_STARTED, JobLog
-from .stops import held
+from .state import NOT_SENT, NOT_STARTED, JobLog
+from .stops import held, positions
 
 
 def fix_branch(number: int, sha: str) -> str:
@@ -64,9 +64,9 @@ class Fixer:
         """Why a PR whose head the runner found blocking gets no fix round now, or None."""
         h7 = pr.head_sha[:7]
         done = [j for j in self.jobs.on('fix', repo.name, pr.number, pr.head_sha)
-                if j.outcome != NOT_STARTED]   # T3 failed before any thread: try again
+                if j.outcome not in (NOT_STARTED, NOT_SENT)]   # no thread ran: try again
         if order := self.order(repo, pr):   # one more round on H, ordered after the last
-            pos = {j.id: i for i, j in enumerate(self.jobs.jobs())}
+            pos = positions(self.jobs)
             done = [j for j in done if pos[j.id] > pos[order.id]]
         if done:
             last = done[-1]

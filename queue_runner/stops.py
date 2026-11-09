@@ -46,13 +46,13 @@ def needs_info_mark(github: str, n: int) -> str:
     return f'<!-- queue-runner needs-info {github}#{n} -->'
 
 
-def _utc(stamp: str) -> str:
+def utc(stamp: str) -> str:
     """A job's local time as GitHub writes times (UTC, `Z`), so the two compare as text."""
     t = datetime.datetime.fromisoformat(stamp.replace('Z', '+00:00'))
     return t.astimezone(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
 
 
-def _number(url: str) -> int:
+def number_of(url: str) -> int:
     return int(url.rstrip('/').rsplit('/', 1)[-1])
 
 
@@ -157,9 +157,9 @@ class Stopper:
         try:
             self.github.post_comment(repo, n, (
                 f'**The review loop stopped here for Stefan.** {line}\n\n'
-                f'Tracked in #{_number(url)}. The queue runner leaves this PR alone until that '
+                f'Tracked in #{number_of(url)}. The queue runner leaves this PR alone until that '
                 'issue is closed or Stefan replies here.\n\n'
-                f'{STOP_MARK}kind={kind} sha={h} issue={_number(url)} -->\n'))
+                f'{STOP_MARK}kind={kind} sha={h} issue={number_of(url)} -->\n'))
         except Exception as e:
             self.say(f'{name}: recording the stop on the PR failed: {e}')
         self.jobs.ended(job.id, exit_code=None, outcome='filed', link=url, reason=why)
@@ -225,10 +225,10 @@ class Stopper:
                 continue
             try:
                 closed = {u for u in {j.link for j in stops if j.link}
-                          if self.github.issue_state(repo.github, _number(u)) == 'closed'}
+                          if self.github.issue_state(repo.github, number_of(u)) == 'closed'}
                 said = (self.github.issue_comments(repo, n)
                         + self.github.review_replies(repo, n))
-                on_issue = {u: self.github.issue_comments(repo, _number(u))
+                on_issue = {u: self.github.issue_comments(repo, number_of(u))
                             for u in {j.link for j in stops if j.link} - closed}
             except Exception as e:
                 self.say(f'stop {repo.name}#{n}: reading its answer failed ({e}); next pass')
@@ -236,7 +236,7 @@ class Stopper:
             for j in stops:
                 how = ('issue-closed' if j.link in closed else
                        'replied' if said_since(said + on_issue.get(j.link, []),
-                                               _utc(j.started_at)) else None)
+                                               utc(j.started_at)) else None)
                 if how:
                     self.jobs.ended(j.id, exit_code=None, outcome='answered', link=j.link,
                                     reason=j.reason, answer=how)
@@ -258,18 +258,41 @@ def held(jobs, repo, n: int) -> str | None:
     decisions = jobs.on('decision', repo.name, n)
     if any(d.outcome == 'hold' for d in decisions):
         return f'Stefan said hold: left alone until --release {repo.name}#{n}'
-    answered = [s for s in jobs.on('stop', repo.name, n) if s.outcome == 'answered']
-    if any(s.answer == 'replied' and not jobs.decided(s.id) for s in answered):
+    if undecided_replies(jobs, repo, n):
         return 'Stefan replied to a stop: a decision on his reply comes first'
-    reviews = [j for j in jobs.on('review', repo.name, n) if j.outcome in REVIEWED]
-    if not reviews or reviews[-1].outcome != 'approach-note':
+    r = approach_review(jobs, repo, n)
+    if r is None:
         return None
-    r = reviews[-1]
-    pos = {j.id: i for i, j in enumerate(jobs.jobs())}
-    if any(pos[d.id] > pos[r.id] and d.outcome in ('fix', 'carry-on') for d in decisions) or \
-            any(pos[s.id] > pos[r.id] and s.answer == 'issue-closed' for s in answered):
-        return None
-    if not jobs.stopped(repo.name, n, r.sha, 'approach-note'):
+    note = next((s for s in jobs.on('stop', repo.name, n, r.sha)
+                 if s.stop == 'approach-note' and s.outcome in ('filed', 'answered')), None)
+    if note is None:   # another stop's answer doesn't count: the note goes to Stefan first
         return f'review {r.round} is still blocking: its Approach note goes to Stefan first'
+    pos = positions(jobs)
+    if note.answer == 'issue-closed' or any(
+            pos[d.id] > pos[note.id] and d.outcome in ('fix', 'carry-on') for d in decisions):
+        return None
     return (f'review {r.round} is still blocking: no further review or fix round without '
             "Stefan's answer (rework, fix on or hold)")
+
+
+def positions(jobs) -> dict[str, int]:
+    """Each job's place in the log: which came after which."""
+    return {j.id: i for i, j in enumerate(jobs.jobs())}
+
+
+def approach_review(jobs, repo, n: int):
+    """The runner's newest review of the PR (any head, not released), if it's an approach note:
+    review 3 or later still blocking."""
+    reviews = [j for j in jobs.on('review', repo.name, n) if j.outcome in REVIEWED]
+    return reviews[-1] if reviews and reviews[-1].outcome == 'approach-note' else None
+
+
+def undecided_replies(jobs, repo, n: int) -> list:
+    """Stops on the PR Stefan answered by a reply that no decision has read yet, oldest first.
+    One reply may answer several stops: a decision on the PR after a stop reads it too."""
+    pos = positions(jobs)
+    read = [pos[d.id] for d in jobs.on('decision', repo.name, n, released=True)
+            if d.question == 'reply' and d.outcome != 'not-started']
+    return [s for s in jobs.on('stop', repo.name, n)
+            if s.outcome == 'answered' and s.answer == 'replied'
+            and not any(p > pos[s.id] for p in read)]
