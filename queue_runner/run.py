@@ -25,8 +25,10 @@ from .t3 import T3Error, Thread
 from .toast import NoToaster
 
 # What a pass did: started (a job ran to its end), busy (a Claude job is still running from an
-# earlier runner, so none was started), idle (nothing to start).
-STARTED, BUSY, IDLE = 'started', 'busy', 'idle'
+# earlier runner, so none was started), idle (nothing to start), gated (the usage gate held the
+# chosen Claude job back: `Runner.gate_until` says when to look again).
+STARTED, BUSY, IDLE, GATED = 'started', 'busy', 'idle', 'gated'
+CLAUDE_KINDS = ('build', 'fix', 'decision')
 
 
 def job_title(repo: Repo, issue: int) -> str:
@@ -46,8 +48,11 @@ def _when(stamp: str) -> datetime.datetime:
 
 class Runner:
     def __init__(self, config: Config, *, github, t3, git, out, log_line, sol=None,
-                 toaster=None):
+                 toaster=None, gate=None):
         self.config, self.github, self.t3, self.git = config, github, t3, git
+        self.gate = gate   # gate.Gate; None starts every Claude job (tests, the live checks)
+        self.gate_until: datetime.datetime | None = None
+        self._last_gate: str | None = None
         self.out, self.log_line = out, log_line
         self.jobs = JobLog(os.path.join(config.state_dir, 'jobs.jsonl'))
         self.repos = {r.name: r for r in config.repos}
@@ -73,23 +78,65 @@ class Runner:
         return job() if callable(job) else job
 
     def plan(self):
-        """Settles, then chooses this pass's Claude job: a callable that runs it, or BUSY or
-        IDLE. A decision comes first, then a fix round, then a build."""
+        """Settles, then chooses this pass's Claude job: a callable that runs it, or BUSY, IDLE
+        or GATED. A decision comes first, then a fix round, then a build."""
         if self.settle() == BUSY:
             return BUSY
+        chosen = self.choose()
+        return self._gated(*chosen) if isinstance(chosen, tuple) else chosen
+
+    def choose(self):
+        """(kind, a callable that runs it), or IDLE. The kind is the gate's: None for a
+        decision Stefan's own words answer, which starts no thread."""
         if case := self.decider.next_case():
-            return lambda: self.decider.run(case, self.continue_job)
+            kind = None if self.decider.direct_answer(case) else 'decision'
+            return kind, lambda: self.decider.run(case, self.continue_job)
         if fix := self.next_fix():
-            return lambda: self.run_fix(*fix)
+            return 'fix', lambda: self.run_fix(*fix)
         for repo in self.config.repos:
             if not repo.github:
                 continue   # no GitHub issues to pick from (local-issue repos come in ticket 12)
             job = pick(repo, self.github, held=self.jobs.held_issues(repo.name))
             if job is not None:
-                return lambda: self.run_build(job)
+                return 'build', lambda: self.run_build(job)
         self.say('Nothing to start: no PR needs a fix round, and no repo has an unblocked '
                  'ready-for-agent issue that isn\'t already being built or held.')
         return IDLE
+
+    def _gated(self, kind, run):
+        """The usage gate before a Claude job (`gate.py`): GATED, saying why and until when
+        (once, until that changes), or a callable that runs the job and records usage before
+        and after it."""
+        self.gate_until = None
+        if kind is None or self.gate is None:
+            return run
+        verdict = self.gate.check(kind)
+        if not verdict.go:
+            self.gate_until = verdict.until
+            if verdict.text != self._last_gate:
+                self.say(f'Claude lane waits: {verdict.text}')
+            self._last_gate = verdict.text
+            return GATED
+        self._last_gate = None
+        self.say(f'Usage gate: {verdict.text}')
+
+        def measured():
+            since = len(self.jobs.jobs())
+            did = run()
+            if did == STARTED:   # a thread ran: what it cost teaches the next estimate
+                ids = [j.id for j in self.jobs.jobs()[since:] if j.kind in CLAUDE_KINDS]
+                self.gate.measured(kind, ids, verdict.usage)
+            return did
+        return measured
+
+    def idle_seconds(self) -> float:
+        """The pause after a pass that started nothing: `poll_seconds`, or less when the gate
+        opens sooner (pause, resume and the reserve are read again each pass)."""
+        poll = self.config.poll_seconds
+        if self.gate_until is None or self.gate is None:
+            return poll
+        left = (self.gate_until - self.gate.clock()).total_seconds()
+        return max(1.0, min(poll, left))
 
     def next_fix(self):
         """(repo, PR, its blocking review job) for the first PR that needs a fix round now."""
@@ -390,7 +437,7 @@ class Runner:
                     self.log_line('pass failed:\n' + traceback.format_exc())
                     did = IDLE
                 if did != STARTED:
-                    sleep(self.config.poll_seconds)
+                    sleep(self.idle_seconds())
         finally:
             stop.set()
             sol.join(timeout=5)

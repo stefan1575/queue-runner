@@ -8,7 +8,8 @@ import unittest
 from queue_runner.cli import main
 from queue_runner.state import JobLog
 from queue_runner.t3 import T3Error
-from tests.fakes import FakeGitHubForReviews, FakeGitHubWithPulls, FakeToaster, full_pr, issue
+from tests.fakes import (FakeGitHubForReviews, FakeGitHubWithPulls, FakeToaster, FakeUsage,
+                         full_pr, issue)
 from tests.fakes_t3 import FakeGit, FakeReviewGit, FakeSol, FakeT3, decision_reply
 from tests.test_ledger import H2, important, reply
 
@@ -47,7 +48,7 @@ path = "{self.dir}"
         self.toaster = FakeToaster()   # a waiting job toasts: never a real one in tests
         code = main(args + ['--config', self.config], github=github, out=out, t3=t3,
                     git=git or FakeGit(), sleep=sleep or (lambda s: None), sol=sol or FakeSol(),
-                    toaster=self.toaster)
+                    toaster=self.toaster, usage=FakeUsage())
         return code, out.getvalue()
 
     def runner_log(self):

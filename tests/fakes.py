@@ -175,3 +175,22 @@ class FakeToaster:
         if self.fail:
             raise RuntimeError('no toast')
         self.toasts.append({'title': title, 'text': text, 'url': url, 'tag': tag})
+
+
+class FakeUsage:
+    """Plays Claude's usage endpoint: each read gives the next of `reads` (the last one again
+    once they run out); an exception in it is raised. Tests never read the real one."""
+
+    def __init__(self, *reads):
+        import datetime
+        from queue_runner.usage import Usage, Window
+        far = datetime.datetime(2099, 1, 1, tzinfo=datetime.timezone.utc)
+        self.reads = list(reads) or [Usage(Window(0, None), Window(0, far))]
+        self.count = 0
+
+    def read(self):
+        got = self.reads[min(self.count, len(self.reads) - 1)]
+        self.count += 1
+        if isinstance(got, Exception):
+            raise got
+        return got

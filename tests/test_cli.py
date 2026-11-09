@@ -4,7 +4,7 @@ import tempfile
 import unittest
 
 from queue_runner.cli import main
-from tests.fakes import FakeGitHub, issue
+from tests.fakes import FakeGitHub, FakeUsage, issue
 
 
 class DryRunTest(unittest.TestCase):
@@ -31,7 +31,7 @@ path = "{self.dir}"
 
     def run_main(self, args, github):
         out = io.StringIO()
-        code = main(args, github=github, out=out)
+        code = main(args, github=github, out=out, usage=FakeUsage())
         return code, out.getvalue()
 
     def test_prints_the_job_it_would_start_and_its_brief(self):

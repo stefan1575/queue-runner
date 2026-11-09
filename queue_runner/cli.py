@@ -9,6 +9,9 @@
                                               # and the PRs that would merge
     python -m queue_runner --release NAME#N   # let the picker take a held issue again
     python -m queue_runner --review NAME#N    # Sol reviews that PR's head now
+    python -m queue_runner --gate             # Claude's usage now, and whether each job kind fits
+    python -m queue_runner --pause | --resume # hold Claude jobs back, or let them start again
+    python -m queue_runner --reserve PERCENT  # the share of the week kept for Stefan (default 5)
 """
 import argparse
 import datetime
@@ -38,10 +41,62 @@ def _jobs(config) -> JobLog:
     return JobLog(os.path.join(config.state_dir, 'jobs.jsonl'))
 
 
-def _dry_run(config, github, git, out, log_line, t3=None) -> int:
+def _gate(config, usage, clock):
+    from .gate import Gate
+    if usage is None:
+        from .usage import OAuthUsage
+        usage = OAuthUsage()
+    return Gate(config.state_dir, usage, clock)
+
+
+def _print_gate(gate, out) -> None:
+    """The knob, Claude's windows now and each job kind's verdict (reads usage once)."""
+    from .gate import CLAUDE_KINDS, decide
+    from .usage import UsageError
+    knob = gate.knob()
+    print(f'Claude usage gate: {"paused" if knob.paused else "running"}, weekly reserve '
+          f'{knob.reserve:g}%', file=out)
+    try:
+        usage = gate.reader.read()
+    except UsageError as e:
+        print(f'  usage unreadable: {e}', file=out)
+        return
+    for name, w in (('5 hours', usage.five_hour), ('week', usage.seven_day)):
+        resets = (f', resets {w.resets_at.astimezone().isoformat(timespec="minutes")}'
+                  if w.resets_at else ', not started')
+        print(f'  {name}: {w.used:g}% used{resets}', file=out)
+    for kind in CLAUDE_KINDS:
+        cost = gate.book.expected(kind)
+        learned = ' (the cautious default)' if cost == gate.default(kind) else ''
+        v = decide(usage, kind, cost, knob, gate.clock())
+        print(f'  {kind}: {"starts" if v.go else "waits"}: {v.text}{learned}', file=out)
+
+
+def _knob(config, args, out) -> int:
+    from dataclasses import replace
+    from .gate import read_knob, write_knob
+    knob = read_knob(config.state_dir)
+    if args.reserve is not None:
+        if not 0 <= args.reserve <= 100:
+            print('--reserve takes a percent from 0 to 100.', file=out)
+            return 2
+        knob = replace(knob, reserve=args.reserve)
+    if args.pause or args.resume:
+        knob = replace(knob, paused=args.pause)
+    write_knob(config.state_dir, knob)
+    state = ('Paused: no Claude job starts (one running now runs to its end; Sol goes on)'
+             if knob.paused else 'Running: Claude jobs start when they fit')
+    print(f'{state}; the weekly reserve is {knob.reserve:g}%. A running runner reads this '
+          'before its next Claude job.', file=out)
+    return 0
+
+
+def _dry_run(config, github, git, out, log_line, t3=None, gate=None) -> int:
     if not _dry_run_decision(config, github, t3, out, log_line) and \
             not _dry_run_fix(config, github, git, out, log_line):
         _dry_run_build(config, github, out, log_line)
+    if gate is not None:
+        _print_gate(gate, out)
     _dry_run_stops(config, github, out)
     _dry_run_reviews(config, github, out)
     _dry_run_merges(config, github, out)
@@ -211,7 +266,7 @@ def _review(config, github, git, sol, value, out, log_line, toaster=None) -> int
 
 
 def main(argv=None, github=None, out=None, t3=None, git=None, sleep=time.sleep,
-         sol=None, toaster=None) -> int:
+         sol=None, toaster=None, usage=None, clock=None) -> int:
     out = out or sys.stdout
     parser = argparse.ArgumentParser(prog='queue_runner')
     parser.add_argument('--once', action='store_true', help='one pass, then exit')
@@ -220,6 +275,13 @@ def main(argv=None, github=None, out=None, t3=None, git=None, sleep=time.sleep,
                         help='let the picker take a held issue again (NAME is the repo in config)')
     parser.add_argument('--review', metavar='NAME#N',
                         help="have Sol review that PR's head now (nothing is posted yet)")
+    parser.add_argument('--gate', action='store_true',
+                        help="print Claude's usage now and whether each job kind would start")
+    knob = parser.add_mutually_exclusive_group()
+    knob.add_argument('--pause', action='store_true', help='start no Claude job until --resume')
+    knob.add_argument('--resume', action='store_true', help='let Claude jobs start again')
+    parser.add_argument('--reserve', type=float, metavar='PERCENT',
+                        help='the share of the week kept for Stefan until 24h before its reset')
     parser.add_argument('--config', default=DEFAULT_CONFIG)
     args = parser.parse_args(argv)
     if args.dry_run and not args.once:
@@ -240,6 +302,16 @@ def main(argv=None, github=None, out=None, t3=None, git=None, sleep=time.sleep,
               'the loop.', file=out)
         return 0
 
+    if args.pause or args.resume or args.reserve is not None:
+        code = _knob(config, args, out)
+        if code == 0:
+            log_line(f'gate knob: {" ".join(argv or sys.argv[1:])}')
+        return code
+    gate = _gate(config, usage, clock)
+    if args.gate:
+        _print_gate(gate, out)
+        return 0
+
     if github is None:
         from .github import GhCli
         github = GhCli()
@@ -250,7 +322,7 @@ def main(argv=None, github=None, out=None, t3=None, git=None, sleep=time.sleep,
         if t3 is None:
             from .t3 import T3Cli
             t3 = T3Cli()
-        return _dry_run(config, github, git, out, log_line, t3)
+        return _dry_run(config, github, git, out, log_line, t3, gate)
     if sol is None:
         from .sol import SolCli
         sol = SolCli(script=config.sol_script, bash=config.sol_bash)
@@ -264,7 +336,7 @@ def main(argv=None, github=None, out=None, t3=None, git=None, sleep=time.sleep,
         from .t3 import T3Cli
         t3 = T3Cli()
     runner = Runner(config, github=github, t3=t3, git=git, out=out, log_line=log_line, sol=sol,
-                    toaster=toaster)
+                    toaster=toaster, gate=gate)
     try:
         with runner_lock(config.state_dir):
             if args.once:

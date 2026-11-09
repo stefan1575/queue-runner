@@ -24,6 +24,7 @@ RESERVE_RELEASE = datetime.timedelta(hours=24)   # before the weekly reset, the 
 AFTER_RESET = datetime.timedelta(minutes=2)      # wait this past a reset before reading again
 SAME_WINDOW = datetime.timedelta(minutes=10)     # two reads' resets this close: the same window
 SAMPLES, RECENT = 3, 5
+CLAUDE_KINDS = ('build', 'fix', 'decision')
 
 # Gate verdicts: why a job starts or waits.
 FITS = 'fits'

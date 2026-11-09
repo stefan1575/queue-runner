@@ -17,6 +17,9 @@ python3 -m queue_runner --once                # one pass of each lane: at most o
 python3 -m queue_runner --once --dry-run      # print the next Claude job's brief (a decision first, then a fix round), list the stops it would file, what Sol would review and what would merge
 python3 -m queue_runner --release NAME#N      # let the picker take a held issue again (a PR: retry its failed reviews, merges and fix round; let a stopped PR go)
 python3 -m queue_runner --review NAME#N       # Sol reviews that PR's head now, if adoption says it needs one
+python3 -m queue_runner --gate                # Claude's usage now, and whether a build, fix or decision would start
+python3 -m queue_runner --pause | --resume    # Stefan's knob: start no Claude job, or start them again
+python3 -m queue_runner --reserve PERCENT     # the share of the week kept for Stefan (default 5)
 ```
 
 **`--once`, the bare command and `--review` start real Claude builds, fix rounds and decision
@@ -37,6 +40,43 @@ no window. A lock on `<state_dir>/runner.lock` keeps a second runner out (exit 3
 `runs_dir` and `checkouts_dir` for reviews; `poll_seconds`, the pause after a pass that started
 nothing; `[claude]`, the T3 provider instance and model for Claude jobs; and `[sol]`,
 `codex-sol.sh` and the Git bash that runs it. `--config <path>` reads another one.
+
+## The usage gate
+
+`gate.py` and `usage.py` (ticket 08; `orchestration.md`, Limits). Before each Claude job (a build,
+a fix round, a decision thread; a continued job runs inside its decision's pass), after settling
+and choosing it, the Claude lane reads Claude's windows and the job kind's expected cost. **Sol
+isn't gated**, and neither is an Approach-note answer read from Stefan's words (no thread).
+
+- **Reading usage:** `GET https://api.anthropic.com/api/oauth/usage` with `anthropic-beta:
+  oauth-2025-04-20` and the Claude login's token, as T3 does (`readClaudeResetCredits` and
+  `readAccessToken` in `resources/server.asar`, read 2026-11-10): `claudeAiOauth.accessToken` in
+  `$CLAUDE_CONFIG_DIR` or `~/.claude`, `.credentials.json`. Claude Code refreshes it whenever it
+  runs. The token goes only into the request header: no log, record or error holds it. The
+  response's `five_hour` and `seven_day` are `{utilization: 0-100, resets_at}`; null means not
+  started. `tests/fixtures/usage/oauth-usage.json` is a real response.
+- **Fits:** the 5-hour window's used percent plus the job's expected cost must be at most 100,
+  or the lane waits for its reset (plus 2 minutes); a window with nothing used takes any job. The
+  week must leave `reserve` percent (5 by default) for Stefan until 24 hours before its reset,
+  or the lane waits for that release; inside the last 24 hours the reserve may be spent. No room
+  even then: it waits for the weekly reset. Unreadable usage (no login, HTTP 401, the endpoint
+  down) starts nothing and is read again next pass.
+- **Waiting:** a held pass is `gated`; the log says once why and until when (`Claude lane waits:
+  ...`, and again only when that changes), and the loop sleeps `poll_seconds` or until the gate
+  opens, if sooner. The Sol lane goes on.
+- **The knob** is `<state_dir>/gate.json` (`paused`, `reserve`), written whole by `--pause`,
+  `--resume` and `--reserve N` without the runner lock, and read before every Claude job, so it
+  works while the runner runs (within one `poll_seconds`). Pausing doesn't stop a running job or
+  the Sol lane.
+- **Learned cost:** each Claude job pass that started a thread appends to
+  `<state_dir>/usage.jsonl`: the kind, the jobs it started, usage before (the gate's read) and
+  after, and `spent` per window (null for a window that reset mid-job). The expected cost per kind
+  is the cautious default (build 60% of 5 hours and 15% of the week, fix 40/10, decision 15/4)
+  until 3 records have that window's `spent`, then the largest of the last 5. Utilization comes
+  in whole percents, and Stefan's own sessions in the same window count too, so it errs high. A
+  decision's record includes the build or fix it continued.
+- `Runner` without a `gate` (the tests, `live_sandbox.py`) starts every job; the CLI always passes
+  one.
 
 ## Two lanes
 
@@ -396,6 +436,10 @@ now), `threads` and `push_before_merge`; fix rounds (`tests/test_fix.py`) run th
 with a T3 fake whose thread pushes. Decisions (`tests/test_decisions.py`): the answer block
 parsed, and each case and action through the real `Runner`, `FakeT3` giving a decision thread's
 reply (`decision_reply`), each thread's last messages and the runs `send` starts.
+The usage gate: `tests/test_usage.py` (the real response, the login, never the token),
+`tests/test_gate.py` (`decide()` with a fixed clock, the knob, learned costs) and
+`tests/test_gating.py` (the run loop and the knob through `main`, `FakeUsage` in `fakes.py`; every
+test that runs `main` passes one, so none reads the real endpoint).
 `tests/test_git.py` runs `GitCli` on a real local repo in a
 temp folder.
 
@@ -430,6 +474,9 @@ temp folder.
 - `queue_runner/post.py`: posting a review: follow-up issues, the comment, `sol-review`, the
   PR body's Review row.
 - `queue_runner/sol.py`: the Sol seam and its codex-sol.sh adapter.
+- `queue_runner/usage.py`: Claude's usage windows from `api/oauth/usage`, with the Claude login.
+- `queue_runner/gate.py`: the usage gate: `decide()`, Stefan's knob (`gate.json`), learned costs
+  (`usage.jsonl`).
 - `queue_runner/lock.py`: `runner.lock` and `sol.lock`.
 - `queue_runner/cli.py`: the command line.
 - `scripts/live_sandbox.py`, `scripts/live_review.py`, `scripts/live_fix_brief.py` and
