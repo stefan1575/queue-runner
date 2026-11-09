@@ -17,6 +17,7 @@ import json
 import os
 from dataclasses import dataclass
 
+from .state import append_record, read_records
 from .usage import Usage, UsageError, Window
 
 DEFAULT_RESERVE = 5.0
@@ -40,6 +41,9 @@ UNREADABLE = 'unreadable'       # usage couldn't be read: nothing starts; read a
 class Cost:
     five_hour: float   # percent of the 5-hour window
     seven_day: float   # percent of the week
+
+    def __add__(self, other: 'Cost') -> 'Cost':
+        return Cost(self.five_hour + other.five_hour, self.seven_day + other.seven_day)
 
 
 # Cautious until learned: a build is a long Opus thread, a fix round shorter, a decision one call.
@@ -82,9 +86,10 @@ def decide(usage: Usage, kind: str, cost: Cost, knob: Knob,
              f'{_pct(cost.seven_day)} of the week'
     released = False
     if week.used > 0 and week.used + cost.seven_day > 100:
-        until = week.resets_at + AFTER_RESET if week.resets_at else None
+        reset = week.resets_at if week.resets_at and week.resets_at > now else None
+        until = reset + AFTER_RESET if reset else None
         return wait(WEEKLY, f'the week is {_pct(week.used)} used and {expect}: waiting for the '
-                    f'weekly reset' + (f' at {_local(week.resets_at)}' if week.resets_at else ''),
+                    f'weekly reset' + (f' at {_local(reset)}' if reset else ''),
                     until)
     if week.used > 0 and week.used + cost.seven_day > 100 - knob.reserve:
         release = week.resets_at - RESERVE_RELEASE if week.resets_at else None
@@ -149,7 +154,7 @@ class CostBook:
 
     @staticmethod
     def default(kind: str) -> Cost:
-        return DEFAULTS.get(kind, DEFAULTS['build'])
+        return DEFAULTS[kind]
 
     def record(self, kind: str, jobs: list, before: Usage, after: Usage | None,
                error: str | None = None) -> None:
@@ -161,24 +166,12 @@ class CostBook:
                             'seven_day': _spent(before.seven_day, after.seven_day)}
         if error:
             rec['error'] = error
-        os.makedirs(os.path.dirname(self.path), exist_ok=True)
-        with open(self.path, 'a', encoding='utf-8') as f:
-            f.write(json.dumps(rec) + '\n')
-
-    def _records(self):
-        try:
-            with open(self.path, encoding='utf-8') as f:
-                lines = f.read().split('\n')
-        except FileNotFoundError:
-            return
-        for line in lines:
-            try:
-                yield json.loads(line)
-            except ValueError:   # blank, or torn by a crash
-                continue
+        append_record(self.path, rec)
 
     def expected(self, kind: str) -> Cost:
-        spent = [r['spent'] for r in self._records() if r.get('kind') == kind and r.get('spent')]
+        """Raises ValueError if usage.jsonl has a bad line (other than a torn last one)."""
+        spent = [r['spent'] for r in read_records(self.path)
+                 if r.get('kind') == kind and r.get('spent')]
         default = self.default(kind)
 
         def learned(window, fallback):
@@ -199,23 +192,31 @@ class Gate:
     def knob(self) -> Knob:
         return read_knob(self.state_dir)
 
-    def check(self, kind: str) -> Verdict:
+    def check(self, kind: str, then: str | None = None) -> Verdict:
+        """Whether a `kind` job fits now. With `then`, the kind of job it may continue in the
+        same pass (a decision's retry or answer), whose cost counts too."""
+        label = f'{kind} (and the {then} it may continue)' if then else kind
         try:
             knob = self.knob()
         except (OSError, ValueError) as e:
             return Verdict(False, UNREADABLE, f'gate.json is unreadable ({e}): no Claude job '
                            'starts until it is fixed or removed')
         if knob.paused:   # no usage read needed
-            return decide(Usage(Window(0, None), Window(0, None)), kind, self.default(kind),
-                          knob, self.clock())
+            return decide(Usage(Window(0, None), Window(0, None)), label,
+                          CostBook.default(kind), knob, self.clock())
         try:
             usage = self.reader.read()
         except UsageError as e:
             return Verdict(False, UNREADABLE, f'Claude usage is unreadable ({e}): no Claude job '
                            'starts; trying again next pass')
-        return decide(usage, kind, self.book.expected(kind), knob, self.clock())
-
-    default = staticmethod(CostBook.default)
+        try:
+            cost = self.book.expected(kind)
+            if then:
+                cost = cost + self.book.expected(then)
+        except (OSError, ValueError) as e:
+            return Verdict(False, UNREADABLE, f'usage.jsonl is unreadable ({e}): no Claude job '
+                           'starts until it is fixed or removed')
+        return decide(usage, label, cost, knob, self.clock())
 
     def measured(self, kind: str, jobs: list, before: Usage) -> None:
         """Records usage after a Claude job pass, against `before` (read by its check)."""

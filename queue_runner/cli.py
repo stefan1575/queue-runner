@@ -51,9 +51,14 @@ def _gate(config, usage, clock):
 
 def _print_gate(gate, out) -> None:
     """The knob, Claude's windows now and each job kind's verdict (reads usage once)."""
-    from .gate import CLAUDE_KINDS, decide
+    from .gate import CLAUDE_KINDS, CostBook, decide
     from .usage import UsageError
-    knob = gate.knob()
+    try:
+        knob = gate.knob()
+    except (OSError, ValueError) as e:
+        print(f'gate.json is unreadable ({e}): no Claude job starts until it is fixed or removed',
+              file=out)
+        return
     print(f'Claude usage gate: {"paused" if knob.paused else "running"}, weekly reserve '
           f'{knob.reserve:g}%', file=out)
     try:
@@ -67,15 +72,19 @@ def _print_gate(gate, out) -> None:
         print(f'  {name}: {w.used:g}% used{resets}', file=out)
     for kind in CLAUDE_KINDS:
         cost = gate.book.expected(kind)
-        learned = ' (the cautious default)' if cost == gate.default(kind) else ''
+        learned = ' (the cautious default)' if cost == CostBook.default(kind) else ''
         v = decide(usage, kind, cost, knob, gate.clock())
         print(f'  {kind}: {"starts" if v.go else "waits"}: {v.text}{learned}', file=out)
 
 
 def _knob(config, args, out) -> int:
     from dataclasses import replace
-    from .gate import read_knob, write_knob
-    knob = read_knob(config.state_dir)
+    from .gate import Knob, read_knob, write_knob
+    try:
+        knob = read_knob(config.state_dir)
+    except (OSError, ValueError) as e:   # set afresh from the defaults
+        print(f'gate.json was unreadable ({e}); starting again from the defaults.', file=out)
+        knob = Knob()
     if args.reserve is not None:
         if not 0 <= args.reserve <= 100:
             print('--reserve takes a percent from 0 to 100.', file=out)

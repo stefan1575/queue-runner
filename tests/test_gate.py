@@ -111,3 +111,34 @@ class CostBookTest(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class GateCheckTest(unittest.TestCase):
+    def gate(self, *reads):
+        from queue_runner.gate import Gate
+        from tests.fakes import FakeUsage
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        return Gate(tmp.name, FakeUsage(*reads), clock=lambda: NOW)
+
+    def test_a_decision_that_may_continue_a_build_must_fit_both(self):
+        gate = self.gate(usage(30, 10))
+        self.assertTrue(gate.check('decision').go)
+        v = gate.check('decision', then='build')
+        self.assertEqual((v.go, v.why), (False, FIVE_HOUR))
+        self.assertIn('the build it may continue', v.text)
+
+    def test_a_weekly_reset_already_past_is_not_waited_on(self):
+        v = decide(usage(10, 99, week_reset=NOW - datetime.timedelta(minutes=30)), 'build',
+                   BUILD, Knob(), NOW)
+        self.assertEqual((v.go, v.why, v.until), (False, WEEKLY, None))
+
+    def test_a_torn_last_record_is_ignored_and_cut_off_by_the_next(self):
+        book = CostBook(os.path.join(tempfile.mkdtemp(), 'usage.jsonl'))
+        for _ in range(3):
+            book.record('fix', [], snap(10, 10), snap(20, 12))
+        with open(book.path, 'a', encoding='utf-8') as f:
+            f.write('{"kind": "fix", "spe')
+        self.assertEqual(book.expected('fix'), Cost(10, 2))
+        book.record('fix', [], snap(10, 10), snap(40, 12))
+        self.assertEqual(book.expected('fix'), Cost(30, 2))

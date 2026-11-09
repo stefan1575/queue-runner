@@ -16,6 +16,7 @@ from .brief import build_brief
 from .config import Config, Repo
 from .decisions import Decider
 from .fix import Fixer, fix_branch, fix_title
+from .gate import CLAUDE_KINDS
 from .lock import RunnerBusy, runner_lock  # noqa: F401 (the CLI takes them from here)
 from .picker import BuildJob, pick
 from .review import Reviewer
@@ -28,7 +29,6 @@ from .toast import NoToaster
 # earlier runner, so none was started), idle (nothing to start), gated (the usage gate held the
 # chosen Claude job back: `Runner.gate_until` says when to look again).
 STARTED, BUSY, IDLE, GATED = 'started', 'busy', 'idle', 'gated'
-CLAUDE_KINDS = ('build', 'fix', 'decision')
 
 
 def job_title(repo: Repo, issue: int) -> str:
@@ -80,37 +80,40 @@ class Runner:
     def plan(self):
         """Settles, then chooses this pass's Claude job: a callable that runs it, or BUSY, IDLE
         or GATED. A decision comes first, then a fix round, then a build."""
+        self.gate_until = None   # a wait from an earlier pass is that pass's
         if self.settle() == BUSY:
             return BUSY
         chosen = self.choose()
         return self._gated(*chosen) if isinstance(chosen, tuple) else chosen
 
     def choose(self):
-        """(kind, a callable that runs it), or IDLE. The kind is the gate's: None for a
-        decision Stefan's own words answer, which starts no thread."""
+        """(kind, then, a callable that runs it), or IDLE, for the gate: `kind` None for a
+        decision Stefan's own words answer, which starts no thread; `then` the kind of job a
+        decision may continue in the same pass (a retry or an answer)."""
         if case := self.decider.next_case():
-            kind = None if self.decider.direct_answer(case) else 'decision'
-            return kind, lambda: self.decider.run(case, self.continue_job)
+            if self.decider.direct_answer(case):
+                return None, None, lambda: self.decider.run(case, self.continue_job)
+            then = case.about.kind if {'retry', 'answer'} & set(case.allowed) else None
+            return 'decision', then, lambda: self.decider.run(case, self.continue_job)
         if fix := self.next_fix():
-            return 'fix', lambda: self.run_fix(*fix)
+            return 'fix', None, lambda: self.run_fix(*fix)
         for repo in self.config.repos:
             if not repo.github:
                 continue   # no GitHub issues to pick from (local-issue repos come in ticket 12)
             job = pick(repo, self.github, held=self.jobs.held_issues(repo.name))
             if job is not None:
-                return 'build', lambda: self.run_build(job)
+                return 'build', None, lambda: self.run_build(job)
         self.say('Nothing to start: no PR needs a fix round, and no repo has an unblocked '
                  'ready-for-agent issue that isn\'t already being built or held.')
         return IDLE
 
-    def _gated(self, kind, run):
+    def _gated(self, kind, then, run):
         """The usage gate before a Claude job (`gate.py`): GATED, saying why and until when
         (once, until that changes), or a callable that runs the job and records usage before
         and after it."""
-        self.gate_until = None
         if kind is None or self.gate is None:
             return run
-        verdict = self.gate.check(kind)
+        verdict = self.gate.check(kind, then)
         if not verdict.go:
             self.gate_until = verdict.until
             if verdict.text != self._last_gate:
@@ -124,8 +127,11 @@ class Runner:
             since = len(self.jobs.jobs())
             did = run()
             if did == STARTED:   # a thread ran: what it cost teaches the next estimate
-                ids = [j.id for j in self.jobs.jobs()[since:] if j.kind in CLAUDE_KINDS]
-                self.gate.measured(kind, ids, verdict.usage)
+                new = [j for j in self.jobs.jobs()[since:] if j.kind in CLAUDE_KINDS]
+                # A decision that continued a build or fix counts as that job's cost, so a
+                # plain decision's estimate stays a decision's.
+                learned = next((j.kind for j in new if j.kind != 'decision'), kind)
+                self.gate.measured(learned, [j.id for j in new], verdict.usage)
             return did
         return measured
 
@@ -136,7 +142,7 @@ class Runner:
         if self.gate_until is None or self.gate is None:
             return poll
         left = (self.gate_until - self.gate.clock()).total_seconds()
-        return max(1.0, min(poll, left))
+        return min(poll, left) if left >= 1 else poll
 
     def next_fix(self):
         """(repo, PR, its blocking review job) for the first PR that needs a fix round now."""

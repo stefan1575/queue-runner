@@ -47,6 +47,34 @@ def _lock(path: str) -> threading.Lock:
         return _LOCKS.setdefault(os.path.normcase(os.path.abspath(path)), threading.Lock())
 
 
+def append_record(path: str, record: dict) -> None:
+    """Appends one JSON record to a `.jsonl` file and syncs it to disk. A final record torn by a
+    crash (no newline yet) is cut off first."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with _lock(path), open(path, 'ab+') as f:
+        f.seek(0)
+        data = f.read()
+        if data and not data.endswith(b'\n'):
+            f.truncate(data.rfind(b'\n') + 1)
+        f.write((json.dumps(record, ensure_ascii=False) + '\n').encode('utf-8'))
+        f.flush()
+        os.fsync(f.fileno())
+
+
+def read_records(path: str):
+    """The records of a `.jsonl` file written by `append_record`; a bad line other than a torn
+    last one is an error (ValueError)."""
+    if not os.path.exists(path):
+        return
+    with _lock(path), open(path, 'rb') as f:
+        data = f.read()
+    # Every complete record ends in a newline; what follows the last one was torn by a crash
+    # (maybe inside a multibyte character), so it's cut off before decoding.
+    for line in data[:data.rfind(b'\n') + 1].decode('utf-8').split('\n'):
+        if line.strip():
+            yield json.loads(line)
+
+
 def _now() -> str:
     return datetime.datetime.now().astimezone().isoformat(timespec='seconds')
 
@@ -97,31 +125,13 @@ _END_FIELDS = ('thread_id', 'link', 'run_id', 'exit_code', 'status', 'outcome', 
 class JobLog:
     def __init__(self, path: str):
         self.path = path
-        self._lock = _lock(path)
 
     def _append(self, record: dict) -> None:
-        """Appends one record and syncs it to disk, so a start record exists before t3 runs.
-        A final record torn by a crash (no newline yet) is cut off first."""
-        os.makedirs(os.path.dirname(self.path), exist_ok=True)
-        with self._lock, open(self.path, 'ab+') as f:
-            f.seek(0)
-            data = f.read()
-            if data and not data.endswith(b'\n'):
-                f.truncate(data.rfind(b'\n') + 1)
-            f.write((json.dumps(record, ensure_ascii=False) + '\n').encode('utf-8'))
-            f.flush()
-            os.fsync(f.fileno())
+        """A start record exists on disk before t3 runs."""
+        append_record(self.path, record)
 
     def _events(self):
-        if not os.path.exists(self.path):
-            return
-        with self._lock, open(self.path, 'rb') as f:
-            data = f.read()
-        # Every complete record ends in a newline; what follows the last one was torn by a crash
-        # (maybe inside a multibyte character), so it's cut off before decoding.
-        for line in data[:data.rfind(b'\n') + 1].decode('utf-8').split('\n'):
-            if line.strip():
-                yield json.loads(line)
+        yield from read_records(self.path)
 
     def started(self, *, kind: str, repo: str, issue: int | None, branch: str | None,
                 title: str, sha: str | None = None, round: int | None = None,

@@ -42,6 +42,7 @@ github = "owner/first"
 path = "{self.dir}"
 ''')
         self.log = JobLog(os.path.join(self.dir, 'state', 'jobs.jsonl'))
+        self.now = NOW
 
     def run_main(self, args, usage_reader, t3=None, sleep=None):
         out = io.StringIO()
@@ -50,7 +51,7 @@ path = "{self.dir}"
         self.t3 = t3 or FakeT3([(0, 'completed')])
         code = main(args + ['--config', self.config], github=gh, out=out, t3=self.t3,
                     git=FakeGit(), sleep=sleep or (lambda s: None), sol=FakeSol(),
-                    toaster=FakeToaster(), usage=usage_reader, clock=lambda: NOW)
+                    toaster=FakeToaster(), usage=usage_reader, clock=lambda: self.now)
         return code, out.getvalue()
 
     def runner_log(self):
@@ -117,6 +118,22 @@ path = "{self.dir}"
         with self.assertRaises(Done):
             self.run_main([], FakeUsage(soon), sleep=sleep)
         self.assertLess(slept[0], 300)
+
+    def test_a_wait_that_has_passed_doesnt_shorten_a_later_idle_pause(self):
+        slept = []
+
+        class Done(Exception):
+            pass
+
+        def sleep(s):
+            slept.append(s)
+            self.now = FIVE_RESET + datetime.timedelta(hours=1)   # the reset came and went
+            if len(slept) == 2:
+                raise Done
+        with self.assertRaises(Done):   # gated, then the build starts, then nothing to start
+            self.run_main([], FakeUsage(usage(80, 20), usage(0, 20)), sleep=sleep)
+        self.assertEqual(len(self.t3.starts), 1)
+        self.assertEqual(slept[1], 300)
 
     def test_gate_prints_the_windows_and_each_kind(self):
         code, out = self.run_main(['--gate'], FakeUsage(usage(80, 20)))

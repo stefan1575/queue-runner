@@ -74,7 +74,10 @@ isn't gated**, and neither is an Approach-note answer read from Stefan's words (
   is the cautious default (build 60% of 5 hours and 15% of the week, fix 40/10, decision 15/4)
   until 3 records have that window's `spent`, then the largest of the last 5. Utilization comes
   in whole percents, and Stefan's own sessions in the same window count too, so it errs high. A
-  decision's record includes the build or fix it continued.
+  decision that may continue a build or fix (its question allows `retry` or `answer`) must fit
+  with that job's cost added; a pass in which it did is recorded under the continued job's kind.
+  `usage.jsonl` is written like the job log (`state.append_record`: synced, a torn last line cut
+  off); a bad line elsewhere, like an unreadable `gate.json`, starts nothing until it's fixed.
 - `Runner` without a `gate` (the tests, `live_sandbox.py`) starts every job; the CLI always passes
   one.
 
