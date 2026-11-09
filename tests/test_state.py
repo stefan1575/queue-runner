@@ -97,5 +97,19 @@ class JobLogTest(unittest.TestCase):
             JobLog(self.path).jobs()
 
 
+    def test_a_record_torn_inside_a_multibyte_character_is_dropped(self):
+        log = JobLog(self.path)
+        job = self.start(log, 4)
+        with open(self.path, 'ab') as f:
+            f.write(b'{"event": "end", "error": "caf\xc3')   # the crash, mid-character
+        self.assertEqual([j.id for j in JobLog(self.path).open_jobs()], [job.id])
+
+    def test_a_released_waiting_job_stays_released_when_its_issue_is_built_again(self):
+        log = JobLog(self.path)
+        self.end(log, self.start(log, 4), exit_code=2, outcome='waiting', status='waiting')
+        log.released('first', 4)
+        self.end(log, self.start(log, 4), exit_code=0, outcome='done')
+        self.assertEqual(JobLog(self.path).waiting_jobs(), [])
+
 if __name__ == '__main__':
     unittest.main()

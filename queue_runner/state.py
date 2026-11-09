@@ -70,10 +70,11 @@ class JobLog:
     def _events(self):
         if not os.path.exists(self.path):
             return
-        with open(self.path, encoding='utf-8', newline='') as f:
-            lines = f.read().split('\n')
-        # Every complete record ends in a newline; what follows the last one was torn by a crash.
-        for line in lines[:-1]:
+        with open(self.path, 'rb') as f:
+            data = f.read()
+        # Every complete record ends in a newline; what follows the last one was torn by a crash
+        # (maybe inside a multibyte character), so it's cut off before decoding.
+        for line in data[:data.rfind(b'\n') + 1].decode('utf-8').split('\n'):
             if line.strip():
                 yield json.loads(line)
 
@@ -100,6 +101,7 @@ class JobLog:
     def _fold(self):
         jobs: dict[str, Job] = {}
         held: dict[tuple[str, int], bool] = {}
+        released: set[str] = set()   # jobs a release settled; a later build doesn't revive them
         for e in self._events():
             kind = e['event']
             if kind == 'start':
@@ -116,7 +118,9 @@ class JobLog:
                     held[(job.repo, job.issue)] = False
             elif kind == 'release':
                 held[(e['repo'], e['issue'])] = False
-        return list(jobs.values()), held
+                released.update(j.id for j in jobs.values()
+                                if (j.repo, j.issue) == (e['repo'], e['issue']))
+        return list(jobs.values()), held, released
 
     def jobs(self) -> list[Job]:
         return self._fold()[0]
@@ -125,8 +129,8 @@ class JobLog:
         return [j for j in self.jobs() if j.open]
 
     def waiting_jobs(self) -> list[Job]:
-        jobs, held = self._fold()
-        return [j for j in jobs if j.outcome == 'waiting' and held.get((j.repo, j.issue))]
+        jobs, _, released = self._fold()
+        return [j for j in jobs if j.outcome == 'waiting' and j.id not in released]
 
     def held_issues(self, repo: str) -> set[int]:
         """Issues the build picker must leave alone: a build is open on them, or ended without
