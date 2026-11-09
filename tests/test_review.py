@@ -122,6 +122,17 @@ class ReviewerTest(unittest.TestCase):
         r = self.one_pr()
         self.assertEqual(r.review_pass(), 'idle')
 
+    def test_a_pr_whose_build_waits_for_an_answer_is_left_alone(self):
+        # Sol review F2: Stefan may answer it and the build writes to the branch again.
+        job = self.jobs.started(kind='build', repo='first', issue=5, branch='claude/red-5',
+                                title='Queue runner build: first#5')
+        self.jobs.ended(job.id, exit_code=2, outcome='waiting', thread_id='mcp:t1')
+        r = self.one_pr()
+        self.assertEqual(r.review_pass(), 'idle')
+        self.assertTrue(any('waits for an answer' in s for s in self.said))
+        self.jobs.released('first', 5)
+        self.assertEqual(r.review_pass(), 'started')
+
     def test_a_head_the_runner_reviewed_in_a_dry_run_is_not_reviewed_again(self):
         r = self.one_pr(sol=FakeSol([reply(), reply()]))
         self.assertEqual(r.review_pass(), 'started')
@@ -149,6 +160,17 @@ class ReviewerTest(unittest.TestCase):
         self.assertIn('Make the widget red.', issue)
         self.assertIn('Use the brand red.', issue)            # with its comments
         self.assertIn('Makes it red.', self.read('pr.md'))
+
+    def test_issues_closed_by_url_or_qualified_ref_are_in_the_brief(self):
+        # Sol review F3: only a bare #N was found.
+        r = self.one_pr(body='Closes https://github.com/owner/first/issues/5\nFixes other/x#9')
+        self.gh.issue_bodies[('other/x', 9)] = Issue(9, 'Elsewhere', 'In another repo.')
+        r.review_pass()
+        brief = self.sol.briefs[0]['brief']
+        self.assertIn('`issue-5.md`', brief)
+        self.assertIn('`issue-other-x-9.md`', brief)
+        self.assertIn('Make the widget red.', self.read('issue-5.md'))
+        self.assertIn('In another repo.', self.read('issue-other-x-9.md'))
 
     def test_review_2_brief_has_the_change_since_the_last_review_its_findings_and_replies(self):
         replies = [Comment('claude', '2026-11-06T01:00:00Z', 'Before the review.'),

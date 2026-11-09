@@ -5,10 +5,10 @@ The verdict comes from Sol's sol-findings ledger (`ledger.decide`). In this tick
 posted: the would-be comment and the verdict go to the review's run folder only (`DryRunPoster`).
 One Sol job at a time: each review holds `<state_dir>/sol.lock`.
 """
+import dataclasses
 import datetime
 import json
 import os
-import re
 from importlib import resources
 from string import Template
 
@@ -17,6 +17,7 @@ from .github import Comment, PullRequest
 from .ledger import TAGS, OPEN, SolFailed, decide, next_round, norm, read_review, read_reviews, \
     state
 from .lock import RunnerBusy, runner_lock
+from .picker import closed_issues
 from .sol import SolOutOfUsage
 from .state import FAILED_REVIEW, OUT_OF_USAGE, REVIEWED, JobLog
 
@@ -24,7 +25,6 @@ STARTED, BUSY, IDLE = 'started', 'busy', 'idle'   # as run.py's lane results
 MAX_FAILED = 2   # failed reviews on one head before the lane leaves it until a release or a push
 RESUME_AFTER = datetime.timedelta(minutes=10)    # after Sol's reset
 RETRY_UNKNOWN = datetime.timedelta(minutes=30)   # when Sol didn't say when
-CLOSES = re.compile(r'\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)', re.I)
 # The job log's outcome for each of decide()'s.
 OUTCOMES = {'merge': 'clean', 'fix': 'blocking', 'stop': 'stop', 'approach-note': 'approach-note'}
 
@@ -165,6 +165,10 @@ class Reviewer:
         if any(j.kind == 'build' and j.repo == repo.name and j.branch == pr.branch
                for j in self.jobs.open_jobs()):
             return 'a build job is still writing to its branch'
+        # A waiting build writes again once Stefan answers it: left alone until it ends or is
+        # released.
+        if any(j.repo == repo.name and j.branch == pr.branch for j in self.jobs.waiting_jobs()):
+            return 'its build waits for an answer, and may write to the branch again'
         done = self.jobs.reviews_of(repo.name, pr.number, h)
         if ran := [j for j in done if j.outcome in REVIEWED]:
             return (f'the runner reviewed {h7} already (review {ran[-1].round}, '
@@ -270,12 +274,17 @@ class Reviewer:
                f'# PR #{pr.number}: {pr.title}\n\nMerges `{pr.branch}` into `{pr.base}`; head '
                f'{h}.\n\n{pr.body}\n')
         files.append("`pr.md`: the PR's description")
-        for k in sorted({int(m) for m in CLOSES.findall(pr.body or '')}):
-            issue = self.github.issue(repo.github, k)
-            text = f'# Issue #{k}: {issue.title}\n\n{issue.body}\n\n## Comments\n\n' + (
-                ''.join(_said(c) for c in self.github.issue_comments(repo, k)) or 'None.\n')
-            _write(os.path.join(run_dir, f'issue-{k}.md'), text)
-            files.append(f'`issue-{k}.md`: the issue it closes (the ticket), with its comments')
+        here = repo.github.lower()
+        for where, k in closed_issues(pr.body, here):
+            issue = self.github.issue(where, k)
+            comments = self.github.issue_comments(dataclasses.replace(repo, github=where), k)
+            name = f'#{k}' if where == here else f'{where}#{k}'
+            text = f'# Issue {name}: {issue.title}\n\n{issue.body}\n\n## Comments\n\n' + (
+                ''.join(_said(c) for c in comments) or 'None.\n')
+            file = (f'issue-{k}.md' if where == here else
+                    f'issue-{where.replace("/", "-")}-{k}.md')
+            _write(os.path.join(run_dir, file), text)
+            files.append(f'`{file}`: the issue it closes (the ticket), with its comments')
         said = self._conversation(repo, pr)
         if said:
             _write(os.path.join(run_dir, 'conversation.md'),

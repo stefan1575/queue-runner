@@ -67,6 +67,17 @@ class ReadReviewsTest(unittest.TestCase):
         self.assertEqual(read_reviews(comments), [])
         self.assertEqual(next_round([]), 1)
 
+    def test_a_review_whose_ledger_cant_be_read_isnt_counted(self):
+        # Sol review F1: it replaced the PR's state with no findings, so F1 was lost.
+        hand = (f'<!-- sol-review round=2 head={H2} -->\n## Sol review 2 · Clean\n\n'
+                '```sol-findings\n{"findings": [oops\n```\n')
+        corrupt = '<!-- sol-pr-review round=2 verdict=clean sha=' + H2 + ' findings=!!notbase64 -->'
+        for bad in (hand, f'<!-- sol-review round=2 head={H2} -->\nNo block.', corrupt):
+            with self.subTest(bad=bad[:40]):
+                earlier = read_reviews([*review1([important('F1')]), comment(bad)])
+                self.assertEqual([r['round'] for r in earlier], [1])
+                self.assertEqual([f['id'] for f in state(earlier)], ['F1'])
+
     def test_numbering_carries_on_from_the_newest_review(self):
         comments = [*review1([important('F1')]),
                     comment('## Sol review 2 · Clean\n\n' + old_marker(2, 'clean', H2, []))]

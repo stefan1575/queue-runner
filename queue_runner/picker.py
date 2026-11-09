@@ -41,6 +41,12 @@ def _refs(pattern, text: str, here: str) -> list[tuple[str, int]]:
     return found
 
 
+def closed_issues(body: str, here: str) -> list[tuple[str, int]]:
+    """Issues a PR body closes (Closes, Fixes, Resolves... then `#N`, `owner/name#N` or an issue
+    URL), as (owner/name, number); a bare `#N` is in `here`."""
+    return sorted(set(_refs(_CLOSES, body or '', here.lower())))
+
+
 def blockers(body: str, here: str) -> list[tuple[str, int]]:
     """Issues named as blockers, as (owner/name, number): on a `Blocked by:` line, or under a
     `## Blocked by` heading up to the next heading. Refs elsewhere in the body don't block."""

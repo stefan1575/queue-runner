@@ -19,8 +19,7 @@ import json
 import re
 import urllib.parse
 
-MARK = re.compile(r'<!-- sol-pr-review round=(\d+) verdict=(clean|blocking)(?: sha=([0-9a-f]+))?'
-                  r'(?: findings=([A-Za-z0-9+/=]*))?')
+MARK = re.compile(r'<!-- sol-pr-review round=(\d+) verdict=(clean|blocking)(?: sha=([0-9a-f]+))?')
 HAND_MARK = re.compile(r'<!-- sol-review round=(\d+) head=([0-9a-f]{7,40}) -->')
 HEADING = re.compile(r'^## Sol review (\d+)\s*\S\s*(Clean|Blocking)\b', re.I | re.M)
 FENCE = re.compile(r'^[ \t]*```+[ \t]*sol-findings[ \t]*\r?\n(.*?)^[ \t]*```+[ \t]*$', re.M | re.S)
@@ -48,33 +47,46 @@ def _text(v) -> str:
 
 # --- earlier reviews ----------------------------------------------------------------------------
 
-def _decode(data: str | None) -> list:
-    try:
-        found = json.loads(base64.b64decode(data or '', validate=True) or b'[]')
-    except ValueError:
+def _marker_findings(body: str, start: int) -> list | None:
+    """The marker's base64 findings: [] if it has none, None if they can't be read."""
+    end = body.find('-->', start)
+    field = re.search(r'\bfindings=(\S*)', body[start:end if end >= 0 else len(body)])
+    if not field:
         return []
-    return found if isinstance(found, list) else []
+    try:
+        found = json.loads(base64.b64decode(field[1], validate=True) or b'[]')
+    except ValueError:
+        return None
+    return found if isinstance(found, list) else None
 
 
-def _visible_findings(body: str) -> list:
+def _visible_findings(body: str) -> list | None:
+    """The findings in a comment's last sol-findings block; None if there's no readable one."""
     blocks = FENCE.findall(body)
     try:
-        data = json.loads(blocks[-1]) if blocks else {}
+        data = json.loads(blocks[-1]) if blocks else None
     except ValueError:
-        return []
+        return None
     found = data.get('findings') if isinstance(data, dict) else None
-    return [f for f in found if isinstance(f, dict)] if isinstance(found, list) else []
+    return [f for f in found if isinstance(f, dict)] if isinstance(found, list) else None
 
 
 def read_review(body: str, at: str = '') -> dict | None:
-    """One comment's review: {round, verdict, sha, findings, at}, or None if it isn't one."""
+    """One comment's review: {round, verdict, sha, findings, at}, or None if it isn't one. A
+    review whose ledger can't be read isn't one: it failed, so it isn't counted and doesn't
+    replace the PR's state (pr-review.md)."""
     if m := MARK.search(body):
-        return {'round': int(m[1]), 'verdict': m[2], 'sha': m[3], 'findings': _decode(m[4]),
-                'at': at}
+        found = _marker_findings(body, m.start())
+        if found is None:
+            return None
+        return {'round': int(m[1]), 'verdict': m[2], 'sha': m[3], 'findings': found, 'at': at}
     if m := HAND_MARK.search(body):
         h = HEADING.search(body)
         rnd = int(m[1])
-        found = [{**f, 'raised': f.get('raised') or rnd} for f in _visible_findings(body)]
+        visible = _visible_findings(body)
+        if visible is None:
+            return None
+        found = [{**f, 'raised': f.get('raised') or rnd} for f in visible]
         verdict = h[2].lower() if h else (
             'blocking' if any(f.get('tag') == 'important' and f.get('status', 'open') in OPEN
                               for f in found) else 'clean')
