@@ -149,8 +149,8 @@ class Runner:
                      f'(held until released)')
             return job
         brief = build_brief(build, self.github.issue_comments(repo, n))
-        self.say(f'Starting {self._name(job)} ({repo.github}#{n}) on {build.branch} '
-                 f'from {build.base}')
+        where = f' ({repo.github}#{n})' if repo.github else ''
+        self.say(f'Starting {self._name(job)}{where} on {build.branch} from {build.base}')
         try:
             result = self.t3.start(repo.path, brief, title=job.title,
                                    provider=self.config.claude_provider,

@@ -2,6 +2,13 @@
 # State and logs live outside every served repo.
 state_dir = "~/.queue-runner/state"
 log_dir = "~/.queue-runner/logs"
+poll_seconds = 300   # continuous mode: the pause after a pass that started nothing
+
+# Claude jobs run as T3 threads on this provider instance and model. T3's CLI has no flag for
+# reasoning effort, so a thread gets the model's default effort in T3.
+[claude]
+provider = "claudeAgent"
+model = "claude-opus-5-5"
 
 [[repos]]
 name = "leads-dashboard"
