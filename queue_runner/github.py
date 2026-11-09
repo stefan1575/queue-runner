@@ -107,6 +107,17 @@ class GhCli:
         refs = self._all(f'repos/{repo.github}/git/matching-refs/heads/{prefix}')
         return [r['ref'].removeprefix('refs/heads/') for r in refs]
 
+    def pull_for_branch(self, repo, branch) -> dict | None:
+        """The newest PR opened from `branch`, open or not: {number, url, state}, where state is
+        open, closed or merged."""
+        owner = repo.github.split('/')[0]
+        pulls = self._all(f'repos/{repo.github}/pulls?head={owner}:{branch}&state=all&per_page=100')
+        if not pulls:
+            return None
+        p = max(pulls, key=lambda p: p['number'])
+        return {'number': p['number'], 'url': p['html_url'],
+                'state': 'merged' if p.get('merged_at') else p['state']}
+
     def issue_comments(self, repo, number) -> list[Comment]:
         return [Comment(author=(c.get('user') or {}).get('login', 'ghost'),
                         created_at=c['created_at'], body=c.get('body') or '')

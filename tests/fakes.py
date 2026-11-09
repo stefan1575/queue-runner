@@ -37,3 +37,14 @@ def issue(number, title='A ticket', body='', open_blockers=0, open_sub_issues=0,
 
 def pr(number, branch, body=''):
     return PullRequest(number=number, branch=branch, body=body)
+
+
+class FakeGitHubWithPulls(FakeGitHub):
+    """Also answers which PR a job opened from its branch."""
+
+    def __init__(self, *args, pulls_by_branch=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.pulls_by_branch = dict(pulls_by_branch or {})
+
+    def pull_for_branch(self, repo, branch):
+        return self.pulls_by_branch.get(branch)

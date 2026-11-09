@@ -81,10 +81,11 @@ def _in_flight(repo: Repo, github) -> set[int]:
     return taken
 
 
-def pick(repo: Repo, github) -> BuildJob | None:
+def pick(repo: Repo, github, held=frozenset()) -> BuildJob | None:
     """The lowest-numbered open `ready-for-agent` issue that's unblocked and not already being
-    built. A spec or map with open sub-issues isn't built itself; its children are."""
-    taken = _in_flight(repo, github)
+    built. A spec or map with open sub-issues isn't built itself; its children are. `held` are
+    issues the runner's own job log holds (a build open, failed or waiting on them)."""
+    taken = _in_flight(repo, github) | set(held)
     for issue in sorted(github.ready_issues(repo), key=lambda i: i.number):
         if issue.number in taken or issue.open_linked_pulls or issue.open_sub_issues:
             continue

@@ -55,11 +55,10 @@ path = "{self.dir}"
         with open(os.path.join(self.dir, 'logs', 'runner.log'), encoding='utf-8') as f:
             self.assertIn('dry run: would build owner/first#4', f.read())
 
-    def test_refuses_to_run_for_real_yet(self):
-        code, out = self.run_main(['--once', '--config', self.config], FakeGitHub(issues=[issue(4)]))
+    def test_dry_run_goes_with_once(self):
+        code, out = self.run_main(['--dry-run', '--config', self.config], FakeGitHub())
         self.assertEqual(code, 2)
-        self.assertIn('--dry-run', out)
-
+        self.assertIn('--dry-run goes with --once', out)
 
 if __name__ == '__main__':
     unittest.main()

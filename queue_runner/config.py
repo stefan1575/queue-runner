@@ -10,7 +10,7 @@ DEFAULT_CONFIG = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__
 @dataclass(frozen=True)
 class Repo:
     name: str
-    github: str        # owner/name
+    github: str | None  # owner/name; None for a repo with no GitHub (the live-check sandbox)
     path: str          # local clone; T3's project for its jobs
     base: str = 'main'
 
@@ -20,6 +20,9 @@ class Config:
     repos: list[Repo]  # in priority order: the first repo with work gets the next job
     state_dir: str
     log_dir: str
+    claude_provider: str = 'claudeAgent'     # T3 provider instance for Claude jobs
+    claude_model: str = 'claude-opus-5-5'    # T3 has no flag for reasoning effort
+    poll_seconds: int = 300                  # continuous mode: the pause after an idle pass
 
 
 def _path(p: str) -> str:
@@ -29,6 +32,11 @@ def _path(p: str) -> str:
 def load_config(path: str = DEFAULT_CONFIG) -> Config:
     with open(path, 'rb') as f:
         raw = tomllib.load(f)
-    repos = [Repo(name=r['name'], github=r['github'], path=_path(r['path']), base=r.get('base', 'main'))
+    repos = [Repo(name=r['name'], github=r.get('github'), path=_path(r['path']),
+                  base=r.get('base', 'main'))
              for r in raw['repos']]
-    return Config(repos=repos, state_dir=_path(raw['state_dir']), log_dir=_path(raw['log_dir']))
+    claude = raw.get('claude', {})
+    return Config(repos=repos, state_dir=_path(raw['state_dir']), log_dir=_path(raw['log_dir']),
+                  claude_provider=claude.get('provider', 'claudeAgent'),
+                  claude_model=claude.get('model', 'claude-opus-5-5'),
+                  poll_seconds=int(raw.get('poll_seconds', 300)))

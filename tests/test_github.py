@@ -63,6 +63,20 @@ class GhCliTest(unittest.TestCase):
         self.assertEqual(GhCli(gh).issue_comments(REPO, 4),
                          [Comment('stefan', '2026-11-01T10:00:00Z', 'Hi')])
 
+    def test_the_newest_pull_request_from_a_branch_in_any_state(self):
+        gh = FakeGh({'repos/owner/demo/pulls?head=owner:claude/x-5&state=all&per_page=100': [
+            {'number': 21, 'html_url': 'https://github.com/owner/demo/pull/21', 'state': 'open',
+             'merged_at': None, 'head': {'ref': 'claude/x-5'}},
+            {'number': 20, 'html_url': 'https://github.com/owner/demo/pull/20', 'state': 'closed',
+             'merged_at': None, 'head': {'ref': 'claude/x-5'}}]})
+        self.assertEqual(GhCli(gh).pull_for_branch(REPO, 'claude/x-5'),
+                         {'number': 21, 'url': 'https://github.com/owner/demo/pull/21',
+                          'state': 'open'})
+
+    def test_no_pull_request_from_a_branch(self):
+        gh = FakeGh({'repos/owner/demo/pulls?head=owner:claude/x-5&state=all&per_page=100': []})
+        self.assertIsNone(GhCli(gh).pull_for_branch(REPO, 'claude/x-5'))
+
 
 if __name__ == '__main__':
     unittest.main()

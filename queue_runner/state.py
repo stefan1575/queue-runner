@@ -8,6 +8,7 @@ handled a held issue, so the picker may take it again).
 import datetime
 import json
 import os
+import uuid
 from dataclasses import dataclass, field, replace
 
 # An ended build job holds its issue, so a failed or waiting run never loops, unless it never
@@ -70,7 +71,7 @@ class JobLog:
                 title: str) -> Job:
         at = _now()
         stamp = at[:19].replace('-', '').replace(':', '').replace('T', '-')
-        job = Job(id=f'{stamp}-{kind}-{repo}-{issue}', kind=kind, repo=repo, issue=issue,
+        job = Job(id=f'{stamp}-{kind}-{repo}-{issue}-{uuid.uuid4().hex[:6]}', kind=kind, repo=repo, issue=issue,
                   branch=branch, title=title, started_at=at)
         self._append({'event': 'start', 'job': job.id, 'kind': kind, 'repo': repo,
                       'issue': issue, 'branch': branch, 'title': title, 'at': at})
