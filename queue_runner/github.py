@@ -25,6 +25,8 @@ class PullRequest:
     url: str = ''
     labels: tuple = ()
     draft: bool = False
+    state: str = 'open'            # `pull` only: open, closed or merged
+    mergeable: bool | None = None  # `pull` only: None while GitHub is still working it out
 
 
 @dataclass(frozen=True)
@@ -54,6 +56,16 @@ class GhError(RuntimeError):
     pass
 
 
+def _pull(p: dict) -> PullRequest:
+    return PullRequest(number=p['number'], branch=p['head']['ref'], body=p.get('body') or '',
+                       title=p.get('title') or '', head_sha=p['head'].get('sha') or '',
+                       base=(p.get('base') or {}).get('ref') or '', url=p.get('html_url') or '',
+                       labels=tuple(lb['name'] for lb in p.get('labels') or ()),
+                       draft=bool(p.get('draft')),
+                       state='merged' if p.get('merged_at') else p.get('state') or 'open',
+                       mergeable=p.get('mergeable'))
+
+
 def run_gh(args: list[str], input: str | None = None) -> str:
     """Runs `gh` with no console window (the runner lives under pythonw). `input` goes to its
     stdin: a write's JSON body (`--input -`), which keeps a long comment off the command line."""
@@ -74,6 +86,19 @@ query($owner: String!, $name: String!, $endCursor: String) {
       pageInfo { hasNextPage endCursor }
       nodes { number closedByPullRequestsReferences(first: 20, includeClosedPrs: false) {
         nodes { state } } }
+    }
+  }
+}'''
+
+
+_THREADS = '''
+query($owner: String!, $name: String!, $number: Int!, $endCursor: String) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      reviewThreads(first: 100, after: $endCursor) {
+        pageInfo { hasNextPage endCursor }
+        nodes { isResolved }
+      }
     }
   }
 }'''
@@ -125,13 +150,20 @@ class GhCli:
         return self._get(f'repos/{github}/issues/{number}')['state']
 
     def open_pulls(self, repo) -> list[PullRequest]:
-        return [PullRequest(number=p['number'], branch=p['head']['ref'], body=p.get('body') or '',
-                            title=p.get('title') or '', head_sha=p['head'].get('sha') or '',
-                            base=(p.get('base') or {}).get('ref') or '',
-                            url=p.get('html_url') or '',
-                            labels=tuple(lb['name'] for lb in p.get('labels') or ()),
-                            draft=bool(p.get('draft')))
-                for p in self._all(f'repos/{repo.github}/pulls?state=open&per_page=100')]
+        return [_pull(p) for p in self._all(f'repos/{repo.github}/pulls?state=open&per_page=100')]
+
+    def pull(self, repo, number) -> PullRequest:
+        """One PR as GitHub has it now, with its state and whether it can merge."""
+        return _pull(self._get(f'repos/{repo.github}/pulls/{number}'))
+
+    def open_threads(self, repo, number) -> int:
+        """The PR's review threads nobody has resolved (outdated ones count: still unanswered)."""
+        owner, name = repo.github.split('/')
+        pages = json.loads(self._run(['api', 'graphql', '--paginate', '--slurp',
+                                      '-f', f'query={_THREADS}', '-f', f'owner={owner}',
+                                      '-f', f'name={name}', '-F', f'number={number}']))
+        return sum(not t['isResolved'] for page in pages for t in
+                   page['data']['repository']['pullRequest']['reviewThreads']['nodes'])
 
     def checks(self, repo, sha) -> Checks:
         """Check runs and commit statuses on `sha`, leaving out `sol-review`."""
@@ -225,3 +257,9 @@ class GhCli:
 
     def edit_pull_body(self, repo, number, body) -> None:
         self._send('PATCH', f'repos/{repo.github}/pulls/{number}', {'body': body})
+
+    def merge(self, repo, number, sha) -> str:
+        """Merges the PR with a merge commit, only if its head is still `sha` (GitHub refuses
+        otherwise: 409). Returns the merge commit's sha."""
+        return self._send('PUT', f'repos/{repo.github}/pulls/{number}/merge',
+                          {'sha': sha, 'merge_method': 'merge'}).get('sha') or ''

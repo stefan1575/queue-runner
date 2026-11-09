@@ -291,6 +291,21 @@ path = "{self.dir}"
         self.assertIn(f'would review #20 on {H2[:7]} (review 1)', out)
         self.assertEqual(sol.briefs, [])
 
+    def test_dry_run_prints_the_fix_brief_for_a_blocking_pr_and_starts_nothing(self):
+        gh, git, sol = self.reviews_setup()
+        self.run_main(['--review', 'first#20'], gh, FakeT3(), git, sol=sol)   # blocking
+        t3 = FakeT3()
+        code, out = self.run_main(['--once', '--dry-run'], gh, t3, git, sol=sol)
+        self.assertEqual(code, 0)
+        self.assertIn('Would start a fix round (dry run: nothing started)', out)
+        self.assertIn(f'from:   {H2[:7]} on claude/fix-pr20-{H2[:7]}, pushing to claude/blue-3',
+                      out)
+        self.assertIn('**F1** · Important', out)
+        self.assertNotIn('Would start a build job', out)   # a fix round comes first
+        self.assertIn('Merges (dry run: nothing merged):', out)
+        self.assertEqual(t3.starts, [])
+        self.assertEqual([j.kind for j in self.log.jobs()], ['review'])
+
 
 if __name__ == '__main__':
     unittest.main()

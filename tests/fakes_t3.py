@@ -74,6 +74,8 @@ class FakeReviewGit(FakeGit):
         self.files = dict(files or {})
         self.ancestors = set(ancestors)
         self.checkouts, self.removed = [], []
+        self.removed_worktrees = []
+        self.stuck = set()   # worktrees git can't remove
 
     def fetch_pr(self, path, number, base):
         self.fetches.append((path, f'pr{number}', base))
@@ -97,6 +99,16 @@ class FakeReviewGit(FakeGit):
 
     def diff(self, path, a, b, merge_base=False):
         return f'diff {a}{"..." if merge_base else ".."}{b}\n'
+
+    def log(self, path, a, b):
+        return list(self.commit_log.get((a, b), []))
+
+    def diffstat(self, path, a, b):
+        return f' src/a.ts | 2 +-\n 1 file changed ({a}...{b})\n'
+
+    def remove_worktree(self, path, worktree, branch=None):
+        self.removed_worktrees.append((worktree, branch))
+        return worktree not in self.stuck
 
 
 class FakeSol:

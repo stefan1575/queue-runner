@@ -1,7 +1,8 @@
 """The run loop: two lanes side by side, one Claude job and one Sol job at a time.
 
-The Claude lane settles what earlier passes left open, then starts at most one build; it blocks
-on `t3 thread start --wait` while the build runs. The Sol lane (`review.py`) reviews at most one
+The Claude lane settles what earlier passes left open, then starts at most one job: a fix round
+on a PR the runner found blocking (`fix.py`) before any new build, so open PRs finish first. It
+blocks on `t3 thread start --wait` while the job runs. The Sol lane (`review.py`) reviews at most one
 PR a pass, under `<state_dir>/sol.lock`. A second runner process is kept out by a lock on
 `<state_dir>/runner.lock`.
 """
@@ -12,6 +13,8 @@ import traceback
 
 from .brief import build_brief
 from .config import Config, Repo
+from .fix import Fixer, fix_title
+from .merge import fix_branch
 from .lock import RunnerBusy, runner_lock  # noqa: F401 (the CLI takes them from here)
 from .picker import BuildJob, pick
 from .review import Reviewer
@@ -47,6 +50,8 @@ class Runner:
         self._say_lock = threading.Lock()
         self.reviewer = Reviewer(config, github=github, git=git, sol=sol, jobs=self.jobs,
                                  say=self.say) if sol is not None else None
+        self.fixer = Fixer(config, github=github, git=git, jobs=self.jobs)
+        self._last_why: dict[tuple[str, int], str | None] = {}
 
     def say(self, line: str) -> None:
         with self._say_lock:   # both lanes say things
@@ -56,25 +61,53 @@ class Runner:
     # --- one pass -------------------------------------------------------------------------
 
     def run_pass(self) -> str:
+        job = self.plan()
+        return job() if callable(job) else job
+
+    def plan(self):
+        """Settles, then chooses this pass's Claude job: a callable that runs it, or BUSY or
+        IDLE. A fix round comes before any build."""
         if self.settle() == BUSY:
             return BUSY
+        if fix := self.next_fix():
+            return lambda: self.run_fix(*fix)
         for repo in self.config.repos:
             if not repo.github:
                 continue   # no GitHub issues to pick from (local-issue repos come in ticket 12)
             job = pick(repo, self.github, held=self.jobs.held_issues(repo.name))
             if job is not None:
-                return self.run_build(job)
-        self.say('Nothing to start: no repo has an unblocked ready-for-agent issue that isn\'t '
-                 'already being built or held.')
+                return lambda: self.run_build(job)
+        self.say('Nothing to start: no PR needs a fix round, and no repo has an unblocked '
+                 'ready-for-agent issue that isn\'t already being built or held.')
         return IDLE
+
+    def next_fix(self):
+        """(repo, PR, its blocking review job) for the first PR that needs a fix round now."""
+        for repo in self.config.repos:
+            if not repo.github:
+                continue
+            try:
+                found = list(self.fixer.candidates(repo))
+            except Exception as e:   # GitHub down on PRs: a build may still be picked
+                self.say(f'fix rounds on {repo.name}: reading PRs failed ({type(e).__name__}: '
+                         f'{e})')
+                continue
+            for pr, review, why in found:
+                key = (repo.name, pr.number)
+                if why and self._last_why.get(key) != why:
+                    self.say(f'fix {repo.name}#{pr.number}: not now, {why}')
+                self._last_why[key] = why
+                if why is None:
+                    return repo, pr, review
+        return None
 
     def settle(self) -> str | None:
         """Records how jobs left open by a dead runner, or left waiting for an answer, ended.
         BUSY if one of their threads is still running."""
         busy = None
         for job in self.jobs.open_jobs():
-            if job.kind != 'build':
-                continue   # an open review is the Sol lane's to settle
+            if job.kind not in ('build', 'fix'):
+                continue   # an open review or merge is the Sol lane's to settle
             thread = self._find_thread(job)
             if thread is None:
                 self.jobs.ended(job.id, exit_code=None, outcome=NOT_STARTED,
@@ -135,11 +168,16 @@ class Runner:
         brief = build_brief(build, self.github.issue_comments(repo, n))
         where = f' ({repo.github}#{n})' if repo.github else ''
         self.say(f'Starting {self._name(job)}{where} on {build.branch} from {build.base}')
+        return self._start(job, repo, brief, build.base, build.branch)
+
+    def _start(self, job: Job, repo: Repo, brief: str, base: str, branch: str) -> str:
+        """Runs the job's thread in a new T3 worktree on `branch` from `base`, and records how
+        it ended."""
         try:
             result = self.t3.start(repo.path, brief, title=job.title,
                                    provider=self.config.claude_provider,
-                                   model=self.config.claude_model, worktree=build.base,
-                                   branch=build.branch)
+                                   model=self.config.claude_model, worktree=base,
+                                   branch=branch)
         except T3Error as e:
             try:
                 thread = self._find_thread(job)
@@ -156,8 +194,78 @@ class Runner:
                     result.run_id)
         return STARTED
 
+    # --- a fix round ----------------------------------------------------------------------
+
+    def run_fix(self, repo: Repo, pr, review: Job) -> str:
+        """A fresh Claude thread in a new T3 worktree at the PR's head H, on a local branch from
+        which it pushes to the PR's. IDLE if none was started."""
+        n, h = pr.number, pr.head_sha
+        try:
+            _, fetched = self.git.fetch_pr(repo.path, n, pr.base)
+        except Exception as e:
+            self.say(f'fix {repo.name}#{n}: fetching the PR failed ({e}); next pass')
+            return IDLE
+        if fetched != h:
+            self.say(f'fix {repo.name}#{n}: the head moved from {h[:7]} to {fetched[:7]}; '
+                     'Sol reviews it first')
+            return IDLE
+        work = fix_branch(n, h)
+        job = self.jobs.started(kind='fix', repo=repo.name, issue=n, branch=pr.branch,
+                                title=fix_title(repo, n), sha=h, round=review.round)
+        if self.git.has_branch(repo.path, work):
+            self.jobs.ended(job.id, exit_code=None, outcome='branch-exists',
+                            error=f'A local branch {work} is left from an earlier run.')
+            self.say(f'{self._name(job)} not started: local branch {work} already exists '
+                     '(held until released)')
+            return IDLE
+        try:
+            brief = self.fixer.brief(repo, pr, review)
+        except Exception as e:
+            self.jobs.ended(job.id, exit_code=None, outcome=NOT_STARTED,
+                            error=f'building the brief failed: {type(e).__name__}: {e}')
+            self.say(f'{self._name(job)} not started: building the brief failed ({e})')
+            return IDLE
+        self.say(f'Starting {self._name(job)} ({repo.github}#{n}) after review {review.round}, '
+                 f'from {h[:7]} on {work}, pushing to {pr.branch}')
+        return self._start(job, repo, brief, h, work)
+
+    def finish_fix(self, job: Job, thread_id: str, exit_code: int, status: str,
+                   error: str | None, run_id: str | None) -> Job:
+        """Records a fix round: `pushed` if the PR's head moved, `no-push` if it ended at H
+        (reviewed already, so the PR waits for Stefan), else `failed` or `waiting`."""
+        repo = self.repos[job.repo]
+        link = worktree = head = pr = None
+        commits = []
+        try:
+            thread, _ = self.t3.show(thread_id)
+            link, worktree = thread.link, thread.worktree_path
+        except T3Error as e:
+            error = error or f'thread show failed: {e}'
+        try:
+            now = self.github.pull(repo, job.issue)
+            head = now.head_sha
+            pr = {'number': now.number, 'url': now.url, 'state': now.state}
+            if head != job.sha:
+                self.git.fetch_pr(repo.path, job.issue, now.base)
+                commits = self.git.log(repo.path, job.sha, head)
+        except Exception as e:   # the record matters more than its commit list
+            error = error or f'reading the PR after the round failed: {type(e).__name__}: {e}'
+        pushed = head is not None and head != job.sha
+        outcome = ('waiting' if exit_code == 2 else 'failed' if exit_code else
+                   'pushed' if pushed else 'no-push')
+        self.jobs.ended(job.id, exit_code=exit_code, outcome=outcome, thread_id=thread_id,
+                        link=link, run_id=run_id, status=status, commits=commits, pr=pr,
+                        worktree=worktree, error=error, head=head)
+        moved = (f', head {job.sha[:7]} -> {head[:7]}, {len(commits)} commits' if pushed else
+                 f', head still {job.sha[:7]}')
+        self.say(f'{self._name(job)} ended: {outcome} (exit {exit_code}{moved}) '
+                 f'{link or thread_id}')
+        return job
+
     def finish(self, job: Job, thread_id: str, exit_code: int, status: str, error: str | None,
                run_id: str | None) -> Job:
+        if job.kind == 'fix':
+            return self.finish_fix(job, thread_id, exit_code, status, error, run_id)
         repo = self.repos[job.repo]
         link = worktree = None
         try:
@@ -207,11 +315,14 @@ class Runner:
                 stop.wait(self.config.poll_seconds)
 
     def run_once(self) -> None:
-        """One pass of each lane, side by side."""
+        """One pass of each lane, side by side. The Claude lane chooses its job before the Sol
+        lane starts, so what this pass's review decides waits for the next pass."""
+        job = self.plan()
         sol = threading.Thread(target=self._sol_pass, name='sol-lane')
         sol.start()
         try:
-            self.run_pass()
+            if callable(job):
+                job()
         finally:
             sol.join()
 

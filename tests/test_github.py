@@ -164,3 +164,30 @@ class GhCliTest(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class MergeCallsTest(unittest.TestCase):
+    """Ticket 05: one PR afresh, its unresolved review threads, and the expected-head merge."""
+
+    def test_a_pr_read_afresh_has_its_state_and_whether_it_can_merge(self):
+        gh = FakeGh({'repos/owner/demo/pulls/4': {
+            'number': 4, 'head': {'ref': 'claude/x-1', 'sha': 'b' * 40}, 'base': {'ref': 'main'},
+            'state': 'closed', 'merged_at': '2026-11-10T00:00:00Z', 'mergeable': None,
+            'draft': False, 'labels': [], 'title': 'X', 'body': None, 'html_url': 'U'}})
+        pr = GhCli(run=gh).pull(REPO, 4)
+        self.assertEqual((pr.head_sha, pr.state, pr.mergeable, pr.base), ('b' * 40, 'merged',
+                                                                          None, 'main'))
+
+    def test_unresolved_review_threads_are_counted(self):
+        gh = FakeGh({'graphql': {'data': {'repository': {'pullRequest': {'reviewThreads': {
+            'pageInfo': {'hasNextPage': False, 'endCursor': None},
+            'nodes': [{'isResolved': True}, {'isResolved': False}]}}}}}})
+        self.assertEqual(GhCli(run=gh).open_threads(REPO, 4), 1)
+        self.assertIn('number=4', gh.calls[0])
+        self.assertIn('-F', gh.calls[0])   # an Int, not a string
+
+    def test_the_merge_sends_the_expected_head_and_a_merge_commit(self):
+        gh = FakeGh({'repos/owner/demo/pulls/4/merge': {'sha': 'm' * 40, 'merged': True}})
+        self.assertEqual(GhCli(run=gh).merge(REPO, 4, 'b' * 40), 'm' * 40)
+        self.assertEqual(gh.calls[0][:3], ['api', '-X', 'PUT'])
+        self.assertEqual(gh.inputs, [{'sha': 'b' * 40, 'merge_method': 'merge'}])

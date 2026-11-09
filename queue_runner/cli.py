@@ -3,7 +3,9 @@
     python -m queue_runner                    # run: pass after pass (what logon will start)
     python -m queue_runner --once             # one pass of each lane: settle, at most one build
                                               # and at most one Sol review
-    python -m queue_runner --once --dry-run   # name the next build and the PRs Sol would review
+    python -m queue_runner --once --dry-run   # name the next Claude job (a fix round's brief
+                                              # first, else a build's), the PRs Sol would review
+                                              # and the PRs that would merge
     python -m queue_runner --release NAME#N   # let the picker take a held issue again
     python -m queue_runner --review NAME#N    # Sol reviews that PR's head now
 """
@@ -35,10 +37,57 @@ def _jobs(config) -> JobLog:
     return JobLog(os.path.join(config.state_dir, 'jobs.jsonl'))
 
 
-def _dry_run(config, github, out, log_line) -> int:
-    _dry_run_build(config, github, out, log_line)
+def _dry_run(config, github, git, out, log_line) -> int:
+    if not _dry_run_fix(config, github, git, out, log_line):
+        _dry_run_build(config, github, out, log_line)
     _dry_run_reviews(config, github, out)
+    _dry_run_merges(config, github, out)
     return 0
+
+
+def _dry_run_fix(config, github, git, out, log_line) -> bool:
+    """Prints the fix round the Claude lane would start, with its brief. It fetches the PR's
+    head (local refs only) so the brief's commits and files are real; nothing else changes."""
+    from .fix import Fixer
+    from .merge import fix_branch
+    fixer = Fixer(config, github=github, git=git, jobs=_jobs(config))
+    for repo in config.repos:
+        if not repo.github:
+            continue
+        for pr, review, why in fixer.candidates(repo):
+            if why:
+                print(f'Fix round {repo.name}#{pr.number}: not now, {why}', file=out)
+                continue
+            _, fetched = git.fetch_pr(repo.path, pr.number, pr.base)
+            if fetched != pr.head_sha:
+                print(f'Fix round {repo.name}#{pr.number}: the head moved to {fetched[:7]}; '
+                      'Sol reviews it first', file=out)
+                continue
+            brief = fixer.brief(repo, pr, review)
+            log_line(f'dry run: would start a fix round on {repo.github}#{pr.number}')
+            print('Would start a fix round (dry run: nothing started)', file=out)
+            print(f'  repo:   {repo.github} ({repo.path})', file=out)
+            print(f'  PR:     #{pr.number} {pr.title}, after review {review.round}', file=out)
+            print(f'  from:   {pr.head_sha[:7]} on {fix_branch(pr.number, pr.head_sha)}, pushing '
+                  f'to {pr.branch}', file=out)
+            print('  brief:', file=out)
+            print('-' * 72, file=out)
+            print(brief, file=out)
+            print('-' * 72, file=out)
+            return True
+    return False
+
+
+def _dry_run_merges(config, github, out) -> None:
+    from .merge import Merger
+    merger = Merger(config, github=github, git=None, jobs=_jobs(config), say=lambda line: None)
+    print('Merges (dry run: nothing merged):', file=out)
+    for repo in config.repos:
+        if not repo.github:
+            continue
+        for pr, why in merger.candidates(repo):
+            print(f'  {repo.name}#{pr.number}: ' + (f'not now, {why}' if why else
+                                                    f'would merge at {pr.head_sha[:7]}'), file=out)
 
 
 def _dry_run_build(config, github, out, log_line) -> None:
@@ -148,12 +197,11 @@ def main(argv=None, github=None, out=None, t3=None, git=None, sleep=time.sleep,
     if github is None:
         from .github import GhCli
         github = GhCli()
-    if args.dry_run:
-        return _dry_run(config, github, out, log_line)
-
     if git is None:
         from .git import GitCli
         git = GitCli()
+    if args.dry_run:
+        return _dry_run(config, github, git, out, log_line)
     if sol is None:
         from .sol import SolCli
         sol = SolCli(script=config.sol_script, bash=config.sol_bash)

@@ -1,6 +1,9 @@
 """The runner's own state: an append-only job log (`<state_dir>/jobs.jsonl`), one JSON object per
 line, so a restarted runner knows what ran and what's still open.
 
+Job kinds: `build` (an issue), `review` (Sol on a PR's head H), `fix` (a Claude fix round on a
+blocking PR, from H) and `merge` (the runner merging a clean PR at H).
+
 Events: `start` (a job is about to start), `end` (how it ended; a later `end` for the same job
 replaces the earlier one, e.g. when a waiting thread later completes) and `release` (Stefan
 handled a held issue, so the picker may take it again).
@@ -41,9 +44,9 @@ def _now() -> str:
 @dataclass(frozen=True)
 class Job:
     id: str
-    kind: str                 # build or review (fix... in later tickets)
+    kind: str                 # build, review, fix or merge
     repo: str                 # the repo's name in config.toml
-    issue: int | None         # the issue; for a review, the PR
+    issue: int | None         # the issue; for a review, fix or merge, the PR
     branch: str | None
     title: str                # the T3 thread's title; finds the thread after a crash
     started_at: str
@@ -58,12 +61,13 @@ class Job:
     pr: dict | None = None
     worktree: str | None = None
     error: str | None = None
-    sha: str | None = None         # a review: H, the commit reviewed
+    sha: str | None = None         # a review, fix or merge: H, the commit it starts from
     round: int | None = None       # a review: its number on the PR
     verdict: str | None = None     # a review: clean or blocking
     signals: list = field(default_factory=list)   # a review: the stop signals that fired
     run_dir: str | None = None     # a review: its brief, inputs, reply and would-be comment
     resume_at: str | None = None   # out-of-usage: when the Sol lane may run again
+    head: str | None = None        # a fix: the PR's head after it (H again if it pushed nothing)
 
     @property
     def open(self) -> bool:
@@ -71,7 +75,7 @@ class Job:
 
 
 _END_FIELDS = ('thread_id', 'link', 'run_id', 'exit_code', 'status', 'outcome', 'commits', 'pr',
-               'worktree', 'error', 'verdict', 'signals', 'run_dir', 'resume_at')
+               'worktree', 'error', 'verdict', 'signals', 'run_dir', 'resume_at', 'head')
 
 
 class JobLog:
@@ -167,6 +171,22 @@ class JobLog:
         jobs, _, released = self._fold()
         return [j for j in jobs if j.kind == 'review' and (j.repo, j.issue, j.sha) ==
                 (repo, number, sha) and j.id not in released]
+
+    def on(self, kind: str, repo: str, number: int, sha: str | None = None,
+           released: bool = False) -> list[Job]:
+        """The jobs of this kind on this issue or PR (and head H, if given), oldest first; with
+        `released`, also those a release settled."""
+        jobs, _, gone = self._fold()
+        return [j for j in jobs if (j.kind, j.repo, j.issue) == (kind, repo, number)
+                and (sha is None or j.sha == sha) and (released or j.id not in gone)]
+
+    def writer(self, repo: str, branch: str) -> Job | None:
+        """A Claude job that is writing to this branch, or may again: a build or fix still
+        open, or waiting for an answer (until it ends or is released). One writer per PR."""
+        jobs, _, gone = self._fold()
+        return next((j for j in jobs if j.kind in ('build', 'fix') and j.repo == repo
+                     and j.branch == branch and (j.open or (j.outcome == 'waiting'
+                                                            and j.id not in gone))), None)
 
     def sol_resume_at(self) -> str | None:
         """When the Sol lane may run again, if the newest ended review found Sol out of usage."""

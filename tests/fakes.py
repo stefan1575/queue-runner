@@ -67,6 +67,9 @@ class FakeGitHubForReviews(FakeGitHubWithPulls):
         self.conflicts = set(conflicts)
         self.replies = dict(replies or {})            # PR number -> [Comment]
         self.issue_bodies = dict(issue_bodies or {})  # (github, number) -> Issue
+        self.now = {}                # PR number -> its fields now, where they changed
+        self.threads = {}            # PR number -> unresolved review threads
+        self.push_before_merge = {}  # PR number -> a head pushed just before the merge call
 
     def checks(self, repo, sha):
         from queue_runner.github import Checks
@@ -114,6 +117,36 @@ class FakeGitHubForReviews(FakeGitHubWithPulls):
     def edit_pull_body(self, repo, number, body):
         self._write('body', number, body)
         self.bodies[number] = body
+
+    # --- merging (ticket 05) ------------------------------------------------------------------
+
+    def pull(self, repo, number):
+        """The PR as listed, with what changed since (`now`: number -> fields)."""
+        from dataclasses import replace
+        if 'pull' in self.fail:
+            raise RuntimeError('gh failed')
+        p = next(p for p in self.prs if p.number == number)
+        return replace(p, **self.now.get(number, {}))
+
+    def open_threads(self, repo, number):
+        return self.threads.get(number, 0)
+
+    def merge(self, repo, number, sha):
+        """GitHub's merge with an expected head: a push in `push_before_merge` lands first."""
+        if number in self.push_before_merge:
+            self.now.setdefault(number, {})['head_sha'] = self.push_before_merge.pop(number)
+        if self.pull(repo, number).head_sha != sha:
+            from queue_runner.github import GhError
+            raise GhError('gh api failed (1): Head branch was modified. Review and try the merge '
+                          'again. (HTTP 409)')
+        self._write('merge', number, sha)
+        self.now.setdefault(number, {})['state'] = 'merged'
+        return 'f' * 40
+
+    def open_pulls(self, repo):
+        """The listed PRs as they are now, merged ones left out."""
+        return [self.pull(repo, p.number) for p in self.prs
+                if self.now.get(p.number, {}).get('state', 'open') == 'open']
 
 
 def full_pr(number, branch, head_sha, body='', title='A PR', base='main', labels=()):

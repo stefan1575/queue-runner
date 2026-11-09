@@ -42,10 +42,11 @@ class ReviewerTest(unittest.TestCase):
         self.jobs = JobLog(os.path.join(self.dir, 'state', 'jobs.jsonl'))
         self.said = []
 
-    def reviewer(self, gh, git, sol, now=NOW, poster=None):
+    def reviewer(self, gh, git, sol, now=NOW, poster=None, merger=False):
+        """Merging is tested in test_merge.py: these reviews merge nothing (merger False)."""
         self.gh, self.git, self.sol = gh, git, sol
         return Reviewer(self.config, github=gh, git=git, sol=sol, jobs=self.jobs,
-                        say=self.said.append, now=lambda: now, poster=poster)
+                        say=self.said.append, now=lambda: now, poster=poster, merger=merger)
 
     def one_pr(self, comments=(), replies=(), checks=None, conflicts=(), sol=None, heads=None,
                files=None, ancestors=(), body='Closes #5\n\nMakes it red.', labels=(),

@@ -73,3 +73,34 @@ class GitCli:
         """`git diff a..b`, or with `merge_base` the PR-style `a...b` (from where b left a)."""
         return self._ok(['-C', path, 'diff', f'{a}...{b}' if merge_base else a, *(
             [] if merge_base else [b])])
+
+    # --- a fix round, and after a merge -------------------------------------------------------
+
+    def log(self, path: str, a: str, b: str) -> list[dict]:
+        """The commits in `b` not in `a`, oldest first: [{sha, subject}]."""
+        out = self._ok(['-C', path, 'log', '--reverse', '--format=%H%x09%s', f'{a}..{b}'])
+        return [dict(zip(('sha', 'subject'), line.split('\t', 1)))
+                for line in out.splitlines() if line]
+
+    def diffstat(self, path: str, a: str, b: str) -> str:
+        """`git diff --stat a...b`: the files a PR changes, from where b left a."""
+        return self._ok(['-C', path, 'diff', '--stat', f'{a}...{b}'])
+
+    def remove_worktree(self, path: str, worktree: str, branch: str | None = None) -> bool:
+        """Removes a job's worktree and its local branch. True once git no longer lists the
+        worktree: T3 can hold the empty folder open, so `worktree remove` may fail after git
+        has unregistered it and deleted its files (AGENTS.md, T3 as a script sees it)."""
+        self._run(['-C', path, 'worktree', 'remove', '--force', worktree])
+        self._run(['-C', path, 'worktree', 'prune'])
+        listed = self._ok(['-C', path, 'worktree', 'list', '--porcelain'])
+        want = _same_path(worktree)
+        gone = not any(_same_path(line[len('worktree '):]) == want
+                       for line in listed.splitlines() if line.startswith('worktree '))
+        if gone and branch:
+            self._run(['-C', path, 'branch', '-D', branch])
+        return gone
+
+
+def _same_path(p: str) -> str:
+    import os
+    return os.path.normcase(os.path.normpath(p.strip()))

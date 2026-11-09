@@ -4,6 +4,8 @@ checks, and have Sol review that exact head H (`~/.claude/docs/pr-review.md`, A 
 The verdict comes from Sol's sol-findings ledger (`ledger.decide`). The comment and verdict go to
 the review's run folder, then `post.GitHubPoster` posts them on the PR (ticket 04); `DryRunPoster`
 posts nothing (the live check). One Sol job at a time: each review holds `<state_dir>/sol.lock`.
+A clean review merges (`merge.Merger`) once the PR is read again; each pass first merges any PR
+still waiting at a head the runner found clean.
 """
 import dataclasses
 import datetime
@@ -17,6 +19,7 @@ from .github import Comment, PullRequest
 from .ledger import TAGS, OPEN, SolFailed, decide, next_round, norm, read_review, read_reviews, \
     state
 from .lock import RunnerBusy, runner_lock
+from .merge import Merger
 from .picker import closed_issues
 from .post import GitHubPoster, PostFailed
 from .sol import SolOutOfUsage
@@ -85,10 +88,13 @@ def _write(path: str, text: str) -> None:
 
 class Reviewer:
     def __init__(self, config: Config, *, github, git, sol, jobs: JobLog, say,
-                 now=datetime.datetime.now, poster=None):
+                 now=datetime.datetime.now, poster=None, merger=None):
         self.config, self.github, self.git, self.sol, self.jobs = config, github, git, sol, jobs
         self.say, self.now = say, now
         self.poster = poster or GitHubPoster(github, say)
+        # A dry-run poster (the live check) merges nothing either, unless given a merger.
+        self.merger = merger if merger is not None or poster is not None else Merger(
+            config, github=github, git=git, jobs=jobs, say=say)
         self._last_why: dict[tuple[str, int], str | None] = {}
         self._said_paused = None
 
@@ -103,6 +109,8 @@ class Reviewer:
         try:
             with runner_lock(self.config.state_dir, 'sol.lock'):
                 self.settle()
+                if self.merger:
+                    self.merger.merge_pass()
                 for repo in self.config.repos:
                     if not repo.github:
                         continue
@@ -135,6 +143,8 @@ class Reviewer:
                                 error='The runner stopped mid-review.')
                 self.say(f'review {job.repo}#{job.issue}: cut off with its runner; '
                          'counted as failed')
+        if self.merger:
+            self.merger.settle()
 
     def candidates(self, repo: Repo) -> list[tuple[PullRequest, str | None]]:
         """Every open PR and why it isn't reviewed now (None: it would be)."""
@@ -169,13 +179,12 @@ class Reviewer:
         h, h7 = pr.head_sha, pr.head_sha[:7]
         if old := [lb for lb in pr.labels if lb in OLD_LABELS]:
             return f'labelled {old[0]}: the old sol-pr-review.py reviews it until the cutover'
-        if any(j.kind == 'build' and j.repo == repo.name and j.branch == pr.branch
-               for j in self.jobs.open_jobs()):
-            return 'a build job is still writing to its branch'
-        # A waiting build writes again once Stefan answers it: left alone until it ends or is
-        # released.
-        if any(j.repo == repo.name and j.branch == pr.branch for j in self.jobs.waiting_jobs()):
-            return 'its build waits for an answer, and may write to the branch again'
+        # One writer per PR: a waiting build or fix writes again once Stefan answers it, so it's
+        # left alone until that job ends or is released.
+        if job := self.jobs.writer(repo.name, pr.branch):
+            return (f'its {job.kind} waits for an answer, and may write to the branch again'
+                    if job.outcome == 'waiting' else
+                    f'a {job.kind} job is still writing to its branch')
         done = self.jobs.reviews_of(repo.name, pr.number, h)
         if ran := [j for j in done if j.outcome in REVIEWED]:
             return (f'the runner reviewed {h7} already (review {ran[-1].round}, '
@@ -270,6 +279,8 @@ class Reviewer:
                         signals=[s['signal'] for s in d['signals']], run_dir=run_dir, link=url)
         why = f' ({"; ".join(s["text"] for s in d["signals"])})' if d['signals'] else ''
         self.say(f'{name}: review {rnd} on {h[:7]} is {d["verdict"]}, next: {d["outcome"]}{why}')
+        if outcome == 'clean' and self.merger:
+            self.merger.try_merge(repo, pr)
         return STARTED
 
     def _inputs(self, repo, pr, rnd, last, gone, earlier, run_dir, wt) -> list[str]:
