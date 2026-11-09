@@ -72,11 +72,17 @@ class ReadReviewsTest(unittest.TestCase):
         hand = (f'<!-- sol-review round=2 head={H2} -->\n## Sol review 2 · Clean\n\n'
                 '```sol-findings\n{"findings": [oops\n```\n')
         corrupt = '<!-- sol-pr-review round=2 verdict=clean sha=' + H2 + ' findings=!!notbase64 -->'
-        for bad in (hand, f'<!-- sol-review round=2 head={H2} -->\nNo block.', corrupt):
+        empty = '<!-- sol-pr-review round=2 verdict=clean sha=' + H2 + ' findings= tokens=0 -->'
+        for bad in (hand, f'<!-- sol-review round=2 head={H2} -->\nNo block.', corrupt, empty):
             with self.subTest(bad=bad[:40]):
                 earlier = read_reviews([*review1([important('F1')]), comment(bad)])
                 self.assertEqual([r['round'] for r in earlier], [1])
                 self.assertEqual([f['id'] for f in state(earlier)], ['F1'])
+
+    def test_a_marker_from_before_findings_were_recorded_counts_with_none(self):
+        # The old script's markers before 2026-11-05 (leads-dashboard #139) end at sha=, e.g. #88.
+        [r] = read_reviews([comment(f'<!-- sol-pr-review round=1 verdict=clean sha={H1} -->')])
+        self.assertEqual((r['round'], r['findings']), (1, []))
 
     def test_numbering_carries_on_from_the_newest_review(self):
         comments = [*review1([important('F1')]),

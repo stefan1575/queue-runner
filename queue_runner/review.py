@@ -281,8 +281,10 @@ class Reviewer:
             name = f'#{k}' if where == here else f'{where}#{k}'
             text = f'# Issue {name}: {issue.title}\n\n{issue.body}\n\n## Comments\n\n' + (
                 ''.join(_said(c) for c in comments) or 'None.\n')
+            # A GitHub owner name has no `_`, so owner_name keeps the two apart: a-b/c and a/b-c
+            # don't share a file.
             file = (f'issue-{k}.md' if where == here else
-                    f'issue-{where.replace("/", "-")}-{k}.md')
+                    f'issue-{where.replace("/", "_")}-{k}.md')
             _write(os.path.join(run_dir, file), text)
             files.append(f'`{file}`: the issue it closes (the ticket), with its comments')
         said = self._conversation(repo, pr)

@@ -83,7 +83,7 @@ The review loop's rules are `~/.claude/docs/pr-review.md`; leads-dashboard's
    nothing counts. Sol reads a detached checkout at H under `checkouts_dir`, removed afterwards.
    Its inputs are in the run folder, `runs_dir/<repo>-pr<n>-r<K>-<time>/`: `change.diff` (review
    1, or after a force-push: the whole diff, `origin/<base>...H`; later: the change since the last
-   reviewed commit) and `full.diff` (later reviews), `pr.md`, `issue-<k>.md` for each issue it
+   reviewed commit) and `full.diff` (later reviews), `pr.md`, `issue-<k>.md` (`issue-<owner>_<name>-<k>.md` in another repo) for each issue it
    closes with its comments, `conversation.md` (comments, review threads, review bodies, earlier
    ledgers). `brief.md` (`templates/review.md`) lists them, points to `AGENTS.md`, has
    `REVIEW.md` in full and, from review 2, the open findings, the classes so far, the IDs used

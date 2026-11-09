@@ -168,9 +168,19 @@ class ReviewerTest(unittest.TestCase):
         r.review_pass()
         brief = self.sol.briefs[0]['brief']
         self.assertIn('`issue-5.md`', brief)
-        self.assertIn('`issue-other-x-9.md`', brief)
+        self.assertIn('`issue-other_x-9.md`', brief)
         self.assertIn('Make the widget red.', self.read('issue-5.md'))
-        self.assertIn('In another repo.', self.read('issue-other-x-9.md'))
+        self.assertIn('In another repo.', self.read('issue-other_x-9.md'))
+
+    def test_issues_in_repos_whose_names_join_alike_get_their_own_files(self):
+        # Sol review 2, F4: a-b/c#9 and a/b-c#9 both became issue-a-b-c-9.md.
+        r = self.one_pr(body='Closes https://github.com/a-b/c/issues/9\n'
+                             'Closes https://github.com/a/b-c/issues/9')
+        self.gh.issue_bodies[('a-b/c', 9)] = Issue(9, 'One', 'First ticket.')
+        self.gh.issue_bodies[('a/b-c', 9)] = Issue(9, 'Two', 'Second ticket.')
+        r.review_pass()
+        self.assertIn('First ticket.', self.read('issue-a-b_c-9.md'))
+        self.assertIn('Second ticket.', self.read('issue-a_b-c-9.md'))
 
     def test_review_2_brief_has_the_change_since_the_last_review_its_findings_and_replies(self):
         replies = [Comment('claude', '2026-11-06T01:00:00Z', 'Before the review.'),

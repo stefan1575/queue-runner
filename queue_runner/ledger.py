@@ -48,13 +48,16 @@ def _text(v) -> str:
 # --- earlier reviews ----------------------------------------------------------------------------
 
 def _marker_findings(body: str, start: int) -> list | None:
-    """The marker's base64 findings: [] if it has none, None if they can't be read."""
+    """The marker's base64 findings, or None if they can't be read. A marker with no findings
+    field holds none: the old script's markers before 2026-11-05 (leads-dashboard #139) end at
+    `sha=`. An empty field is never written (the runner and the old script write `W10=` for no
+    findings), so it can't be read."""
     end = body.find('-->', start)
     field = re.search(r'\bfindings=(\S*)', body[start:end if end >= 0 else len(body)])
     if not field:
         return []
     try:
-        found = json.loads(base64.b64decode(field[1], validate=True) or b'[]')
+        found = json.loads(base64.b64decode(field[1], validate=True))
     except ValueError:
         return None
     return found if isinstance(found, list) else None
