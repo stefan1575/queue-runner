@@ -13,9 +13,12 @@ class FakeGh:
     def __init__(self, responses):
         self.responses = responses
         self.calls = []
+        self.inputs = []   # each write's JSON body, sent on stdin
 
-    def __call__(self, args):
+    def __call__(self, args, input=None):
         self.calls.append(args)
+        if input is not None:
+            self.inputs.append(json.loads(input))
         endpoint = next(a for a in args if a.startswith('repos/') or a == 'graphql')
         data = self.responses[endpoint]
         # --paginate --slurp wraps each page in an outer list
@@ -23,6 +26,28 @@ class FakeGh:
 
 
 class GhCliTest(unittest.TestCase):
+    def test_writes_send_their_json_on_stdin_and_return_the_url(self):
+        repo = Repo(name='demo', github='owner/demo', path='.')
+        gh = FakeGh({'repos/owner/demo/issues/4/comments': {'html_url': 'C'},
+                     'repos/owner/demo/issues': {'html_url': 'I'},
+                     'repos/owner/demo/statuses/' + 'a' * 40: {},
+                     'repos/owner/demo/pulls/4': {}})
+        cli = GhCli(run=gh)
+        body = 'A long comment' * 2000 + '<!-- marker é -->'
+        self.assertEqual(cli.post_comment(repo, 4, body), 'C')
+        self.assertEqual(cli.create_issue(repo, 'T', 'B', ['needs-triage']), 'I')
+        cli.set_status(repo, 'a' * 40, 'success', 'x' * 200, 'C')
+        cli.edit_pull_body(repo, 4, 'New body')
+        self.assertEqual([c[:3] for c in gh.calls], [['api', '-X', 'POST']] * 3
+                         + [['api', '-X', 'PATCH']])
+        self.assertTrue(all(c[-2:] == ['--input', '-'] for c in gh.calls))
+        self.assertEqual(gh.inputs, [
+            {'body': body},
+            {'title': 'T', 'body': 'B', 'labels': ['needs-triage']},
+            {'state': 'success', 'context': 'sol-review', 'description': 'x' * 140,
+             'target_url': 'C'},
+            {'body': 'New body'}])
+
     def test_ready_issues_skip_pull_requests_and_count_open_blockers_and_sub_issues(self):
         gh = FakeGh({'repos/owner/demo/issues?state=open&labels=ready-for-agent&per_page=100': [
             {'number': 7, 'title': 'T', 'body': None,

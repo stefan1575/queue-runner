@@ -1,9 +1,9 @@
 """The Sol lane: adopt every open PR without a review on its newest commit, wait for that commit's
 checks, and have Sol review that exact head H (`~/.claude/docs/pr-review.md`, A round, steps 1-3).
 
-The verdict comes from Sol's sol-findings ledger (`ledger.decide`). In this ticket (03) nothing is
-posted: the would-be comment and the verdict go to the review's run folder only (`DryRunPoster`).
-One Sol job at a time: each review holds `<state_dir>/sol.lock`.
+The verdict comes from Sol's sol-findings ledger (`ledger.decide`). The comment and verdict go to
+the review's run folder, then `post.GitHubPoster` posts them on the PR (ticket 04); `DryRunPoster`
+posts nothing (the live check). One Sol job at a time: each review holds `<state_dir>/sol.lock`.
 """
 import dataclasses
 import datetime
@@ -18,6 +18,7 @@ from .ledger import TAGS, OPEN, SolFailed, decide, next_round, norm, read_review
     state
 from .lock import RunnerBusy, runner_lock
 from .picker import closed_issues
+from .post import GitHubPoster, PostFailed
 from .sol import SolOutOfUsage
 from .state import FAILED_REVIEW, OUT_OF_USAGE, REVIEWED, JobLog
 
@@ -25,6 +26,9 @@ STARTED, BUSY, IDLE = 'started', 'busy', 'idle'   # as run.py's lane results
 MAX_FAILED = 2   # failed reviews on one head before the lane leaves it until a release or a push
 RESUME_AFTER = datetime.timedelta(minutes=10)    # after Sol's reset
 RETRY_UNKNOWN = datetime.timedelta(minutes=30)   # when Sol didn't say when
+# Until the cutover (ticket 13) the old ~/sol-pr-review.py still reviews PRs carrying these labels:
+# the runner leaves them to it, so the two never review the same PR.
+OLD_LABELS = ('needs-sol-review', 'sol-reviewed')
 # The job log's outcome for each of decide()'s.
 OUTCOMES = {'merge': 'clean', 'fix': 'blocking', 'stop': 'stop', 'approach-note': 'approach-note'}
 
@@ -34,7 +38,7 @@ def review_title(repo: Repo, number: int) -> str:
 
 
 class DryRunPoster:
-    """Ticket 03: posts nothing. The comment and verdict are already in the run folder."""
+    """Posts nothing (the live check): the comment and verdict are already in the run folder."""
 
     def __init__(self, say):
         self.say = say
@@ -42,6 +46,7 @@ class DryRunPoster:
     def post(self, repo: Repo, pr: PullRequest, decision: dict, run_dir: str) -> None:
         self.say(f'dry run: {repo.name}#{pr.number} review comment, verdict and sol-review '
                  f'status not posted; they are in {run_dir}')
+        return None
 
 
 def _template() -> Template:
@@ -83,7 +88,7 @@ class Reviewer:
                  now=datetime.datetime.now, poster=None):
         self.config, self.github, self.git, self.sol, self.jobs = config, github, git, sol, jobs
         self.say, self.now = say, now
-        self.poster = poster or DryRunPoster(say)
+        self.poster = poster or GitHubPoster(github, say)
         self._last_why: dict[tuple[str, int], str | None] = {}
         self._said_paused = None
 
@@ -162,6 +167,8 @@ class Reviewer:
     def why_not(self, repo: Repo, pr: PullRequest) -> str | None:
         """Why this PR isn't reviewed now, or None if it is: cheapest checks first."""
         h, h7 = pr.head_sha, pr.head_sha[:7]
+        if old := [lb for lb in pr.labels if lb in OLD_LABELS]:
+            return f'labelled {old[0]}: the old sol-pr-review.py reviews it until the cutover'
         if any(j.kind == 'build' and j.repo == repo.name and j.branch == pr.branch
                for j in self.jobs.open_jobs()):
             return 'a build job is still writing to its branch'
@@ -172,7 +179,7 @@ class Reviewer:
         done = self.jobs.reviews_of(repo.name, pr.number, h)
         if ran := [j for j in done if j.outcome in REVIEWED]:
             return (f'the runner reviewed {h7} already (review {ran[-1].round}, '
-                    f'{ran[-1].outcome}, not posted: dry run)')
+                    f'{ran[-1].outcome})')
         if (failed := sum(j.outcome == FAILED_REVIEW for j in done)) >= MAX_FAILED:
             return (f'{failed} failed reviews on {h7}: left until a new head or '
                     f'--release {repo.name}#{pr.number}')
@@ -249,10 +256,18 @@ class Reviewer:
             'kept': d['kept'], 'unaddressed': d['unaddressed'],
             'issues': [{'id': i['id'], 'title': i['title']} for i in d['issues']],
             'findings': d['findings']}, indent=2, ensure_ascii=False) + '\n')
-        self.poster.post(repo, pr, d, run_dir)
+        try:
+            url = self.poster.post(repo, pr, d, run_dir)
+        except PostFailed as e:   # nothing on the PR, so nothing counts: reviewed again later
+            _write(os.path.join(run_dir, 'failed.txt'), f'{e}\n')
+            self.jobs.ended(job.id, exit_code=None, outcome=FAILED_REVIEW, run_dir=run_dir,
+                            verdict=d['verdict'], error=str(e))
+            self.say(f'{name}: review {rnd} on {h[:7]} was {d["verdict"]} but not posted, '
+                     f'so it failed: {e}')
+            return STARTED
         outcome = OUTCOMES[d['outcome']]
         self.jobs.ended(job.id, exit_code=None, outcome=outcome, verdict=d['verdict'],
-                        signals=[s['signal'] for s in d['signals']], run_dir=run_dir)
+                        signals=[s['signal'] for s in d['signals']], run_dir=run_dir, link=url)
         why = f' ({"; ".join(s["text"] for s in d["signals"])})' if d['signals'] else ''
         self.say(f'{name}: review {rnd} on {h[:7]} is {d["verdict"]}, next: {d["outcome"]}{why}')
         return STARTED

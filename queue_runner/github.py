@@ -11,6 +11,7 @@ class Issue:
     open_blockers: int = 0      # GitHub's native dependencies still open
     open_sub_issues: int = 0    # a spec or map: its children are the work
     open_linked_pulls: int = 0  # open PRs GitHub links to it (closing keyword or linked by hand)
+    url: str = ''
 
 
 @dataclass(frozen=True)
@@ -53,11 +54,13 @@ class GhError(RuntimeError):
     pass
 
 
-def run_gh(args: list[str]) -> str:
-    """Runs `gh` with no console window (the runner lives under pythonw)."""
+def run_gh(args: list[str], input: str | None = None) -> str:
+    """Runs `gh` with no console window (the runner lives under pythonw). `input` goes to its
+    stdin: a write's JSON body (`--input -`), which keeps a long comment off the command line."""
     import subprocess
     p = subprocess.run(['gh', *args], capture_output=True, text=True, encoding='utf-8',
-                       errors='replace', timeout=120, stdin=subprocess.DEVNULL,
+                       errors='replace', timeout=120,
+                       **({'input': input} if input is not None else {'stdin': subprocess.DEVNULL}),
                        creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
     if p.returncode:
         raise GhError(f"gh {' '.join(args)} failed ({p.returncode}): {p.stderr.strip()}")
@@ -185,3 +188,40 @@ class GhCli:
         return [Comment(author=(c.get('user') or {}).get('login', 'ghost'),
                         created_at=c['created_at'], body=c.get('body') or '')
                 for c in self._all(f'repos/{repo.github}/issues/{number}/comments?per_page=100')]
+
+    # --- writes: the review's automated posts (no go-ahead needed, ~/.claude/CLAUDE.md) --------
+
+    def _send(self, method, endpoint, data) -> dict:
+        out = self._run(['api', '-X', method, endpoint, '--input', '-'],
+                        input=json.dumps(data, ensure_ascii=False))
+        return json.loads(out) if out.strip() else {}
+
+    def open_issues(self, repo) -> list[Issue]:
+        """Every open issue (not PR), with its body and URL: where a follow-up may be filed
+        already."""
+        return [Issue(number=i['number'], title=i['title'], body=i.get('body') or '',
+                      url=i.get('html_url') or '')
+                for i in self._all(f'repos/{repo.github}/issues?state=open&per_page=100')
+                if 'pull_request' not in i]
+
+    def post_comment(self, repo, number, body) -> str:
+        """Comments on an issue or PR; returns the comment's URL."""
+        return self._send('POST', f'repos/{repo.github}/issues/{number}/comments',
+                          {'body': body})['html_url']
+
+    def create_issue(self, repo, title, body, labels=()) -> str:
+        """Files an issue; returns its URL."""
+        return self._send('POST', f'repos/{repo.github}/issues',
+                          {'title': title, 'body': body, 'labels': list(labels)})['html_url']
+
+    def set_status(self, repo, sha, state, description, target_url='', context=SOL_REVIEW):
+        """A commit status on exactly `sha`."""
+        self._send('POST', f'repos/{repo.github}/statuses/{sha}',
+                   {'state': state, 'context': context, 'description': description[:140],
+                    **({'target_url': target_url} if target_url else {})})
+
+    def pull_body(self, repo, number) -> str:
+        return self._get(f'repos/{repo.github}/pulls/{number}').get('body') or ''
+
+    def edit_pull_body(self, repo, number, body) -> None:
+        self._send('PATCH', f'repos/{repo.github}/pulls/{number}', {'body': body})

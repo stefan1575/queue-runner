@@ -198,6 +198,29 @@ class DecideTest(unittest.TestCase):
         d = self.decide(reply(findings=[pre]), comments)
         self.assertEqual(d['issues'], [])
 
+    def test_a_finding_listed_again_under_a_new_id_keeps_its_earlier_one(self):
+        d = self.decide(reply(findings=[important('F7')]), review1([important('F1')]))
+        self.assertEqual([f['id'] for f in d['findings']], ['F1'])
+        self.assertIn('F7 is F1', d['body'])
+        self.assertEqual(d['signals'], [])   # not a new finding in an earlier class
+
+    def test_an_unchanged_finding_is_not_reposted_as_new(self):
+        d = self.decide(reply(findings=[important('F1')]), review1([important('F1')]))
+        findings = d['body'].split('### Findings')[1]
+        self.assertIn('No new findings.', findings)
+        self.assertIn('Still open (listed again)', d['body'].split('### Findings')[0])
+
+    def test_a_filed_finding_listed_again_keeps_its_issue_url(self):
+        url = 'https://github.com/owner/repo/issues/40'
+        pre = {'id': 'F2', 'tag': 'pre-existing', 'class': 'old bug', 'file': 'src/b.ts',
+               'line': 3, 'scenario': 's'}
+        comments = [comment(old_marker(1, 'clean', H1, [{**pre, 'status': 'filed', 'raised': 1,
+                                                         'issue': url}]))]
+        d = self.decide(reply(findings=[pre]), comments)
+        self.assertEqual(d['issues'], [])
+        [r] = read_reviews([comment(d['body'])])
+        self.assertEqual([f.get('issue') for f in state([r])], [url])
+
     def test_the_comment_carries_a_ledger_that_reads_back_as_the_prs_state(self):
         d = self.decide(reply(findings=[important('F1'), nit('F2')], prose='Two things.'))
         self.assertTrue(d['body'].startswith('## Sol review 1 · Blocking'))

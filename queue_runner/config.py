@@ -13,6 +13,7 @@ class Repo:
     github: str | None  # owner/name; None for a repo with no GitHub (the live-check sandbox)
     path: str          # local clone; T3's project for its jobs
     base: str = 'main'
+    review_table: bool = False   # a posted review adds a row to the PR body's `## Review` table
 
 
 @dataclass(frozen=True)
@@ -37,7 +38,7 @@ def load_config(path: str = DEFAULT_CONFIG) -> Config:
     with open(path, 'rb') as f:
         raw = tomllib.load(f)
     repos = [Repo(name=r['name'], github=r.get('github'), path=_path(r['path']),
-                  base=r.get('base', 'main'))
+                  base=r.get('base', 'main'), review_table=bool(r.get('review_table')))
              for r in raw['repos']]
     claude, sol = raw.get('claude', {}), raw.get('sol', {})
     state_dir = _path(raw['state_dir'])

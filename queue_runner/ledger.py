@@ -35,6 +35,8 @@ OPEN = ('open', 'decline-kept')
 # (pr-review.md: no fourth review without his answer). The old script did it at review 3 only,
 # with its spend guard behind it; with that guard gone, every later blocking review does too.
 APPROACH_REVIEW = 3
+# Where a comment's collapsed ledger starts: everything after it is the ledger and the marker.
+LEDGER = '<details><summary>Ledger</summary>'
 
 
 class SolFailed(Exception):
@@ -280,6 +282,27 @@ def decide(repo: str, n: int, sha: str, rnd: int, earlier: list[dict], has_revie
         notes.append(f'{", ".join(down)} {"was" if one else "were"} tagged Important without a '
                      'file and line plus a failure scenario, or a later cost and the rule it '
                      f'breaks, so {"it counts" if one else "they count"} as a nit.')
+    # An unchanged finding isn't reposted as new: one Sol gives a new ID with the same tag,
+    # class, file and line as a finding still open (or filed), and gave no status, is that
+    # finding.
+    prior = state(earlier)
+    ids = {f['id'] for f in found}
+    same = []
+    for f in found:
+        if any(p['id'] == f['id'] for p in prior):
+            continue
+        p = next((p for p in prior if p['status'] in (*OPEN, 'filed') and p['id'] not in ids
+                  and p['id'] not in given
+                  and p['tag'] == f['tag'] and norm(p['class']) and p['file']
+                  and (norm(p['class']), p['file'], p['line'])
+                  == (norm(f['class']), f['file'], f['line'])), None)
+        if p:
+            same.append(f"{f['id']} is {p['id']}")
+            ids.add(p['id'])
+            f['id'] = p['id']
+    if same:
+        notes.append('Listed again under a new ID, with the same tag, class, file and line, so '
+                     f'each keeps its earlier ID: {"; ".join(same)}.')
     if over := [f['id'] for f in found if f['tag'] == 'nit'][MAX_NITS:]:
         found = [f for f in found if f['id'] not in over]
         notes.append(f'Nits past the first {MAX_NITS} are left out: {", ".join(over)}.')
@@ -293,12 +316,13 @@ def decide(repo: str, n: int, sha: str, rnd: int, earlier: list[dict], has_revie
     # Carry the state forward. A finding Sol lists again takes its earlier ID's place, open (or
     # filed); one that had closed is reopened. Every other earlier open finding takes the status
     # Sol gave it, and stays as it was if Sol gave none. Closed ones are kept as they are.
-    prior = state(earlier)
     before, new = {f['id']: f for f in prior}, {f['id']: f for f in found}
     for f in found:
         p = before.get(f['id'])
         f['status'] = 'filed' if f['tag'] == 'pre-existing' else 'open'
         f['raised'] = p['raised'] if p else rnd
+        if p and p.get('issue'):   # its follow-up issue's URL stays recorded
+            f['issue'] = p['issue']
         if p and p['status'] in ('fixed', 'decline-accepted'):
             f['reopened'] = p['status']
     asked = [f['id'] for f in prior if f['status'] in OPEN and f['id'] not in new]
@@ -307,6 +331,8 @@ def decide(repo: str, n: int, sha: str, rnd: int, earlier: list[dict], has_revie
     for p in prior:
         if p['id'] in new:
             now.append(new[p['id']])
+            if p['status'] in (*OPEN, 'filed'):   # listed again: shown with the earlier ones
+                rows.append({**new[p['id']], 'again': True})
             continue
         q = dict(p)
         if p['id'] in asked:
@@ -368,12 +394,17 @@ def decide(repo: str, n: int, sha: str, rnd: int, earlier: list[dict], has_revie
     desc = (f'Blocking: {len(important)} Important finding{"s" * (len(important) != 1)} '
             f'({", ".join(important)})' if important else
             f'Clean: no Important finding, {nits} nit{"s" * (nits != 1)}')
-    table = (('No new findings.' if earlier else 'No findings.') if not found else
+    fresh = [f for f in found if not (f['id'] in before
+                                      and before[f['id']]['status'] in (*OPEN, 'filed'))]
+    table = (('No new findings.' if earlier else 'No findings.') if not fresh else
              '| ID | Tag | Class | Where |\n|---|---|---|---|\n' + ''.join(
                  f"| {_cell(f['id'])} | {TAGS[f['tag']]} | {_cell(f['class'])} | "
-                 f"{_where(repo, sha, f)} |\n" for f in found))
+                 f"{_where(repo, sha, f)} |\n" for f in fresh))
 
     def label(f):
+        if f.get('again'):
+            return ('Filed already' if f['status'] == 'filed' else 'Still open') + \
+                ' (listed again)'
         return STATUSES[f['status']] + ('' if f['id'] in given else ' (Sol gave no status)')
     old = '' if not rows else (
         '### Earlier findings\n\n| ID | Tag | Class | Where | Now |\n|---|---|---|---|---|\n'
@@ -387,12 +418,31 @@ def decide(repo: str, n: int, sha: str, rnd: int, earlier: list[dict], has_revie
             "the queue runner from Stefan's PC.</sub>\n\n"
             f'{text}\n\n{old}### Findings\n\n{table.rstrip()}\n\n'
             + ''.join(f'{s}\n\n' for s in notes)
-            + '<details><summary>Ledger</summary>\n\n' + ledger_block(rnd, verdict, sha, now)
+            + f'{LEDGER}\n\n' + ledger_block(rnd, verdict, sha, now)
             + '\n\n</details>\n\n' + mark(rnd, verdict, sha, now) + '\n')
-    return {'verdict': verdict, 'outcome': outcome, 'signals': signals, 'findings': now,
+    return {'round': rnd, 'sha': sha, 'verdict': verdict, 'outcome': outcome, 'signals': signals, 'findings': now,
             'kept': kept, 'unaddressed': unaddressed,
             'status': {'state': 'failure' if important else 'success',
                        'description': desc[:140]},
             'issues': [{'id': f['id'], 'title': issue_title(f), 'finding': f}
                        for f in pre if f['id'] not in filed],
             'body': body}
+
+
+
+def with_issues(d: dict, urls: dict[str, str]) -> str:
+    """The comment with each filed Pre-existing finding's issue linked ({finding id: url}) and
+    its URL recorded in the ledger and the marker (`issue`), so no later review files it again."""
+    if not urls:
+        return d['body']
+    for f in d['findings']:
+        if f['id'] in urls:
+            f['issue'] = urls[f['id']]
+    links = ', '.join(f'{fid} → [#{url.rstrip("/").rsplit("/", 1)[-1]}]({url})'
+                      for fid, url in urls.items())
+    body = d['body']
+    head = body[:body.rindex(LEDGER)]
+    return (f'{head}Filed as follow-up issues: {links}.\n\n{LEDGER}\n\n'
+            + ledger_block(d['round'], d['verdict'], d['sha'], d['findings'])
+            + '\n\n</details>\n\n' + mark(d['round'], d['verdict'], d['sha'], d['findings'])
+            + '\n')

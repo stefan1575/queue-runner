@@ -18,7 +18,7 @@ from queue_runner.config import load_config  # noqa: E402
 from queue_runner.git import GitCli  # noqa: E402
 from queue_runner.github import GhCli  # noqa: E402
 from queue_runner.lock import runner_lock  # noqa: E402
-from queue_runner.review import Reviewer  # noqa: E402
+from queue_runner.review import DryRunPoster, Reviewer  # noqa: E402
 from queue_runner.sol import SolCli  # noqa: E402
 from queue_runner.state import JobLog  # noqa: E402
 
@@ -34,7 +34,8 @@ def main(ref: str) -> int:
     github = GhCli()
     jobs = JobLog(os.path.join(config.state_dir, 'jobs.jsonl'))
     reviewer = Reviewer(config, github=github, git=GitCli(), sol=SolCli(
-        script=config.sol_script, bash=config.sol_bash), jobs=jobs, say=print)
+        script=config.sol_script, bash=config.sol_bash), jobs=jobs, say=print,
+        poster=DryRunPoster(print))   # a live check posts nothing
     pr = next(p for p in github.open_pulls(repo) if p.number == int(n))
     print(f'Adoption would say: {reviewer.why_not(repo, pr) or "review it"}')
     with runner_lock(config.state_dir, 'sol.lock'):

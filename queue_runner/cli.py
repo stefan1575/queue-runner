@@ -68,9 +68,9 @@ def _dry_run_build(config, github, out, log_line) -> None:
 
 def _dry_run_reviews(config, github, out) -> None:
     from .ledger import next_round, read_reviews
-    from .review import Reviewer
+    from .review import DryRunPoster, Reviewer
     reviewer = Reviewer(config, github=github, git=None, sol=None, jobs=_jobs(config),
-                        say=lambda line: None)
+                        say=lambda line: None, poster=DryRunPoster(lambda line: None))
     print('Sol reviews (dry run: Sol not started):', file=out)
     for repo in config.repos:
         if not repo.github:

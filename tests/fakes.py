@@ -1,5 +1,5 @@
 """In-memory GitHub for tests: no network, no gh."""
-from queue_runner.github import Issue, PullRequest
+from queue_runner.github import Comment, Issue, PullRequest
 
 
 class FakeGitHub:
@@ -51,12 +51,18 @@ class FakeGitHubWithPulls(FakeGitHub):
 
 
 class FakeGitHubForReviews(FakeGitHubWithPulls):
-    """Also what the Sol lane reads: a PR's checks, conflicts, review replies and its issues.
-    It has no way to post anything, so a dry run that tried would fail."""
+    """Also what the Sol lane reads (a PR's checks, conflicts, review replies, its issues and
+    body) and what it posts: every write goes to `posts`, in order, as (call, args...). A call
+    named in `fail` raises."""
 
     def __init__(self, *args, checks=None, conflicts=(), replies=None, issue_bodies=None,
-                 **kwargs):
+                 open_issue_list=(), bodies=None, fail=(), **kwargs):
         super().__init__(*args, **kwargs)
+        self.open_issue_list = list(open_issue_list)
+        self.bodies = dict(bodies or {})              # PR number -> its body now
+        self.fail = set(fail)
+        self.posts = []
+        self._next = 900
         self.check_states = dict(checks or {})        # sha -> Checks; default passed
         self.conflicts = set(conflicts)
         self.replies = dict(replies or {})            # PR number -> [Comment]
@@ -74,6 +80,40 @@ class FakeGitHubForReviews(FakeGitHubWithPulls):
 
     def issue(self, github, number):
         return self.issue_bodies[(github, number)]
+
+    def open_issues(self, repo):
+        if 'open_issues' in self.fail:
+            raise RuntimeError('gh failed')
+        return list(self.open_issue_list)
+
+    def pull_body(self, repo, number):
+        return self.bodies.get(number, next((p.body for p in self.prs if p.number == number), ''))
+
+    def _write(self, call, *args):
+        if call in self.fail:
+            raise RuntimeError(f'{call} failed')
+        self.posts.append((call, *args))
+
+    def post_comment(self, repo, number, body):
+        self._write('comment', number, body)
+        self.comments.setdefault(number, []).append(Comment('stefan1575', '2026-11-09T12:00:00Z',
+                                                            body))
+        self._next += 1
+        return f'https://github.com/{repo.github}/pull/{number}#issuecomment-{self._next}'
+
+    def create_issue(self, repo, title, body, labels=()):
+        self._write('issue', title, body, tuple(labels))
+        self._next += 1
+        self.open_issue_list.append(Issue(self._next, title, body,
+                                          url=f'https://github.com/{repo.github}/issues/{self._next}'))
+        return f'https://github.com/{repo.github}/issues/{self._next}'
+
+    def set_status(self, repo, sha, state, description, target_url='', context='sol-review'):
+        self._write('status', sha, state, description, target_url)
+
+    def edit_pull_body(self, repo, number, body):
+        self._write('body', number, body)
+        self.bodies[number] = body
 
 
 def full_pr(number, branch, head_sha, body='', title='A PR', base='main', labels=()):

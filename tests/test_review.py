@@ -1,21 +1,24 @@
-"""The Sol lane: which open PRs it adopts, the brief it builds from sources, and a dry-run review
-whose would-be comment and verdict land in the run folder, with GitHub, git and Sol faked."""
+"""The Sol lane: which open PRs it adopts, the brief it builds from sources, and a review whose
+comment, sol-review status, follow-up issues and PR body row are posted, with GitHub, git and Sol
+faked: every post is checked against FakeGitHubForReviews.posts."""
+import dataclasses
 import datetime
 import glob
 import json
 import os
+import re
 import tempfile
 import unittest
 
 from queue_runner.config import Config, Repo
 from queue_runner.github import Checks, Comment, Issue
-from queue_runner.ledger import SolFailed
-from queue_runner.review import Reviewer
+from queue_runner.ledger import SolFailed, read_reviews, state
+from queue_runner.review import DryRunPoster, Reviewer
 from queue_runner.sol import SolOutOfUsage
 from queue_runner.state import JobLog
 from tests.fakes import FakeGitHubForReviews, full_pr
 from tests.fakes_t3 import FakeReviewGit, FakeSol
-from tests.test_ledger import H1, H2, important, old_marker, reply
+from tests.test_ledger import H1, H2, H3, important, old_marker, reply
 
 NOW = datetime.datetime(2026, 11, 9, 12, 0)
 
@@ -39,22 +42,26 @@ class ReviewerTest(unittest.TestCase):
         self.jobs = JobLog(os.path.join(self.dir, 'state', 'jobs.jsonl'))
         self.said = []
 
-    def reviewer(self, gh, git, sol, now=NOW):
+    def reviewer(self, gh, git, sol, now=NOW, poster=None):
         self.gh, self.git, self.sol = gh, git, sol
         return Reviewer(self.config, github=gh, git=git, sol=sol, jobs=self.jobs,
-                        say=self.said.append, now=lambda: now)
+                        say=self.said.append, now=lambda: now, poster=poster)
 
     def one_pr(self, comments=(), replies=(), checks=None, conflicts=(), sol=None, heads=None,
-               files=None, ancestors=(), body='Closes #5\n\nMakes it red.'):
-        pr = full_pr(20, 'claude/red-5', H2, body=body, title='Red widget', base='claude/base-4')
+               files=None, ancestors=(), body='Closes #5\n\nMakes it red.', labels=(),
+               poster=None, **gh_kw):
+        pr = full_pr(20, 'claude/red-5', H2, body=body, title='Red widget', base='claude/base-4',
+                     labels=labels)
         gh = FakeGitHubForReviews(
             prs=[pr], comments={20: list(comments), 5: [Comment('stefan', '2026-11-01T00:00:00Z',
                                                                 'Use the brand red.')]},
             replies={20: list(replies)}, checks=checks, conflicts=conflicts,
-            issue_bodies={('owner/first', 5): Issue(5, 'Red widget', 'Make the widget red.')})
+            issue_bodies={('owner/first', 5): Issue(5, 'Red widget', 'Make the widget red.')},
+            **gh_kw)
         git = FakeReviewGit(heads=heads or {20: H2}, ancestors=ancestors, files=files or {
             'AGENTS.md': '# Agents', 'REVIEW.md': '# Review guidelines\n\nAlways check grants.'})
-        return self.reviewer(gh, git, sol or FakeSol([reply(findings=[important('F1')])]))
+        return self.reviewer(gh, git, sol or FakeSol([reply(findings=[important('F1')])]),
+                             poster=poster)
 
     def run_dir(self):
         [d] = glob.glob(os.path.join(self.dir, 'runs', '*'))
@@ -82,7 +89,7 @@ class ReviewerTest(unittest.TestCase):
         self.assertEqual((job.outcome, job.verdict), ('blocking', 'blocking'))
         self.assertEqual(job.run_dir, self.run_dir())
 
-    def test_the_would_be_comment_and_verdict_are_in_the_run_folder_and_nothing_is_posted(self):
+    def test_the_comment_and_verdict_are_in_the_run_folder(self):
         self.one_pr().review_pass()
         comment = self.read('comment.md')
         self.assertTrue(comment.startswith('## Sol review 1 · Blocking'))
@@ -91,7 +98,12 @@ class ReviewerTest(unittest.TestCase):
         self.assertEqual((d['verdict'], d['outcome'], d['round'], d['sha']),
                          ('blocking', 'fix', 1, H2))
         self.assertEqual(d['status']['state'], 'failure')
+
+    def test_the_dry_run_poster_posts_nothing(self):
+        self.one_pr(poster=DryRunPoster(self.said.append)).review_pass()
+        self.assertEqual(self.gh.posts, [])
         self.assertTrue(any('dry run' in s for s in self.said))
+        self.assertTrue(self.read('comment.md').startswith('## Sol review 1 · Blocking'))
 
     def test_a_pr_already_reviewed_on_its_head_is_left_alone(self):
         r = self.one_pr(comments=[blocking_review_1(sha=H2)])
@@ -274,6 +286,117 @@ class ReviewerTest(unittest.TestCase):
         r = self.one_pr()
         [(pr, why)] = r.candidates(self.repo)
         self.assertEqual((pr.number, why), (20, None))
+
+    # --- posting (ticket 04) -----------------------------------------------------------------
+
+    def test_a_review_posts_its_comment_then_sol_review_on_the_reviewed_head(self):
+        self.one_pr().review_pass()
+        [(c, n, body), (st, sha, state, desc, target)] = self.gh.posts
+        self.assertEqual((c, n, st, sha, state), ('comment', 20, 'status', H2, 'failure'))
+        self.assertEqual(body, self.read('comment.md'))
+        self.assertEqual(desc, 'Blocking: 1 Important finding (F1)')
+        url = 'https://github.com/owner/first/pull/20#issuecomment-901'
+        self.assertEqual(target, url)
+        [job] = self.jobs.jobs()
+        self.assertEqual((job.outcome, job.link), ('blocking', url))
+
+    def test_a_posted_review_is_not_reviewed_again_on_the_same_head(self):
+        r = self.one_pr()
+        r.review_pass()
+        self.assertEqual(r.review_pass(), 'idle')
+        self.assertEqual(len(self.sol.briefs), 1)
+
+    def test_a_new_pre_existing_finding_is_filed_once_and_linked_from_the_comment(self):
+        sol = FakeSol([reply(findings=[pre_existing('F2')])])
+        self.one_pr(sol=sol).review_pass()
+        [(i, title, text, labels), (c, _, body), (st, sha, st_state, _, _)] = self.gh.posts
+        self.assertEqual((i, c, st, sha, st_state), ("issue", "comment", "status", H2, "success"))
+        self.assertEqual(labels, ('needs-triage',))
+        self.assertEqual(title, 'old bug (src/b.ts)')
+        self.assertIn('<!-- sol-finding owner/first#20 F2 -->', text)
+        url = 'https://github.com/owner/first/issues/901'
+        self.assertIn(f'F2 → [#901]({url})', body)
+        [r] = read_reviews([Comment('x', '', body)])
+        self.assertEqual([(f['id'], f['status'], f.get('issue')) for f in state([r])],
+                         [('F2', 'filed', url)])
+
+    def test_a_finding_filed_by_an_earlier_review_is_not_filed_again(self):
+        sol = FakeSol([reply(findings=[pre_existing('F2')]), reply(findings=[pre_existing('F2')])])
+        r = self.one_pr(sol=sol, ancestors={(H2, H3)})
+        r.review_pass()
+        self.gh.prs = [dataclasses.replace(self.gh.prs[0], head_sha=H3)]
+        self.git.heads[20] = H3
+        r.review_pass()
+        self.assertEqual([p[0] for p in self.gh.posts],
+                         ['issue', 'comment', 'status', 'comment', 'status'])
+        self.assertIn('Already filed after an earlier review', self.gh.posts[3][2])
+
+    def test_an_open_issue_that_holds_the_finding_is_linked_not_filed_again(self):
+        # A comment that failed after its issues were filed left this one; the retry finds it.
+        had = Issue(77, 'Something else', 'x\n<!-- sol-finding owner/first#20 F2 -->',
+                    url='https://github.com/owner/first/issues/77')
+        sol = FakeSol([reply(findings=[pre_existing('F2')])])
+        self.one_pr(sol=sol, open_issue_list=[had]).review_pass()
+        self.assertEqual([p[0] for p in self.gh.posts], ['comment', 'status'])
+        self.assertIn('F2 → [#77](https://github.com/owner/first/issues/77)', self.gh.posts[0][2])
+
+    def test_open_issues_unreadable_files_nothing_and_says_so_on_the_pr(self):
+        sol = FakeSol([reply(findings=[pre_existing('F2')])])
+        self.one_pr(sol=sol, fail={'open_issues'}).review_pass()
+        self.assertEqual([p[0] for p in self.gh.posts], ['comment', 'status'])
+        self.assertIn('Filing F2 as follow-up issues failed', self.gh.posts[0][2])
+
+    def test_a_comment_that_cant_be_posted_fails_the_review_and_it_is_reviewed_again(self):
+        sol = FakeSol([reply(findings=[important('F1')]), reply(findings=[important('F1')])])
+        r = self.one_pr(sol=sol, fail={'comment'})
+        r.review_pass()
+        self.assertEqual(self.gh.posts, [])   # no status without its comment
+        [job] = self.jobs.jobs()
+        self.assertEqual(job.outcome, 'failed')
+        self.gh.fail.clear()
+        self.assertEqual(r.review_pass(), 'started')
+        self.assertEqual([p[0] for p in self.gh.posts], ['comment', 'status'])
+
+    def test_a_review_that_failed_posts_nothing(self):
+        self.one_pr(sol=FakeSol(['No block here.'])).review_pass()
+        self.assertEqual(self.gh.posts, [])
+
+    def test_a_failed_status_leaves_the_posted_review_standing(self):
+        self.one_pr(fail={'status'}).review_pass()
+        self.assertEqual([p[0] for p in self.gh.posts], ['comment'])
+        self.assertEqual(self.jobs.jobs()[0].outcome, 'blocking')
+        self.assertTrue(any('setting sol-review' in s for s in self.said))
+
+    def test_a_repo_with_a_review_table_gets_its_row_in_the_pr_body(self):
+        self.repo = dataclasses.replace(self.repo, review_table=True)
+        self.config = dataclasses.replace(self.config, repos=[self.repo])
+        body = ('Closes #5\n\n## Evidence\n\nTests pass.\n\n## Review\n\n'
+                '| Step | Time (UTC) | Commit | Verdict |\n|---|---|---|---|\n'
+                '| Opened | 2026-11-09 11:00 | `bbbbbbb` | Waiting on Sol |\n')
+        edited = body.replace('Tests pass.', 'Tests pass, edited while Sol ran.')
+        self.one_pr(body=body, bodies={20: edited}).review_pass()
+        [_, _, (b, n, new)] = self.gh.posts
+        self.assertEqual((b, n), ('body', 20))
+        self.assertRegex(new, re.escape(
+            '| Opened | 2026-11-09 11:00 | `bbbbbbb` | Waiting on Sol |\n'
+            '| [Sol review 1](https://github.com/owner/first/pull/20#issuecomment-901) | ')
+            + r'\d{4}-\d\d-\d\d \d\d:\d\d' + re.escape(
+            ' | `bbbbbbb` | **Blocking**, back to fix; raised: F1; left open: F1 |\n'))
+        self.assertIn('edited while Sol ran', new)   # read afresh, not from the listing
+
+    def test_a_pr_the_old_script_reviews_is_left_to_it(self):
+        for label in ('needs-sol-review', 'sol-reviewed'):
+            with self.subTest(label=label):
+                self.said.clear()
+                r = self.one_pr(labels=(label,))
+                self.assertEqual(r.review_pass(), 'idle')
+                self.assertEqual((self.sol.briefs, self.gh.posts), ([], []))
+                self.assertTrue(any(label in s for s in self.said))
+
+
+def pre_existing(fid):
+    return {'id': fid, 'tag': 'pre-existing', 'class': 'old bug', 'file': 'src/b.ts', 'line': 3,
+            'scenario': 'an old input, the old wrong result'}
 
 
 if __name__ == '__main__':
