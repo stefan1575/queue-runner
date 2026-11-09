@@ -7,7 +7,9 @@ checkouts_dir = "~/.queue-runner/checkouts"  # Sol's detached checkout of a PR's
 poll_seconds = 300   # continuous mode: the pause after a pass that started nothing
 
 # Claude jobs run as T3 threads on this provider instance and model. T3's CLI has no flag for
-# reasoning effort, so a thread gets the model's default effort in T3.
+# reasoning effort, so a thread gets the model's default effort in T3. For claude-opus-5-5 that's
+# medium (`~/.t3/userdata/model-manifest.json`, profile opus-5-5), which is what Stefan wants for
+# builds (2026-11-09).
 [claude]
 provider = "claudeAgent"
 model = "claude-opus-5-5"

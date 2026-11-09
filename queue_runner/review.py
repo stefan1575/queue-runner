@@ -137,7 +137,11 @@ class Reviewer:
 
     def _candidates(self, repo):
         for pr in sorted(self.github.open_pulls(repo), key=lambda p: p.number):
-            yield pr, self.why_not(repo, pr)
+            try:
+                why = self.why_not(repo, pr)
+            except Exception as e:   # GitHub failing on one PR leaves the others to go on
+                why = f'reading it failed ({type(e).__name__}: {e})'
+            yield pr, why
 
     def _paused(self) -> bool:
         resume = self.jobs.sol_resume_at()

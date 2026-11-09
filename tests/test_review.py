@@ -225,6 +225,19 @@ class ReviewerTest(unittest.TestCase):
         [job] = self.jobs.jobs()
         self.assertEqual(job.outcome, 'failed')
 
+    def test_github_failing_on_one_pr_skips_that_pr_not_the_pass(self):
+        class Flaky(FakeGitHubForReviews):
+            def checks(self, repo, sha):
+                if sha == H1:
+                    raise RuntimeError('TLS handshake timeout')
+                return super().checks(repo, sha)
+        gh = Flaky(prs=[full_pr(10, 'a', H1), full_pr(20, 'b', H2)])
+        r = self.reviewer(gh, FakeReviewGit(heads={20: H2}), FakeSol([reply()]))
+        self.assertEqual(r.review_pass(), 'started')
+        [job] = self.jobs.jobs()
+        self.assertEqual(job.issue, 20)
+        self.assertTrue(any('#10' in s and 'TLS handshake timeout' in s for s in self.said))
+
     def test_candidates_say_what_would_be_reviewed(self):
         r = self.one_pr()
         [(pr, why)] = r.candidates(self.repo)
