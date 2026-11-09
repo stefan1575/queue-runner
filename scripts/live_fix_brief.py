@@ -16,10 +16,9 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from queue_runner.config import load_config  # noqa: E402
-from queue_runner.fix import Fixer  # noqa: E402
+from queue_runner.fix import Fixer, fix_branch  # noqa: E402
 from queue_runner.git import GitCli  # noqa: E402
 from queue_runner.github import GhCli  # noqa: E402
-from queue_runner.merge import fix_branch  # noqa: E402
 from queue_runner.state import JobLog  # noqa: E402
 
 

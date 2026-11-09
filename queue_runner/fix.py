@@ -16,10 +16,16 @@ from importlib import resources
 from string import Template
 
 from .brief import _agents_pointer
-from .ledger import OPEN, norm, read_reviews, state, STATUSES
-from .merge import OLD_LABELS, fix_branch
+from .github import OLD_LABELS
+from .ledger import OPEN, STATUSES, newest_on, norm, read_reviews, state
 from .picker import closed_issues
-from .state import NOT_STARTED, REVIEWED, JobLog
+from .state import NOT_STARTED, JobLog
+
+
+def fix_branch(number: int, sha: str) -> str:
+    """The local branch a fix round's T3 worktree is made on, from H. It never goes to origin:
+    the round pushes to the PR's own branch."""
+    return f'claude/fix-pr{number}-{sha[:7]}'
 
 
 def fix_title(repo, number: int) -> str:
@@ -36,13 +42,11 @@ class Fixer:
         self.config, self.github, self.git, self.jobs = config, github, git, jobs
 
     def review_to_fix(self, repo, pr):
-        """The runner's newest review of the PR's head, if it says fix: else None. A release
-        doesn't undo it: the review stands on GitHub."""
+        """The runner's newest review of the PR's head, if it says fix: else None."""
         if any(lb in OLD_LABELS for lb in pr.labels):
             return None
-        ran = [j for j in self.jobs.on('review', repo.name, pr.number, pr.head_sha, released=True)
-               if j.outcome in REVIEWED]
-        return ran[-1] if ran and ran[-1].outcome == 'blocking' else None
+        review = self.jobs.runner_review(repo.name, pr.number, pr.head_sha)
+        return review if review and review.outcome == 'blocking' else None
 
     def why_not(self, repo, pr) -> str | None:
         """Why a PR whose head the runner found blocking gets no fix round now, or None."""
@@ -58,10 +62,7 @@ class Fixer:
                     f'left for Stefan (or --release {repo.name}#{pr.number})')
         if job := self.jobs.writer(repo.name, pr.branch):
             return f'a {job.kind} job is writing to {pr.branch}'
-        reviews = read_reviews(self.github.issue_comments(repo, pr.number))
-        last = reviews[-1] if reviews else None
-        if not last or not (last['sha'] and pr.head_sha.startswith(last['sha'])) or \
-                last['verdict'] != 'blocking':
+        if not newest_on(self.github.issue_comments(repo, pr.number), pr.head_sha, 'blocking'):
             return f'its newest review comment is not the blocking review of {h7}'
         return None
 
@@ -91,9 +92,7 @@ class Fixer:
         here = repo.github.lower()
         closes = [f'#{k}' if where == here else f'{where}#{k}'
                   for where, k in closed_issues(pr.body, here)]
-        threads = [j for j in self.jobs.jobs() if j.repo == repo.name and j.link and (
-            (j.kind == 'build' and j.branch == pr.branch) or (j.kind == 'fix' and j.issue ==
-                                                               pr.number))]
+        threads = [j for j in self.jobs.pr_jobs(repo.name, pr.number, pr.branch) if j.link]
         return _template().substitute(
             number=pr.number, github=repo.github, title=pr.title, round=review.round,
             sha=h, sha7=h[:7], work=fix_branch(pr.number, h), branch=pr.branch, base=pr.base,

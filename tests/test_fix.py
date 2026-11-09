@@ -8,7 +8,7 @@ import unittest
 
 from queue_runner.config import Config, Repo
 from queue_runner.github import Comment, Issue
-from queue_runner.merge import fix_branch
+from queue_runner.fix import fix_branch
 from queue_runner.run import Runner
 from tests.fakes import FakeGitHubForReviews, full_pr, issue
 from tests.fakes_t3 import FakeReviewGit, FakeSol, FakeT3
@@ -184,6 +184,30 @@ class FixTest(unittest.TestCase):
         r.run_pass()
         r.jobs.released('first', 20)
         self.assertIsNotNone(r.next_fix())
+
+    def test_after_a_release_sol_still_leaves_the_reviewed_head_alone(self):
+        # The release lets H have another fix round; its review comment keeps Sol off H, so the
+        # round is the PR's one writer.
+        r = self.blocking(outcomes=[(0, 'completed'), (0, 'completed')])
+        r.run_pass()
+        r.jobs.released('first', 20)
+        self.assertIsNotNone(r.next_fix())
+        why = r.reviewer.why_not(self.repo, self.gh.pull(self.repo, 20))
+        self.assertEqual(why, 'review 1 is on bbbbbbb already (blocking)')
+
+    def test_a_round_whose_pr_cannot_be_read_after_is_recorded_head_unknown(self):
+        gh = self.gh
+
+        class GitHubDownAfter(PushingT3):
+            def start(self, *args, **kwargs):
+                result = super().start(*args, **kwargs)
+                gh.fail.add('pull')   # GitHub goes down while the round runs
+                return result
+        r = self.blocking(t3=GitHubDownAfter([(0, 'completed')], gh, H3))
+        r.run_pass()
+        [fix] = self.fixes(r)
+        self.assertEqual((fix.outcome, fix.head), ('head-unknown', None))
+        self.assertIn('gh failed', fix.error)
 
     def test_a_failed_round_holds_its_head_too(self):
         r = self.blocking(outcomes=[(1, 'failed')])

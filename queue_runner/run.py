@@ -13,8 +13,7 @@ import traceback
 
 from .brief import build_brief
 from .config import Config, Repo
-from .fix import Fixer, fix_title
-from .merge import fix_branch
+from .fix import Fixer, fix_branch, fix_title
 from .lock import RunnerBusy, runner_lock  # noqa: F401 (the CLI takes them from here)
 from .picker import BuildJob, pick
 from .review import Reviewer
@@ -232,7 +231,8 @@ class Runner:
     def finish_fix(self, job: Job, thread_id: str, exit_code: int, status: str,
                    error: str | None, run_id: str | None) -> Job:
         """Records a fix round: `pushed` if the PR's head moved, `no-push` if it ended at H
-        (reviewed already, so the PR waits for Stefan), else `failed` or `waiting`."""
+        (reviewed already, so the PR waits for Stefan), `head-unknown` if GitHub couldn't say,
+        else `failed` or `waiting`."""
         repo = self.repos[job.repo]
         link = worktree = head = pr = None
         commits = []
@@ -252,12 +252,12 @@ class Runner:
             error = error or f'reading the PR after the round failed: {type(e).__name__}: {e}'
         pushed = head is not None and head != job.sha
         outcome = ('waiting' if exit_code == 2 else 'failed' if exit_code else
-                   'pushed' if pushed else 'no-push')
+                   'head-unknown' if head is None else 'pushed' if pushed else 'no-push')
         self.jobs.ended(job.id, exit_code=exit_code, outcome=outcome, thread_id=thread_id,
                         link=link, run_id=run_id, status=status, commits=commits, pr=pr,
                         worktree=worktree, error=error, head=head)
         moved = (f', head {job.sha[:7]} -> {head[:7]}, {len(commits)} commits' if pushed else
-                 f', head still {job.sha[:7]}')
+                 f', head still {job.sha[:7]}' if head else ', head unknown')
         self.say(f'{self._name(job)} ended: {outcome} (exit {exit_code}{moved}) '
                  f'{link or thread_id}')
         return job

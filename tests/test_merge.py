@@ -7,7 +7,8 @@ import unittest
 
 from queue_runner.config import Config, Repo
 from queue_runner.github import Checks, Comment
-from queue_runner.merge import Merger, fix_branch
+from queue_runner.fix import fix_branch
+from queue_runner.merge import Merger
 from queue_runner.review import Reviewer
 from queue_runner.state import JobLog
 from tests.fakes import FakeGitHubForReviews, full_pr

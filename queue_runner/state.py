@@ -180,6 +180,18 @@ class JobLog:
         return [j for j in jobs if (j.kind, j.repo, j.issue) == (kind, repo, number)
                 and (sha is None or j.sha == sha) and (released or j.id not in gone)]
 
+    def runner_review(self, repo: str, number: int, sha: str) -> Job | None:
+        """The runner's newest review that reviewed this head (clean, blocking, stop or
+        approach-note). A release doesn't undo it: the review stands on GitHub."""
+        ran = [j for j in self.on('review', repo, number, sha, released=True)
+               if j.outcome in REVIEWED]
+        return ran[-1] if ran else None
+
+    def pr_jobs(self, repo: str, number: int, branch: str) -> list[Job]:
+        """The Claude jobs that wrote to a PR: builds on its branch and its fix rounds."""
+        return [j for j in self.jobs() if j.repo == repo and (
+            (j.kind == 'build' and j.branch == branch) or (j.kind == 'fix' and j.issue == number))]
+
     def writer(self, repo: str, branch: str) -> Job | None:
         """A Claude job that is writing to this branch, or may again: a build or fix still
         open, or waiting for an answer (until it ends or is released). One writer per PR."""

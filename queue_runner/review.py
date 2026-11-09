@@ -15,7 +15,7 @@ from importlib import resources
 from string import Template
 
 from .config import Config, Repo
-from .github import Comment, PullRequest
+from .github import OLD_LABELS, Comment, PullRequest
 from .ledger import TAGS, OPEN, SolFailed, decide, next_round, norm, read_review, read_reviews, \
     state
 from .lock import RunnerBusy, runner_lock
@@ -29,9 +29,6 @@ STARTED, BUSY, IDLE = 'started', 'busy', 'idle'   # as run.py's lane results
 MAX_FAILED = 2   # failed reviews on one head before the lane leaves it until a release or a push
 RESUME_AFTER = datetime.timedelta(minutes=10)    # after Sol's reset
 RETRY_UNKNOWN = datetime.timedelta(minutes=30)   # when Sol didn't say when
-# Until the cutover (ticket 13) the old ~/sol-pr-review.py still reviews PRs carrying these labels:
-# the runner leaves them to it, so the two never review the same PR.
-OLD_LABELS = ('needs-sol-review', 'sol-reviewed')
 # The job log's outcome for each of decide()'s.
 OUTCOMES = {'merge': 'clean', 'fix': 'blocking', 'stop': 'stop', 'approach-note': 'approach-note'}
 

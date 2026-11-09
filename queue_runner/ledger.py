@@ -104,6 +104,16 @@ def read_reviews(comments) -> list[dict]:
     return [r for c in comments if (r := read_review(c.body or '', c.created_at))]
 
 
+def newest_on(comments, sha: str, verdict: str) -> dict | None:
+    """The PR's newest review, if it's on `sha` with this verdict: no later review has
+    replaced the one the runner acts on."""
+    reviews = read_reviews(comments)
+    last = reviews[-1] if reviews else None
+    if last and last['sha'] and sha.startswith(last['sha']) and last['verdict'] == verdict:
+        return last
+    return None
+
+
 def next_round(earlier: list[dict]) -> int:
     """Reviews the old script posted count: numbering carries on from the newest."""
     return 1 + max((r['round'] for r in earlier), default=0)

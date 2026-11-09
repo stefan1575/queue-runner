@@ -12,22 +12,16 @@ worktrees of the PR's build and fix jobs are removed. The repo's live steps are 
 Merges are automated posts that need no go-ahead (`~/.claude/CLAUDE.md`, Merge when the review is
 clean).
 """
-from .github import Comment
-from .ledger import read_review, read_reviews
-from .state import REVIEWED, JobLog
+from .fix import fix_branch
+from .github import OLD_LABELS, Comment
+from .ledger import newest_on, read_review
+from .state import JobLog
 
 MAX_FAILED = 2   # failed merges on one head before the runner leaves it until a release or a push
-OLD_LABELS = ('needs-sol-review', 'sol-reviewed')   # review.py's: the old script's PRs
 
 
 def merge_title(repo, number: int) -> str:
     return f'Queue runner merge: {repo.name}#{number}'
-
-
-def fix_branch(number: int, sha: str) -> str:
-    """The local branch a fix round's T3 worktree is made on, from H. It never goes to origin:
-    the round pushes to the PR's own branch."""
-    return f'claude/fix-pr{number}-{sha[:7]}'
 
 
 def said_since(comments: list[Comment], at: str) -> list[Comment]:
@@ -48,9 +42,8 @@ class Merger:
         review stands on GitHub."""
         if any(lb in OLD_LABELS for lb in pr.labels):
             return False
-        ran = [j for j in self.jobs.on('review', repo.name, pr.number, pr.head_sha, released=True)
-               if j.outcome in REVIEWED]
-        return bool(ran) and ran[-1].outcome == 'clean' and not any(
+        review = self.jobs.runner_review(repo.name, pr.number, pr.head_sha)
+        return review is not None and review.outcome == 'clean' and not any(
             j.outcome == 'merged' for j in self.jobs.on('merge', repo.name, pr.number,
                                                          pr.head_sha))
 
@@ -82,10 +75,7 @@ class Merger:
                 >= MAX_FAILED:
             return f'{failed} merges failed on {h7}: left until a new head or --release'
         comments = self.github.issue_comments(repo, n)
-        reviews = read_reviews(comments)
-        last = reviews[-1] if reviews else None
-        if not last or not (last['sha'] and h.startswith(last['sha'])) or \
-                last['verdict'] != 'clean':
+        if not (last := newest_on(comments, h, 'clean')):
             return f'its newest review comment is not a clean review of {h7}'
         checks = self.github.checks(repo, h)
         if checks.state != 'passed':
@@ -157,10 +147,8 @@ class Merger:
 
     def remove_worktrees(self, repo, pr) -> None:
         """The worktrees and local branches of the PR's build and fix jobs, once it merged."""
-        jobs = [j for j in self.jobs.jobs() if j.repo == repo.name and j.worktree and (
-            (j.kind == 'build' and j.branch == pr.branch) or (j.kind == 'fix' and j.issue ==
-                                                               pr.number))]
-        for j in jobs:
+        for j in [j for j in self.jobs.pr_jobs(repo.name, pr.number, pr.branch)
+                  if j.worktree]:
             branch = j.branch if j.kind == 'build' else fix_branch(pr.number, j.sha or '')
             try:
                 gone = self.git.remove_worktree(repo.path, j.worktree, branch)

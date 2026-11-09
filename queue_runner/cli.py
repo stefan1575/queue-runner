@@ -49,7 +49,7 @@ def _dry_run_fix(config, github, git, out, log_line) -> bool:
     """Prints the fix round the Claude lane would start, with its brief. It fetches the PR's
     head (local refs only) so the brief's commits and files are real; nothing else changes."""
     from .fix import Fixer
-    from .merge import fix_branch
+    from .fix import fix_branch
     fixer = Fixer(config, github=github, git=git, jobs=_jobs(config))
     for repo in config.repos:
         if not repo.github:

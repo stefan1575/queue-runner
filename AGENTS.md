@@ -91,7 +91,9 @@ retries it.
 **Fix job records** (kind `fix`, `issue` = the PR, `branch` = the PR's) add `sha` (H), `round`
 and `head` (the PR's head afterwards, read from GitHub), with `commits` the ones it pushed
 (`H..head`). Outcomes: `pushed` (exit 0, the head moved: Sol reviews the new head), `no-push`
-(exit 0 at H: H was reviewed, so the PR waits for Stefan; ticket 06 files the stop), `failed`,
+(exit 0 at H: H was reviewed, so the PR waits for Stefan; ticket 06 files the stop),
+`head-unknown` (exit 0, but GitHub couldn't say afterwards; the Sol lane still reads the real
+head), `failed`,
 `waiting`, `branch-exists` and `not-started`, as for builds.
 
 ## A Sol pass
@@ -298,7 +300,7 @@ temp folder.
 - `queue_runner/run.py`: the two lanes, a build job, a fix round's thread and the loop.
 - `queue_runner/fix.py` and `templates/fix.md`: which PRs get a fix round, and its brief.
 - `queue_runner/merge.py`: the pre-merge re-check, the expected-head merge and the worktrees
-  removed after.
+  removed after. A fix round's local branch name (`fix_branch`) is `fix.py`'s.
 - `queue_runner/review.py` and `templates/review.md`: the Sol lane: adoption, the brief, a review.
 - `queue_runner/ledger.py`: earlier reviews from a PR's comments, and `decide()`.
 - `queue_runner/post.py`: posting a review: follow-up issues, the comment, `sol-review`, the
