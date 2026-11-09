@@ -2,7 +2,7 @@ import json
 import unittest
 
 from queue_runner.config import Repo
-from queue_runner.github import Comment, GhCli, Issue, PullRequest
+from queue_runner.github import Checks, Comment, GhCli, Issue, PullRequest
 
 REPO = Repo(name='demo', github='owner/demo', path='C:/demo')
 
@@ -51,6 +51,65 @@ class GhCliTest(unittest.TestCase):
         gh = FakeGh({'repos/owner/demo/pulls?state=open&per_page=100': [
             {'number': 20, 'head': {'ref': 'claude/x-5'}, 'body': None}]})
         self.assertEqual(GhCli(gh).open_pulls(REPO), [PullRequest(20, 'claude/x-5', '')])
+
+    def test_open_pulls_carry_what_a_review_needs(self):
+        gh = FakeGh({'repos/owner/demo/pulls?state=open&per_page=100': [
+            {'number': 20, 'title': 'Red', 'body': 'Closes #5', 'draft': False,
+             'html_url': 'https://github.com/owner/demo/pull/20',
+             'head': {'ref': 'claude/x-5', 'sha': 'a' * 40}, 'base': {'ref': 'claude/y-4'},
+             'labels': [{'name': 'sol-reviewed'}]}]})
+        [p] = GhCli(gh).open_pulls(REPO)
+        self.assertEqual((p.title, p.head_sha, p.base, p.url, p.labels),
+                         ('Red', 'a' * 40, 'claude/y-4', 'https://github.com/owner/demo/pull/20',
+                          ('sol-reviewed',)))
+
+    def checks(self, runs, statuses):
+        sha = 'a' * 40
+        return GhCli(FakeGh({
+            f'repos/owner/demo/commits/{sha}/check-runs?per_page=100': {
+                'total_count': len(runs), 'check_runs': [
+                    {'name': n, 'status': s, 'conclusion': c} for n, s, c in runs]},
+            f'repos/owner/demo/commits/{sha}/status': {
+                'state': 'x', 'statuses': [{'context': n, 'state': s} for n, s in statuses]},
+        })).checks(REPO, sha)
+
+    def test_checks_pass_when_every_check_and_status_passed_leaving_out_sol_review(self):
+        c = self.checks([('check', 'completed', 'success'), ('lint', 'completed', 'skipped')],
+                        [('sol-review', 'failure'), ('deploy', 'success')])
+        self.assertEqual(c, Checks('passed', failed=(), pending=()))
+
+    def test_checks_fail_when_any_failed_and_wait_while_any_runs(self):
+        self.assertEqual(self.checks([('check', 'completed', 'failure'),
+                                      ('e2e', 'in_progress', None)], []).state, 'failed')
+        c = self.checks([('check', 'in_progress', None)], [('deploy', 'pending')])
+        self.assertEqual((c.state, c.pending), ('pending', ('check', 'deploy')))
+        self.assertEqual(self.checks([], [('ci', 'error')]).failed, ('ci',))
+
+    def test_no_checks_yet(self):
+        self.assertEqual(self.checks([], [('sol-review', 'success')]).state, 'none')
+
+    def test_a_pull_request_with_a_conflict(self):
+        gh = FakeGh({'repos/owner/demo/pulls/20': {'mergeable': False, 'mergeable_state': 'dirty'},
+                     'repos/owner/demo/pulls/21': {'mergeable': None, 'mergeable_state': 'unknown'}})
+        self.assertTrue(GhCli(gh).has_conflict(REPO, 20))
+        self.assertFalse(GhCli(gh).has_conflict(REPO, 21))
+
+    def test_review_threads_and_review_bodies_as_replies(self):
+        gh = FakeGh({
+            'repos/owner/demo/pulls/20/comments?per_page=100': [
+                {'user': {'login': 'claude'}, 'created_at': '2026-11-02T00:00:00Z',
+                 'body': 'F1 declined', 'path': 'src/a.ts', 'line': None, 'original_line': 9}],
+            'repos/owner/demo/pulls/20/reviews?per_page=100': [
+                {'user': {'login': 'stefan'}, 'submitted_at': '2026-11-03T00:00:00Z', 'body': ''},
+                {'user': {'login': 'stefan'}, 'submitted_at': '2026-11-04T00:00:00Z',
+                 'body': 'Looks odd'}]})
+        self.assertEqual(GhCli(gh).review_replies(REPO, 20), [
+            Comment('claude', '2026-11-02T00:00:00Z', 'F1 declined', path='src/a.ts', line=9),
+            Comment('stefan', '2026-11-04T00:00:00Z', 'Looks odd')])
+
+    def test_an_issue_in_any_repo(self):
+        gh = FakeGh({'repos/other/x/issues/3': {'number': 3, 'title': 'T', 'body': None}})
+        self.assertEqual(GhCli(gh).issue('other/x', 3), Issue(3, 'T', ''))
 
     def test_branches_under_a_prefix(self):
         gh = FakeGh({'repos/owner/demo/git/matching-refs/heads/claude/': [

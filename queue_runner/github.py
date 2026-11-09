@@ -18,6 +18,12 @@ class PullRequest:
     number: int
     branch: str
     body: str
+    title: str = ''
+    head_sha: str = ''     # H: the commit a review reviews
+    base: str = ''         # the branch it merges into (not always main: PRs stack)
+    url: str = ''
+    labels: tuple = ()
+    draft: bool = False
 
 
 @dataclass(frozen=True)
@@ -25,6 +31,22 @@ class Comment:
     author: str
     created_at: str
     body: str
+    path: str | None = None   # a review thread's file and line
+    line: int | None = None
+
+
+@dataclass(frozen=True)
+class Checks:
+    """A commit's checks, the `sol-review` status left out: passed, failed, pending, or none
+    (nothing reported yet)."""
+    state: str
+    failed: tuple = ()
+    pending: tuple = ()
+
+
+# The runner's own status on a reviewed commit: never counted as one of its checks.
+SOL_REVIEW = 'sol-review'
+_PASSED = {'success', 'neutral', 'skipped'}
 
 
 class GhError(RuntimeError):
@@ -100,8 +122,49 @@ class GhCli:
         return self._get(f'repos/{github}/issues/{number}')['state']
 
     def open_pulls(self, repo) -> list[PullRequest]:
-        return [PullRequest(number=p['number'], branch=p['head']['ref'], body=p.get('body') or '')
+        return [PullRequest(number=p['number'], branch=p['head']['ref'], body=p.get('body') or '',
+                            title=p.get('title') or '', head_sha=p['head'].get('sha') or '',
+                            base=(p.get('base') or {}).get('ref') or '',
+                            url=p.get('html_url') or '',
+                            labels=tuple(lb['name'] for lb in p.get('labels') or ()),
+                            draft=bool(p.get('draft')))
                 for p in self._all(f'repos/{repo.github}/pulls?state=open&per_page=100')]
+
+    def checks(self, repo, sha) -> Checks:
+        """Check runs and commit statuses on `sha`, leaving out `sol-review`."""
+        runs = self._get(f'repos/{repo.github}/commits/{sha}/check-runs?per_page=100')
+        status = self._get(f'repos/{repo.github}/commits/{sha}/status')
+        seen = [(r['name'], r['conclusion'] if r['status'] == 'completed' else 'pending')
+                for r in runs.get('check_runs') or ()]
+        seen += [(s['context'], s['state']) for s in status.get('statuses') or ()
+                 if s['context'] != SOL_REVIEW]
+        failed = tuple(n for n, s in seen if s not in _PASSED and s != 'pending')
+        pending = tuple(n for n, s in seen if s == 'pending')
+        state = ('none' if not seen else 'failed' if failed else 'pending' if pending
+                 else 'passed')
+        return Checks(state, failed=failed, pending=pending)
+
+    def has_conflict(self, repo, number) -> bool:
+        """True once GitHub says the PR can't merge cleanly; unknown (still computing) is False."""
+        return self._get(f'repos/{repo.github}/pulls/{number}').get('mergeable') is False
+
+    def review_replies(self, repo, number) -> list[Comment]:
+        """A PR's review-thread comments and non-empty review bodies (its other comments are
+        `issue_comments`)."""
+        said = [Comment(author=(c.get('user') or {}).get('login', 'ghost'),
+                        created_at=c['created_at'], body=c.get('body') or '', path=c.get('path'),
+                        line=c.get('line') or c.get('original_line'))
+                for c in self._all(f'repos/{repo.github}/pulls/{number}/comments?per_page=100')]
+        said += [Comment(author=(r.get('user') or {}).get('login', 'ghost'),
+                         created_at=r['submitted_at'], body=r['body'])
+                 for r in self._all(f'repos/{repo.github}/pulls/{number}/reviews?per_page=100')
+                 if r.get('body') and r.get('submitted_at')]
+        return said
+
+    def issue(self, github: str, number: int) -> Issue:
+        """An issue's title and body, in any repo (`owner/name`)."""
+        i = self._get(f'repos/{github}/issues/{number}')
+        return Issue(number=i['number'], title=i['title'], body=i.get('body') or '')
 
     def branches(self, repo, prefix) -> list[str]:
         refs = self._all(f'repos/{repo.github}/git/matching-refs/heads/{prefix}')
