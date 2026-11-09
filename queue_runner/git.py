@@ -42,3 +42,34 @@ class GitCli:
                         f'{base}..refs/heads/{branch}'])
         return [dict(zip(('sha', 'subject'), line.split('\t', 1)))
                 for line in out.splitlines() if line]
+
+    # --- a review's checkout ------------------------------------------------------------------
+
+    def fetch_pr(self, path: str, number: int, base: str) -> tuple[str, str]:
+        """Fetches the PR's head into a runner ref, and its base branch. Returns (ref, sha)."""
+        ref = f'refs/queue-runner/pr{number}'
+        self._ok(['-C', path, 'fetch', '--quiet', 'origin', f'+refs/pull/{number}/head:{ref}',
+                  f'+refs/heads/{base}:refs/remotes/origin/{base}'])
+        return ref, self._ok(['-C', path, 'rev-parse', ref]).strip()
+
+    def checkout(self, path: str, ref: str, worktree: str) -> None:
+        """A detached worktree at `ref` for Sol to read, made afresh."""
+        self.remove_checkout(path, worktree)
+        self._ok(['-C', path, 'worktree', 'add', '--detach', worktree, ref])
+
+    def remove_checkout(self, path: str, worktree: str, ref: str | None = None) -> None:
+        import os
+        if os.path.exists(worktree):
+            self._run(['-C', path, 'worktree', 'remove', '--force', worktree])
+        self._run(['-C', path, 'worktree', 'prune'])
+        if ref:
+            self._run(['-C', path, 'update-ref', '-d', ref])
+
+    def is_ancestor(self, path: str, older: str, newer: str) -> bool:
+        """Whether `older` is in `newer`'s history; False for a commit this clone lacks."""
+        return self._run(['-C', path, 'merge-base', '--is-ancestor', older, newer])[0] == 0
+
+    def diff(self, path: str, a: str, b: str, merge_base: bool = False) -> str:
+        """`git diff a..b`, or with `merge_base` the PR-style `a...b` (from where b left a)."""
+        return self._ok(['-C', path, 'diff', f'{a}...{b}' if merge_base else a, *(
+            [] if merge_base else [b])])

@@ -8,12 +8,30 @@ handled a held issue, so the picker may take it again).
 import datetime
 import json
 import os
+import threading
 import uuid
 from dataclasses import dataclass, field, replace
 
 # An ended build job holds its issue, so a failed or waiting run never loops, unless it never
 # got a thread to begin with.
 NOT_STARTED = 'not-started'
+
+# A review job's outcomes. These four mean Sol reviewed the head: it isn't reviewed again.
+REVIEWED = frozenset({'clean', 'blocking', 'stop', 'approach-note'})
+# Not a review: `failed` (no readable ledger, Sol's run failed, or the runner failed around it),
+# `out-of-usage` (the Sol lane waits until resume_at) and `head-moved` (a push between listing the
+# PR and fetching it).
+FAILED_REVIEW = 'failed'
+OUT_OF_USAGE = 'out-of-usage'
+
+# Both lanes write the log from one process: one lock per file.
+_LOCKS: dict[str, threading.Lock] = {}
+_LOCKS_LOCK = threading.Lock()
+
+
+def _lock(path: str) -> threading.Lock:
+    with _LOCKS_LOCK:
+        return _LOCKS.setdefault(os.path.normcase(os.path.abspath(path)), threading.Lock())
 
 
 def _now() -> str:
@@ -23,9 +41,9 @@ def _now() -> str:
 @dataclass(frozen=True)
 class Job:
     id: str
-    kind: str                 # build (fix, review... in later tickets)
+    kind: str                 # build or review (fix... in later tickets)
     repo: str                 # the repo's name in config.toml
-    issue: int | None
+    issue: int | None         # the issue; for a review, the PR
     branch: str | None
     title: str                # the T3 thread's title; finds the thread after a crash
     started_at: str
@@ -40,6 +58,12 @@ class Job:
     pr: dict | None = None
     worktree: str | None = None
     error: str | None = None
+    sha: str | None = None         # a review: H, the commit reviewed
+    round: int | None = None       # a review: its number on the PR
+    verdict: str | None = None     # a review: clean or blocking
+    signals: list = field(default_factory=list)   # a review: the stop signals that fired
+    run_dir: str | None = None     # a review: its brief, inputs, reply and would-be comment
+    resume_at: str | None = None   # out-of-usage: when the Sol lane may run again
 
     @property
     def open(self) -> bool:
@@ -47,18 +71,19 @@ class Job:
 
 
 _END_FIELDS = ('thread_id', 'link', 'run_id', 'exit_code', 'status', 'outcome', 'commits', 'pr',
-               'worktree', 'error')
+               'worktree', 'error', 'verdict', 'signals', 'run_dir', 'resume_at')
 
 
 class JobLog:
     def __init__(self, path: str):
         self.path = path
+        self._lock = _lock(path)
 
     def _append(self, record: dict) -> None:
         """Appends one record and syncs it to disk, so a start record exists before t3 runs.
         A final record torn by a crash (no newline yet) is cut off first."""
         os.makedirs(os.path.dirname(self.path), exist_ok=True)
-        with open(self.path, 'ab+') as f:
+        with self._lock, open(self.path, 'ab+') as f:
             f.seek(0)
             data = f.read()
             if data and not data.endswith(b'\n'):
@@ -70,7 +95,7 @@ class JobLog:
     def _events(self):
         if not os.path.exists(self.path):
             return
-        with open(self.path, 'rb') as f:
+        with self._lock, open(self.path, 'rb') as f:
             data = f.read()
         # Every complete record ends in a newline; what follows the last one was torn by a crash
         # (maybe inside a multibyte character), so it's cut off before decoding.
@@ -79,13 +104,17 @@ class JobLog:
                 yield json.loads(line)
 
     def started(self, *, kind: str, repo: str, issue: int | None, branch: str | None,
-                title: str) -> Job:
+                title: str, sha: str | None = None, round: int | None = None) -> Job:
         at = _now()
         stamp = at[:19].replace('-', '').replace(':', '').replace('T', '-')
         job = Job(id=f'{stamp}-{kind}-{repo}-{issue}-{uuid.uuid4().hex[:6]}', kind=kind,
-                  repo=repo, issue=issue, branch=branch, title=title, started_at=at)
-        self._append({'event': 'start', 'job': job.id, 'kind': kind, 'repo': repo,
-                      'issue': issue, 'branch': branch, 'title': title, 'at': at})
+                  repo=repo, issue=issue, branch=branch, title=title, started_at=at, sha=sha,
+                  round=round)
+        record = {'event': 'start', 'job': job.id, 'kind': kind, 'repo': repo, 'issue': issue,
+                  'branch': branch, 'title': title, 'at': at}
+        if sha:
+            record.update(sha=sha, round=round)
+        self._append(record)
         return job
 
     def ended(self, job_id: str, *, exit_code: int | None, outcome: str, **fields) -> None:
@@ -106,7 +135,8 @@ class JobLog:
             kind = e['event']
             if kind == 'start':
                 job = Job(id=e['job'], kind=e['kind'], repo=e['repo'], issue=e['issue'],
-                          branch=e['branch'], title=e['title'], started_at=e['at'])
+                          branch=e['branch'], title=e['title'], started_at=e['at'],
+                          sha=e.get('sha'), round=e.get('round'))
                 jobs[job.id] = job
                 if job.kind == 'build':
                     held[(job.repo, job.issue)] = True
@@ -131,6 +161,18 @@ class JobLog:
     def waiting_jobs(self) -> list[Job]:
         jobs, _, released = self._fold()
         return [j for j in jobs if j.outcome == 'waiting' and j.id not in released]
+
+    def reviews_of(self, repo: str, number: int, sha: str) -> list[Job]:
+        """The review jobs on this PR's head H, oldest first, leaving out any a release settled."""
+        jobs, _, released = self._fold()
+        return [j for j in jobs if j.kind == 'review' and (j.repo, j.issue, j.sha) ==
+                (repo, number, sha) and j.id not in released]
+
+    def sol_resume_at(self) -> str | None:
+        """When the Sol lane may run again, if the newest ended review found Sol out of usage."""
+        ended = [j for j in self.jobs() if j.kind == 'review' and not j.open]
+        last = max(ended, key=lambda j: j.ended_at, default=None)
+        return last.resume_at if last and last.outcome == OUT_OF_USAGE else None
 
     def held_issues(self, repo: str) -> set[int]:
         """Issues the build picker must leave alone: a build is open on them, or ended without

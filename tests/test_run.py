@@ -8,8 +8,9 @@ import unittest
 from queue_runner.cli import main
 from queue_runner.state import JobLog
 from queue_runner.t3 import T3Error
-from tests.fakes import FakeGitHubWithPulls, issue
-from tests.fakes_t3 import FakeGit, FakeT3
+from tests.fakes import FakeGitHubForReviews, FakeGitHubWithPulls, full_pr, issue
+from tests.fakes_t3 import FakeGit, FakeReviewGit, FakeSol, FakeT3
+from tests.test_ledger import H2, important, reply
 
 PR = {'number': 12, 'url': 'https://github.com/owner/first/pull/12', 'state': 'open'}
 
@@ -41,10 +42,10 @@ path = "{self.dir}"
 ''')
         self.log = JobLog(os.path.join(self.dir, 'state', 'jobs.jsonl'))
 
-    def run_main(self, args, github, t3, git=None, sleep=None):
+    def run_main(self, args, github, t3, git=None, sleep=None, sol=None):
         out = io.StringIO()
         code = main(args + ['--config', self.config], github=github, out=out, t3=t3,
-                    git=git or FakeGit(), sleep=sleep or (lambda s: None))
+                    git=git or FakeGit(), sleep=sleep or (lambda s: None), sol=sol or FakeSol())
         return code, out.getvalue()
 
     def runner_log(self):
@@ -245,6 +246,50 @@ path = "{self.dir}"
             code, out = self.run_main(['--once'], FakeGitHubWithPulls(issues=[issue(4)]), FakeT3())
         self.assertEqual(code, 3)
         self.assertIn('already running', out)
+
+
+    # --- the Sol lane alongside -------------------------------------------------------------
+
+    def reviews_setup(self):
+        gh = FakeGitHubForReviews(issues=[issue(4, 'Red widget', 'Make it red.')],
+                                  prs=[full_pr(20, 'claude/blue-3', H2)],
+                                  pulls_by_branch={'claude/red-widget-4': PR})
+        git = FakeReviewGit(heads={20: H2})
+        return gh, git, FakeSol([reply(findings=[important('F1')])])
+
+    def test_once_runs_a_build_and_a_review_alongside(self):
+        gh, git, sol = self.reviews_setup()
+        code, out = self.run_main(['--once'], gh, FakeT3([(0, 'completed')]), git, sol=sol)
+        self.assertEqual(code, 0)
+        jobs = {j.kind: j for j in self.log.jobs()}
+        self.assertEqual((jobs['build'].issue, jobs['build'].outcome), (4, 'done'))
+        self.assertEqual((jobs['review'].issue, jobs['review'].outcome), (20, 'blocking'))
+        self.assertIn('review first#20', out)
+
+    def test_an_open_review_is_the_sol_lanes_to_settle_not_the_claude_lanes(self):
+        self.log.started(kind='review', repo='first', issue=20, branch='claude/blue-3',
+                         title='Queue runner review: first#20', sha='e' * 40, round=1)
+        gh, git, sol = self.reviews_setup()
+        self.run_main(['--once'], gh, FakeT3([(0, 'completed')]), git, sol=sol)
+        review = next(j for j in self.log.jobs() if j.kind == 'review' and j.sha == 'e' * 40)
+        self.assertEqual(review.outcome, 'failed')
+
+    def test_review_one_pr_now(self):
+        gh, git, sol = self.reviews_setup()
+        code, out = self.run_main(['--review', 'first#20'], gh, FakeT3(), git, sol=sol)
+        self.assertEqual(code, 0)
+        [job] = self.log.jobs()
+        self.assertEqual((job.kind, job.outcome), ('review', 'blocking'))
+        self.assertIn('is blocking', out)
+        code, out = self.run_main(['--review', 'first#20'], gh, FakeT3(), git, sol=sol)
+        self.assertEqual(code, 1)
+        self.assertIn('reviewed', out)   # already reviewed on that head
+
+    def test_dry_run_also_says_which_prs_sol_would_review(self):
+        gh, git, sol = self.reviews_setup()
+        code, out = self.run_main(['--once', '--dry-run'], gh, FakeT3(), git, sol=sol)
+        self.assertIn(f'would review #20 on {H2[:7]} (review 1)', out)
+        self.assertEqual(sol.briefs, [])
 
 
 if __name__ == '__main__':

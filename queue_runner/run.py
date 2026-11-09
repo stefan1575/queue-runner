@@ -1,52 +1,26 @@
-"""The run loop: settle what earlier passes left open, then start at most one Claude job.
+"""The run loop: two lanes side by side, one Claude job and one Sol job at a time.
 
-A pass blocks on `t3 thread start --wait` while its job runs, so at most one Claude job runs at
-a time; a second runner process is kept out by a lock on `<state_dir>/runner.lock`.
+The Claude lane settles what earlier passes left open, then starts at most one build; it blocks
+on `t3 thread start --wait` while the build runs. The Sol lane (`review.py`) reviews at most one
+PR a pass, under `<state_dir>/sol.lock`. A second runner process is kept out by a lock on
+`<state_dir>/runner.lock`.
 """
-import contextlib
 import datetime
 import os
+import threading
 import traceback
 
 from .brief import build_brief
 from .config import Config, Repo
+from .lock import RunnerBusy, runner_lock  # noqa: F401 (the CLI takes them from here)
 from .picker import BuildJob, pick
+from .review import Reviewer
 from .state import NOT_STARTED, Job, JobLog
 from .t3 import T3Error, Thread
 
 # What a pass did: started (a job ran to its end), busy (a Claude job is still running from an
 # earlier runner, so none was started), idle (nothing to start).
 STARTED, BUSY, IDLE = 'started', 'busy', 'idle'
-
-
-class RunnerBusy(RuntimeError):
-    pass
-
-
-@contextlib.contextmanager
-def runner_lock(state_dir: str):
-    """Held for the runner's whole life. The OS drops it if the process dies."""
-    os.makedirs(state_dir, exist_ok=True)
-    f = open(os.path.join(state_dir, 'runner.lock'), 'a+')
-    try:
-        try:
-            if os.name == 'nt':
-                import msvcrt
-                f.seek(0)
-                msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
-            else:
-                import fcntl
-                fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError:
-            raise RunnerBusy(f'another queue runner holds {f.name}') from None
-        try:
-            yield
-        finally:
-            if os.name == 'nt':
-                f.seek(0)
-                msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
-    finally:
-        f.close()
 
 
 def job_title(repo: Repo, issue: int) -> str:
@@ -65,15 +39,19 @@ def _when(stamp: str) -> datetime.datetime:
 
 
 class Runner:
-    def __init__(self, config: Config, *, github, t3, git, out, log_line):
+    def __init__(self, config: Config, *, github, t3, git, out, log_line, sol=None):
         self.config, self.github, self.t3, self.git = config, github, t3, git
         self.out, self.log_line = out, log_line
         self.jobs = JobLog(os.path.join(config.state_dir, 'jobs.jsonl'))
         self.repos = {r.name: r for r in config.repos}
+        self._say_lock = threading.Lock()
+        self.reviewer = Reviewer(config, github=github, git=git, sol=sol, jobs=self.jobs,
+                                 say=self.say) if sol is not None else None
 
     def say(self, line: str) -> None:
-        self.log_line(line)
-        print(line, file=self.out)
+        with self._say_lock:   # both lanes say things
+            self.log_line(line)
+            print(line, file=self.out)
 
     # --- one pass -------------------------------------------------------------------------
 
@@ -95,6 +73,8 @@ class Runner:
         BUSY if one of their threads is still running."""
         busy = None
         for job in self.jobs.open_jobs():
+            if job.kind != 'build':
+                continue   # an open review is the Sol lane's to settle
             thread = self._find_thread(job)
             if thread is None:
                 self.jobs.ended(job.id, exit_code=None, outcome=NOT_STARTED,
@@ -214,12 +194,41 @@ class Runner:
 
     # --- the loop ---------------------------------------------------------------------------
 
+    def _sol_pass(self) -> str:
+        try:
+            return self.reviewer.review_pass() if self.reviewer else IDLE
+        except Exception:
+            self.log_line('Sol pass failed:\n' + traceback.format_exc())
+            return IDLE
+
+    def _sol_lane(self, stop: threading.Event) -> None:
+        while not stop.is_set():
+            if self._sol_pass() != STARTED:
+                stop.wait(self.config.poll_seconds)
+
+    def run_once(self) -> None:
+        """One pass of each lane, side by side."""
+        sol = threading.Thread(target=self._sol_pass, name='sol-lane')
+        sol.start()
+        try:
+            self.run_pass()
+        finally:
+            sol.join()
+
     def run_forever(self, sleep) -> None:
-        while True:
-            try:
-                did = self.run_pass()
-            except Exception:
-                self.log_line('pass failed:\n' + traceback.format_exc())
-                did = IDLE
-            if did != STARTED:
-                sleep(self.config.poll_seconds)
+        """The Claude lane here; the Sol lane in a thread that stops when this loop does."""
+        stop = threading.Event()
+        sol = threading.Thread(target=self._sol_lane, args=(stop,), name='sol-lane', daemon=True)
+        sol.start()
+        try:
+            while True:
+                try:
+                    did = self.run_pass()
+                except Exception:
+                    self.log_line('pass failed:\n' + traceback.format_exc())
+                    did = IDLE
+                if did != STARTED:
+                    sleep(self.config.poll_seconds)
+        finally:
+            stop.set()
+            sol.join(timeout=5)

@@ -2,6 +2,8 @@
 # State and logs live outside every served repo.
 state_dir = "~/.queue-runner/state"
 log_dir = "~/.queue-runner/logs"
+runs_dir = "~/.queue-runner/runs"            # each Sol review's brief, inputs, reply and comment
+checkouts_dir = "~/.queue-runner/checkouts"  # Sol's detached checkout of a PR's head
 poll_seconds = 300   # continuous mode: the pause after a pass that started nothing
 
 # Claude jobs run as T3 threads on this provider instance and model. T3's CLI has no flag for
@@ -9,6 +11,11 @@ poll_seconds = 300   # continuous mode: the pause after a pass that started noth
 [claude]
 provider = "claudeAgent"
 model = "claude-opus-5-5"
+
+# Sol reviews run through codex-sol.sh at effort high (a T3 thread can't be given an effort).
+[sol]
+script = "~/codex-sol.sh"
+bash = "C:/Program Files/Git/bin/bash.exe"
 
 [[repos]]
 name = "leads-dashboard"

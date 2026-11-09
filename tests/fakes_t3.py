@@ -61,3 +61,57 @@ class FakeGit:
 
     def commits(self, path, base, branch):
         return list(self.commit_log.get(branch, []))
+
+
+class FakeReviewGit(FakeGit):
+    """FakeGit plus a review's checkout: `heads` is what fetching each PR finds (default: the
+    sha the test says), `files` what the checkout holds, `ancestors` the (older, newer) pairs
+    in history."""
+
+    def __init__(self, *args, heads=None, files=None, ancestors=(), **kwargs):
+        super().__init__(*args, **kwargs)
+        self.heads = dict(heads or {})
+        self.files = dict(files or {})
+        self.ancestors = set(ancestors)
+        self.checkouts, self.removed = [], []
+
+    def fetch_pr(self, path, number, base):
+        self.fetches.append((path, f'pr{number}', base))
+        return f'refs/queue-runner/pr{number}', self.heads[number]
+
+    def checkout(self, path, ref, worktree):
+        import os
+        os.makedirs(worktree, exist_ok=True)
+        for name, text in self.files.items():
+            with open(os.path.join(worktree, name), 'w', encoding='utf-8') as f:
+                f.write(text)
+        self.checkouts.append((path, ref, worktree))
+
+    def remove_checkout(self, path, worktree, ref=None):
+        import shutil
+        shutil.rmtree(worktree, ignore_errors=True)
+        self.removed.append((worktree, ref))
+
+    def is_ancestor(self, path, older, newer):
+        return (older, newer) in self.ancestors
+
+    def diff(self, path, a, b, merge_base=False):
+        return f'diff {a}{"..." if merge_base else ".."}{b}\n'
+
+
+class FakeSol:
+    """Plays Sol: each review returns the next reply, or raises it if it's an exception."""
+
+    def __init__(self, replies=()):
+        self.replies = list(replies)
+        self.briefs = []
+
+    def review(self, brief, reply, workdir, out):
+        with open(brief, encoding='utf-8') as f:
+            self.briefs.append({'brief': f.read(), 'workdir': workdir})
+        r = self.replies.pop(0)
+        if isinstance(r, Exception):
+            raise r
+        with open(reply, 'w', encoding='utf-8') as f:
+            f.write(r)
+        return r.strip()
