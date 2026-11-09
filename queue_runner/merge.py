@@ -13,8 +13,9 @@ Merges are automated posts that need no go-ahead (`~/.claude/CLAUDE.md`, Merge w
 clean).
 """
 from .fix import fix_branch
-from .github import OLD_LABELS, Comment
-from .ledger import newest_on, read_review
+from .github import OLD_LABELS
+from .ledger import newest_on, said_since  # noqa: F401 (said_since was here first)
+from .stops import held
 from .state import JobLog
 
 MAX_FAILED = 2   # failed merges on one head before the runner leaves it until a release or a push
@@ -22,12 +23,6 @@ MAX_FAILED = 2   # failed merges on one head before the runner leaves it until a
 
 def merge_title(repo, number: int) -> str:
     return f'Queue runner merge: {repo.name}#{number}'
-
-
-def said_since(comments: list[Comment], at: str) -> list[Comment]:
-    """What people said on the PR after the review at `at`: reviews and bots left out."""
-    return [c for c in comments if c.created_at > at and not c.author.endswith('[bot]')
-            and read_review(c.body or '') is None and '<!-- sol-pr-review' not in (c.body or '')]
 
 
 class Merger:
@@ -71,6 +66,8 @@ class Merger:
             return 'it is a draft'
         if job := self.jobs.writer(repo.name, pr.branch):
             return f'a {job.kind} job is writing to {pr.branch}'
+        if why := held(self.jobs, repo, n):
+            return why
         if (failed := sum(j.outcome == 'failed' for j in self.jobs.on('merge', repo.name, n, h))) \
                 >= MAX_FAILED:
             return f'{failed} merges failed on {h7}: left until a new head or --release'

@@ -35,6 +35,9 @@ OPEN = ('open', 'decline-kept')
 # (pr-review.md: no fourth review without his answer). The old script did it at review 3 only,
 # with its spend guard behind it; with that guard gone, every later blocking review does too.
 APPROACH_REVIEW = 3
+# The hidden line on the runner's comment recording a stop on a PR (`stops.py`): the runner's
+# own post, never a reply from Stefan, though it's on his account.
+STOP_MARK = '<!-- queue-runner stop '
 # Where a comment's collapsed ledger starts: everything after it is the ledger and the marker.
 LEDGER = '<details><summary>Ledger</summary>'
 
@@ -112,6 +115,20 @@ def newest_on(comments, sha: str, verdict: str) -> dict | None:
     if last and last['sha'] and sha.startswith(last['sha']) and last['verdict'] == verdict:
         return last
     return None
+
+
+def runner_post(body: str) -> bool:
+    """A review (any format) or a stop the runner recorded: not something a person said."""
+    body = body or ''
+    return (read_review(body) is not None or '<!-- sol-pr-review' in body
+            or STOP_MARK in body)
+
+
+def said_since(comments, at: str) -> list:
+    """What people said on the PR after `at` (GitHub's UTC time): bots and the runner's own
+    reviews and stop records left out."""
+    return [c for c in comments if c.created_at > at and not c.author.endswith('[bot]')
+            and not runner_post(c.body)]
 
 
 def next_round(earlier: list[dict]) -> int:

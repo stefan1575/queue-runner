@@ -107,9 +107,15 @@ class FakeGitHubForReviews(FakeGitHubWithPulls):
     def create_issue(self, repo, title, body, labels=()):
         self._write('issue', title, body, tuple(labels))
         self._next += 1
+        self.states[self._next] = 'open'
         self.open_issue_list.append(Issue(self._next, title, body,
                                           url=f'https://github.com/{repo.github}/issues/{self._next}'))
         return f'https://github.com/{repo.github}/issues/{self._next}'
+
+    def close_issue(self, number):
+        """Stefan closes an issue."""
+        self.states[number] = 'closed'
+        self.open_issue_list = [i for i in self.open_issue_list if i.number != number]
 
     def set_status(self, repo, sha, state, description, target_url='', context='sol-review'):
         self._write('status', sha, state, description, target_url)

@@ -2,7 +2,9 @@
 line, so a restarted runner knows what ran and what's still open.
 
 Job kinds: `build` (an issue), `review` (Sol on a PR's head H), `fix` (a Claude fix round on a
-blocking PR, from H) and `merge` (the runner merging a clean PR at H).
+blocking PR, from H), `merge` (the runner merging a clean PR at H) and `stop` (a stop filed for
+Stefan on a PR at H: `filed`, then `answered` once he closes its `needs-info` issue or replies on
+the PR; `failed` if the issue couldn't be filed, so the next pass files it).
 
 Events: `start` (a job is about to start), `end` (how it ended; a later `end` for the same job
 replaces the earlier one, e.g. when a waiting thread later completes) and `release` (Stefan
@@ -68,6 +70,9 @@ class Job:
     run_dir: str | None = None     # a review: its brief, inputs, reply and would-be comment
     resume_at: str | None = None   # out-of-usage: when the Sol lane may run again
     head: str | None = None        # a fix: the PR's head after it (H again if it pushed nothing)
+    stop: str | None = None        # a stop: its kind (stops.KINDS)
+    reason: str | None = None      # a stop: why, as the issue and the toast say it
+    answer: str | None = None      # a stop: how Stefan answered (issue-closed, replied)
 
     @property
     def open(self) -> bool:
@@ -75,7 +80,8 @@ class Job:
 
 
 _END_FIELDS = ('thread_id', 'link', 'run_id', 'exit_code', 'status', 'outcome', 'commits', 'pr',
-               'worktree', 'error', 'verdict', 'signals', 'run_dir', 'resume_at', 'head')
+               'worktree', 'error', 'verdict', 'signals', 'run_dir', 'resume_at', 'head',
+               'reason', 'answer')
 
 
 class JobLog:
@@ -108,16 +114,19 @@ class JobLog:
                 yield json.loads(line)
 
     def started(self, *, kind: str, repo: str, issue: int | None, branch: str | None,
-                title: str, sha: str | None = None, round: int | None = None) -> Job:
+                title: str, sha: str | None = None, round: int | None = None,
+                stop: str | None = None) -> Job:
         at = _now()
         stamp = at[:19].replace('-', '').replace(':', '').replace('T', '-')
         job = Job(id=f'{stamp}-{kind}-{repo}-{issue}-{uuid.uuid4().hex[:6]}', kind=kind,
                   repo=repo, issue=issue, branch=branch, title=title, started_at=at, sha=sha,
-                  round=round)
+                  round=round, stop=stop)
         record = {'event': 'start', 'job': job.id, 'kind': kind, 'repo': repo, 'issue': issue,
                   'branch': branch, 'title': title, 'at': at}
         if sha:
             record.update(sha=sha, round=round)
+        if stop:
+            record['stop'] = stop
         self._append(record)
         return job
 
@@ -140,7 +149,7 @@ class JobLog:
             if kind == 'start':
                 job = Job(id=e['job'], kind=e['kind'], repo=e['repo'], issue=e['issue'],
                           branch=e['branch'], title=e['title'], started_at=e['at'],
-                          sha=e.get('sha'), round=e.get('round'))
+                          sha=e.get('sha'), round=e.get('round'), stop=e.get('stop'))
                 jobs[job.id] = job
                 if job.kind == 'build':
                     held[(job.repo, job.issue)] = True
@@ -199,6 +208,17 @@ class JobLog:
         return next((j for j in jobs if j.kind in ('build', 'fix') and j.repo == repo
                      and j.branch == branch and (j.open or (j.outcome == 'waiting'
                                                             and j.id not in gone))), None)
+
+    def open_stops(self, repo: str, number: int) -> list[Job]:
+        """Stops filed on this PR that Stefan hasn't answered (or released), oldest first: while
+        there's one, the runner leaves the PR alone."""
+        return [j for j in self.on('stop', repo, number) if j.outcome == 'filed']
+
+    def stopped(self, repo: str, number: int, sha: str, kind: str) -> bool:
+        """A stop of this kind was filed on this head already (answered or released or not):
+        it's never filed twice."""
+        return any(j.stop == kind and j.outcome in ('filed', 'answered')
+                   for j in self.on('stop', repo, number, sha, released=True))
 
     def sol_resume_at(self) -> str | None:
         """When the Sol lane may run again, if the newest ended review found Sol out of usage."""

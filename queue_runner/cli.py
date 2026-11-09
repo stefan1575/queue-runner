@@ -40,9 +40,27 @@ def _jobs(config) -> JobLog:
 def _dry_run(config, github, git, out, log_line) -> int:
     if not _dry_run_fix(config, github, git, out, log_line):
         _dry_run_build(config, github, out, log_line)
+    _dry_run_stops(config, github, out)
     _dry_run_reviews(config, github, out)
     _dry_run_merges(config, github, out)
     return 0
+
+
+def _dry_run_stops(config, github, out) -> None:
+    """The stops the Sol lane would file, and the PRs left alone for Stefan."""
+    from .stops import Stopper, held
+    jobs = _jobs(config)
+    stopper = Stopper(config, github=github, jobs=jobs, say=lambda line: None)
+    print('Stops for Stefan (dry run: nothing filed or toasted):', file=out)
+    for repo in config.repos:
+        if not repo.github:
+            continue
+        for pr in sorted(github.open_pulls(repo), key=lambda p: p.number):
+            for kind, why, _ in stopper.new_stops(repo, pr):
+                print(f'  {repo.name}#{pr.number}: would stop for Stefan ({kind}): {why}',
+                      file=out)
+            if why := held(jobs, repo, pr.number):
+                print(f'  {repo.name}#{pr.number}: {why}', file=out)
 
 
 def _dry_run_fix(config, github, git, out, log_line) -> bool:
@@ -143,7 +161,7 @@ def _repo_ref(value, config, flag, out):
     return repos[m[1]], int(m[2])
 
 
-def _review(config, github, git, sol, value, out, log_line) -> int:
+def _review(config, github, git, sol, value, out, log_line, toaster=None) -> int:
     """`--review NAME#N`: one Sol review now, under sol.lock, if the PR needs one."""
     from .review import Reviewer
     ref = _repo_ref(value, config, '--review', out)
@@ -153,7 +171,8 @@ def _review(config, github, git, sol, value, out, log_line) -> int:
     def say(line):
         log_line(line)
         print(line, file=out)
-    reviewer = Reviewer(config, github=github, git=git, sol=sol, jobs=_jobs(config), say=say)
+    reviewer = Reviewer(config, github=github, git=git, sol=sol, jobs=_jobs(config), say=say,
+                        toaster=toaster)
     try:
         _, why = reviewer.review_one(*ref)
     except RunnerBusy:
@@ -166,7 +185,7 @@ def _review(config, github, git, sol, value, out, log_line) -> int:
 
 
 def main(argv=None, github=None, out=None, t3=None, git=None, sleep=time.sleep,
-         sol=None) -> int:
+         sol=None, toaster=None) -> int:
     out = out or sys.stdout
     parser = argparse.ArgumentParser(prog='queue_runner')
     parser.add_argument('--once', action='store_true', help='one pass, then exit')
@@ -190,8 +209,9 @@ def main(argv=None, github=None, out=None, t3=None, git=None, sleep=time.sleep,
             return 2
         _jobs(config).released(ref[0].name, ref[1])
         log_line(f'released {args.release}')
-        print(f'Released {args.release}: the picker may take it again, and the Sol lane may '
-              'review it again if its reviews failed.', file=out)
+        print(f'Released {args.release}: the picker may take it again, the Sol lane may '
+              'review it again if its reviews failed, and a PR stopped for Stefan is back in '
+              'the loop.', file=out)
         return 0
 
     if github is None:
@@ -206,12 +226,19 @@ def main(argv=None, github=None, out=None, t3=None, git=None, sleep=time.sleep,
         from .sol import SolCli
         sol = SolCli(script=config.sol_script, bash=config.sol_bash)
     if args.review:
-        return _review(config, github, git, sol, args.review, out, log_line)
+        if toaster is None:
+            from .toast import WindowsToaster
+            toaster = WindowsToaster()
+        return _review(config, github, git, sol, args.review, out, log_line, toaster)
 
     if t3 is None:
         from .t3 import T3Cli
         t3 = T3Cli()
-    runner = Runner(config, github=github, t3=t3, git=git, out=out, log_line=log_line, sol=sol)
+    if toaster is None:
+        from .toast import WindowsToaster
+        toaster = WindowsToaster()
+    runner = Runner(config, github=github, t3=t3, git=git, out=out, log_line=log_line, sol=sol,
+                    toaster=toaster)
     try:
         with runner_lock(config.state_dir):
             if args.once:

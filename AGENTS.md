@@ -14,14 +14,15 @@ completed step, with a message that says what changed and why.
 ```
 python3 -m queue_runner                       # run: both lanes, pass after pass (nothing starts it at logon yet)
 python3 -m queue_runner --once                # one pass of each lane: at most one Claude job (a fix round or a build), merges, at most one Sol review
-python3 -m queue_runner --once --dry-run      # print the next Claude job's brief (a fix round first), list what Sol would review and what would merge
-python3 -m queue_runner --release NAME#N      # let the picker take a held issue again (a PR: retry its failed reviews, merges and fix round)
+python3 -m queue_runner --once --dry-run      # print the next Claude job's brief (a fix round first), list the stops it would file, what Sol would review and what would merge
+python3 -m queue_runner --release NAME#N      # let the picker take a held issue again (a PR: retry its failed reviews, merges and fix round; let a stopped PR go)
 python3 -m queue_runner --review NAME#N       # Sol reviews that PR's head now, if adoption says it needs one
 ```
 
 **`--once`, the bare command and `--review` start real Claude builds and fix rounds and real Sol
 reviews** in the configured repos, **a review posts on GitHub** (its comment, the `sol-review`
-status, follow-up issues and the PR body's Review row), and **a clean review merges**. Don't run
+status, follow-up issues and the PR body's Review row), **a clean review merges**, and **a stop
+files a `needs-info` issue, comments on the PR and toasts**. Don't run
 them against leads-dashboard to try something: use the live checks (below). `--dry-run` posts,
 starts and merges nothing; it only fetches a PR's head into the runner's local ref to print a
 fix brief.
@@ -91,7 +92,7 @@ retries it.
 **Fix job records** (kind `fix`, `issue` = the PR, `branch` = the PR's) add `sha` (H), `round`
 and `head` (the PR's head afterwards, read from GitHub), with `commits` the ones it pushed
 (`H..head`). Outcomes: `pushed` (exit 0, the head moved: Sol reviews the new head), `no-push`
-(exit 0 at H: H was reviewed, so the PR waits for Stefan; ticket 06 files the stop),
+(exit 0 at H: H was reviewed, so the PR waits for Stefan: a `no-push` stop),
 `head-unknown` (exit 0, but GitHub couldn't say afterwards; the Sol lane still reads the real
 head), `failed`,
 `waiting`, `branch-exists` and `not-started`, as for builds.
@@ -103,7 +104,9 @@ The review loop's rules are `~/.claude/docs/pr-review.md`; leads-dashboard's
 
 1. **Settle.** Under `sol.lock`, a review the log shows open was cut off with its runner: it
    counts as `failed`. An open merge is settled from GitHub: `merged` or `failed`.
-2. **Merge** (`merge.Merger`, also right after a clean review is posted). A PR merges once the
+2. **Stops** (`stops.Stopper`, before merging, so a PR stopped now neither merges nor is
+   reviewed; see Stops for Stefan, below).
+3. **Merge** (`merge.Merger`, also right after a clean review is posted). A PR merges once the
    runner's own newest review of its head H is `clean` (a clean review that stops for Stefan is
    `stop`). Just before, it's read again: open, still at H (moved: nothing is tried, and Sol
    reviews the new head), not a draft, no Claude job writing to it, its newest review comment
@@ -117,15 +120,15 @@ The review loop's rules are `~/.claude/docs/pr-review.md`; leads-dashboard's
    can't be is said. The repo's live steps (leads-dashboard: Lovable) are ticket 11's.
    **Merge job records** (kind `merge`): `sha` H, `head` the merge commit; outcomes `merged`,
    `head-moved`, `failed`.
-3. **Adopt** (`Reviewer.why_not`): open PRs, lowest number first. A PR is left alone, and why is
+4. **Adopt** (`Reviewer.why_not`): open PRs, lowest number first. A PR is left alone, and why is
    logged once, while it's labelled `needs-sol-review` or `sol-reviewed` (the old
    `~/sol-pr-review.py` reviews those until the cutover, ticket 13), while a build or fix job writes to its branch, once the runner reviewed its
    head H, after two failed reviews on H (until a push or `--release NAME#N`), while a review
    comment is on H already (any of the three formats below), while H's checks are running or
-   none have reported (`sol-review` isn't counted), and when a check failed or it conflicts with
-   its base (stops for Stefan: ticket 06 files them). GitHub failing on one PR skips only that
+   none have reported (`sol-review` isn't counted), while it's stopped for Stefan, and when a
+   check failed or it conflicts with its base (stops). GitHub failing on one PR skips only that
    PR.
-4. **Review H.** Fetch `refs/pull/<n>/head` into `refs/queue-runner/pr<n>` and the PR's base
+5. **Review H.** Fetch `refs/pull/<n>/head` into `refs/queue-runner/pr<n>` and the PR's base
    (PRs stack: the base isn't always main); if the head moved since listing, `head-moved` and
    nothing counts. Sol reads a detached checkout at H under `checkouts_dir`, removed afterwards.
    Its inputs are in the run folder, `runs_dir/<repo>-pr<n>-r<K>-<time>/`: `change.diff` (review
@@ -135,18 +138,18 @@ The review loop's rules are `~/.claude/docs/pr-review.md`; leads-dashboard's
    ledgers). `brief.md` (`templates/review.md`) lists them, points to `AGENTS.md`, has
    `REVIEW.md` in full and, from review 2, the open findings, the classes so far, the IDs used
    and the replies since the last review.
-5. **Decide** (`ledger.py`, no I/O): the verdict and outcome come from the last `sol-findings`
+6. **Decide** (`ledger.py`, no I/O): the verdict and outcome come from the last `sol-findings`
    block in Sol's reply, never its prose. Clean when no Important finding is open; outcomes, in
    order: `stop` (a new Important finding in an earlier class, a closed finding reopened, a
    decline Sol kept), `approach-note` (blocking from review 3 on: there's no spend guard any
    more, so every blocking review from 3 comes to Stefan), `merge` (clean), `fix`. An Important
    finding without file, line and a scenario (or a cost and rule) counts as a nit; nits past five
    are dropped and named. No readable block: `failed`.
-6. **Write.** `comment.md` (heading, Sol's prose with links made GitHub-relative, findings
+7. **Write.** `comment.md` (heading, Sol's prose with links made GitHub-relative, findings
    tables, notes, a visible `sol-findings` ledger of the PR's whole state, and the old script's
    hidden marker) and `decision.json` (verdict, outcome, signals, the `sol-review` status,
    follow-up issues).
-7. **Post** (`post.GitHubPoster`; automated posts need no go-ahead, `~/.claude/CLAUDE.md`). In
+8. **Post** (`post.GitHubPoster`; automated posts need no go-ahead, `~/.claude/CLAUDE.md`). In
    order: each new Pre-existing finding as a `needs-triage` issue, with a hidden
    `<!-- sol-finding owner/name#N ID -->` line (an open issue with that line, the old script's
    footer for the PR and ID, or the same title is linked instead of filed again); the comment,
@@ -175,6 +178,52 @@ holds the PR's whole state.
 **Review job records** (kind `review`, `issue` = the PR) add `sha`, `round`, `verdict`, `signals`,
 `run_dir` and `resume_at`. Outcomes: `clean`, `blocking`, `stop`, `approach-note` (H was
 reviewed), `failed`, `out-of-usage` and `head-moved` (nothing counts).
+
+## Stops for Stefan
+
+`stops.py` (`~/.claude/docs/pr-review.md`, Stops). Each Sol pass, for every open PR (not one the
+old script has, nor one a Claude job is writing to), the runner looks for stops on its head H, and
+files each kind once per H (`JobLog.stopped`). The kinds: `review` (the runner's review of H
+stopped: a repeated class, a reopened finding, a kept decline; the reason is decide()'s text from
+the run folder's `decision.json`), `approach-note` (review 3 or later still blocking; the
+Approach note itself is ticket 07's, so until then it stops without one), `no-push` (a fix round
+on H ended without pushing), `failed-check` and `conflict`. A review that stops files right after
+it posts.
+
+**Filing** (automated posts, no go-ahead): the PR's one open `needs-info` issue, found by its
+hidden `<!-- queue-runner needs-info owner/name#N -->` line, gets the stop as a comment; with
+none open, one is filed (`PR #N needs Stefan: <title>`). Then a comment on the PR records the
+stop and links the issue (`<!-- queue-runner stop kind=K sha=H issue=I -->`; `ledger.runner_post`
+keeps it, like the reviews, from counting as a reply), then a toast. An issue that can't be filed
+makes the stop `failed`, and the next pass files it; a failed PR comment or toast is said and
+left. **Stop job records** (kind `stop`, `issue` = the PR): `stop` (the kind), `sha` H, `link`
+the issue, `reason`; outcomes `filed`, `answered` (with `answer`: `issue-closed` or `replied`) and
+`failed`.
+
+**Left alone until Stefan answers:** while a stop is `filed`, the PR gets no review (even on a new
+head), no fix round and no merge (`stops.held`). It's answered when its issue is closed or someone
+(not a bot, not the runner's own posts) says something on the PR after the stop; `--release
+NAME#PR` lets it go too. Answers are read at the start of each Sol pass. What a reply asks for is
+ticket 07's decision thread; until then a reply only puts the PR back in the loop.
+
+**Toasts** (`toast.py`): a native Windows toast under the runner's own name and icon. The runner
+registers its AppUserModelID `Stefan.QueueRunner` under
+`HKCU\Software\Classes\AppUserModelId\` (display name "Queue runner", `IconUri`
+`queue_runner/assets/icon.png`, drawn by `scripts/make_icon.py`), then Windows PowerShell shows
+the toast through WinRT's `CreateToastNotifier(<that id>)`, hidden; Windows shows the registered
+name and icon, not PowerShell's. The toast is `activationType="protocol"` with the URL as its
+`launch` (and its one button), so a click opens it with no activator. Checked live on
+2026-11-10: a test toast showed as "Queue runner" with the icon. A stop's toast opens its
+`needs-info` issue; a build or fix thread that exits waiting for an answer (exit 2) gets one
+that opens the thread, because T3's own notifications stay off (below). Tests use a fake
+toaster; `Runner` and `Reviewer` default to `NoToaster`, and the CLI passes `WindowsToaster`.
+
+**T3's thread notifications stay off** (`notificationMode` in `~/.t3/userdata/client-settings.json`).
+Checked 2026-11-10 in the app's client code (`resources/server.asar`, the notification gate):
+it notifies on every completed thread ("Thread completed") and on every thread that needs
+attention (input, approval, usage limit, failure), for all threads not archived or hidden; only a
+thread whose run Stefan stopped skips the completion one. There's no setting to limit them to
+threads that need Stefan, so the runner toasts instead.
 
 ## Sol, as a script sees it
 
@@ -275,7 +324,7 @@ network: GitHub is the `GhCli` adapter in `queue_runner/github.py`, faked in tes
 (`tests/fixtures/t3/`), and faked with git in `tests/fakes_t3.py` for the run loop
 (`tests/test_run.py`). The Sol lane is tested against `FakeGitHubForReviews` (every write goes to its `posts`, in
 order; a call named in `fail` raises), `FakeReviewGit` and `FakeSol` (`tests/test_review.py`); `decide()` and the marker formats in
-`tests/test_ledger.py`; the codex-sol.sh adapter in `tests/test_sol.py`. Merging
+`tests/test_ledger.py`; the codex-sol.sh adapter in `tests/test_sol.py`. Stops and toasts are in `tests/test_stops.py` (a fake toaster). Merging
 (`tests/test_merge.py`) plays GitHub moving on through `FakeGitHubForReviews.now` (a PR's fields
 now), `threads` and `push_before_merge`; fix rounds (`tests/test_fix.py`) run the real `Runner`
 with a T3 fake whose thread pushes. `tests/test_git.py` runs `GitCli` on a real local repo in a
@@ -303,6 +352,9 @@ temp folder.
   removed after. A fix round's local branch name (`fix_branch`) is `fix.py`'s.
 - `queue_runner/review.py` and `templates/review.md`: the Sol lane: adoption, the brief, a review.
 - `queue_runner/ledger.py`: earlier reviews from a PR's comments, and `decide()`.
+- `queue_runner/stops.py`: stops for Stefan: which, the `needs-info` issue, the PR comment, the
+  toast, and holding the PR until he answers.
+- `queue_runner/toast.py` and `assets/icon.png`: the runner's own Windows toast.
 - `queue_runner/post.py`: posting a review: follow-up issues, the comment, `sol-review`, the
   PR body's Review row.
 - `queue_runner/sol.py`: the Sol seam and its codex-sol.sh adapter.

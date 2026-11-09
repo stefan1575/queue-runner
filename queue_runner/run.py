@@ -19,6 +19,7 @@ from .picker import BuildJob, pick
 from .review import Reviewer
 from .state import NOT_STARTED, Job, JobLog
 from .t3 import T3Error, Thread
+from .toast import NoToaster
 
 # What a pass did: started (a job ran to its end), busy (a Claude job is still running from an
 # earlier runner, so none was started), idle (nothing to start).
@@ -41,14 +42,16 @@ def _when(stamp: str) -> datetime.datetime:
 
 
 class Runner:
-    def __init__(self, config: Config, *, github, t3, git, out, log_line, sol=None):
+    def __init__(self, config: Config, *, github, t3, git, out, log_line, sol=None,
+                 toaster=None):
         self.config, self.github, self.t3, self.git = config, github, t3, git
         self.out, self.log_line = out, log_line
         self.jobs = JobLog(os.path.join(config.state_dir, 'jobs.jsonl'))
         self.repos = {r.name: r for r in config.repos}
         self._say_lock = threading.Lock()
+        self.toaster = toaster or NoToaster()
         self.reviewer = Reviewer(config, github=github, git=git, sol=sol, jobs=self.jobs,
-                                 say=self.say) if sol is not None else None
+                                 say=self.say, toaster=self.toaster) if sol is not None else None
         self.fixer = Fixer(config, github=github, git=git, jobs=self.jobs)
         self._last_why: dict[tuple[str, int], str | None] = {}
 
@@ -260,6 +263,8 @@ class Runner:
                  f', head still {job.sha[:7]}' if head else ', head unknown')
         self.say(f'{self._name(job)} ended: {outcome} (exit {exit_code}{moved}) '
                  f'{link or thread_id}')
+        if outcome == 'waiting':
+            self._toast_waiting(job, link)
         return job
 
     def finish(self, job: Job, thread_id: str, exit_code: int, status: str, error: str | None,
@@ -294,7 +299,25 @@ class Runner:
         pr_note = f', PR #{pr["number"]}' if pr else ''
         self.say(f'{self._name(job)} ended: {outcome} (exit {exit_code}, {len(commits)} commits'
                  f'{pr_note}) {link or thread_id}')
+        if outcome == 'waiting':
+            self._toast_waiting(job, link)
         return job
+
+    def _toast_waiting(self, job: Job, link: str | None) -> None:
+        """A job thread that stopped to ask Stefan something: T3's own notifications are off
+        (they can't be limited to threads that need him), so the runner toasts; the click opens
+        the thread."""
+        if not link:
+            self.say(f'{self._name(job)}: no thread link, so no toast')
+            return
+        what = 'PR' if job.kind == 'fix' else 'issue'
+        try:
+            self.toaster.toast(f'{job.repo}: a {job.kind} thread asks you something',
+                               f'The {job.kind} on {what} #{job.issue} waits for your answer.',
+                               link, tag=f'{job.repo}-{job.kind}-{job.issue}',
+                               button='Open the thread')
+        except Exception as e:
+            self.say(f'{self._name(job)}: the toast failed: {e}')
 
     @staticmethod
     def _name(job: Job) -> str:

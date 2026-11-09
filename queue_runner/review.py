@@ -16,7 +16,7 @@ from string import Template
 
 from .config import Config, Repo
 from .github import OLD_LABELS, Comment, PullRequest
-from .ledger import TAGS, OPEN, SolFailed, decide, next_round, norm, read_review, read_reviews, \
+from .ledger import TAGS, OPEN, SolFailed, decide, next_round, norm, read_reviews, runner_post, \
     state
 from .lock import RunnerBusy, runner_lock
 from .merge import Merger
@@ -24,6 +24,7 @@ from .picker import closed_issues
 from .post import GitHubPoster, PostFailed
 from .sol import SolOutOfUsage
 from .state import FAILED_REVIEW, OUT_OF_USAGE, REVIEWED, JobLog
+from .stops import Stopper, held
 
 STARTED, BUSY, IDLE = 'started', 'busy', 'idle'   # as run.py's lane results
 MAX_FAILED = 2   # failed reviews on one head before the lane leaves it until a release or a push
@@ -85,13 +86,16 @@ def _write(path: str, text: str) -> None:
 
 class Reviewer:
     def __init__(self, config: Config, *, github, git, sol, jobs: JobLog, say,
-                 now=datetime.datetime.now, poster=None, merger=None):
+                 now=datetime.datetime.now, poster=None, merger=None, toaster=None):
         self.config, self.github, self.git, self.sol, self.jobs = config, github, git, sol, jobs
         self.say, self.now = say, now
         self.poster = poster or GitHubPoster(github, say)
         # A dry-run poster (the live check) merges nothing either, unless given a merger.
         self.merger = merger if merger is not None or poster is not None else Merger(
             config, github=github, git=git, jobs=jobs, say=say)
+        # Stops are filed with the real posts only: a dry-run poster files none.
+        self.stopper = Stopper(config, github=github, jobs=jobs, say=say,
+                               toaster=toaster) if poster is None else None
         self._last_why: dict[tuple[str, int], str | None] = {}
         self._said_paused = None
 
@@ -106,6 +110,8 @@ class Reviewer:
         try:
             with runner_lock(self.config.state_dir, 'sol.lock'):
                 self.settle()
+                if self.stopper:   # first: a PR stopped now neither merges nor is reviewed
+                    self.stopper.stop_pass()
                 if self.merger:
                     self.merger.merge_pass()
                 for repo in self.config.repos:
@@ -182,6 +188,8 @@ class Reviewer:
             return (f'its {job.kind} waits for an answer, and may write to the branch again'
                     if job.outcome == 'waiting' else
                     f'a {job.kind} job is still writing to its branch')
+        if why := held(self.jobs, repo, pr.number):
+            return why
         done = self.jobs.reviews_of(repo.name, pr.number, h)
         if ran := [j for j in done if j.outcome in REVIEWED]:
             return (f'the runner reviewed {h7} already (review {ran[-1].round}, '
@@ -278,6 +286,8 @@ class Reviewer:
         self.say(f'{name}: review {rnd} on {h[:7]} is {d["verdict"]}, next: {d["outcome"]}{why}')
         if outcome == 'clean' and self.merger:
             self.merger.try_merge(repo, pr)
+        elif outcome in ('stop', 'approach-note') and self.stopper:
+            self.stopper.check(repo, pr)
         return STARTED
 
     def _inputs(self, repo, pr, rnd, last, gone, earlier, run_dir, wt) -> list[str]:
@@ -363,8 +373,7 @@ class Reviewer:
         if rnd > 1:
             after = earlier[-1]['at']
             since = [c for c in self._conversation(repo, pr)
-                     if c.created_at > after and read_review(c.body or '') is None
-                     and '<!-- sol-pr-review' not in (c.body or '')]
+                     if c.created_at > after and not runner_post(c.body)]
             open_ = [f for f in prior if f['status'] in OPEN]
             guide += ('\n## Your open findings\n\n' + ('\n'.join(map(_open_line, open_))
                                                         or 'None.') + '\n'

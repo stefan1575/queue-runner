@@ -20,6 +20,7 @@ from .github import OLD_LABELS
 from .ledger import OPEN, STATUSES, newest_on, norm, read_reviews, state
 from .picker import closed_issues
 from .state import NOT_STARTED, JobLog
+from .stops import held
 
 
 def fix_branch(number: int, sha: str) -> str:
@@ -62,6 +63,8 @@ class Fixer:
                     f'left for Stefan (or --release {repo.name}#{pr.number})')
         if job := self.jobs.writer(repo.name, pr.branch):
             return f'a {job.kind} job is writing to {pr.branch}'
+        if why := held(self.jobs, repo, pr.number):
+            return why
         if not newest_on(self.github.issue_comments(repo, pr.number), pr.head_sha, 'blocking'):
             return f'its newest review comment is not the blocking review of {h7}'
         return None
