@@ -48,8 +48,8 @@ def main() -> int:
                     log_line=log_line)
     build = BuildJob(repo=repo, issue=ISSUE, base='origin/main',
                      branch=f'claude/{slug(ISSUE.title)}-{ISSUE.number}')
-    job = runner.run_build(build)
-    [record] = [j for j in runner.jobs.jobs() if j.id == job.id]
+    runner.run_build(build)
+    record = runner.jobs.jobs()[-1]
     print(json.dumps(record.__dict__, indent=2, ensure_ascii=False))
     return 0
 

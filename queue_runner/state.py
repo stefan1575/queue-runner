@@ -55,24 +55,34 @@ class JobLog:
         self.path = path
 
     def _append(self, record: dict) -> None:
+        """Appends one record and syncs it to disk, so a start record exists before t3 runs.
+        A final record torn by a crash (no newline yet) is cut off first."""
         os.makedirs(os.path.dirname(self.path), exist_ok=True)
-        with open(self.path, 'a', encoding='utf-8') as f:
-            f.write(json.dumps(record, ensure_ascii=False) + '\n')
+        with open(self.path, 'ab+') as f:
+            f.seek(0)
+            data = f.read()
+            if data and not data.endswith(b'\n'):
+                f.truncate(data.rfind(b'\n') + 1)
+            f.write((json.dumps(record, ensure_ascii=False) + '\n').encode('utf-8'))
+            f.flush()
+            os.fsync(f.fileno())
 
     def _events(self):
         if not os.path.exists(self.path):
             return
-        with open(self.path, encoding='utf-8') as f:
-            for line in f:
-                if line.strip():
-                    yield json.loads(line)
+        with open(self.path, encoding='utf-8', newline='') as f:
+            lines = f.read().split('\n')
+        # Every complete record ends in a newline; what follows the last one was torn by a crash.
+        for line in lines[:-1]:
+            if line.strip():
+                yield json.loads(line)
 
     def started(self, *, kind: str, repo: str, issue: int | None, branch: str | None,
                 title: str) -> Job:
         at = _now()
         stamp = at[:19].replace('-', '').replace(':', '').replace('T', '-')
-        job = Job(id=f'{stamp}-{kind}-{repo}-{issue}-{uuid.uuid4().hex[:6]}', kind=kind, repo=repo, issue=issue,
-                  branch=branch, title=title, started_at=at)
+        job = Job(id=f'{stamp}-{kind}-{repo}-{issue}-{uuid.uuid4().hex[:6]}', kind=kind,
+                  repo=repo, issue=issue, branch=branch, title=title, started_at=at)
         self._append({'event': 'start', 'job': job.id, 'kind': kind, 'repo': repo,
                       'issue': issue, 'branch': branch, 'title': title, 'at': at})
         return job

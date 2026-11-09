@@ -36,14 +36,16 @@ instance and model for Claude jobs. `--config <path>` reads another one.
    found by title (`Queue runner build: <repo>#<n>`, created after the job's start record). Still
    running: the pass starts nothing (one Claude job at a time). Ended: its outcome is recorded.
    No thread: `not-started`. A `waiting` job whose thread has since completed or failed is
-   recorded again.
+   recorded again. One that's running again, or that T3 can't read, also makes the pass start
+   nothing: if its thread is gone for good, `--release` the issue.
 2. **Pick and build** (`run.py`): the first repo with a pickable issue gets one build. The runner
    fetches `origin/<base>`, writes a start record, then blocks on
    `t3 thread start --wait --json --worktree origin/<base> --branch claude/<slug>-<n>` with the
    brief on stdin. Afterwards it records the outcome.
 
 **The job log** is `<state_dir>/jobs.jsonl` (`state.py`): `start`, `end` and `release` events, one
-JSON object per line. An end record has the thread id and link, run id, T3's exit code and
+JSON object per line, each synced to disk as it's written. A last line torn by a crash is
+ignored and cut off by the next write; a bad line anywhere else is an error. An end record has the thread id and link, run id, T3's exit code and
 status, the branch's commits, the PR found by branch, the worktree path and any error.
 Outcomes: `done` (exit 0, a PR found), `done-no-pr`, `failed` (exit 1), `waiting` (exit 2),
 `branch-exists` (a local `claude/*` branch left over, so T3 couldn't make it again) and

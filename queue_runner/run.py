@@ -85,8 +85,7 @@ class Runner:
                 continue   # no GitHub issues to pick from (local-issue repos come in ticket 12)
             job = pick(repo, self.github, held=self.jobs.held_issues(repo.name))
             if job is not None:
-                self.run_build(job)
-                return STARTED
+                return self.run_build(job)
         self.say('Nothing to start: no repo has an unblocked ready-for-agent issue that isn\'t '
                  'already being built or held.')
         return IDLE
@@ -112,7 +111,10 @@ class Runner:
             try:
                 thread, _ = self.t3.show(job.thread_id)
             except T3Error as e:
-                self.log_line(f'{self._name(job)}: cannot read {job.thread_id}: {e}')
+                # Stefan may have answered it and set it running: start nothing until T3 says.
+                self.say(f'{self._name(job)}: cannot read {job.thread_id} ({e}); '
+                         'no other Claude job starts')
+                busy = BUSY
                 continue
             if thread.active and not thread.pending_requests:
                 busy = BUSY   # answered, and running again
@@ -137,7 +139,9 @@ class Runner:
 
     # --- a build job ----------------------------------------------------------------------
 
-    def run_build(self, build: BuildJob) -> Job:
+    def run_build(self, build: BuildJob) -> str:
+        """STARTED once a thread ran (or may still be running); IDLE if none was started, so
+        the loop pauses before trying again."""
         repo, n = build.repo, build.issue.number
         self.git.fetch(repo.path, repo.base)
         job = self.jobs.started(kind='build', repo=repo.name, issue=n, branch=build.branch,
@@ -147,7 +151,7 @@ class Runner:
                             error=f'A local branch {build.branch} is left from an earlier run.')
             self.say(f'{self._name(job)} not started: local branch {build.branch} already exists '
                      f'(held until released)')
-            return job
+            return IDLE
         brief = build_brief(build, self.github.issue_comments(repo, n))
         where = f' ({repo.github}#{n})' if repo.github else ''
         self.say(f'Starting {self._name(job)}{where} on {build.branch} from {build.base}')
@@ -164,12 +168,13 @@ class Runner:
             if thread is None:
                 self.jobs.ended(job.id, exit_code=None, outcome=NOT_STARTED, error=str(e))
                 self.say(f'{self._name(job)} not started: {e}')
-            else:
-                self.say(f'{self._name(job)}: lost track of its thread ({e}); '
-                         'the next pass settles it')
-            return job
-        return self.finish(job, result.thread_id, result.exit_code, result.status, result.error,
-                           result.run_id)
+                return IDLE
+            self.say(f'{self._name(job)}: lost track of its thread ({e}); '
+                     'the next pass settles it')
+            return STARTED
+        self.finish(job, result.thread_id, result.exit_code, result.status, result.error,
+                    result.run_id)
+        return STARTED
 
     def finish(self, job: Job, thread_id: str, exit_code: int, status: str, error: str | None,
                run_id: str | None) -> Job:
@@ -186,7 +191,7 @@ class Runner:
         except Exception as e:   # the record matters more than its commit list
             error = error or f'reading commits failed: {e}'
         pr = None
-        if repo.github and exit_code == 0:
+        if repo.github:   # a job may open its PR and fail or stop after
             try:
                 pr = self.github.pull_for_branch(repo, job.branch)
             except Exception as e:

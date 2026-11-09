@@ -212,6 +212,33 @@ path = "{self.dir}"
             self.run_main([], Broken(), FakeT3(), sleep=sleep)
         self.assertIn('GitHub is down', self.runner_log())
 
+    def test_a_waiting_thread_t3_cannot_read_counts_as_busy(self):
+        gh = FakeGitHubWithPulls(issues=[issue(4), issue(5)])
+        t3 = FakeT3([(2, 'waiting'), (0, 'completed')])
+        self.run_main(['--once'], gh, t3)
+        del t3.threads['mcp:t1']   # T3 can't say whether Stefan's answer set it running again
+        self.run_main(['--once'], gh, t3)
+        self.assertEqual(len(t3.starts), 1)
+
+    def test_a_failed_build_records_the_pr_it_opened(self):
+        gh = FakeGitHubWithPulls(issues=[issue(4)], pulls_by_branch={'claude/a-ticket-4': PR})
+        self.run_main(['--once'], gh, FakeT3([(1, 'interrupted')]))
+        [job] = self.log.jobs()
+        self.assertEqual((job.outcome, job.pr), ('failed', PR))
+
+    def test_continuous_mode_pauses_after_a_build_that_never_started(self):
+        gh = FakeGitHubWithPulls(issues=[issue(4)])
+        t3 = FakeT3([T3Error('T3 Code server is not running')])
+        sleeps = []
+
+        def sleep(seconds):
+            sleeps.append(seconds)
+            raise Stop
+
+        with self.assertRaises(Stop):
+            self.run_main([], gh, t3, sleep=sleep)
+        self.assertEqual((len(t3.starts), sleeps), (1, [60]))
+
     def test_a_second_runner_exits_while_one_holds_the_lock(self):
         from queue_runner.run import runner_lock
         with runner_lock(os.path.join(self.dir, 'state')):

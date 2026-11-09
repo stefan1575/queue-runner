@@ -78,6 +78,24 @@ class JobLogTest(unittest.TestCase):
         self.start(log, 4)
         self.assertEqual(JobLog(self.path).held_issues('first'), {4})
 
+    def test_a_record_torn_by_a_crash_is_dropped_and_later_records_still_read(self):
+        log = JobLog(self.path)
+        job = self.start(log, 4)
+        with open(self.path, 'a', encoding='utf-8') as f:
+            f.write('{"event": "end", "job": "' + job.id + '", "exit')   # the crash
+        self.assertEqual([j.id for j in JobLog(self.path).open_jobs()], [job.id])
+        self.start(JobLog(self.path), 5)
+        self.assertEqual([j.issue for j in JobLog(self.path).open_jobs()], [4, 5])
+
+    def test_a_broken_record_mid_log_is_an_error(self):
+        log = JobLog(self.path)
+        self.start(log, 4)
+        with open(self.path, 'a', encoding='utf-8') as f:
+            f.write('not json\n')
+        self.start(log, 5)
+        with self.assertRaises(ValueError):
+            JobLog(self.path).jobs()
+
 
 if __name__ == '__main__':
     unittest.main()
