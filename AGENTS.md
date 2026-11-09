@@ -74,7 +74,9 @@ retries it.
   live on 2026-11-09 (without `--force`, on a clean worktree): git unregistered the worktree and deleted its files, but exited 1 with
   "failed to delete '<path>': Permission denied" because T3 still holds the empty folder open.
   So treat a worktree gone from `git worktree list` as removed, and sweep empty folders under
-  `~/.t3/worktrees/` later. T3's own cleanup (Settings → storage: `worktreeOnMerge`, off by
+  `~/.t3/worktrees/` later. About 30 minutes later, after the thread was settled (through T3's
+  MCP `t3_thread_organize`), `rmdir` worked. Whether settling the thread or the time freed it
+  is unknown. T3's own cleanup (Settings → storage: `worktreeOnMerge`, off by
   default; and on thread delete) is the alternative. It isn't used, because it would race the
   runner.
 - **Settling a thread:** the CLI has no command for it (spec, Verify while building).
