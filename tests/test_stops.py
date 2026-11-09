@@ -16,24 +16,15 @@ from queue_runner.run import Runner
 from queue_runner.state import JobLog
 from queue_runner.stops import NEEDS_INFO, needs_info_mark
 from queue_runner.toast import toast_xml, WindowsToaster
-from tests.fakes import FakeGitHubForReviews, full_pr
-from tests.fakes_t3 import FakeReviewGit, FakeSol, FakeT3
-from tests.test_ledger import H2, H3, important, reply
+from tests.fakes import FakeGitHubWithPulls, FakeGitHubForReviews, FakeToaster, \
+    full_pr, issue
+from tests.fakes_t3 import FakeGit, FakeReviewGit, FakeSol, FakeT3
+from tests.test_ledger import H2, H3, important, old_marker, reply
 
 NOW = datetime.datetime(2026, 11, 9, 12, 0)
 LATER = '2099-01-01T00:00:00Z'    # after any stop the test files
 EARLIER = '2026-01-01T00:00:00Z'  # before it
 ISSUE_URL = 'https://github.com/owner/first/issues/901'
-
-
-class FakeToaster:
-    def __init__(self, fail=False):
-        self.toasts, self.fail = [], fail
-
-    def toast(self, title, text, url, tag='', button='Open'):
-        if self.fail:
-            raise RuntimeError('no toast')
-        self.toasts.append({'title': title, 'text': text, 'url': url, 'tag': tag})
 
 
 class StopsTest(unittest.TestCase):
@@ -171,7 +162,9 @@ class StopsTest(unittest.TestCase):
         self.assertIn('Another stop on PR #20', on_issue[0])
         self.assertIn('conflicts with main', on_issue[0])
         self.assertEqual([s.link for s in self.stops()], [ISSUE_URL, ISSUE_URL])
-        self.assertEqual(len(self.toaster.toasts), 2)
+        # Two toasts, each its own: the second doesn't replace the first.
+        self.assertEqual([t['tag'] for t in self.toaster.toasts],
+                         ['first-20-failed-check', 'first-20-conflict'])
 
     def test_after_the_issue_is_closed_a_new_stop_opens_a_new_issue(self):
         self.fail_check()
@@ -246,8 +239,8 @@ class StopsTest(unittest.TestCase):
 
     def test_a_stopped_pr_does_not_merge(self):
         self.review_ended('clean')
-        self.gh.comments[20] = [Comment('stefan1575', '2026-11-09T12:00:00Z', __import__(
-            'tests.test_ledger', fromlist=['old_marker']).old_marker(1, 'clean', H2, []))]
+        self.gh.comments[20] = [Comment('stefan1575', '2026-11-09T12:00:00Z',
+                                        old_marker(1, 'clean', H2, []))]
         self.gh.conflicts.add(20)   # has_conflict: the stop; pull().mergeable stays unknown
         merger = Merger(self.config, github=self.gh, git=self.git, jobs=self.jobs,
                         say=self.said.append)
@@ -257,8 +250,8 @@ class StopsTest(unittest.TestCase):
 
     def test_a_stopped_pr_gets_no_fix_round(self):
         self.review_ended('blocking')
-        self.gh.comments[20] = [Comment('stefan1575', '2026-11-09T12:00:00Z', __import__(
-            'tests.test_ledger', fromlist=['old_marker']).old_marker(1, 'blocking', H2, []))]
+        self.gh.comments[20] = [Comment('stefan1575', '2026-11-09T12:00:00Z',
+                                        old_marker(1, 'blocking', H2, []))]
         self.gh.conflicts.add(20)
         runner = Runner(self.config, github=self.gh, t3=FakeT3([]), git=self.git,
                         out=io.StringIO(), log_line=lambda line: None, sol=FakeSol([]),
@@ -272,36 +265,26 @@ class WaitingToastTest(unittest.TestCase):
     """T3's thread notifications can't be limited to threads that need Stefan, so they stay off
     and the runner toasts for a job thread that waits for an answer (exit 2)."""
 
-    def test_a_build_that_waits_for_an_answer_toasts_with_its_thread_link(self):
-        from tests.fakes import FakeGitHubWithPulls, issue
-        from tests.fakes_t3 import FakeGit
+    def build(self, *outcomes):
+        """One build pass of issue #4 whose thread ends as given; returns the toasts."""
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         repo = Repo(name='first', github='owner/first', path=tmp.name)
         config = Config(repos=[repo], state_dir=os.path.join(tmp.name, 'state'),
                         log_dir=os.path.join(tmp.name, 'logs'))
         toaster = FakeToaster()
-        runner = Runner(config, github=FakeGitHubWithPulls(issues=[issue(4)]),
-                        t3=FakeT3([(2, 'waiting')]), git=FakeGit(), out=io.StringIO(),
-                        log_line=lambda line: None, toaster=toaster)
-        runner.run_pass()
-        [t] = toaster.toasts
+        Runner(config, github=FakeGitHubWithPulls(issues=[issue(4)]), t3=FakeT3(list(outcomes)),
+               git=FakeGit(), out=io.StringIO(), log_line=lambda line: None,
+               toaster=toaster).run_pass()
+        return toaster.toasts
+
+    def test_a_build_that_waits_for_an_answer_toasts_with_its_thread_link(self):
+        [t] = self.build((2, 'waiting'))
         self.assertEqual(t['url'], 'https://app.t3.codes/threads/env/mcp:t1')
         self.assertIn('build on issue #4 waits for your answer', t['text'])
 
     def test_a_build_that_completes_does_not_toast(self):
-        from tests.fakes import FakeGitHubWithPulls, issue
-        from tests.fakes_t3 import FakeGit
-        tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(tmp.cleanup)
-        repo = Repo(name='first', github='owner/first', path=tmp.name)
-        config = Config(repos=[repo], state_dir=os.path.join(tmp.name, 'state'),
-                        log_dir=os.path.join(tmp.name, 'logs'))
-        toaster = FakeToaster()
-        Runner(config, github=FakeGitHubWithPulls(issues=[issue(4)]),
-               t3=FakeT3([(0, 'completed')]), git=FakeGit(), out=io.StringIO(),
-               log_line=lambda line: None, toaster=toaster).run_pass()
-        self.assertEqual(toaster.toasts, [])
+        self.assertEqual(self.build((0, 'completed')), [])
 
 
 class ToastTest(unittest.TestCase):

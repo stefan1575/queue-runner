@@ -14,7 +14,7 @@ clean).
 """
 from .fix import fix_branch
 from .github import OLD_LABELS
-from .ledger import newest_on, said_since  # noqa: F401 (said_since was here first)
+from .ledger import newest_on, said_since
 from .stops import held
 from .state import JobLog
 

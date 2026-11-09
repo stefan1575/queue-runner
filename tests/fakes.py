@@ -159,3 +159,15 @@ def full_pr(number, branch, head_sha, body='', title='A PR', base='main', labels
     return PullRequest(number=number, branch=branch, body=body, title=title, head_sha=head_sha,
                        base=base, url=f'https://github.com/owner/first/pull/{number}',
                        labels=tuple(labels))
+
+
+class FakeToaster:
+    """Plays the Windows toaster: each toast goes to `toasts`; with `fail`, toasting raises."""
+
+    def __init__(self, fail=False):
+        self.toasts, self.fail = [], fail
+
+    def toast(self, title, text, url, tag='', button='Open'):
+        if self.fail:
+            raise RuntimeError('no toast')
+        self.toasts.append({'title': title, 'text': text, 'url': url, 'tag': tag})

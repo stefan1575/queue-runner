@@ -157,7 +157,7 @@ class Stopper:
         self.jobs.ended(job.id, exit_code=None, outcome='filed', link=url, reason=why)
         try:
             self.toaster.toast(f'{repo.name} PR #{n} needs you', f'{KINDS[kind]}: {why}.'[:250],
-                               url, tag=f'{repo.name}-{n}', button='Open the issue')
+                               url, tag=f'{repo.name}-{n}-{kind}', button='Open the issue')
         except Exception as e:
             self.say(f'{name}: the toast failed: {e}')
         return 'filed'

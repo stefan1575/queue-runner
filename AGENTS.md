@@ -362,3 +362,4 @@ temp folder.
 - `queue_runner/cli.py`: the command line.
 - `scripts/live_sandbox.py`, `scripts/live_review.py`, `scripts/live_fix_brief.py` and
   `scripts/live_merge.py`: the live checks.
+- `scripts/make_icon.py`: draws the toast icon, `queue_runner/assets/icon.png`.

@@ -225,18 +225,15 @@ def main(argv=None, github=None, out=None, t3=None, git=None, sleep=time.sleep,
     if sol is None:
         from .sol import SolCli
         sol = SolCli(script=config.sol_script, bash=config.sol_bash)
+    if toaster is None:
+        from .toast import WindowsToaster
+        toaster = WindowsToaster()
     if args.review:
-        if toaster is None:
-            from .toast import WindowsToaster
-            toaster = WindowsToaster()
         return _review(config, github, git, sol, args.review, out, log_line, toaster)
 
     if t3 is None:
         from .t3 import T3Cli
         t3 = T3Cli()
-    if toaster is None:
-        from .toast import WindowsToaster
-        toaster = WindowsToaster()
     runner = Runner(config, github=github, t3=t3, git=git, out=out, log_line=log_line, sol=sol,
                     toaster=toaster)
     try:
