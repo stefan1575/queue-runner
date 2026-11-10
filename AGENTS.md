@@ -3,8 +3,9 @@
 A script with no AI in it that runs Stefan's fixed build-and-review flow and starts fresh T3 Code
 threads only for work that needs Claude or Sol. The design and its rules live outside this repo:
 `~/.claude/docs/orchestration.md`, `~/.claude/docs/pr-review.md` and `~/.claude/docs/sol.md`. The
-spec and the tickets that build it are in personal-ops `.scratch/queue-runner/` (`spec.md`,
-`issues/NN-*.md`).
+spec and the tickets that build it are in this repo's `.scratch/queue-runner/` (`spec.md`,
+`issues/NN-*.md`; moved from personal-ops on 2026-11-10). The tracker's conventions are
+`docs/agents/issue-tracker.md` and `docs/agents/triage-labels.md`.
 
 **This repo never goes to GitHub**: local git only, no remote, no push. Commit after every
 completed step, with a message that says what changed and why.
@@ -375,9 +376,9 @@ tickets as markdown, `.scratch/<feature>/issues/NN-<slug>.md` (its
   `<feature>/NN`. Checked on 2026-11-10 against every ticket in personal-ops and royal-bully-ops
   (128): each has a status this reads.
 - **Not built yet:** the Claude lane skips local repos, and `--once --dry-run` only names the
-  next ticket. Ticket 12's Comments (personal-ops) ask Stefan how the no-remote flow (a
-  worktree branch, Sol on its diff against `main`, a local `--no-ff` merge) should fit
-  personal-ops and queue-runner, where his own sessions commit straight to `main`.
+  next ticket. Ticket 12 builds the no-remote flow (a worktree branch, Sol on its diff
+  against `main`, a local `--no-ff` merge) for queue-runner only; personal-ops is not served
+  (Stefan, 2026-11-10).
 
 ## A Sol pass
 
