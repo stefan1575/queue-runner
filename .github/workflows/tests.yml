@@ -1,0 +1,19 @@
+# The check the runner waits for before reviewing and merging a queue-runner PR (ticket 14):
+# "checks passed on H" means the tests passed on H. Windows, like the PC it runs on.
+name: tests
+on:
+  pull_request:
+  push:
+    branches: [main]
+jobs:
+  unittest:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.15'
+          allow-prereleases: true
+      - run: git config --global user.name ci; git config --global user.email ci@example.invalid
+      - run: python -m unittest
