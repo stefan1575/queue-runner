@@ -43,7 +43,7 @@ second runner out: it logs `a second runner started (pid N) and exited at once` 
 `review_table` for a repo whose PR bodies keep a `## Review` table, `issues = "local"` for one
 whose tickets are local markdown: Local tickets, below, `merge = "stefan"` for one whose PRs Stefan
 merges himself: Stefan merges, below), in priority order; the runner's `state_dir` and `log_dir` (`~/.queue-runner/`, outside every served repo);
-`runs_dir` and `checkouts_dir` for reviews; `poll_seconds`, the pause after a pass that started
+`runs_dir`, `checkouts_dir` and `deps_dir` for reviews; `poll_seconds`, the pause after a pass that started
 nothing; `[claude]`, the T3 provider instance and model for Claude jobs; and `[sol]`,
 `codex-sol.sh` and the Git bash that runs it. `--config <path>` reads another one.
 
@@ -507,7 +507,8 @@ The review loop's rules are `~/.claude/docs/pr-review.md`; leads-dashboard's
    PR.
 5. **Review H.** Fetch `refs/pull/<n>/head` into `refs/queue-runner/pr<n>` and the PR's base
    (PRs stack: the base isn't always main); if the head moved since listing, `head-moved` and
-   nothing counts. Sol reads a detached checkout at H under `checkouts_dir`, removed afterwards.
+   nothing counts. Sol reads a detached checkout at H under `checkouts_dir`, removed afterwards,
+   with its dependencies linked in so it can run the tests (Sol runs tests, below).
    Its inputs are in the run folder, `runs_dir/<repo>-pr<n>-r<K>-<time>/`: `change.diff` (review
    1, or after a force-push: the whole diff, `origin/<base>...H`; later: the change since the last
    reviewed commit) and `full.diff` (later reviews), `pr.md`, `issue-<k>.md` (`issue-<owner>_<name>-<k>.md` in another repo) for each issue it
@@ -616,12 +617,41 @@ threads that need Stefan, so the runner toasts instead.
   a `configuration_update` record with `reasoning.effort: "low"`, though `~/.codex/config.toml`
   says high; T3 sends its own default, and its CLI has no effort flag. `codex-sol.sh --job
   review --effort high` logs `reasoning effort: high` in `reply.md.log`. Each run is a fresh
-  Codex session, read-only, with no network: Sol can't post, so the runner posts (04).
+  Codex session with no network: Sol can't post, so the runner posts (04). Files are read-only
+  except the checkout and `deps_dir` (`--write`, `--writable-root`: Sol runs tests, below).
 - It runs under Git's bash by full path, through a parent bash that waits: codex-sol.sh's
   watchdog ends the run once its caller is gone. 75 minutes, then tree-killed and `failed`.
 - **Out of usage** ("hit your usage limit" in `run.out` or `reply.md.log`): `out-of-usage`, and
   the Sol lane starts no review until 10 minutes after the reset in Sol's rollout, else the time
   Sol names, else 30 minutes (Usage limits, above).
+
+## Sol runs tests
+
+`deps.py` (ticket 16). Sol can run a repo's tests while it reviews, mainly to confirm a suspected
+bug with a failing test; CI still gates the merge.
+
+- **Dependencies:** after the checkout, `Deps.prepare` links `node_modules` into it as a junction
+  to `<deps_dir>/<repo>-<key>/node_modules`, installed once per key: the lockfile plus
+  package.json's dependency fields (a script change reuses it). `bun.lock` installs with
+  `bun install --frozen-lockfile`, as leads-dashboard's CI does (bun from scoop, installed
+  2026-11-10; `package-lock.json` is gitignored there), `package-lock.json` with `npm ci`, into a
+  temp folder moved into place. A marker in `node_modules` (`.queue-runner-ready`) is checked on
+  every use; gone, it installs again. The 3 most recently used caches per repo are kept. No
+  `package.json`, no lockfile, no bun, or a failed install: nothing is linked, the brief says why,
+  and the review goes on. The log says `dependencies installed in Ns (<repo>-<key>)` or
+  `cached`.
+- **`git worktree remove --force` follows a junction and empties its target** (checked
+  2026-11-10), so `GitCli.remove_checkout` unlinks `node_modules` first (`Deps.unlink`).
+- **The sandbox:** Codex's read-only sandbox stops vitest at once (EPERM writing
+  `node_modules/.vite-temp`), so a review runs `codex-sol.sh --write --writable-root <deps_dir>`:
+  Codex's workspace-write sandbox, the checkout and the cache writable, the network off.
+  codex-sol.sh adds a Files rule (write only there) and puts fnm's default Node first on PATH
+  (`$FNM_DIR/aliases/default`), since the runner starts without fnm's shell PATH. A folder named
+  as a writable root covers folders made in it later, even on first use (checked 2026-11-10).
+- **The brief** (step 4, `review._tests`) tells Sol what it can run: `npm test`, a failing test it
+  adds, each command named with its summary line quoted; a failure the change doesn't explain
+  (Windows only) is no finding. leads-dashboard's `src/test/callsling-relay.test.ts` has one
+  test that fails on Windows outside any sandbox too (EPERM removing its temp folder).
 
 ## T3, as a script sees it
 
@@ -728,7 +758,8 @@ network: GitHub is the `GhCli` adapter in `queue_runner/github.py`, faked in tes
 (`tests/fixtures/t3/`), and faked with git in `tests/fakes_t3.py` for the run loop
 (`tests/test_run.py`). The Sol lane is tested against `FakeGitHubForReviews` (every write goes to its `posts`, in
 order; a call named in `fail` raises), `FakeReviewGit` and `FakeSol` (`tests/test_review.py`); `decide()` and the marker formats in
-`tests/test_ledger.py`; the codex-sol.sh adapter in `tests/test_sol.py`. Stops and toasts are in `tests/test_stops.py` (a fake toaster). Merging
+`tests/test_ledger.py`; the codex-sol.sh adapter in `tests/test_sol.py`; dependencies in `tests/test_deps.py` (a
+fake install) and the junction kept on removal in `tests/test_git.py`. Stops and toasts are in `tests/test_stops.py` (a fake toaster). Merging
 (`tests/test_merge.py`) plays GitHub moving on through `FakeGitHubForReviews.now` (a PR's fields
 now), `threads` and `push_before_merge`; fix rounds (`tests/test_fix.py`) run the real `Runner`
 with a T3 fake whose thread pushes. Conflict rounds (`tests/test_conflicts.py`): a pair of
@@ -798,6 +829,7 @@ temp folder.
 - `queue_runner/post.py`: posting a review: follow-up issues, the comment, `sol-review`, the
   PR body's Review row.
 - `queue_runner/sol.py`: the Sol seam and its codex-sol.sh adapter.
+- `queue_runner/deps.py`: a review checkout's dependencies, cached per lockfile and linked in.
 - `queue_runner/usage.py`: Claude's usage windows from `api/oauth/usage`, with the Claude login.
 - `queue_runner/gate.py`: the usage gate: `decide()`, Stefan's knob (`gate.json`), learned costs
   (`usage.jsonl`).
