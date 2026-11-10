@@ -323,8 +323,12 @@ pass says `merged`, the live run says `live` (the log, and a **Live.** comment o
   and the edge functions changed. Commits with no PR (Lovable's own pushes) wait for the next PR.
 - **About to land** (`LiveSteps.about_to_land`): an open merge, review or fix job in the repo, or
   an open PR whose runner review of its head is clean and that the merge re-check would merge now
-  or that waits only for its checks. While one is, no live run starts (said once). A clean PR held
-  for Stefan doesn't hold the live steps.
+  or that would once its checks pass. While one is, no live run starts (said once). A clean PR
+  held for Stefan doesn't hold the live steps, whatever its checks.
+- **The Sol lane, alongside:** while a live job is open, nothing merges in that repo
+  (`Merger.why_not`), so the batch stays the one the thread was given. After writing its start
+  record the run reads the base and about-to-land again; a merge that landed or began since the
+  batch was read ends it `not-started`, and the next pass reads the batch afresh.
 - **The thread** runs in a T3 worktree at T on `claude/live-<T7>-<id6>`, never pushed, removed
   after (`.env` is tracked, so `npm run check:live-schema` runs there with plain node). Its brief:
   the live doc to follow, the PRs, commits, migrations in order, functions, migrations an earlier
@@ -334,13 +338,17 @@ pass says `merged`, the live run says `live` (the log, and a **Live.** comment o
   `live`, `partial` (with `failed`) or `stop` (with `question`), `applied` (the migrations it
   applied this run), `stefan`, optional `notes`. `live` that didn't apply every listed migration
   reads as `partial`; a file it wasn't given, or anything unreadable, is `failed`.
+- **First sight** is recorded before anything may hold it, so a merge after it is always a live
+  run's.
 - **State** is the job log, kind `live`: `sha` R, `head` T, `issue` the batch's newest PR; at the
   end `applied`, `prs`, `reason`. Outcomes: `live` (R moves to T), `partial`, `stop`, `failed`,
   `usage-limit` (waits for `resume_at`; no stop), `not-started`, and `assumed`: **on first sight
   of a repo the runner records its base's head as live**, since the steps before were Stefan's.
   A run that didn't go live keeps R; its `applied` are left out of the next run's list, and a
   `failed` or `usage-limit` run marks its batch "maybe applied", so the next thread checks each
-  migration through `query_database` before running it. A dead runner's open live job is settled
+  migration through `query_database` before running it. A migration an earlier run applied that a
+  later merge edited is listed as changed (the thread stops). A `usage-limit` run's `resume_at`
+  is the idle lane's `gate_until`, so a wake task is set for it. A dead runner's open live job is settled
   from its thread's last reply, like a build.
 - **Stops:** `partial`, `stop` and `failed` file a `live` stop (Stops for Stefan, below) on the
   batch's newest PR; no live run starts in that repo until it's answered (issue closed or a
@@ -360,7 +368,7 @@ The review loop's rules are `~/.claude/docs/pr-review.md`; leads-dashboard's
 3. **Merge** (`merge.Merger`, also right after a clean review is posted). A PR merges once the
    runner's own newest review of its head H is `clean` (a clean review that stops for Stefan is
    `stop`). Just before, it's read again: open, still at H (moved: nothing is tried, and Sol
-   reviews the new head), not a draft, no Claude job writing to it, its newest review comment
+   reviews the new head), not a draft, no Claude job writing to it, no live run open in the repo, its newest review comment
    the clean one on H, checks passed on H (`sol-review` not counted), no conflict, nothing said
    on it since that review (bots, `*[bot]`, aside) and no unresolved review thread. Why not is
    logged once. Then `PUT pulls/<n>/merge` with `sha=H` and `merge_method=merge` (a merge
