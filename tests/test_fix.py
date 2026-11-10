@@ -338,6 +338,39 @@ class AdoptedReviewTest(FixTest):
                 self.old_review(**kwargs)
                 self.assertIsNone(self.runner(FakeT3([])).next_fix())
 
+    def old_reviews(self, *rounds, at='2026-11-06T21:45:04Z'):
+        """The old script's reviews of H2 on the PR, one per `found` list (round 1 first), each
+        finding as the ledger left it after that review."""
+        from tests.test_ledger import old_marker
+        self.gh.comments[20] = [
+            Comment('stefan1575', at, f'## Sol review {n} · Blocking\n\nProse.\n\n'
+                    + old_marker(n, 'blocking', H2, found))
+            for n, found in enumerate(rounds, 1)]
+
+    def test_an_old_review_that_needed_stefan_is_not_adopted(self):
+        """Review 3 still blocking needs an Approach note; a kept decline, a repeated class or a
+        reopened finding stops for Stefan. Adopting any of them as `blocking` would skip that."""
+        f1 = {**important('F1'), 'raised': 1}
+        f3 = {**important('F3'), 'raised': 2}   # F1's class again, under a new ID
+        cases = {
+            'review 3 still blocking': ([{**f1, 'status': 'open'}], [{**f1, 'status': 'open'}],
+                                        [{**f1, 'status': 'open'}]),
+            'decline kept': ([{**f1, 'status': 'open'}], [{**f1, 'status': 'decline-kept'}]),
+            'repeated class': ([{**f1, 'status': 'open'}],
+                               [{**f1, 'status': 'fixed', 'closed': 2}, {**f3, 'status': 'open'}]),
+        }
+        for name, rounds in cases.items():
+            with self.subTest(name):
+                self.old_reviews(*rounds)
+                self.assertIsNone(self.runner(FakeT3([])).next_fix())
+
+    def test_an_old_review_2_that_only_says_fix_is_adopted(self):
+        f1 = {**important('F1'), 'raised': 1}
+        f3 = {**important('F3', cls='another class'), 'raised': 2, 'status': 'open'}
+        self.old_reviews([{**f1, 'status': 'open'}], [{**f1, 'status': 'fixed', 'closed': 2}, f3])
+        found = self.runner(FakeT3([])).next_fix()
+        self.assertEqual(found and found[2].round, 2)
+
     def test_the_runner_s_own_review_of_h_comes_before_an_old_one(self):
         self.old_review()
         for outcome, fixes in (('clean', False), ('blocking', True)):
