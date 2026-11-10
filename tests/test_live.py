@@ -205,8 +205,26 @@ class AboutToLandTest(LiveHarness):
     def test_a_clean_pr_waiting_for_its_checks_waits(self):
         self.clean_pr()
         self.gh.check_states[C] = Checks('pending', pending=('ci',))
-        self.assertIsNone(self.live().next())
+        live = self.live()
+        live.merger.why_not = lambda repo, n, h, checks=True: 'checks pending' if checks else None
+        self.assertIsNone(live.next())
         self.assertIn('live first: not now, #20 is clean, waiting for its checks', self.said)
+
+    def test_a_held_clean_pr_with_checks_pending_does_not_wait(self):
+        self.clean_pr()
+        self.gh.check_states[C] = Checks('pending', pending=('ci',))
+        live = self.live()
+        live.merger.why_not = lambda repo, n, h, checks=True: 'stopped for Stefan'
+        self.assertIsNotNone(live.next())
+
+    def test_first_sight_is_recorded_even_while_a_merge_is_about_to_land(self):
+        self.jobs.path = os.path.join(self.dir, 'state', 'other.jsonl')   # a fresh log
+        self.clean_pr()
+        live = self.live()
+        live.merger.why_not = lambda repo, n, h, checks=True: None
+        self.git.base = A
+        self.assertIsNone(live.next())
+        self.assertEqual([(j.outcome, j.head) for j in self.jobs.live('first')], [('assumed', A)])
 
     def test_a_clean_pr_held_for_stefan_does_not_wait(self):
         self.clean_pr()
@@ -305,12 +323,63 @@ class RunTest(LiveHarness):
         self.assertEqual(self.outcomes(), ['assumed', 'usage-limit'])
         self.assertEqual(self.stops(), [])
         self.assertEqual(self.jobs.limited_jobs(), [])   # not a build or fix to recover
-        self.assertIsNone(self.live().next())
+        waits = self.live()
+        self.assertIsNone(waits.next())
+        self.assertEqual(waits.wait_until, NOW + datetime.timedelta(hours=1))
         later = self.live()
         later.now = lambda: NOW + datetime.timedelta(hours=2)
         repo, b = later.next()
         self.assertEqual(b.pending, (M1, M2))
         self.assertIn('Maybe applied already', later.brief(repo, b))
+
+
+class RaceTest(LiveHarness):
+    """The Sol lane merges alongside: a batch read before a merge is never run stale, and no
+    merge lands while a live run is open."""
+
+    def setUp(self):
+        super().setUp()
+        self.first_sight()
+        self.merged()
+
+    def test_a_merge_after_the_batch_was_read_makes_it_stale(self):
+        live = self.live()
+        repo, b = live.next()
+        self.git.base = C   # the Sol lane merged meanwhile
+        self.assertEqual(live.run(repo, b), 'idle')
+        self.assertEqual(self.t3.starts, [])
+        self.assertEqual(self.outcomes(), ['assumed', 'not-started'])
+        self.assertIn('main moved past bbbbbbb', ' '.join(self.said))
+
+    def test_a_merge_begun_after_the_batch_was_read_makes_it_stale(self):
+        live = self.live()
+        repo, b = live.next()
+        self.jobs.started(kind='merge', repo='first', issue=20, branch='claude/x-9', title='t',
+                          sha=C)
+        self.assertEqual(live.run(repo, b), 'idle')
+        self.assertEqual(self.t3.starts, [])
+
+    def test_no_merge_while_a_live_run_is_open(self):
+        self.jobs.started(kind='live', repo='first', issue=13, branch='main',
+                          title='Queue runner live: first', sha=A, head=B)
+        self.gh.prs.append(full_pr(20, 'claude/x-9', C))
+        why = Merger(self.config, github=self.gh, git=self.git, jobs=self.jobs,
+                     say=self.said.append).why_not(self.repo, 20, C)
+        self.assertIn('is bringing main live: merges wait for it', why)
+
+
+class EditedMigrationTest(LiveHarness):
+    def test_a_migration_edited_after_a_partial_run_applied_it_is_named(self):
+        self.first_sight()
+        self.merged()
+        self.t3.outcomes = [(0, 'completed', live_reply('partial', [M1], failed='two failed'))]
+        live = self.live()
+        live.run(*live.next())
+        self.jobs.released('first', 13)
+        self.merged(start=A, target=C, changes=[('A', M1), ('A', M2)])   # net: still added
+        self.git.changes[(B, C)] = [('M', M1)]                          # but C edited one
+        repo, b = self.live().next()
+        self.assertEqual((b.pending, b.changed), ((M2,), (M1,)))
 
 
 class RestartTest(LiveHarness):
@@ -363,6 +432,19 @@ class LaneTest(LiveHarness):
         self.addCleanup(r.out.close)
         kind, then, run = r.choose()
         self.assertEqual((kind, then), ('live', None))
+
+    def test_an_idle_lane_wakes_for_a_live_runs_limit(self):
+        self.first_sight()
+        self.merged()
+        job = self.jobs.started(kind='live', repo='first', issue=13, branch='main',
+                                title='Queue runner live: first', sha=A, head=B)
+        at = NOW + datetime.timedelta(hours=1)
+        self.jobs.ended(job.id, exit_code=1, outcome='usage-limit', resume_at=at.isoformat())
+        r = Runner(self.config, github=self.gh, t3=self.t3, git=self.git,
+                   out=open(os.devnull, 'w'), log_line=self.said.append, now=lambda: NOW)
+        self.addCleanup(r.out.close)
+        self.assertEqual(r.choose(), 'idle')
+        self.assertEqual(r.gate_until, at)
 
 
 if __name__ == '__main__':

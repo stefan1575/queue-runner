@@ -155,6 +155,7 @@ class LiveSteps:
         self.find_thread = find_thread                   # Runner._find_thread
         self.now = now or (lambda: datetime.datetime.now(datetime.timezone.utc))
         self._last_why: dict[str, str | None] = {}
+        self.wait_until: datetime.datetime | None = None   # a live run's usage-limit resume
 
     def served(self):
         return [r for r in self.config.repos if r.live_doc and r.github]
@@ -188,6 +189,11 @@ class LiveSteps:
                 if name not in functions and not name.startswith('_'):
                     functions.append(name)
         applied = [a for j in since for a in j.applied if a in added]
+        for j in since:   # applied at j.head, then edited by a later merge: the repo forbids it
+            if j.applied and j.head and j.head != target:
+                edited = {p.replace('\\', '/') for s, p in
+                          self.git.name_status(repo.path, j.head, target) if s != 'A'}
+                changed += [a for a in j.applied if a in edited and a not in changed]
         unsure = tuple(j.link or j.id for j in since if j.outcome in UNSURE)
         return Batch(start=start, target=target, prs=tuple(pr_numbers(commits)),
                      commits=tuple(commits), pending=tuple(a for a in sorted(added)
@@ -211,7 +217,8 @@ class LiveSteps:
             why = self.merger.why_not(repo, pr.number, pr.head_sha)
             if why is None:
                 return f'#{pr.number} is clean and merging'
-            if self.github.checks(repo, pr.head_sha).state in ('pending', 'none'):
+            if (self.github.checks(repo, pr.head_sha).state in ('pending', 'none')
+                    and self.merger.why_not(repo, pr.number, pr.head_sha, checks=False) is None):
                 return f'#{pr.number} is clean, waiting for its checks'
         return None
 
@@ -227,6 +234,7 @@ class LiveSteps:
         if last.outcome == USAGE_LIMIT:
             at = datetime.datetime.fromisoformat(last.resume_at) if last.resume_at else None
             if at and self.now() < at:
+                self.wait_until = min(filter(None, (self.wait_until, at)))
                 return (f'the last live run was cut off by a usage limit; again after '
                         f'{at.astimezone():%Y-%m-%d %H:%M}')
             return None
@@ -248,19 +256,21 @@ class LiveSteps:
     def batch(self, repo, record: bool = True) -> Batch | None:
         """This repo's batch, if its live steps should run now; None (saying why, once) if not.
         On first sight, records the base's head as `assumed` live (unless `record` is False)."""
+        if self.reach(repo)[0] is None:
+            # First, before anything may hold it: a merge after this point is a live run's.
+            target = self.target(repo)
+            if record:
+                job = self.jobs.started(kind='live', repo=repo.name, issue=None,
+                                        branch=repo.base, title=live_title(repo), sha=target,
+                                        head=target)
+                self.jobs.ended(job.id, exit_code=None, outcome=ASSUMED)
+            return self._note(repo, f'first sight: everything up to {target[:7]} on {repo.base} '
+                                    'counts as live')
         why = self.held(repo) or self.about_to_land(repo)
         if why is None:
-            self.git.fetch(repo.path, repo.base)
-            target = self.git.sha(repo.path, f'origin/{repo.base}')
+            target = self.target(repo)
             last, since = self.reach(repo)
-            if last is None:
-                if record:
-                    job = self.jobs.started(kind='live', repo=repo.name, issue=None,
-                                            branch=repo.base, title=live_title(repo), sha=target,
-                                            head=target)
-                    self.jobs.ended(job.id, exit_code=None, outcome=ASSUMED)
-                why = (f'first sight: everything up to {target[:7]} on {repo.base} counts as live')
-            elif last.head == target:
+            if last.head == target:
                 return self._note(repo, f'nothing merged since {target[:7]}', quiet=True)
             elif not self.git.is_ancestor(repo.path, last.head, target):
                 why = (f'{repo.base} at {target[:7]} no longer holds {last.head[:7]}, where the '
@@ -273,6 +283,11 @@ class LiveSteps:
                 why = f'no PR merged since {last.head[:7]}'
         return self._note(repo, why)
 
+    def target(self, repo) -> str:
+        """The base's head on origin now."""
+        self.git.fetch(repo.path, repo.base)
+        return self.git.sha(repo.path, f'origin/{repo.base}')
+
     def _note(self, repo, why: str, quiet: bool = False) -> None:
         if self._last_why.get(repo.name) != why and not quiet:
             self.say(f'live {repo.name}: not now, {why}')
@@ -280,7 +295,9 @@ class LiveSteps:
         return None
 
     def next(self):
-        """(repo, batch) for the first repo whose live steps run now, or None."""
+        """(repo, batch) for the first repo whose live steps run now, or None. `wait_until` is
+        then the soonest a live run cut off by a usage limit may run again."""
+        self.wait_until = None
         for repo in self.served():
             try:
                 if found := self.batch(repo):
@@ -361,6 +378,18 @@ class LiveSteps:
         job = self.jobs.started(kind='live', repo=repo.name, issue=b.prs[-1], branch=repo.base,
                                 title=live_title(repo), sha=b.start, head=b.target)
         name = f'live {repo.name}'
+        # From the start record on, the Sol lane merges nothing in this repo (merge.why_not).
+        # A merge that landed or began since the batch was read makes it stale: next pass.
+        try:
+            moved = self.about_to_land(repo) or (
+                None if self.target(repo) == b.target else f'{repo.base} moved past {b.target[:7]}')
+        except Exception as e:
+            moved = f'reading it again failed ({type(e).__name__}: {e})'
+        if moved:
+            self.jobs.ended(job.id, exit_code=None, outcome=NOT_STARTED,
+                            error=f'the batch went stale before its thread: {moved}')
+            self.say(f'{name} not started: {moved}; the next pass reads the batch again')
+            return 'idle'
         try:
             brief = self.brief(repo, b)
         except Exception as e:

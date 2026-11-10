@@ -53,8 +53,9 @@ class Merger:
                     why = f'reading it failed ({type(e).__name__}: {e})'
                 yield pr, why
 
-    def why_not(self, repo, n: int, h: str) -> str | None:
-        """The pre-merge re-check, read afresh: why the PR doesn't merge at H now, or None."""
+    def why_not(self, repo, n: int, h: str, checks: bool = True) -> str | None:
+        """The pre-merge re-check, read afresh: why the PR doesn't merge at H now, or None.
+        Without `checks`, its checks aren't looked at (live.py: would it merge once they pass?)."""
         h7 = h[:7]
         pr = self.github.pull(repo, n)
         if pr.state != 'open':
@@ -67,6 +68,9 @@ class Merger:
             return 'it is a draft'
         if job := self.jobs.writer(repo.name, pr.branch):
             return f'a {job.kind} job is writing to {pr.branch}'
+        if live := next((j for j in self.jobs.live(repo.name) if j.open), None):
+            return (f'the live run {live.id} is bringing {repo.base} live: merges wait for it, '
+                    'so its batch stays the one it was given')
         if why := held(self.jobs, repo, n):
             return why
         if (failed := sum(j.outcome == 'failed' for j in self.jobs.on('merge', repo.name, n, h))) \
@@ -75,8 +79,8 @@ class Merger:
         comments = self.github.issue_comments(repo, n)
         if not (last := newest_on(comments, h, 'clean')):
             return f'its newest review comment is not a clean review of {h7}'
-        checks = self.github.checks(repo, h)
-        if checks.state != 'passed':
+        checks = self.github.checks(repo, h) if checks else None
+        if checks and checks.state != 'passed':
             more = ', '.join(checks.failed or checks.pending)
             return f'checks on {h7} are {checks.state}' + (f' ({more})' if more else '')
         if pr.mergeable is False:

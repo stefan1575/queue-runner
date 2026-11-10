@@ -154,6 +154,7 @@ class Runner:
                 return 'build', None, lambda: self.run_build(job)
         self.say('Nothing to start: no PR needs a fix round, and no repo has an unblocked '
                  'ready-for-agent issue that isn\'t already being built or held.')
+        self.gate_until = self.live.wait_until   # a live run's limit: the wake task for it
         return IDLE
 
     def _gated(self, kind, then, run):
