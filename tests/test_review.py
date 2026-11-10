@@ -201,6 +201,7 @@ class ReviewerTest(unittest.TestCase):
         self.assertIn('from `bun.lock`', b['brief'])
         self.assertIn('`npm test`', b['brief'])
         self.assertIn('quote', b['brief'])                 # its summary line, in the reply
+        self.assertIn('not browser tests', b['brief'])     # e2e stalled with no browser
         self.assertTrue(any('cached (first-abc)' in line for line in self.said))
 
     def test_without_its_dependencies_sol_is_told_why_and_still_reviews(self):

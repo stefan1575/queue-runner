@@ -91,7 +91,8 @@ def _tests(prepared) -> str:
     if prepared and prepared.ready:
         return ('Node is on PATH and ' + prepared.note + ", so run the repo's tests here: "
                 '`npm test`, and the other `package.json` scripts the change touches that need '
-                'no network (the network is off). To confirm a suspected bug, add a test that '
+                'no network (the network is off); not browser tests (Playwright has no browser '
+                'here; CI runs them). To confirm a suspected bug, add a test that '
                 'fails and run it. The workdir is a throwaway copy of H, deleted afterwards. '
                 + said + " A failure the change doesn't explain (one that only happens on "
                 'Windows, say) is no finding: say so. CI runs too, and still gates the merge.')
