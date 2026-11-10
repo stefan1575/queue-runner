@@ -70,6 +70,16 @@ class SelfUpdateTest(unittest.TestCase):
         self.assertFalse(self.update.due())
         self.assertIn('fast-forward', self.lines[0])
 
+    def test_a_switch_to_another_branch_while_waiting_is_not_fast_forwarded(self):
+        self.merge_on_origin()
+        self.assertTrue(self.update.due())
+        git('switch', '-q', '-c', 'mine', cwd=self.repo)   # during the Sol lane's pass
+        before = git('rev-parse', 'HEAD', cwd=self.repo)
+        self.assertIsNone(self.update.update())
+        self.assertEqual(git('rev-parse', 'mine', cwd=self.repo), before)
+        self.assertEqual(git('rev-parse', 'main', cwd=self.repo), before)
+        self.assertIn('changed while', self.lines[-1])
+
     def test_an_update_that_fails_is_said_and_not_due_again_for_that_commit(self):
         self.merge_on_origin('b.txt')
         with open(os.path.join(self.repo, 'b.txt'), 'w') as f:   # untracked, in the way
@@ -158,6 +168,16 @@ class RelaunchTest(unittest.TestCase):
         self.assertTrue(self.run_relaunch(takes_lock=False, exits=0, code=3))
         self.assertEqual(self.toaster.toasts, [])
         self.assertIn('another runner', self.lines[-1])
+
+    def test_a_runner_that_cant_be_spawned_toasts(self):
+        def spawn(cmd, cwd, err):
+            raise FileNotFoundError('no such python')
+        ok = relaunch(['missing.exe'], cwd='C:/repo', sha='abc1234def', github='o/queue-runner',
+                      pid_file=self.pid_file, err_file=self.err_file, spawn=spawn,
+                      toaster=self.toaster, say=self.lines.append, sleep=self.sleep,
+                      clock=self.clock)
+        self.assertFalse(ok)
+        self.assertIn('no such python', self.toaster.toasts[0]['text'])
 
     def test_a_failed_toast_is_said(self):
         self.toaster.fail = True

@@ -47,6 +47,12 @@ class SelfUpdate:
         if code:
             self._once(f"Self-update: can't fetch {self.repo.name}'s {base}: {err}")
             return False
+        return self._fast_forwards()
+
+    def _fast_forwards(self) -> bool:
+        """The checkout is on its base, and `origin/<base>` (as last fetched) is ahead of it and
+        fast-forwards from it."""
+        base = self.repo.base
         _, head, _ = self._git('rev-parse', 'HEAD')
         _, target, _ = self._git('rev-parse', f'refs/remotes/origin/{base}')
         if not target or head == target or target == self._failed:
@@ -68,6 +74,12 @@ class SelfUpdate:
         refused, and that commit isn't due again."""
         target_ref = f'refs/remotes/origin/{self.repo.base}'
         _, target, _ = self._git('rev-parse', target_ref)
+        # checked again: the checkout may have changed while the Sol lane finished its pass
+        if not self._fast_forwards():
+            self._failed = target
+            self.say(f'Self-update: {self.repo.path} changed while the runner waited to restart, '
+                     f'so it carries on with the code it has')
+            return None
         code, _, err = self._git('merge', '--ff-only', '--quiet', target_ref)
         if code:
             self._failed = target
@@ -111,11 +123,13 @@ def relaunch(cmd, *, cwd, sha, github, pid_file, err_file, toaster, say, spawn=_
     runner.lock: True when the new one took the lock and stayed up `stay_up` seconds (or another
     runner holds the lock), else False after toasting Stefan the new code's error."""
     short = sha[:7]
-    p = spawn(cmd, cwd, err_file)
+    try:
+        p = spawn(cmd, cwd, err_file)
+    except Exception as e:
+        p, why = None, f"it couldn't be started: {e}"
     started = None
     end = clock() + timeout
-    why = None
-    while True:
+    while p is not None:
         code = p.poll()
         if started is None and _pid(pid_file) == str(p.pid):
             started = clock()
