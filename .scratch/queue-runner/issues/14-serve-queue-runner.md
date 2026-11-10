@@ -70,3 +70,5 @@ first bullet of "The runner":
 [PR #2](https://github.com/stefan1575/queue-runner/pull/2), Sol reviewed it clean, the runner
 merged it (`66a5ea1`), and the log says `runner restarted on 66a5ea1 (pid 36220)` at 21:22:09.
 Boxes 1 and 2 ticked.
+
+The `orchestration.md` draft above was applied word for word on 2026-11-10 (Stefan's go); recovery copy in personal-ops `.scratch/agent-instructions/2026-11-10/orchestration.md.before-serves-itself`.

@@ -18,7 +18,7 @@ stops:
 
 **Blocked by:** 06, 07, 09, 10, 11, 17 (Stefan merges leads-dashboard PRs himself from the cutover on)
 
-**Status:** needs-info (2026-11-10: drafts 1 and 2 applied; drafts 3-6 and question 4 are leads-dashboard's, left to Stefan's leads-dashboard session; question 2 is queue-runner#3)
+**Status:** done (2026-11-10: the queue-runner side; drafts 3-6 and question 4 are leads-dashboard's, handed to Stefan's leads-dashboard session)
 
 - [ ] Recovery copies of every rule file edited go in personal-ops
       `.scratch/agent-instructions/<date>/` first (`~/.claude/CLAUDE.md`, Working notes).
@@ -149,3 +149,9 @@ leads-dashboard session. This ticket is done once they are.
 **Question 2 answered (2026-11-10):** the runner takes them.
 [queue-runner#3](https://github.com/stefan1575/queue-runner/issues/3) (fix rounds adopt blocking
 reviews from before the cutover) was filed `ready-for-agent`, and the runner is building it.
+
+**Closed on the queue-runner side (2026-11-10):** everything here is done or answered. What's
+left belongs to leads-dashboard and goes to Stefan's session there: drafts 3-6 above (its
+`docs/agents/review-loop.md` from `.scratch/queue-runner/drafts/13-review-loop.md`, `AGENTS.md`,
+`.claude/cloud/user-rules.md`, the retired briefs) and question 4 (the `## Review` table's merge
+and live rows). Ticket 15's leads-dashboard wording (review-loop.md's Stop signals) goes with them.

@@ -65,3 +65,4 @@ them. Stefan may close them.
   conflict round couldn't resolve (or the PR's third). A conflict first gets a conflict round,
   one PR at a time."
 
+The two `pr-review.md` drafts above were applied word for word on 2026-11-10 (Stefan's go); recovery copy in personal-ops `.scratch/agent-instructions/2026-11-10/pr-review.md.before-conflict-rounds`. The leads-dashboard review-loop.md draft goes to Stefan's leads-dashboard session.
