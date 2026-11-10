@@ -123,8 +123,7 @@ class Stopper:
                 or (s[0] == CONFLICT and not self._conflict_filed_since_round(repo, pr))]
 
     def _conflict_filed_since_round(self, repo, pr) -> bool:
-        rounds = [j for j in conflict_rounds(self.jobs, repo.name, pr.number)
-                  if j.sha == pr.head_sha]
+        rounds = rounds_on(self.jobs, repo.name, pr.number, pr.head_sha)
         if not rounds:
             return True
         pos = positions(self.jobs)
@@ -330,16 +329,27 @@ def conflict_rounds(jobs, repo_name: str, n: int) -> list:
             if j.cause == CONFLICT and j.outcome not in (NOT_STARTED, NOT_SENT)]
 
 
+def rounds_on(jobs, repo_name: str, n: int, sha: str) -> list:
+    """The PR's fix rounds of any cause on head H that ran or are running, oldest first."""
+    return [j for j in jobs.on('fix', repo_name, n, sha)
+            if j.outcome not in (NOT_STARTED, NOT_SENT)]
+
+
 def conflict_stop(jobs, repo, pr) -> tuple[str, str | None] | None:
     """Why a conflict on the PR's head H is a stop for Stefan, (why, link), or None while a
-    conflict round may still resolve it: the round on H ended without resolving it, or the PR
-    had conflict rounds on two earlier heads already, so this is its third conflict."""
+    conflict round may still resolve it: the newest round on H (a conflict round, or an
+    ordinary fix round that couldn't start) ended without resolving it, or the PR had conflict
+    rounds on two earlier heads already, so this is its third conflict. An ordinary round's
+    `no-push` is its own `no-push` stop."""
     h7 = pr.head_sha[:7]
     rounds = conflict_rounds(jobs, repo.name, pr.number)
-    on_h = [j for j in rounds if j.sha == pr.head_sha and not j.open]
-    if on_h and on_h[-1].outcome in UNRESOLVED:
-        return (f'it conflicts with {pr.base} at {h7}, and the conflict round on {h7} '
-                f"couldn't resolve it (it ended {on_h[-1].outcome})", on_h[-1].link)
+    on_h = [j for j in rounds_on(jobs, repo.name, pr.number, pr.head_sha) if not j.open]
+    last = on_h[-1] if on_h else None
+    if last and last.outcome in UNRESOLVED and (last.cause == CONFLICT
+                                                or last.outcome != 'no-push'):
+        what = 'conflict round' if last.cause == CONFLICT else 'fix round'
+        return (f'it conflicts with {pr.base} at {h7}, and the {what} on {h7} '
+                f"couldn't resolve it (it ended {last.outcome})", last.link)
     heads = list(dict.fromkeys(j.sha for j in rounds if j.sha != pr.head_sha))
     if len(heads) >= MAX_CONFLICT_HEADS:
         return (f'it conflicts with {pr.base} again at {h7}, a third conflict after conflict '

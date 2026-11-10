@@ -214,6 +214,50 @@ class ConflictRoundTest(unittest.TestCase):
         r.jobs.released('first', 20)
         self.assertIsNotNone(r.next_fix())
 
+    # --- Sol's review of ticket 15 ---------------------------------------------------------
+
+    def test_two_resumed_conflicted_prs_never_wait_for_each_other(self):
+        # Both had a conflict round and pushed heads that still conflict; neither is held.
+        r = self.runner(outcomes=[(0, 'completed')])
+        for n, sha in ((20, H2), (21, H4)):
+            j = r.jobs.started(kind='fix', repo='first', issue=n, branch='b', title='t',
+                               sha='9' * 40, cause='conflict')
+            r.jobs.ended(j.id, exit_code=0, outcome='pushed')
+        whys = {pr.number: why for pr, _, why in r.fixer.candidates(self.repo)}
+        self.assertIsNone(whys[20])   # the lower number goes
+        self.assertIn('PR #20', whys[21])
+
+    def test_a_decision_to_fix_after_an_unresolved_conflict_orders_one_more_round(self):
+        self.only(20)
+        r = self.runner(outcomes=[(0, 'completed')] * 2)
+        r.run_pass()                 # pushes nothing
+        r.reviewer.review_pass()     # the conflict stop
+        [stop] = self.jobs(r, 'stop')
+        r.jobs.ended(stop.id, exit_code=None, outcome='answered', link=stop.link,
+                     answer='replied')
+        d = r.jobs.started(kind='decision', repo='first', issue=20, branch=None, title='t',
+                           sha=H2, about=stop.id, question='reply')
+        r.jobs.ended(d.id, exit_code=0, outcome='fix', reason='Keep the new column name.')
+        found = r.next_fix()
+        self.assertIsNotNone(found)
+        self.assertIsNone(found[2])   # a conflict round
+        self.assertEqual(r.run_pass(), 'started')
+        brief = self.t3.starts[1]['message']
+        self.assertIn('## Direction first', brief)
+        self.assertIn('Keep the new column name.', brief)
+
+    def test_an_ordinary_round_that_could_not_start_leaves_a_conflict_stop(self):
+        self.only(20)
+        r = self.runner()
+        j = r.jobs.started(kind='fix', repo='first', issue=20, branch='claude/red-5',
+                           title='Queue runner fix: first#20', sha=H2, round=1)
+        r.jobs.ended(j.id, exit_code=None, outcome='branch-exists')
+        r.reviewer.review_pass()
+        [stop] = self.jobs(r, 'stop')
+        self.assertEqual(stop.stop, 'conflict')
+        self.assertIn("the fix round on bbbbbbb couldn't resolve it (it ended branch-exists)",
+                      stop.reason)
+
     def test_a_restart_after_a_usage_limit_rebuilds_the_conflict_brief(self):
         self.only(20)
         r = self.runner()

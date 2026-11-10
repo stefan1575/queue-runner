@@ -12,7 +12,7 @@ you need is below or in the repo. There are no handoff files.
 - **Push to the PR's branch, not to `$work`:** `git push origin HEAD:$branch`. If the push is
   rejected because `$branch` moved, don't force-push: say so on the PR and end your turn.
 
-## What to do
+${direction}## What to do
 
 1. `git fetch origin $base`, then `git merge origin/$base`. Merge, don't rebase: the PR's
    commits and their review comments stay as they are, and nothing needs a force-push.

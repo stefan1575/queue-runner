@@ -105,7 +105,9 @@ class Fixer:
         the repo's open PRs: one conflicted PR at a time."""
         if why := self._busy(repo, pr):
             return why
-        if stop := conflict_stop(self.jobs, repo, pr):
+        # A decision that ordered a round on H since (Stefan's reply to the stop) overrides
+        # the stop: `_busy` has seen that no round ran after it.
+        if not self.order(repo, pr) and (stop := conflict_stop(self.jobs, repo, pr)):
             return f'{stop[0]}: a stop for Stefan'
         if other := self.resolving(repo, pr, prs):
             return (f"PR #{other.number} had a conflict round and hasn't merged or stopped yet: "
@@ -114,10 +116,14 @@ class Fixer:
 
     def resolving(self, repo, pr, prs):
         """Another open PR that had a conflict round and isn't stopped for Stefan: it's on its
-        way to merging, so this one waits to resolve against the base it lands on."""
+        way to merging, so this one waits to resolve against the base it lands on. One that
+        conflicts again waits its own turn, so it holds back only higher numbers: two such PRs
+        never wait for each other."""
         return next((o for o in prs if o.number != pr.number
                      and conflict_rounds(self.jobs, repo.name, o.number)
-                     and not held(self.jobs, repo, o.number)), None)
+                     and not held(self.jobs, repo, o.number)
+                     and (o.number < pr.number
+                          or not self.github.has_conflict(repo, o.number))), None)
 
     def candidates(self, repo):
         """(PR, its blocking review job, why not now) for each open PR the runner found
@@ -198,7 +204,14 @@ class Fixer:
                   for where, k in closed_issues(pr.body, here)]
         threads = [j for j in self.jobs.pr_jobs(repo.name, pr.number, pr.branch) if j.link]
         older = len(landed) - len(shown)
+        order = self.order(repo, pr)
+        by = order and (order.link or "Stefan's reply on the PR")
+        direction = '' if order is None else (
+            f'## Direction first\n\nAn earlier round on this head stopped for Stefan, and a '
+            f'decision ordered this one ({by}). Follow it; it comes before the steps below.\n\n'
+            f'{(order.reason or "").strip()}\n\n')
         return _template('conflict').substitute(
+            direction=direction,
             number=pr.number, github=repo.github, title=pr.title,
             sha=h, sha7=h[:7], work=fix_branch(pr.number, h), branch=pr.branch, base=pr.base,
             agents=_agents_pointer(repo.path),

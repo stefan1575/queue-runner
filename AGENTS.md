@@ -301,13 +301,17 @@ head. A blocking review on H gets its ordinary fix round first.
 - **One at a time** (`Fixer.resolving`): in a repo, while an open PR that had a conflict round
   (not released) isn't held for Stefan (`stops.held`: a stop, his hold...), it's on its way to
   merging, and no other PR's conflict round starts; among the rest, the lowest number goes
-  first. So each resolves against the base the one before landed on. In a repo Stefan merges,
+  first. One that conflicts again holds back only higher numbers, so two never wait for each
+  other. So each resolves against the base the one before landed on. In a repo Stefan merges,
   "merged" is his merge: the next waits for it.
-- **Still a stop** (`stops.conflict_stop`, filed by the Sol pass as kind `conflict`): the round
-  on H ended `no-push`, `head-unknown` or `branch-exists` and H still conflicts; or the PR had
+- **Still a stop** (`stops.conflict_stop`, filed by the Sol pass as kind `conflict`): the newest
+  round on H ended `no-push`, `head-unknown` or `branch-exists` and H still conflicts (an
+  ordinary fix round's `no-push` is its own `no-push` stop); or the PR had
   conflict rounds on two earlier heads and conflicts again (a third conflict). `failed` and
   `waiting` rounds get a decision first, `usage-limit` a restart, as for any fix round.
-  `--release NAME#PR` lets the PR have conflict rounds again, counting afresh. A conflict stop
+  `--release NAME#PR` lets the PR have conflict rounds again, counting afresh. A decision that
+  orders a fix on H after the stop (Stefan's reply) gets one more conflict round on H, its text
+  first in the brief under `## Direction first`. A conflict stop
   filed on H before a round on H (before this ticket every conflict was a stop) doesn't count
   as the round's own stop.
 - Until then the Sol lane leaves a conflicted head alone (`it conflicts with <base>: a conflict
