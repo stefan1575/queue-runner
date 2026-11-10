@@ -557,6 +557,9 @@ class Runner:
             try:
                 self.t3.list(self.config.repos[0].path)
             except T3Error as e:
+                if 'No T3 Code project matches' in str(e):   # the server answered: it's up
+                    self.say(f"T3's server is up, but: {e}")
+                    return
                 if str(e) != said:
                     self.say(f"Waiting for T3's server: {e}")
                 said = str(e)

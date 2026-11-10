@@ -54,7 +54,8 @@ Ticket 10 (`orchestration.md`, The runner and Sleep).
   `~/sol-pr-review.py` until then. By hand: double-click the shortcut, or
   `pythonw -m queue_runner` from this folder.
 - **Stop:** `python3 -m queue_runner --stop` kills the process named in `<state_dir>/runner.pid`
-  (written once it holds `runner.lock`). A Claude job it was blocked on runs on in T3, and the
+  (written once it holds `runner.lock`, removed when it ends), and only a Python process: a stale pid
+  that Windows gave to something else is left alone. A Claude job it was blocked on runs on in T3, and the
   next runner settles it (A Claude pass, Settle); a Sol review is cut off and counts as `failed`.
   Better to stop between jobs: the log says when one starts and ends.
 - **Restart:** `--stop`, then start it again (the shortcut). A second start while one runs exits
@@ -64,17 +65,18 @@ Ticket 10 (`orchestration.md`, The runner and Sleep).
   error`. Read the tail: `Get-Content ~/.queue-runner/logs/runner.log -Tail 40`.
 - **T3 not up yet at logon:** before its first pass the runner calls `t3 thread list` on the first
   repo's project every 30 seconds until it answers, logging `Waiting for T3's server: ...` once
-  (again only if the error changes) and `T3's server is up`. No AI, nothing else starts meanwhile.
+  (again only if the error changes) and `T3's server is up`. An unknown project
+  (`No T3 Code project matches`) means the server answered: it says so and carries on. No AI, nothing else starts meanwhile.
 - **Wake tasks** (`wake.py`): after every pass of either lane, the runner keeps one Task Scheduler
   task per time a lane waits for: the Claude lane's `gate_until` (the gate's reset, a limit's
   resume) and Sol's resume. They live in the folder `\Queue runner\`, named `wake YYYY-MM-DD
-  HHMM` (local, the minute after the time), one-off time triggers with **wake to run**, run as
+  HHMM+ZZZZ` (local, the minute after the time, with its UTC offset so a DST change can't merge two), one-off time triggers with **wake to run**, run as
   Stefan only while he's logged on, and run `pythonw -I -c ...` to hold off idle sleep for 10
   minutes (`SetThreadExecutionState`), so the runner's pass starts before the PC drops back to
   sleep; the keep-awake hooks then hold it while a job runs. A task whose time has passed, or
   that nothing waits for any more, is deleted at the next sync (said in the log), and each
   expires an hour after its time so Windows deletes it if the runner is gone. Times under a
-  minute ahead get none. Plain idle polls (`poll_seconds`) set no wake: a sleeping PC just
+  minute ahead get no new task, but one already set is kept until it fires. Plain idle polls (`poll_seconds`) set no wake: a sleeping PC just
   polls later. A Task Scheduler error is logged once and never stops the loop.
 - **Sleeping by the wall clock:** the loop's waits (`run.wall_sleep`, the Sol lane's too) look at
   the wall clock every 30 seconds, since Windows' timers may not count time the PC slept.

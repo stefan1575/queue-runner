@@ -66,6 +66,21 @@ class WakerTest(unittest.TestCase):
                          None])
         self.assertEqual(self.sched.tasks, {})
 
+    def test_a_task_set_earlier_is_kept_until_it_fires_even_inside_the_last_minute(self):
+        at = NOW + datetime.timedelta(minutes=5)
+        self.waker.sync([at])
+        self.now = wake_at(at) - datetime.timedelta(seconds=30)
+        self.waker.sync([at])
+        self.assertEqual(set(self.sched.tasks), {task_name(wake_at(at))})
+        self.now = wake_at(at) + datetime.timedelta(seconds=5)   # fired: used
+        self.waker.sync([at])
+        self.assertEqual(self.sched.tasks, {})
+
+    def test_the_two_one_thirties_of_a_dst_change_are_two_names(self):
+        first = datetime.datetime(2026, 11, 1, 1, 30, tzinfo=datetime.timezone(-datetime.timedelta(hours=4)))
+        second = datetime.datetime(2026, 11, 1, 1, 30, tzinfo=datetime.timezone(-datetime.timedelta(hours=5)))
+        self.assertNotEqual(task_name(first), task_name(second))
+
     def test_a_task_left_by_an_earlier_runner_is_removed(self):
         self.sched.tasks[FOLDER + 'wake 2026-11-09 0300'] = NOW - datetime.timedelta(days=1)
         self.waker.sync([])
@@ -251,6 +266,21 @@ path = "{self.dir}"
         self.assertEqual(log.count("Waiting for T3's server"), 1)
         self.assertIn("T3's server is up", log)
         self.assertEqual(len(t3.starts), 1)
+
+    def test_t3_up_but_the_first_project_unknown_doesnt_wait_forever(self):
+        class NoProject(FakeT3):
+            def list(self, project):
+                raise T3Error("t3 thread list failed (1): No T3 Code project matches 'X'.")
+
+        def sleep(s):
+            raise Done
+        with self.assertRaises(Done):   # the loop's first idle sleep, not the T3 wait
+            self.run_main([], t3=NoProject([(0, 'completed')]), sleep=sleep)
+        self.assertIn("T3's server is up, but", self.runner_log())
+
+    def test_the_pid_file_is_gone_once_the_runner_ends(self):
+        self.run_main(['--once'])
+        self.assertFalse(os.path.exists(os.path.join(self.dir, 'state', 'runner.pid')))
 
     def test_stop_kills_the_runner_named_in_runner_pid(self):
         killed = []

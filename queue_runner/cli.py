@@ -15,6 +15,7 @@
     python -m queue_runner --stop             # stop the running runner (its pid in runner.pid)
 """
 import argparse
+import contextlib
 import datetime
 import os
 import re
@@ -298,9 +299,16 @@ def _pid_file(config) -> str:
 
 
 def _kill(pid: int) -> tuple[int, str]:
+    """taskkill, but only a Python process: a pid left in runner.pid may have been reused."""
     import subprocess
+    flags = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
+    p = subprocess.run(['tasklist', '/FI', f'PID eq {pid}', '/FO', 'CSV', '/NH'],
+                       capture_output=True, text=True, errors='replace', creationflags=flags)
+    image = p.stdout.strip().split(',')[0].strip('"').lower()
+    if not image.startswith('python'):
+        return 1, f'pid {pid} is {image or "not running"}, not the runner (runner.pid is stale)'
     p = subprocess.run(['taskkill', '/PID', str(pid), '/F'], capture_output=True, text=True,
-                       errors='replace', creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+                       errors='replace', creationflags=flags)
     return p.returncode, (p.stdout + p.stderr).strip()
 
 
@@ -417,12 +425,16 @@ def main(argv=None, github=None, out=None, t3=None, git=None, sleep=None,
         with runner_lock(config.state_dir):
             with open(_pid_file(config), 'w', encoding='utf-8') as f:
                 f.write(str(os.getpid()))
-            if args.once:
-                runner.run_once()
-            else:
-                log_line(f'runner started (pid {os.getpid()})')
-                runner.wait_for_t3(sleep)
-                runner.run_forever(sleep)
+            try:
+                if args.once:
+                    runner.run_once()
+                else:
+                    log_line(f'runner started (pid {os.getpid()})')
+                    runner.wait_for_t3(sleep)
+                    runner.run_forever(sleep)
+            finally:   # a runner that ends leaves no pid for --stop to find
+                with contextlib.suppress(OSError):
+                    os.remove(_pid_file(config))
     except RunnerBusy as e:
         log_line(f'a second runner started (pid {os.getpid()}) and exited at once: {e}')
         print(f'A queue runner is already running ({e}).', file=out)

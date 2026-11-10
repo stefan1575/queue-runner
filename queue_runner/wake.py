@@ -24,8 +24,9 @@ NO_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
 
 
 def task_name(when: datetime.datetime) -> str:
-    """`\\Queue runner\\wake 2026-11-10 1405`: the local minute it wakes at."""
-    return f'{FOLDER}{PREFIX}{when.astimezone():%Y-%m-%d %H%M}'
+    """`\\Queue runner\\wake 2026-11-10 1405`+0800`: the local minute it wakes at, with its UTC
+    offset, so the two 01:30s of a DST change are two tasks."""
+    return f'{FOLDER}{PREFIX}{when.astimezone():%Y-%m-%d %H%M%z}'
 
 
 def wake_at(when: datetime.datetime) -> datetime.datetime:
@@ -139,17 +140,19 @@ class Waker:
 
     def sync(self, times) -> None:
         now = self.now()
-        wanted = {}
+        wanted, new = {}, set()   # every time still ahead keeps its task; only far ones get one
         for t in times:
-            if t is not None and t - now >= MIN_LEAD:
+            if t is not None and wake_at(t) > now:   # not yet fired
                 at = wake_at(t)
                 wanted[task_name(at)] = at
+                if t - now >= MIN_LEAD:
+                    new.add(task_name(at))
         try:
             have = self.scheduler.names()
             for name in sorted(have - wanted.keys()):
                 self.scheduler.delete(name)
                 self.say(f'Wake task removed: {name}')
-            for name in sorted(wanted.keys() - have):
+            for name in sorted(new - have):
                 self.scheduler.create(name, wanted[name])
                 self.say(f'Wake task set: {name} wakes the PC at '
                          f'{wanted[name]:%Y-%m-%d %H:%M}')
