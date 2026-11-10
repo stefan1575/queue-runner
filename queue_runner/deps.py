@@ -20,7 +20,7 @@ import os
 import re
 import shutil
 import subprocess
-import tempfile
+import uuid
 import time
 
 HOME = os.path.expanduser('~')
@@ -183,8 +183,11 @@ class Deps:
     def _install(self, worktree, final, lock, cmd) -> str | None:
         """Installs into a fresh folder, then moves it into place. The error's tail, or None."""
         os.makedirs(self.cache_dir, exist_ok=True)
-        # Its own folder: another install of the same key may be running (live_review.py).
-        tmp = tempfile.mkdtemp(prefix=f'{os.path.basename(final)}.tmp-', dir=self.cache_dir)
+        # Its own folder: another install of the same key may be running (live_review.py). Not
+        # tempfile.mkdtemp: on Windows its 0o700 gives an owner-only ACL (Python 3.13+), which
+        # Codex's sandbox user can't read through the junction; makedirs inherits deps_dir's.
+        tmp = f'{final}.tmp-{os.getpid()}-{uuid.uuid4().hex[:8]}'
+        os.makedirs(tmp)
         for name in ('package.json', lock, *EXTRA):
             src = os.path.join(worktree, name)
             if os.path.isfile(src):

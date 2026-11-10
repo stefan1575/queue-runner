@@ -184,6 +184,17 @@ class DepsTest(unittest.TestCase):
         self.assertFalse(os.path.exists(old))
         self.assertTrue(os.path.exists(young))
 
+    @unittest.skipUnless(os.name == 'nt', 'Windows ACLs')
+    def test_the_cache_inherits_its_folders_permissions_so_the_sandbox_can_read_it(self):
+        """tempfile.mkdtemp gave an owner-only ACL, and Codex's sandbox user couldn't read
+        node_modules through the junction (EPERM on stat)."""
+        import subprocess
+        self.deps().prepare('app', self.checkout())
+        [cache] = [n for n in os.listdir(self.cache) if '.' not in n]
+        acl = subprocess.run(['icacls', os.path.join(self.cache, cache)], capture_output=True,
+                             text=True).stdout
+        self.assertIn('(I)', acl)
+
     def test_unlink_removes_the_junction_and_keeps_the_cache(self):
         wt = self.checkout()
         self.deps().prepare('app', wt)
