@@ -1,5 +1,6 @@
 """GitHub as the runner sees it: the seam, its data, and the gh adapter."""
 import json
+from urllib.parse import quote
 from dataclasses import dataclass
 
 
@@ -266,6 +267,14 @@ class GhCli:
 
     def edit_pull_body(self, repo, number, body) -> None:
         self._send('PATCH', f'repos/{repo.github}/pulls/{number}', {'body': body})
+
+    def add_label(self, repo, number, label) -> None:
+        """Adds a label to an issue or PR (GitHub makes the label if the repo has none)."""
+        self._send('POST', f'repos/{repo.github}/issues/{number}/labels', {'labels': [label]})
+
+    def remove_label(self, repo, number, label) -> None:
+        self._run(['api', '-X', 'DELETE',
+                   f'repos/{repo.github}/issues/{number}/labels/{quote(label)}'])
 
     def merge(self, repo, number, sha) -> str:
         """Merges the PR with a merge commit, only if its head is still `sha` (GitHub refuses

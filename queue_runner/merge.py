@@ -10,6 +10,15 @@ A head that moved is left to the Sol lane, which reviews the new one. After the 
 worktrees of the PR's build and fix jobs are removed. The repo's live steps run later, in
 the Claude lane (`live.py`).
 
+A repo whose `config.toml` entry says `merge = "stefan"` (leads-dashboard, ticket 17) isn't merged
+by the runner: once the same re-check passes, the PR is marked ready for Stefan instead, once per
+head: the `ready-for-stefan` label and a toast that opens the PR (a `ready` job, `marked`). The
+mark comes off (`unmarked`, the label removed) when the head moves or the PR is held for Stefan
+(a stop, his hold), so a new head is reviewed before it's ready again. When a marked PR is no
+longer open, the next pass reads it: merged by Stefan, it gets a `merge` job `merged` and its
+worktrees go, as after the runner's own merge; closed unmerged, the mark comes off. The live steps
+read his merge from git as usual (`live.py`).
+
 Merges are automated posts that need no go-ahead (`~/.claude/CLAUDE.md`, Merge when the review is
 clean).
 """
@@ -18,8 +27,10 @@ from .github import OLD_LABELS
 from .ledger import newest_on, said_since
 from .stops import held
 from .state import JobLog
+from .toast import NoToaster
 
 MAX_FAILED = 2   # failed merges on one head before the runner leaves it until a release or a push
+READY = 'ready-for-stefan'   # the label on a PR ready for Stefan to merge (merge = "stefan")
 
 
 def merge_title(repo, number: int) -> str:
@@ -27,9 +38,10 @@ def merge_title(repo, number: int) -> str:
 
 
 class Merger:
-    def __init__(self, config, *, github, git, jobs: JobLog, say):
+    def __init__(self, config, *, github, git, jobs: JobLog, say, toaster=None):
         self.config, self.github, self.git, self.jobs, self.say = config, github, git, jobs, say
-        self._last_why: dict[tuple[str, int], str | None] = {}
+        self.toaster = toaster or NoToaster()
+        self._last_why: dict[tuple, str | None] = {}
 
     # --- which PRs ------------------------------------------------------------------------
 
@@ -68,7 +80,9 @@ class Merger:
             return 'it is a draft'
         if job := self.jobs.writer(repo.name, pr.branch):
             return f'a {job.kind} job is writing to {pr.branch}'
-        if live := next((j for j in self.jobs.live(repo.name) if j.open), None):
+        # Stefan may merge while a live run is open: his merge goes in the next batch.
+        if not repo.stefan_merges and (
+                live := next((j for j in self.jobs.live(repo.name) if j.open), None)):
             return (f'the live run {live.id} is bringing {repo.base} live: merges wait for it, '
                     'so its batch stays the one it was given')
         if why := held(self.jobs, repo, n):
@@ -100,6 +114,8 @@ class Merger:
             if not repo.github:
                 continue
             try:
+                if repo.stefan_merges:
+                    self.stefan_pass(repo)
                 found = list(self.candidates(repo))
             except Exception as e:   # GitHub down: the next pass tries again
                 self.say(f'merge pass on {repo.name} failed: {type(e).__name__}: {e}')
@@ -124,6 +140,8 @@ class Merger:
             self._last_why[key] = why
             return None
         self._last_why.pop(key, None)
+        if repo.stefan_merges:
+            return self._mark_ready(repo, pr)
         job = self.jobs.started(kind='merge', repo=repo.name, issue=n, branch=pr.branch,
                                 title=merge_title(repo, n), sha=h)
         try:
@@ -146,6 +164,111 @@ class Merger:
         self.say(f'{name}: merged at {h[:7]}' + (f' (merge commit {merged[:7]})' if merged else ''))
         self.remove_worktrees(repo, pr)
         return 'merged'
+
+    # --- Stefan merges (merge = "stefan", ticket 17) ----------------------------------------
+
+    def mark(self, repo, n: int):
+        """The PR's newest `ready` job (any head), or None."""
+        marks = self.jobs.on('ready', repo.name, n, released=True)
+        return marks[-1] if marks else None
+
+    def ready(self, repo, pr) -> bool:
+        """Marked ready for Stefan on its head now."""
+        last = self.mark(repo, pr.number)
+        return bool(last and last.outcome == 'marked' and last.sha == pr.head_sha)
+
+    def _ready_job(self, repo, n: int, branch, sha: str):
+        return self.jobs.started(kind='ready', repo=repo.name, issue=n, branch=branch,
+                                 title=f'Queue runner ready: {repo.name}#{n}', sha=sha)
+
+    def _mark_ready(self, repo, pr) -> str:
+        """Labels the PR ready for Stefan and toasts, once per head (again only after the mark
+        came off). 'ready', or 'failed' if the label couldn't be added (the next pass tries)."""
+        n, h, name = pr.number, pr.head_sha, f'ready {repo.name}#{pr.number}'
+        if self.ready(repo, pr):
+            return 'ready'
+        job = self._ready_job(repo, n, pr.branch, h)
+        try:
+            if READY not in pr.labels:
+                self.github.add_label(repo, n, READY)
+        except Exception as e:
+            error = f'{type(e).__name__}: {e}'
+            self.jobs.ended(job.id, exit_code=None, outcome='failed', error=error)
+            self.say(f'{name}: labelling it {READY} failed ({error}); next pass')
+            return 'failed'
+        self.jobs.ended(job.id, exit_code=None, outcome='marked')
+        self.say(f'{name}: clean at {h[:7]} with its checks passed: labelled {READY}, for '
+                 'Stefan to merge')
+        done = f"Sol's review is clean on {h[:7]} and its checks passed."
+        try:
+            self.toaster.toast(f'{repo.name} PR #{n} is ready to merge',
+                               (f'{pr.title}: {done}' if pr.title else done)[:250],
+                               pr.url or f'https://github.com/{repo.github}/pull/{n}',
+                               tag=f'{repo.name}-{n}-ready', button='Open the PR')
+        except Exception as e:
+            self.say(f'{name}: the toast failed: {e}')
+        return 'ready'
+
+    def stefan_pass(self, repo) -> None:
+        """Marks come off PRs no longer ready on their head; a marked PR gone from the open list
+        is read: Stefan merged it, or it was closed."""
+        prs = self.github.open_pulls(repo)
+        for pr in prs:
+            last = self.mark(repo, pr.number)
+            if not (last and last.outcome == 'marked'):
+                continue
+            why = (f'the head moved from {last.sha[:7]} to {pr.head_sha[:7]}: Sol reviews it '
+                   'first' if pr.head_sha != last.sha else held(self.jobs, repo, pr.number))
+            if why:
+                self._unmark(repo, pr, last, why)
+        listed = {p.number for p in prs}
+        for n in sorted({j.issue for j in self.jobs.jobs()
+                         if j.kind == 'ready' and j.repo == repo.name} - listed):
+            last = self.mark(repo, n)
+            if last and last.outcome == 'marked' and not any(
+                    j.outcome == 'merged' for j in self.jobs.on('merge', repo.name, n,
+                                                                released=True)):
+                self._gone(repo, n, last)
+
+    def _unmark(self, repo, pr, last, why: str) -> None:
+        n, key = pr.number, (repo.name, pr.number, 'unmark')
+        try:
+            if READY in pr.labels:
+                self.github.remove_label(repo, n, READY)
+        except Exception as e:   # left marked: the next pass tries again
+            if self._last_why.get(key) != str(e):
+                self.say(f'ready {repo.name}#{n}: no longer ready ({why}), but removing '
+                         f'{READY} failed ({type(e).__name__}: {e}); next pass')
+            self._last_why[key] = str(e)
+            return
+        self._last_why.pop(key, None)
+        job = self._ready_job(repo, n, pr.branch, last.sha)
+        self.jobs.ended(job.id, exit_code=None, outcome='unmarked', reason=why)
+        self.say(f'ready {repo.name}#{n}: no longer ready for Stefan ({why}); {READY} removed')
+
+    def _gone(self, repo, n: int, last) -> None:
+        """A marked PR no longer open: Stefan's merge is recorded and its worktrees removed, or
+        a PR closed unmerged loses its mark."""
+        pr = self.github.pull(repo, n)
+        if pr.state == 'merged':
+            job = self.jobs.started(kind='merge', repo=repo.name, issue=n, branch=pr.branch,
+                                    title=merge_title(repo, n), sha=last.sha)
+            self.jobs.ended(job.id, exit_code=None, outcome='merged', reason='Stefan merged it')
+            self.say(f'merge {repo.name}#{n}: Stefan merged it'
+                     + ('' if pr.head_sha == last.sha else
+                        f' (at {pr.head_sha[:7]}, not {last.sha[:7]}, which was ready)')
+                     + '; its live steps follow')
+            if READY in pr.labels:
+                try:
+                    self.github.remove_label(repo, n, READY)
+                except Exception as e:
+                    self.say(f'merge {repo.name}#{n}: removing {READY} failed: {e}')
+            self.remove_worktrees(repo, pr)
+        elif pr.state == 'closed':
+            job = self._ready_job(repo, n, pr.branch, last.sha)
+            self.jobs.ended(job.id, exit_code=None, outcome='unmarked',
+                            reason='closed without merging')
+            self.say(f'ready {repo.name}#{n}: closed without merging')
 
     def remove_worktrees(self, repo, pr) -> None:
         """The worktrees and local branches of the PR's build and fix jobs, once it merged."""

@@ -2,7 +2,8 @@
 line, so a restarted runner knows what ran and what's still open.
 
 Job kinds: `build` (an issue), `review` (Sol on a PR's head H), `fix` (a Claude fix round on a
-blocking PR, from H), `merge` (the runner merging a clean PR at H), `stop` (a stop filed for
+blocking PR, from H), `merge` (the runner merging a clean PR at H, or Stefan's merge noticed),
+`ready` (in a repo Stefan merges, `merge.py`: the PR at H `marked` ready for him, or `unmarked`), `stop` (a stop filed for
 Stefan on a PR at H: `filed`, then `answered` once he closes its `needs-info` issue or replies on
 the PR or the issue; `failed` if the issue couldn't be filed, so the next pass files it) and
 `decision` (a one-off Claude decision thread, or Stefan's reply read directly, on a case the flow

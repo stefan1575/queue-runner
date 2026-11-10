@@ -92,7 +92,7 @@ class Reviewer:
         self.poster = poster or GitHubPoster(github, say)
         # A dry-run poster (the live check) merges nothing either, unless given a merger.
         self.merger = merger if merger is not None or poster is not None else Merger(
-            config, github=github, git=git, jobs=jobs, say=say)
+            config, github=github, git=git, jobs=jobs, say=say, toaster=toaster)
         # Stops are filed with the real posts only: a dry-run poster files none.
         self.stopper = Stopper(config, github=github, jobs=jobs, say=say,
                                toaster=toaster) if poster is None else None

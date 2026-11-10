@@ -22,6 +22,7 @@ python3 -m queue_runner --gate                # Claude's usage now, and whether 
 python3 -m queue_runner --pause | --resume    # Stefan's knob: start no Claude job, or start them again
 python3 -m queue_runner --reserve PERCENT     # the share of the week kept for Stefan (default 5)
 python3 -m queue_runner --stop                # stop the running runner
+python3 -m queue_runner --needs-me            # everything waiting on Stefan: PRs ready to merge, needs-info stops, threads waiting for his answer
 ```
 
 **`--once`, the bare command and `--review` start real Claude builds, fix rounds and decision
@@ -40,7 +41,8 @@ second runner out: it logs `a second runner started (pid N) and exited at once` 
 
 `config.toml` names the repos it serves (GitHub repo, local clone, base branch, and
 `review_table` for a repo whose PR bodies keep a `## Review` table, `issues = "local"` for one
-whose tickets are local markdown: Local tickets, below), in priority order; the runner's `state_dir` and `log_dir` (`~/.queue-runner/`, outside every served repo);
+whose tickets are local markdown: Local tickets, below, `merge = "stefan"` for one whose PRs Stefan
+merges himself: Stefan merges, below), in priority order; the runner's `state_dir` and `log_dir` (`~/.queue-runner/`, outside every served repo);
 `runs_dir` and `checkouts_dir` for reviews; `poll_seconds`, the pause after a pass that started
 nothing; `[claude]`, the T3 provider instance and model for Claude jobs; and `[sol]`,
 `codex-sol.sh` and the Git bash that runs it. `--config <path>` reads another one.
@@ -326,7 +328,8 @@ pass says `merged`, the live run says `live` (the log, and a **Live.** comment o
 - **About to land** (`LiveSteps.about_to_land`): an open merge, review or fix job in the repo, or
   an open PR whose runner review of its head is clean and that the merge re-check would merge now
   or that would once its checks pass. While one is, no live run starts (said once). A clean PR
-  held for Stefan doesn't hold the live steps, whatever its checks.
+  held for Stefan doesn't hold the live steps, whatever its checks; in a repo Stefan merges, no
+  clean PR does (when he merges it is his call).
 - **The Sol lane, alongside:** while a live job is open, nothing merges in that repo
   (`Merger.why_not`), so the batch stays the one the thread was given. After writing its start
   record the run reads the base and about-to-land again; a merge that landed or began since the
@@ -357,6 +360,34 @@ pass says `merged`, the live run says `live` (the log, and a **Live.** comment o
   reply) or `--release <repo>#<that PR>`, and one that couldn't be filed is filed next pass.
   `stefan` steps on a `live` result file a `live-todo` stop, which holds nothing.
 - `--once --dry-run` prints the live run it would start, with its brief, and records nothing.
+
+## Stefan merges
+
+`merge.py` (ticket 17). A repo whose `config.toml` entry says `merge = "stefan"` (leads-dashboard,
+since 2026-11-10) isn't merged by the runner; `merge = "runner"` (the default) is.
+
+- **Ready:** where the merge pass would merge (the same re-check, A Sol pass, step 3, except an
+  open live run doesn't hold it: his merge goes in the next batch), it labels the PR
+  `ready-for-stefan` and toasts "<repo> PR #N is ready to merge", opening the PR, **once per
+  head**: a `ready` job, `marked` (`failed` if the label couldn't be added: the next pass tries
+  again, and the toast waits for it). A failed toast is said and left.
+- **Unready:** a marked PR whose head moved, or that's held for Stefan (`stops.held`: a stop, his
+  hold), loses the label (`ready` job `unmarked`, with `reason`); a removal that fails is tried
+  again next pass. A clean review of the new head, or the hold's answer, marks it again, with a
+  new toast.
+- **His merge:** a marked PR gone from the open list is read once: merged, it gets a `merge` job
+  `merged` (`reason` "Stefan merged it"), its label and its build and fix worktrees go as after
+  the runner's own merge, and the log says `Stefan merged it; its live steps follow`; closed
+  unmerged, it's `unmarked`. The live steps then read the merge from git as for any merge (a
+  merge commit or a squash's `(#N)`; **a rebase merge names no PR**, so its commits wait for the
+  next PR's batch).
+- **`--needs-me`** (`needs_me.py`, read only): the PRs ready to merge (marked on their head, or
+  that the merge pass would mark now), the `needs-info` stops filed and not answered or released,
+  the builds a decision left to Stefan (until `--release`), and the threads waiting for his
+  answer (a decision's `stop` on a waiting job), with their links; `Nothing waits on you.` when
+  there's nothing. A repo GitHub can't read is said after the list.
+- `--once --dry-run`'s merge lines say `would mark ready for Stefan at H` (or `ready for Stefan
+  at H`) instead of `would merge`.
 
 ## Local tickets
 
@@ -401,7 +432,8 @@ The review loop's rules are `~/.claude/docs/pr-review.md`; leads-dashboard's
    the PR's build and fix jobs are removed with their local branches (`GitCli.remove_worktree`:
    gone from `git worktree list` counts, since T3 may hold the empty folder), and one that
    can't be is said. The repo's live steps (leads-dashboard: Lovable) run later in the Claude
-   lane (Live steps, below).
+   lane (Live steps, below). **In a repo Stefan merges** (leads-dashboard), the PR is marked
+   `ready-for-stefan` instead, and his merge is noticed on a later pass (Stefan merges, below).
    **Merge job records** (kind `merge`): `sha` H, `head` the merge commit; outcomes `merged`,
    `head-moved`, `failed`.
 4. **Adopt** (`Reviewer.why_not`): open PRs, lowest number first. A PR is left alone, and why is
@@ -654,6 +686,9 @@ with three tickets in a blocker chain) and `LocalTicketsDryRunTest` in `tests/te
 Live steps: `tests/test_live.py` (the answer block, the batch from `FakeLiveGit`, about to land,
 each outcome and its stop, a restart through the real `Runner`); `GitCli`'s first-parent log and
 changed files in `tests/test_git.py`.
+Stefan merges: `StefanMergesTest` in `tests/test_merge.py` (marked once, unmarked on a new head
+or a stop, his merge noticed once, a closed PR, a failed label) and `tests/test_needs_me.py`
+(`--needs-me` through `main`, and the `merge` setting).
 Running unattended: `tests/test_wake.py` (`Waker` against `FakeScheduler` in `fakes.py`, the
 task XML, `Schtasks` on canned calls, `wall_sleep`, a second start, waiting for T3, `--stop`
 with a fake kill); every test that runs `main` continuously passes a waker, so none touches the
@@ -686,7 +721,8 @@ temp folder.
 - `queue_runner/live.py` and `templates/live.md`: live steps after merges: the batch, about to
   land, the brief, the answer and its stops.
 - `queue_runner/merge.py`: the pre-merge re-check, the expected-head merge and the worktrees
-  removed after. A fix round's local branch name (`fix_branch`) is `fix.py`'s.
+  removed after; in a repo Stefan merges, the `ready-for-stefan` mark and noticing his merge.
+- `queue_runner/needs_me.py`: `--needs-me`, everything waiting on Stefan. A fix round's local branch name (`fix_branch`) is `fix.py`'s.
 - `queue_runner/review.py` and `templates/review.md`: the Sol lane: adoption, the brief, a review.
 - `queue_runner/ledger.py`: earlier reviews from a PR's comments, and `decide()`.
 - `queue_runner/stops.py`: stops for Stefan: which, the `needs-info` issue, the PR comment, the

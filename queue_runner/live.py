@@ -211,6 +211,8 @@ class LiveSteps:
                 what = {'merge': 'a merge of', 'review': 'Sol is reviewing',
                         'fix': 'a fix round is running on'}[j.kind]
                 return f'{what} #{j.issue}'
+        if repo.stefan_merges:   # when Stefan merges a ready PR is his call: the batch goes on
+            return None
         for pr in sorted(self.github.open_pulls(repo), key=lambda p: p.number):
             if not self.merger.clean_on_head(repo, pr):
                 continue

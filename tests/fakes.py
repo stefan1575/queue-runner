@@ -131,6 +131,12 @@ class FakeGitHubForReviews(FakeGitHubWithPulls):
         self._write('body', number, body)
         self.bodies[number] = body
 
+    def add_label(self, repo, number, label):
+        self._write('label', number, label)
+
+    def remove_label(self, repo, number, label):
+        self._write('unlabel', number, label)
+
     # --- merging (ticket 05) ------------------------------------------------------------------
 
     def pull(self, repo, number):

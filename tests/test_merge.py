@@ -8,10 +8,10 @@ import unittest
 from queue_runner.config import Config, Repo
 from queue_runner.github import Checks, Comment
 from queue_runner.fix import fix_branch
-from queue_runner.merge import Merger
+from queue_runner.merge import READY, Merger
 from queue_runner.review import Reviewer
 from queue_runner.state import JobLog
-from tests.fakes import FakeGitHubForReviews, full_pr
+from tests.fakes import FakeGitHubForReviews, FakeToaster, full_pr
 from tests.fakes_t3 import FakeReviewGit, FakeSol
 from tests.test_ledger import H2, H3, important, reply
 
@@ -209,6 +209,119 @@ class MergeTest(unittest.TestCase):
         self.reviewer().review_pass()
         self.assertEqual(self.outcomes(), ['merged'])
         self.assertEqual(self.merges(), [])
+
+
+class StefanMergesTest(unittest.TestCase):
+    """merge = "stefan" (ticket 17): a ready PR is labelled and toasted once; Stefan merges."""
+
+    def setUp(self):
+        MergeTest.setUp(self)
+        self.repo = Repo(name='first', github='owner/first', path=self.dir, merge='stefan')
+        self.config = Config(repos=[self.repo], state_dir=self.config.state_dir,
+                             log_dir=self.config.log_dir, runs_dir=self.config.runs_dir,
+                             checkouts_dir=self.config.checkouts_dir)
+        self.toaster = FakeToaster()
+
+    reviewed_clean, merges, outcomes = (MergeTest.reviewed_clean, MergeTest.merges,
+                                        MergeTest.outcomes)
+
+    def reviewer(self, *replies, merge=True):
+        return Reviewer(self.config, github=self.gh, git=self.git,
+                        sol=FakeSol(list(replies) or [reply()]), jobs=self.jobs,
+                        say=self.said.append, now=lambda: NOW, toaster=self.toaster,
+                        merger=None if merge else False)
+
+    def merger(self):
+        return Merger(self.config, github=self.gh, git=self.git, jobs=self.jobs,
+                      say=self.said.append, toaster=self.toaster)
+
+    def labels(self):
+        return [p for p in self.gh.posts if p[0] in ('label', 'unlabel')]
+
+    def test_a_clean_review_marks_the_pr_ready_once_and_never_merges(self):
+        self.reviewer().review_pass()
+        m = self.merger()
+        m.merge_pass()
+        m.merge_pass()
+        self.assertEqual(self.merges(), [])
+        self.assertEqual(self.labels(), [('label', 20, READY)])
+        [t] = self.toaster.toasts
+        self.assertEqual((t['title'], t['url']), ('first PR #20 is ready to merge',
+                                                  'https://github.com/owner/first/pull/20'))
+        self.assertEqual(self.outcomes('ready'), ['marked'])
+        self.assertEqual(self.outcomes(), [])
+        self.assertIn(f'ready first#20: clean at {H2[:7]} with its checks passed: labelled '
+                      f'{READY}, for Stefan to merge', self.said)
+
+    def test_a_pr_not_ready_yet_is_not_marked(self):
+        self.reviewed_clean()
+        self.gh.check_states[H2] = Checks('pending', pending=('build',))
+        self.merger().merge_pass()
+        self.assertEqual((self.labels(), self.toaster.toasts), ([], []))
+
+    def test_a_new_head_takes_the_mark_off_and_its_clean_review_marks_it_again(self):
+        self.reviewer().review_pass()
+        self.gh.now[20] = {'head_sha': H3, 'labels': (READY,)}
+        self.git.heads[20] = H3
+        self.merger().merge_pass()
+        self.assertEqual(self.labels(), [('label', 20, READY), ('unlabel', 20, READY)])
+        self.assertTrue(any('no longer ready for Stefan (the head moved' in s for s in self.said))
+        self.gh.now[20] = {'head_sha': H3}
+        self.reviewer().review_pass()   # Sol reviews H3 clean: ready again, a second toast
+        self.assertEqual(self.labels()[-1], ('label', 20, READY))
+        self.assertEqual(len(self.toaster.toasts), 2)
+        self.assertEqual(self.outcomes('ready'), ['marked', 'unmarked', 'marked'])
+
+    def test_a_stop_takes_the_mark_off(self):
+        self.reviewer().review_pass()
+        stop = self.jobs.started(kind='stop', repo='first', issue=20, branch='claude/red-5',
+                                 title='t', sha=H2, stop='conflict')
+        self.jobs.ended(stop.id, exit_code=None, outcome='filed', link='https://x/issues/1')
+        self.gh.now[20] = {'labels': (READY,)}
+        self.merger().merge_pass()
+        self.assertEqual(self.labels()[-1], ('unlabel', 20, READY))
+        self.assertEqual(self.outcomes('ready'), ['marked', 'unmarked'])
+
+    def test_stefans_merge_is_noticed_once_and_the_worktrees_go(self):
+        build = self.jobs.started(kind='build', repo='first', issue=5, branch='claude/red-5',
+                                  title='Queue runner build: first#5')
+        self.jobs.ended(build.id, exit_code=0, outcome='done', worktree='C:/t3/wt/build')
+        self.reviewer().review_pass()
+        self.gh.now[20] = {'state': 'merged', 'labels': (READY,)}   # Stefan merged it
+        m = self.merger()
+        m.merge_pass()
+        m.merge_pass()
+        [job] = [j for j in self.jobs.jobs() if j.kind == 'merge']
+        self.assertEqual((job.outcome, job.sha, job.reason), ('merged', H2, 'Stefan merged it'))
+        self.assertEqual(self.merges(), [])
+        self.assertEqual(self.labels()[-1], ('unlabel', 20, READY))
+        self.assertEqual(self.git.removed_worktrees, [('C:/t3/wt/build', 'claude/red-5')])
+        self.assertIn('merge first#20: Stefan merged it; its live steps follow', self.said)
+
+    def test_a_ready_pr_closed_unmerged_loses_its_mark(self):
+        self.reviewer().review_pass()
+        self.gh.now[20] = {'state': 'closed'}
+        m = self.merger()
+        m.merge_pass()
+        m.merge_pass()
+        self.assertEqual(self.outcomes('ready'), ['marked', 'unmarked'])
+        self.assertEqual(self.outcomes(), [])
+
+    def test_a_label_that_fails_is_tried_again_next_pass(self):
+        self.reviewed_clean()
+        self.gh.fail.add('label')
+        self.merger().merge_pass()
+        self.assertEqual((self.outcomes('ready'), self.toaster.toasts), (['failed'], []))
+        self.gh.fail.discard('label')
+        self.merger().merge_pass()
+        self.assertEqual(self.outcomes('ready'), ['failed', 'marked'])
+        self.assertEqual(len(self.toaster.toasts), 1)
+
+    def test_a_live_run_does_not_hold_the_mark(self):
+        self.reviewed_clean()
+        self.jobs.started(kind='live', repo='first', issue=19, branch=None, title='t', sha=H3)
+        self.merger().merge_pass()
+        self.assertEqual(self.outcomes('ready'), ['marked'])
 
 
 if __name__ == '__main__':

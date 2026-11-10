@@ -232,6 +232,14 @@ class AboutToLandTest(LiveHarness):
         live.merger.why_not = lambda repo, n, h: 'Stefan reads it first'
         self.assertIsNotNone(live.next())
 
+    def test_a_pr_ready_for_stefan_to_merge_does_not_wait(self):
+        from dataclasses import replace
+        self.config = replace(self.config, repos=[replace(self.repo, merge='stefan')])
+        self.clean_pr()
+        live = self.live()
+        live.merger.why_not = lambda repo, n, h, checks=True: None   # ready: his call when
+        self.assertIsNotNone(live.next())
+
 
 class RunTest(LiveHarness):
     def setUp(self):
