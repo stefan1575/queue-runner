@@ -84,8 +84,10 @@ Ticket 10 (`orchestration.md`, The runner and Sleep).
 - **Live check** `python3 scripts/live_wake.py [MINUTES] [--sleep]`: sets one real wake task
   a few minutes ahead, prints its settings, waits for it, and removes it. Run on 2026-11-10
   without `--sleep`: `WakeToRun=True`, a one-off `MSFT_TaskTimeTrigger` at 10:15+08:00, it ran at
-  10:15 (result `0x41301`, the hold still running), and was removed. **Waking from sleep is
-  unconfirmed:** run it with `--sleep` once with nothing else running. The PC goes from sleep to
+  10:15 (result `0x41301`, the hold still running), and was removed. **Woke the PC from sleep**
+  on 2026-11-10 (`--sleep`): asleep 10:49:12, awake 10:53:06, and the System log named the wake
+  source as `\Queue runner\wake 2026-11-10 1053+0800`; the task ran and was removed. Hibernate
+  is still untested: The PC goes from sleep to
   hibernate after a while ("S4 Doze to Hibernate" in the System log), and whether a wake timer
   wakes it from hibernate depends on its firmware: a wait of hours may find the PC hibernated.
 
