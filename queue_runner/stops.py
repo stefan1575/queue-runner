@@ -20,7 +20,6 @@ import datetime
 import json
 import os
 
-from .github import OLD_LABELS
 from .ledger import RUNNER_MARK, STOP_MARK, said_since
 from .state import REVIEWED
 from .toast import NoToaster
@@ -76,9 +75,9 @@ class Stopper:
     # --- what stops ---------------------------------------------------------------------------
 
     def detect(self, repo, pr) -> list[tuple[str, str, str | None]]:
-        """The stops on this PR's head H now: [(kind, why, link)], whether filed or not. A PR the
-        old script has, or that a Claude job is writing to, has none yet."""
-        if any(lb in OLD_LABELS for lb in pr.labels) or self.jobs.writer(repo.name, pr.branch):
+        """The stops on this PR's head H now: [(kind, why, link)], whether filed or not. A PR that a
+        Claude job is writing to has none yet."""
+        if self.jobs.writer(repo.name, pr.branch):
             return []
         n, h, h7 = pr.number, pr.head_sha, pr.head_sha[:7]
         found = []

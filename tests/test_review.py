@@ -402,14 +402,16 @@ class ReviewerTest(unittest.TestCase):
             ' | `bbbbbbb` | **Blocking**, back to fix; raised: F1; left open: F1 |\n'))
         self.assertIn('edited while Sol ran', new)   # read afresh, not from the listing
 
-    def test_a_pr_the_old_script_reviews_is_left_to_it(self):
+    def test_the_old_scripts_labels_no_longer_hold_a_pr(self):
+        # Since the cutover (ticket 13) the old sol-pr-review.py is stopped: its labels mean nothing.
         for label in ('needs-sol-review', 'sol-reviewed'):
             with self.subTest(label=label):
                 self.said.clear()
+                self.jobs = JobLog(os.path.join(self.dir, label, 'jobs.jsonl'))
                 r = self.one_pr(labels=(label,))
-                self.assertEqual(r.review_pass(), 'idle')
-                self.assertEqual((self.sol.briefs, self.gh.posts), ([], []))
-                self.assertTrue(any(label in s for s in self.said))
+                self.assertEqual(r.review_pass(), 'started')
+                self.assertEqual(len(self.sol.briefs), 1)
+                self.assertFalse(any(label in s for s in self.said))
 
 
 def pre_existing(fid):

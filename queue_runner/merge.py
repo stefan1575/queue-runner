@@ -23,7 +23,6 @@ Merges are automated posts that need no go-ahead (`~/.claude/CLAUDE.md`, Merge w
 clean).
 """
 from .fix import fix_branch
-from .github import OLD_LABELS
 from .ledger import newest_on, said_since
 from .stops import held
 from .state import JobLog
@@ -48,8 +47,6 @@ class Merger:
     def clean_on_head(self, repo, pr) -> bool:
         """The runner's newest review of the PR's head says merge. Release doesn't undo it: the
         review stands on GitHub."""
-        if any(lb in OLD_LABELS for lb in pr.labels):
-            return False
         review = self.jobs.runner_review(repo.name, pr.number, pr.head_sha)
         return review is not None and review.outcome == 'clean' and not any(
             j.outcome == 'merged' for j in self.jobs.on('merge', repo.name, pr.number,
@@ -74,8 +71,6 @@ class Merger:
             return f'it is {pr.state}'
         if pr.head_sha != h:
             return f'the head moved from {h7} to {pr.head_sha[:7]}: Sol reviews that first'
-        if old := [lb for lb in pr.labels if lb in OLD_LABELS]:
-            return f'labelled {old[0]}: the old sol-pr-review.py has it until the cutover'
         if pr.draft:
             return 'it is a draft'
         if job := self.jobs.writer(repo.name, pr.branch):

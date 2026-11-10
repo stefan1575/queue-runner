@@ -436,9 +436,9 @@ The review loop's rules are `~/.claude/docs/pr-review.md`; leads-dashboard's
    `ready-for-stefan` instead, and his merge is noticed on a later pass (Stefan merges, below).
    **Merge job records** (kind `merge`): `sha` H, `head` the merge commit; outcomes `merged`,
    `head-moved`, `failed`.
-4. **Adopt** (`Reviewer.why_not`): open PRs, lowest number first. A PR is left alone, and why is
-   logged once, while it's labelled `needs-sol-review` or `sol-reviewed` (the old
-   `~/sol-pr-review.py` reviews those until the cutover, ticket 13), while a build or fix job writes to its branch, once the runner reviewed its
+4. **Adopt** (`Reviewer.why_not`): open PRs, lowest number first. The old script's labels
+   (`needs-sol-review`, `sol-reviewed`) mean nothing since the cutover (ticket 13). A PR is left alone, and why is
+   logged once, while a build or fix job writes to its branch, once the runner reviewed its
    head H, after two failed reviews on H (until a push or `--release NAME#N`), while a review
    comment is on H already (any of the three formats below), while H's checks are running or
    none have reported (`sol-review` isn't counted), while it's stopped for Stefan, and when a
@@ -497,8 +497,8 @@ reviewed), `failed`, `out-of-usage` and `head-moved` (nothing counts).
 
 ## Stops for Stefan
 
-`stops.py` (`~/.claude/docs/pr-review.md`, Stops). Each Sol pass, for every open PR (not one the
-old script has, nor one a Claude job is writing to), the runner looks for stops on its head H, and
+`stops.py` (`~/.claude/docs/pr-review.md`, Stops). Each Sol pass, for every open PR (not one a Claude job
+is writing to), the runner looks for stops on its head H, and
 files each kind once per H (`JobLog.stopped`). The kinds: `review` (the runner's review of H
 stopped: a repeated class, a reopened finding, a kept decline; the reason is decide()'s text from
 the run folder's `decision.json`), `no-push` (a fix round on H ended without pushing),

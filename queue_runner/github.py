@@ -48,10 +48,6 @@ class Checks:
     pending: tuple = ()
 
 
-# Until the cutover (ticket 13) the old ~/sol-pr-review.py still reviews PRs carrying these
-# labels: the runner leaves them to it (no review, fix round or merge), so the two never meet.
-OLD_LABELS = ('needs-sol-review', 'sol-reviewed')
-
 # The runner's own status on a reviewed commit: never counted as one of its checks.
 SOL_REVIEW = 'sol-review'
 _PASSED = {'success', 'neutral', 'skipped'}

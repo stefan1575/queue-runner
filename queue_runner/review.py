@@ -15,7 +15,7 @@ from importlib import resources
 from string import Template
 
 from .config import Config, Repo
-from .github import OLD_LABELS, Comment, PullRequest
+from .github import Comment, PullRequest
 from .ledger import TAGS, OPEN, SolFailed, decide, next_round, norm, read_reviews, runner_post, \
     state
 from .lock import RunnerBusy, runner_lock
@@ -180,8 +180,6 @@ class Reviewer:
     def why_not(self, repo: Repo, pr: PullRequest) -> str | None:
         """Why this PR isn't reviewed now, or None if it is: cheapest checks first."""
         h, h7 = pr.head_sha, pr.head_sha[:7]
-        if old := [lb for lb in pr.labels if lb in OLD_LABELS]:
-            return f'labelled {old[0]}: the old sol-pr-review.py reviews it until the cutover'
         # One writer per PR: a waiting build or fix writes again once Stefan answers it, so it's
         # left alone until that job ends or is released.
         if job := self.jobs.writer(repo.name, pr.branch):

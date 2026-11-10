@@ -16,7 +16,6 @@ from importlib import resources
 from string import Template
 
 from .brief import _agents_pointer
-from .github import OLD_LABELS
 from .ledger import OPEN, STATUSES, newest_on, norm, read_reviews, state
 from .picker import closed_issues
 from .state import NOT_SENT, NOT_STARTED, JobLog
@@ -52,8 +51,6 @@ class Fixer:
     def review_to_fix(self, repo, pr):
         """The runner's newest review of the PR's head, if it says fix, or if it stopped and a
         decision ordered a fix round since: else None."""
-        if any(lb in OLD_LABELS for lb in pr.labels):
-            return None
         review = self.jobs.runner_review(repo.name, pr.number, pr.head_sha)
         if review and (review.outcome == 'blocking' or (
                 review.outcome in ('stop', 'approach-note') and self.order(repo, pr))):

@@ -34,7 +34,6 @@ from dataclasses import dataclass, replace
 from importlib import resources
 from string import Template
 
-from .github import OLD_LABELS
 from .ledger import OPEN, RUNNER_MARK, norm, read_reviews, said_since, state
 from .review import _open_line
 from .state import NOT_SENT, NOT_STARTED, Job
@@ -215,8 +214,7 @@ class Decider:
     def cases(self, repo):
         """The cases waiting for a decision in this repo, in the order they're taken."""
         jobs = self.jobs
-        prs = {p.number: p for p in self.github.open_pulls(repo)
-               if not any(lb in OLD_LABELS for lb in p.labels)}
+        prs = {p.number: p for p in self.github.open_pulls(repo)}
         for n in sorted(prs):
             pr = prs[n]
             if jobs.writer(repo.name, pr.branch):
