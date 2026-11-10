@@ -55,13 +55,27 @@ path = "{self.dir}"
         self.jobs.ended(j.id, exit_code=None, outcome=outcome, **fields)
         return j
 
+    def review_clean(self, n):
+        """Sol reviews the PR clean (its comment posted); the merge pass hasn't run."""
+        import datetime
+        from queue_runner.config import load_config
+        from queue_runner.review import Reviewer
+        from tests.fakes_t3 import FakeReviewGit, FakeSol
+        from tests.test_ledger import reply
+        config = load_config(self.config)
+        Reviewer(config, github=self.gh, git=FakeReviewGit(heads={20: H2, 21: H3}),
+                 sol=FakeSol([reply()]), jobs=self.jobs, say=lambda line: None,
+                 now=lambda: datetime.datetime(2026, 11, 9, 12, 0),
+                 merger=False).review(config.repos[0], self.gh.pull(config.repos[0], n))
+        self.gh.posts.clear()
+
     def test_says_nothing_when_nothing_waits(self):
         self.assertEqual(self.needs_me().strip(), 'Nothing waits on you.')
         self.assertEqual(self.gh.posts, [])
 
     def test_lists_all_three_kinds(self):
-        self.job('ready', 20, 'marked', sha=H2)                    # ready on its head
-        self.job('ready', 21, 'marked', sha='0' * 40)              # an old head: not ready
+        self.review_clean(20)                                      # ready on its head
+        self.job('ready', 21, 'marked', sha='0' * 40)              # an old mark: not ready
         self.job('stop', 21, 'filed', sha=H3, stop='conflict', reason='it conflicts with main',
                  link='https://github.com/owner/first/issues/30')
         self.job('stop', 21, 'answered', sha=H3, stop='failed-check', reason='old')

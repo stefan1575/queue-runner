@@ -13,10 +13,10 @@ the Claude lane (`live.py`).
 A repo whose `config.toml` entry says `merge = "stefan"` (leads-dashboard, ticket 17) isn't merged
 by the runner: once the same re-check passes, the PR is marked ready for Stefan instead, once per
 head: the `ready-for-stefan` label and a toast that opens the PR (a `ready` job, `marked`). The
-mark comes off (`unmarked`, the label removed) when the head moves or the PR is held for Stefan
-(a stop, his hold), so a new head is reviewed before it's ready again. When a marked PR is no
+mark comes off (`unmarked`, the label removed) when the head moves or the re-check no longer
+passes (a stop, a reply, a failed check...), so a new head is reviewed before it's ready again. When a marked PR is no
 longer open, the next pass reads it: merged by Stefan, it gets a `merge` job `merged` and its
-worktrees go, as after the runner's own merge; closed unmerged, the mark comes off. The live steps
+worktrees go, as after the runner's own merge; closed unmerged, the mark and the label come off. The live steps
 read his merge from git as usual (`live.py`).
 
 Merges are automated posts that need no go-ahead (`~/.claude/CLAUDE.md`, Merge when the review is
@@ -210,15 +210,20 @@ class Merger:
         return 'ready'
 
     def stefan_pass(self, repo) -> None:
-        """Marks come off PRs no longer ready on their head; a marked PR gone from the open list
+        """Marks come off PRs the merge re-check no longer passes; a marked PR gone from the open list
         is read: Stefan merged it, or it was closed."""
         prs = self.github.open_pulls(repo)
         for pr in prs:
             last = self.mark(repo, pr.number)
             if not (last and last.outcome == 'marked'):
                 continue
-            why = (f'the head moved from {last.sha[:7]} to {pr.head_sha[:7]}: Sol reviews it '
-                   'first' if pr.head_sha != last.sha else held(self.jobs, repo, pr.number))
+            if pr.head_sha != last.sha:
+                why = (f'the head moved from {last.sha[:7]} to {pr.head_sha[:7]}: Sol reviews '
+                       'it first')
+            elif not self.clean_on_head(repo, pr):
+                why = f'its review of {pr.head_sha[:7]} is no longer clean'
+            else:   # the merge re-check again: a stop, a reply, a failed check...
+                why = self.why_not(repo, pr.number, pr.head_sha)
             if why:
                 self._unmark(repo, pr, last, why)
         listed = {p.number for p in prs}
@@ -264,11 +269,8 @@ class Merger:
                 except Exception as e:
                     self.say(f'merge {repo.name}#{n}: removing {READY} failed: {e}')
             self.remove_worktrees(repo, pr)
-        elif pr.state == 'closed':
-            job = self._ready_job(repo, n, pr.branch, last.sha)
-            self.jobs.ended(job.id, exit_code=None, outcome='unmarked',
-                            reason='closed without merging')
-            self.say(f'ready {repo.name}#{n}: closed without merging')
+        elif pr.state == 'closed':   # its label goes too, so a reopened PR isn't left ready
+            self._unmark(repo, pr, last, 'closed without merging')
 
     def remove_worktrees(self, repo, pr) -> None:
         """The worktrees and local branches of the PR's build and fix jobs, once it merged."""

@@ -298,14 +298,29 @@ class StefanMergesTest(unittest.TestCase):
         self.assertEqual(self.git.removed_worktrees, [('C:/t3/wt/build', 'claude/red-5')])
         self.assertIn('merge first#20: Stefan merged it; its live steps follow', self.said)
 
-    def test_a_ready_pr_closed_unmerged_loses_its_mark(self):
+    def test_a_ready_pr_closed_unmerged_loses_its_mark_and_label(self):
         self.reviewer().review_pass()
-        self.gh.now[20] = {'state': 'closed'}
+        self.gh.now[20] = {'state': 'closed', 'labels': (READY,)}
         m = self.merger()
         m.merge_pass()
         m.merge_pass()
         self.assertEqual(self.outcomes('ready'), ['marked', 'unmarked'])
+        self.assertEqual(self.labels()[-1], ('unlabel', 20, READY))
         self.assertEqual(self.outcomes(), [])
+
+    def test_a_reply_after_the_mark_takes_it_off_and_needs_me_drops_it(self):
+        from queue_runner.needs_me import ready_prs
+        self.reviewer().review_pass()
+        self.assertEqual(len(ready_prs(self.config, self.gh, self.jobs)[0]), 1)
+        self.gh.comments[20].append(Comment('michael', LATER, 'Wait, this breaks the export.'))
+        self.gh.now[20] = {'labels': (READY,)}
+        m = self.merger()
+        m.merge_pass()
+        m.merge_pass()
+        self.assertEqual(self.outcomes('ready'), ['marked', 'unmarked'])
+        self.assertEqual(self.labels()[-1], ('unlabel', 20, READY))
+        self.assertEqual(ready_prs(self.config, self.gh, self.jobs)[0], [])
+        self.assertEqual(len(self.toaster.toasts), 1)
 
     def test_a_label_that_fails_is_tried_again_next_pass(self):
         self.reviewed_clean()

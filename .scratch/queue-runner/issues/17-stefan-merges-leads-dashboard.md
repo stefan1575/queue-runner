@@ -76,3 +76,10 @@ merge with a merge commit (GitHub's default button) or squash.
 
    and in "Opening a PR", step 2, replace "After a merge it finishes the live steps" with "After
    Stefan merges, it finishes the live steps". (13 rewrites the rest of that file.)
+
+**Sol review (2026-11-10, c63c68e..c0406f1):** two Important findings, both fixed. (1) A mark
+outlived a new blocker on the same head (a reply since the clean review, a failed check), and
+`--needs-me` still listed the PR from the cached mark: a marked PR now loses its mark whenever the
+merge re-check no longer passes, and `--needs-me` lists only PRs the re-check passes now. (2) A PR
+closed unmerged kept its label, so a reopened, unreviewed PR stayed `ready-for-stefan`: closing now
+removes the label, retried like any unmark. No nits. No second review (the fixes are small).

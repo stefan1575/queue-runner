@@ -2,8 +2,8 @@
 
 Three kinds, read from the job log and GitHub; nothing is posted, started or recorded:
 
-- **Ready to merge:** in a repo where Stefan merges (`merge = "stefan"`), each open PR marked
-  `ready-for-stefan` on its head, or that the merge pass would mark now.
+- **Ready to merge:** in a repo where Stefan merges (`merge = "stefan"`), each open PR the merge
+  re-check passes now (what the merge pass marks `ready-for-stefan`).
 - **Stops:** each `needs-info` stop filed and not yet answered or released (`stops.py`), and each
   build a decision left to Stefan (a comment on its issue, held until `--release`).
 - **Threads waiting for an answer:** a build or fix thread that asked a question a decision
@@ -28,8 +28,7 @@ def ready_prs(config, github, jobs) -> tuple[list[str], list[str]]:
             continue
         try:
             for pr in sorted(github.open_pulls(repo), key=lambda p: p.number):
-                if merger.ready(repo, pr) or (merger.clean_on_head(repo, pr) and
-                                              merger.why_not(repo, pr.number, pr.head_sha) is None):
+                if merger.clean_on_head(repo, pr) and                         merger.why_not(repo, pr.number, pr.head_sha) is None:
                     lines.append(f'{repo.name}#{pr.number} at {pr.head_sha[:7]}'
                                  + (f': {pr.title}' if pr.title else '')
                                  + f' ({pr.url or _issue_url(repo, pr.number)})')

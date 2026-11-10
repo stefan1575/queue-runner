@@ -371,18 +371,18 @@ since 2026-11-10) isn't merged by the runner; `merge = "runner"` (the default) i
   `ready-for-stefan` and toasts "<repo> PR #N is ready to merge", opening the PR, **once per
   head**: a `ready` job, `marked` (`failed` if the label couldn't be added: the next pass tries
   again, and the toast waits for it). A failed toast is said and left.
-- **Unready:** a marked PR whose head moved, or that's held for Stefan (`stops.held`: a stop, his
-  hold), loses the label (`ready` job `unmarked`, with `reason`); a removal that fails is tried
+- **Unready:** a marked PR whose head moved, or that the re-check no longer passes (a stop, his
+  hold, a reply since the clean review, a failed check...), loses the label (`ready` job `unmarked`, with `reason`); a removal that fails is tried
   again next pass. A clean review of the new head, or the hold's answer, marks it again, with a
   new toast.
 - **His merge:** a marked PR gone from the open list is read once: merged, it gets a `merge` job
   `merged` (`reason` "Stefan merged it"), its label and its build and fix worktrees go as after
   the runner's own merge, and the log says `Stefan merged it; its live steps follow`; closed
-  unmerged, it's `unmarked`. The live steps then read the merge from git as for any merge (a
+  unmerged, it's `unmarked` and the label goes (so a reopened PR isn't left ready). The live steps then read the merge from git as for any merge (a
   merge commit or a squash's `(#N)`; **a rebase merge names no PR**, so its commits wait for the
   next PR's batch).
-- **`--needs-me`** (`needs_me.py`, read only): the PRs ready to merge (marked on their head, or
-  that the merge pass would mark now), the `needs-info` stops filed and not answered or released,
+- **`--needs-me`** (`needs_me.py`, read only): the PRs ready to merge (the re-check passes now,
+  as the merge pass reads it), the `needs-info` stops filed and not answered or released,
   the builds a decision left to Stefan (until `--release`), and the threads waiting for his
   answer (a decision's `stop` on a waiting job), with their links; `Nothing waits on you.` when
   there's nothing. A repo GitHub can't read is said after the list.
