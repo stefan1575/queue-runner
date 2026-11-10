@@ -255,6 +255,9 @@ and it gets no other fix round.
    declined before, from the newest review's ledger; the PR's description and the issues it
    closes; its commits and changed files from git (`origin/<base>..H`); the earlier build and
    fix threads' links from the job log (as T3 gave them).
+
+   **A conflict round** (ticket 15; Conflict rounds, below) is a fix round too, for a PR with
+   no blocking review whose head conflicts with its base.
 5. **Pick and build** (`run.py`): the first repo with a pickable issue gets one build. The runner
    fetches `origin/<base>`, writes a start record, then blocks on
    `t3 thread start --wait --json --worktree origin/<base> --branch claude/<slug>-<n>` with the
@@ -278,7 +281,37 @@ and `head` (the PR's head afterwards, read from GitHub), with `commits` the ones
 (exit 0 at H: H was reviewed, so the PR waits for Stefan: a `no-push` stop),
 `head-unknown` (exit 0, but GitHub couldn't say afterwards; the Sol lane still reads the real
 head), `failed`, `usage-limit`,
-`waiting`, `branch-exists` and `not-started`, as for builds.
+`waiting`, `branch-exists` and `not-started`, as for builds. A conflict round's records have
+`cause` `conflict` and no `round`; its `no-push` is a `conflict` stop, not a `no-push` one (H was
+never reviewed). A continued or restarted job keeps its `cause`.
+
+## Conflict rounds
+
+`fix.py` and `templates/conflict.md` (ticket 15; Stefan, 2026-11-10, about leads-dashboard #153
+and #154: "do it sequentially"). A PR whose head H conflicts with its base (GitHub's `mergeable`
+false) and that has no blocking runner review on H gets a fix round instead of a stop: a thread
+`Queue runner conflict: <repo>#<PR>`, made like any fix round (a T3 worktree at H on
+`claude/fix-pr<n>-<H7>`, pushing to the PR's branch), told to `git merge origin/<base>` (merge,
+not rebase: nothing is force-pushed), resolve keeping both sides' intent, run the repo's checks,
+and push; or, when the two sides can't both hold, abort, comment the choice on the PR and push
+nothing. Its brief has the PR, its commits and files, the base's commits since the PR left it
+(the newest 30) and the earlier threads. The pushed head is reviewed by Sol afresh, as any new
+head. A blocking review on H gets its ordinary fix round first.
+
+- **One at a time** (`Fixer.resolving`): in a repo, while an open PR that had a conflict round
+  (not released) isn't held for Stefan (`stops.held`: a stop, his hold...), it's on its way to
+  merging, and no other PR's conflict round starts; among the rest, the lowest number goes
+  first. So each resolves against the base the one before landed on. In a repo Stefan merges,
+  "merged" is his merge: the next waits for it.
+- **Still a stop** (`stops.conflict_stop`, filed by the Sol pass as kind `conflict`): the round
+  on H ended `no-push`, `head-unknown` or `branch-exists` and H still conflicts; or the PR had
+  conflict rounds on two earlier heads and conflicts again (a third conflict). `failed` and
+  `waiting` rounds get a decision first, `usage-limit` a restart, as for any fix round.
+  `--release NAME#PR` lets the PR have conflict rounds again, counting afresh. A conflict stop
+  filed on H before a round on H (before this ticket every conflict was a stop) doesn't count
+  as the round's own stop.
+- Until then the Sol lane leaves a conflicted head alone (`it conflicts with <base>: a conflict
+  round (or a stop) comes first`), and the merge re-check never merges it.
 
 **A continued job** (a decision's `retry` or `answer`): a new build or fix job of the same issue,
 branch, title and H, whose start record carries the earlier job's `thread_id` and `about` (its
@@ -465,7 +498,8 @@ The review loop's rules are `~/.claude/docs/pr-review.md`; leads-dashboard's
    head H, after two failed reviews on H (until a push or `--release NAME#N`), while a review
    comment is on H already (any of the three formats below), while H's checks are running or
    none have reported (`sol-review` isn't counted), while it's stopped for Stefan, and when a
-   check failed or it conflicts with its base (stops). GitHub failing on one PR skips only that
+   check failed (a stop) or it conflicts with its base (a conflict round, or a stop: Conflict
+   rounds, above). GitHub failing on one PR skips only that
    PR.
 5. **Review H.** Fetch `refs/pull/<n>/head` into `refs/queue-runner/pr<n>` and the PR's base
    (PRs stack: the base isn't always main); if the head moved since listing, `head-moved` and
@@ -525,7 +559,8 @@ is writing to), the runner looks for stops on its head H, and
 files each kind once per H (`JobLog.stopped`). The kinds: `review` (the runner's review of H
 stopped: a repeated class, a reopened finding, a kept decline; the reason is decide()'s text from
 the run folder's `decision.json`), `no-push` (a fix round on H ended without pushing),
-`failed-check` and `conflict`. A review that stops files right after it posts. Two kinds are
+`failed-check` and `conflict` (only once a conflict round couldn't resolve it, or a third
+conflict: Conflict rounds, above). A review that stops files right after it posts. Two kinds are
 filed by decisions in the Claude lane: `approach-note` (review 3 or later still blocking, filed
 with the Approach note; the Sol pass files it again from the decision's record if filing failed)
 and `decision` (a decision thread's question on a PR). Live runs file `live` and `live-todo` on a
@@ -692,7 +727,9 @@ order; a call named in `fail` raises), `FakeReviewGit` and `FakeSol` (`tests/tes
 `tests/test_ledger.py`; the codex-sol.sh adapter in `tests/test_sol.py`. Stops and toasts are in `tests/test_stops.py` (a fake toaster). Merging
 (`tests/test_merge.py`) plays GitHub moving on through `FakeGitHubForReviews.now` (a PR's fields
 now), `threads` and `push_before_merge`; fix rounds (`tests/test_fix.py`) run the real `Runner`
-with a T3 fake whose thread pushes. Decisions (`tests/test_decisions.py`): the answer block
+with a T3 fake whose thread pushes. Conflict rounds (`tests/test_conflicts.py`): a pair of
+conflicted PRs through the real `Runner`, one after the other, with a T3 fake whose thread
+resolves (or doesn't), and the stops. Decisions (`tests/test_decisions.py`): the answer block
 parsed, and each case and action through the real `Runner`, `FakeT3` giving a decision thread's
 reply (`decision_reply`), each thread's last messages and the runs `send` starts.
 The usage gate: `tests/test_usage.py` (the real response, the login, never the token),
@@ -742,7 +779,8 @@ temp folder.
   the loop.
 - `queue_runner/decisions.py` and `templates/decision.md`: decision threads: the cases, the
   brief, the answer and acting on it.
-- `queue_runner/fix.py` and `templates/fix.md`: which PRs get a fix round, and its brief.
+- `queue_runner/fix.py`, `templates/fix.md` and `templates/conflict.md`: which PRs get a fix
+  round or a conflict round, and their briefs.
 - `queue_runner/live.py` and `templates/live.md`: live steps after merges: the batch, about to
   land, the brief, the answer and its stops.
 - `queue_runner/merge.py`: the pre-merge re-check, the expected-head merge and the worktrees
