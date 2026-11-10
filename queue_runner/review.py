@@ -84,10 +84,32 @@ def _write(path: str, text: str) -> None:
         f.write(text)
 
 
+def _tests(prepared) -> str:
+    """Step 4 of the brief: what Sol can run here (ticket 16)."""
+    said = ('In your review, name each command you ran and quote its summary line (for example '
+            "`Tests  301 passed (310)`), and say which checks you couldn't run.")
+    if prepared and prepared.ready:
+        return ('Node is on PATH and ' + prepared.note + ", so run the repo's tests here: "
+                '`npm test`, and the other `package.json` scripts the change touches that need '
+                'no network (the network is off). To confirm a suspected bug, add a test that '
+                'fails and run it. The workdir is a throwaway copy of H, deleted afterwards. '
+                + said + " A failure the change doesn't explain (one that only happens on "
+                'Windows, say) is no finding: say so. CI runs too, and still gates the merge.')
+    lead = ('The workdir is a throwaway copy of H, deleted afterwards: you may write in it to '
+            "run the repo's checks (the network is off). ")
+    if prepared and prepared.note:
+        lead += (prepared.note[0].upper() + prepared.note[1:]
+                 + ", so its JavaScript tests can't run here: say so. ")
+    return lead + said
+
+
 class Reviewer:
     def __init__(self, config: Config, *, github, git, sol, jobs: JobLog, say,
-                 now=datetime.datetime.now, poster=None, merger=None, toaster=None):
+                 now=datetime.datetime.now, poster=None, merger=None, toaster=None, deps=None):
         self.config, self.github, self.git, self.sol, self.jobs = config, github, git, sol, jobs
+        # deps.Deps: the checkout's node_modules from a cache, so Sol can run the tests (ticket
+        # 16); None installs nothing (the tests, live_merge.py).
+        self.deps = deps
         self.say, self.now = say, now
         self.poster = poster or GitHubPoster(github, say)
         # A dry-run poster (the live check) merges nothing either, unless given a merger.
@@ -234,17 +256,23 @@ class Reviewer:
                 return IDLE
             os.makedirs(self.config.checkouts_dir, exist_ok=True)
             self.git.checkout(repo.path, ref, wt)
+            prepared = self.deps.prepare(repo.name, wt) if self.deps else None
+            if prepared and prepared.how:
+                self.say(f'{name}: dependencies {prepared.how}'
+                         + ('' if prepared.ready else f': {prepared.note}'))
             last = earlier[-1]['sha'] if earlier else None
             gone = rnd > 1 and not (last and self.git.is_ancestor(repo.path, last, h))
             files = self._inputs(repo, pr, rnd, last, gone, earlier, run_dir, wt)
             guidelines = _read(os.path.join(wt, 'REVIEW.md'))
             brief = self._brief(repo, pr, rnd, last, gone, earlier, run_dir, wt, files,
-                                guidelines)
+                                guidelines, prepared)
             brief_path = os.path.join(run_dir, 'brief.md')
             _write(brief_path, brief)
             self.say(f'{name}: Sol reviews {h[:7]} (review {rnd}) in {run_dir}')
             reply = self.sol.review(brief_path, os.path.join(run_dir, 'reply.md'), wt,
-                                    os.path.join(run_dir, 'run.out'))
+                                    os.path.join(run_dir, 'run.out'),
+                                    writable=[self.deps.cache_dir]
+                                    if prepared and prepared.ready else [])
             d = decide(repo.github, n, h, rnd, earlier, guidelines is not None, reply, wt,
                        run_dir, gone)
         except SolOutOfUsage as e:
@@ -337,7 +365,8 @@ class Reviewer:
             repo, pr.number)
         return sorted(said, key=lambda c: c.created_at)
 
-    def _brief(self, repo, pr, rnd, last, gone, earlier, run_dir, wt, files, guidelines) -> str:
+    def _brief(self, repo, pr, rnd, last, gone, earlier, run_dir, wt, files, guidelines,
+               prepared=None) -> str:
         prior = state(earlier)
         again = guide = ''
         if rnd > 1:
@@ -387,7 +416,7 @@ class Reviewer:
             sha7=pr.head_sha[:7], branch=pr.branch, base=pr.base,
             rundir=run_dir.replace('\\', '/'), files='\n'.join(f'- {f}' for f in files),
             agents='`AGENTS.md`' if has_agents else 'conventions (it has no `AGENTS.md`)',
-            again=again, guide=guide, new='new ' if rnd > 1 else '',
+            tests=_tests(prepared), again=again, guide=guide, new='new ' if rnd > 1 else '',
             statuses=(', and a status for each earlier open finding in `earlier`'
                       if rnd > 1 else ''),
             next_id=f'F{len(prior) + 1}',

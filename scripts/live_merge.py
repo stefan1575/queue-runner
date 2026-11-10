@@ -32,7 +32,7 @@ CLEAN = 'Nothing to fix.\n\n```sol-findings\n{"findings": []}\n```\n'
 
 
 class CleanSol:
-    def review(self, brief, reply, workdir, out):
+    def review(self, brief, reply, workdir, out, writable=()):
         with open(reply, 'w', encoding='utf-8') as f:
             f.write(CLEAN)
         return CLEAN.strip()

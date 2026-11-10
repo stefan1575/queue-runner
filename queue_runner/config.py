@@ -45,6 +45,7 @@ class Config:
     poll_seconds: int = 300                  # continuous mode: the pause after an idle pass
     runs_dir: str = ''        # a review's run folder: brief, inputs, reply, would-be comment
     checkouts_dir: str = ''   # Sol's detached checkout of the PR's head, removed after
+    deps_dir: str = ''        # node_modules per lockfile, linked into Sol's checkout (ticket 16)
     sol_script: str = ''      # ~/codex-sol.sh
     sol_bash: str = ''        # Git's bash, which runs it
 
@@ -89,5 +90,6 @@ def load_config(path: str = DEFAULT_CONFIG) -> Config:
                   poll_seconds=int(raw.get('poll_seconds', 300)),
                   runs_dir=_path(raw.get('runs_dir') or os.path.join(home, 'runs')),
                   checkouts_dir=_path(raw.get('checkouts_dir') or os.path.join(home, 'checkouts')),
+                  deps_dir=_path(raw.get('deps_dir') or os.path.join(home, 'deps')),
                   sol_script=_path(sol.get('script') or SOL_SCRIPT),
                   sol_bash=sol.get('bash') or GIT_BASH)

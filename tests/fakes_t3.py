@@ -150,9 +150,10 @@ class FakeSol:
         self.replies = list(replies)
         self.briefs = []
 
-    def review(self, brief, reply, workdir, out):
+    def review(self, brief, reply, workdir, out, writable=()):
         with open(brief, encoding='utf-8') as f:
-            self.briefs.append({'brief': f.read(), 'workdir': workdir})
+            self.briefs.append({'brief': f.read(), 'workdir': workdir,
+                                'writable': list(writable)})
         r = self.replies.pop(0)
         if isinstance(r, Exception):
             raise r

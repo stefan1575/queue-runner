@@ -2,8 +2,8 @@
 
 Not a T3 thread: a thread from `t3 thread start --provider codex --model gpt-6.1-sol` ran at
 effort low (checked 2026-11-09 in its rollout: `configuration_update` `reasoning.effort: "low"`),
-and T3's CLI has no effort flag. codex-sol.sh starts a fresh Codex session each time, read-only,
-at the effort it's given; Stefan's rule is high for every Sol run.
+and T3's CLI has no effort flag. codex-sol.sh starts a fresh Codex session each time, at the
+effort it's given, with only the checkout and the dependency cache writable (ticket 16); Stefan's rule is high for every Sol run.
 
 codex-sol.sh's watchdog ends the run once its caller is gone, and launched straight from Windows
 it has none, so it runs under a Git bash that waits for it (as `~/sol-pr-review.py` did).
@@ -118,12 +118,17 @@ class SolCli:
         self.sessions = sessions
         self._run, self._now = run, now
 
-    def review(self, brief: str, reply: str, workdir: str, out: str) -> str:
-        """Sol's reply to `brief`, reviewing read-only in `workdir`. Raises SolOutOfUsage when
-        Sol's plan is out, SolFailed for any other failed run."""
+    def review(self, brief: str, reply: str, workdir: str, out: str,
+               writable: list[str] | tuple = ()) -> str:
+        """Sol's reply to `brief`, reviewing in `workdir`, a throwaway checkout it may write in
+        (`--write`: running tests writes, and Sol may add one), as it may in each `writable`
+        folder (the dependency cache behind the checkout's node_modules). Nothing else is
+        writable, and the network stays off. Raises SolOutOfUsage when Sol's plan is out,
+        SolFailed for any other failed run."""
+        roots = [a for d in writable for a in ('--writable-root', _slash(d))]
         cmd = [self.bash, '-c', 'bash "$0" "$@"; exit $?', _slash(self.script),
-               '--job', 'review', '--effort', EFFORT, _slash(brief), _slash(reply),
-               _slash(workdir)]
+               '--job', 'review', '--effort', EFFORT, '--write', *roots, _slash(brief),
+               _slash(reply), _slash(workdir)]
         try:
             code = self._run(cmd, out, self.timeout_s)
         except TimeoutError:

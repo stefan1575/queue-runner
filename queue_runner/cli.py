@@ -339,7 +339,7 @@ def _repo_ref(value, config, flag, out):
     return repos[m[1]], int(m[2])
 
 
-def _review(config, github, git, sol, value, out, log_line, toaster=None) -> int:
+def _review(config, github, git, sol, value, out, log_line, toaster=None, deps=None) -> int:
     """`--review NAME#N`: one Sol review now, under sol.lock, if the PR needs one."""
     from .review import Reviewer
     ref = _repo_ref(value, config, '--review', out)
@@ -350,7 +350,7 @@ def _review(config, github, git, sol, value, out, log_line, toaster=None) -> int
         log_line(line)
         print(line, file=out)
     reviewer = Reviewer(config, github=github, git=git, sol=sol, jobs=_jobs(config), say=say,
-                        toaster=toaster)
+                        toaster=toaster, deps=deps)
     try:
         _, why = reviewer.review_one(*ref)
     except RunnerBusy:
@@ -498,14 +498,17 @@ def main(argv=None, github=None, out=None, t3=None, git=None, sleep=None,
             from .t3 import T3Cli
             t3 = T3Cli()
         return _dry_run(config, github, git, out, log_line, t3, gate)
+    deps = None   # a test's fake Sol reviews with no dependency installs
     if sol is None:
+        from .deps import Deps
         from .sol import SolCli
         sol = SolCli(script=config.sol_script, bash=config.sol_bash)
+        deps = Deps(config.deps_dir)
     if toaster is None:
         from .toast import WindowsToaster
         toaster = WindowsToaster()
     if args.review:
-        return _review(config, github, git, sol, args.review, out, log_line, toaster)
+        return _review(config, github, git, sol, args.review, out, log_line, toaster, deps)
 
     if t3 is None:
         from .t3 import T3Cli
@@ -520,7 +523,7 @@ def main(argv=None, github=None, out=None, t3=None, git=None, sleep=None,
         self_update = _self_update(config, log_line)
     runner = Runner(config, github=github, t3=t3, git=git, out=out, log_line=log_line, sol=sol,
                     toaster=toaster, gate=gate, limits=limits, now=clock, waker=waker,
-                    self_update=self_update)
+                    self_update=self_update, deps=deps)
     if warning := auto_resume_warning(*([t3_settings] if t3_settings else [])):
         runner.say(f'Warning: {warning}')
     restart = None

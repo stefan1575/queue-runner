@@ -54,6 +54,20 @@ class SolCliTest(unittest.TestCase):
         self.assertTrue(out.endswith('run.out'))
         self.assertEqual(timeout, 75 * 60)
 
+    def test_a_review_may_write_in_its_checkout_and_the_folders_it_names(self):
+        """Tests need to write (vitest's node_modules/.vite-temp, a test Sol adds), so the
+        checkout is writable, and the dependency cache behind its node_modules too."""
+        run = FakeRun()
+        sol = SolCli(script='C:/Users/me/codex-sol.sh', bash='C:/Git/bin/bash.exe', run=run,
+                     sessions=os.path.join(self.dir, 'no-sessions'))
+        sol.review(os.path.join(self.dir, 'brief.md'), os.path.join(self.dir, 'reply.md'),
+                   r'C:\wt\pr7', os.path.join(self.dir, 'run.out'),
+                   writable=[r'C:\Users\me\.queue-runner\deps'])
+        [(cmd, _, _)] = run.calls
+        self.assertEqual(cmd[8:11], ['--write', '--writable-root',
+                                     'C:/Users/me/.queue-runner/deps'])
+        self.assertEqual(cmd[-1], 'C:/wt/pr7')
+
     def test_a_failed_run_is_a_failed_review(self):
         with self.assertRaises(SolFailed) as e:
             self.review(FakeRun(code=1, reply=None, out='codex-sol: no reply (codex exit 1)\n'))

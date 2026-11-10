@@ -68,7 +68,8 @@ def _when(stamp: str) -> datetime.datetime:
 
 class Runner:
     def __init__(self, config: Config, *, github, t3, git, out, log_line, sol=None,
-                 toaster=None, gate=None, limits=None, now=None, waker=None, self_update=None):
+                 toaster=None, gate=None, limits=None, now=None, waker=None, self_update=None,
+                 deps=None):
         self.config, self.github, self.t3, self.git = config, github, t3, git
         # restart.SelfUpdate: the runner's own checkout, restarted on when its base moves
         # (continuous mode, and only when the runner serves its own repo)
@@ -91,7 +92,8 @@ class Runner:
         self._say_lock = threading.Lock()
         self.toaster = toaster or NoToaster()
         self.reviewer = Reviewer(config, github=github, git=git, sol=sol, jobs=self.jobs,
-                                 say=self.say, toaster=self.toaster) if sol is not None else None
+                                 say=self.say, toaster=self.toaster,
+                                 deps=deps) if sol is not None else None
         self.fixer = Fixer(config, github=github, git=git, jobs=self.jobs)
         stopper = Stopper(config, github=github, jobs=self.jobs, say=self.say,
                           toaster=self.toaster)

@@ -5,13 +5,12 @@ Repo: $github. This workdir is a checkout of the PR's head, exactly $sha ($sha7)
 reachable from here, so everything you need is in this workdir and in `$rundir`:
 $files
 
-Review independently, read-only:
+Review independently (the only files you change are tests you add to show a problem):
 1. **Correctness:** does the change do what it claims? Does anything else in the repo depend on what
    it changes? Trace the callers.
 2. **Spec fit:** does it do what the issue asks, and is anything it asks missing?
 3. **Standards:** does it follow this repo's $agents and `docs/agents/`?
-4. **Tests:** do the tests cover the behaviour it changes? Say which checks you ran, and which you
-   couldn't.
+4. **Tests:** do the tests cover the behaviour it changes? $tests
 $again$guide
 Tag every finding:
 - **important** blocks the merge. It needs `file` and `line`, plus either a `scenario` (a failure

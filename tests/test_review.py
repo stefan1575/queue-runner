@@ -11,6 +11,7 @@ import tempfile
 import unittest
 
 from queue_runner.config import Config, Repo
+from queue_runner.deps import Prepared
 from queue_runner.github import Checks, Comment, Issue
 from queue_runner.ledger import SolFailed, read_reviews, state
 from queue_runner.review import DryRunPoster, Reviewer
@@ -29,6 +30,18 @@ def blocking_review_1(sha=H1, at='2026-11-06T02:00:00Z'):
                               'raised': 1}]))
 
 
+class FakeDeps:
+    """Plays deps.Deps: every checkout gets the same result."""
+
+    def __init__(self, result):
+        self.result, self.prepared = result, []
+        self.cache_dir = 'C:/deps'
+
+    def prepare(self, repo, worktree):
+        self.prepared.append((repo, worktree))
+        return self.result
+
+
 class ReviewerTest(unittest.TestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
@@ -42,15 +55,16 @@ class ReviewerTest(unittest.TestCase):
         self.jobs = JobLog(os.path.join(self.dir, 'state', 'jobs.jsonl'))
         self.said = []
 
-    def reviewer(self, gh, git, sol, now=NOW, poster=None, merger=False):
+    def reviewer(self, gh, git, sol, now=NOW, poster=None, merger=False, deps=None):
         """Merging is tested in test_merge.py: these reviews merge nothing (merger False)."""
         self.gh, self.git, self.sol = gh, git, sol
         return Reviewer(self.config, github=gh, git=git, sol=sol, jobs=self.jobs,
-                        say=self.said.append, now=lambda: now, poster=poster, merger=merger)
+                        say=self.said.append, now=lambda: now, poster=poster, merger=merger,
+                        deps=deps)
 
     def one_pr(self, comments=(), replies=(), checks=None, conflicts=(), sol=None, heads=None,
                files=None, ancestors=(), body='Closes #5\n\nMakes it red.', labels=(),
-               poster=None, **gh_kw):
+               poster=None, deps=None, **gh_kw):
         pr = full_pr(20, 'claude/red-5', H2, body=body, title='Red widget', base='claude/base-4',
                      labels=labels)
         gh = FakeGitHubForReviews(
@@ -62,7 +76,7 @@ class ReviewerTest(unittest.TestCase):
         git = FakeReviewGit(heads=heads or {20: H2}, ancestors=ancestors, files=files or {
             'AGENTS.md': '# Agents', 'REVIEW.md': '# Review guidelines\n\nAlways check grants.'})
         return self.reviewer(gh, git, sol or FakeSol([reply(findings=[important('F1')])]),
-                             poster=poster)
+                             poster=poster, deps=deps)
 
     def run_dir(self):
         [d] = glob.glob(os.path.join(self.dir, 'runs', '*'))
@@ -173,6 +187,28 @@ class ReviewerTest(unittest.TestCase):
         self.assertIn('Make the widget red.', issue)
         self.assertIn('Use the brand red.', issue)            # with its comments
         self.assertIn('Makes it red.', self.read('pr.md'))
+
+    def test_with_its_dependencies_linked_sol_is_told_to_run_the_tests_and_may_write_the_cache(self):
+        deps = FakeDeps(Prepared(True, 'its dependencies are installed in `node_modules` (from '
+                                       '`bun.lock`, as CI installs them)', 'cached (first-abc)'))
+        self.one_pr(deps=deps, files={'AGENTS.md': '# Agents', 'package.json': '{}'}).review_pass()
+        [(name, wt)] = deps.prepared
+        self.assertEqual(name, 'first')
+        [b] = self.sol.briefs
+        self.assertEqual(wt, b['workdir'])
+        self.assertEqual(b['writable'], [deps.cache_dir])
+        self.assertIn('from `bun.lock`', b['brief'])
+        self.assertIn('`npm test`', b['brief'])
+        self.assertIn('quote', b['brief'])                 # its summary line, in the reply
+        self.assertTrue(any('cached (first-abc)' in line for line in self.said))
+
+    def test_without_its_dependencies_sol_is_told_why_and_still_reviews(self):
+        deps = FakeDeps(Prepared(False, "its dependencies aren't installed: no lockfile", 'none'))
+        self.one_pr(deps=deps).review_pass()
+        [b] = self.sol.briefs
+        self.assertIn("aren't installed: no lockfile", b['brief'])
+        self.assertNotIn('`npm test`', b['brief'])
+        self.assertEqual(b['writable'], [])
 
     def test_issues_closed_by_url_or_qualified_ref_are_in_the_brief(self):
         # Sol review F3: only a bare #N was found.

@@ -4,6 +4,7 @@ state_dir = "~/.queue-runner/state"
 log_dir = "~/.queue-runner/logs"
 runs_dir = "~/.queue-runner/runs"            # each Sol review's brief, inputs, reply and comment
 checkouts_dir = "~/.queue-runner/checkouts"  # Sol's detached checkout of a PR's head
+deps_dir = "~/.queue-runner/deps"            # node_modules per lockfile, linked into that checkout
 poll_seconds = 300   # continuous mode: the pause after a pass that started nothing
 
 # Claude jobs run as T3 threads on this provider instance and model. T3's CLI has no flag for
