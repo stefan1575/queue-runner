@@ -27,7 +27,7 @@ import traceback
 
 from .brief import build_brief
 from .config import DEFAULT_CONFIG, load_config
-from .run import Runner, RunnerBusy, runner_lock, wall_sleep
+from .run import RESTART, Runner, RunnerBusy, runner_lock, wall_sleep
 from .state import JobLog
 
 EXIT_LOCKED = 3
@@ -401,9 +401,33 @@ def _stop(config, out, log_line, kill) -> int:
     return 0
 
 
+def _own_repo(config):
+    """The served repo this runner's code runs from, if any (ticket 14)."""
+    here = os.path.normcase(os.path.dirname(DEFAULT_CONFIG))
+    return next((r for r in config.repos
+                 if r.github and os.path.normcase(os.path.abspath(r.path)) == here), None)
+
+
+def _self_update(config, log_line):
+    from .restart import SelfUpdate
+    repo = _own_repo(config)
+    return SelfUpdate(repo, say=log_line) if repo else None
+
+
+def _relauncher(config, toaster, log_line):
+    """Starts the same command again in the runner's own checkout (`restart.relaunch`)."""
+    from .restart import relaunch
+    repo = _own_repo(config)
+    cmd = [sys.executable, *sys.orig_argv[1:]]
+    return lambda sha: relaunch(cmd, cwd=repo.path, sha=sha, github=repo.github,
+                                pid_file=_pid_file(config),
+                                err_file=os.path.join(config.log_dir, 'restart.err'),
+                                toaster=toaster, say=log_line)
+
+
 def main(argv=None, github=None, out=None, t3=None, git=None, sleep=None,
          sol=None, toaster=None, usage=None, clock=None, limits=None,
-         t3_settings=None, waker=None, kill=_kill) -> int:
+         t3_settings=None, waker=None, kill=_kill, self_update=None, relaunch=None) -> int:
     out = out or sys.stdout   # None under pythonw: print() then prints nothing
     sleep = sleep or wall_sleep
     parser = argparse.ArgumentParser(prog='queue_runner')
@@ -489,10 +513,14 @@ def main(argv=None, github=None, out=None, t3=None, git=None, sleep=None,
     if waker is None and not args.once:
         from .wake import Schtasks, Waker
         waker = Waker(Schtasks(), say=lambda line: runner.say(line), now=clock)
+    if self_update is None and not args.once:
+        self_update = _self_update(config, log_line)
     runner = Runner(config, github=github, t3=t3, git=git, out=out, log_line=log_line, sol=sol,
-                    toaster=toaster, gate=gate, limits=limits, now=clock, waker=waker)
+                    toaster=toaster, gate=gate, limits=limits, now=clock, waker=waker,
+                    self_update=self_update)
     if warning := auto_resume_warning(*([t3_settings] if t3_settings else [])):
         runner.say(f'Warning: {warning}')
+    restart = None
     try:
         with runner_lock(config.state_dir):
             with open(_pid_file(config), 'w', encoding='utf-8') as f:
@@ -503,7 +531,8 @@ def main(argv=None, github=None, out=None, t3=None, git=None, sleep=None,
                 else:
                     log_line(f'runner started (pid {os.getpid()})')
                     runner.wait_for_t3(sleep)
-                    runner.run_forever(sleep)
+                    if runner.run_forever(sleep) == RESTART:
+                        restart = runner.restart_sha
             finally:   # a runner that ends leaves no pid for --stop to find
                 with contextlib.suppress(OSError):
                     os.remove(_pid_file(config))
@@ -514,4 +543,8 @@ def main(argv=None, github=None, out=None, t3=None, git=None, sleep=None,
     except Exception:
         log_line('runner stopped on an error:\n' + traceback.format_exc())
         raise
+    if restart:   # runner.lock and runner.pid are free for the new runner now
+        if relaunch is None:
+            relaunch = _relauncher(config, toaster, log_line)
+        return 0 if relaunch(restart) else 1
     return 0

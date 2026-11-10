@@ -172,7 +172,7 @@ class WallSleepTest(unittest.TestCase):
         self.assertEqual(slept, [30])
 
 
-class UnattendedTest(unittest.TestCase):
+class UnattendedHarness(unittest.TestCase):
     """The runner's continuous mode through `main`, with fakes everywhere."""
 
     def setUp(self):
@@ -194,14 +194,14 @@ path = "{self.dir}"
         self.now = NOW
         self.sched = FakeScheduler()
 
-    def run_main(self, args, t3=None, sleep=None, usage=None, waker=None, kill=None):
+    def run_main(self, args, t3=None, sleep=None, usage=None, waker=None, kill=None, **more):
         out = io.StringIO()
         gh = FakeGitHubWithPulls(issues=[issue(4, 'Red widget', 'Make it red.')],
                                  pulls_by_branch={'claude/red-widget-4': {
                                      'number': 12, 'url': 'https://github.com/owner/first/pull/12',
                                      'state': 'open'}})
         self.t3 = t3 or FakeT3([(0, 'completed')])
-        extra = {'kill': kill} if kill else {}
+        extra = ({'kill': kill} if kill else {}) | more
         code = main(args + ['--config', self.config], github=gh, out=out, t3=self.t3,
                     git=FakeGit(), sleep=sleep or (lambda s: None), sol=FakeSol(),
                     toaster=FakeToaster(), usage=usage or FakeUsage(), clock=lambda: self.now,
@@ -214,6 +214,9 @@ path = "{self.dir}"
         with open(os.path.join(self.dir, 'logs', 'runner.log'), encoding='utf-8') as f:
             return f.read()
 
+
+
+class UnattendedTest(UnattendedHarness):
     def test_a_second_start_exits_at_once_and_the_log_says_so(self):
         with runner_lock(os.path.join(self.dir, 'state')):
             code, out = self.run_main([], sleep=lambda s: self.fail('it waited'))

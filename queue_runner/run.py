@@ -35,6 +35,7 @@ from .wake import NoWaker
 # earlier runner, so none was started), idle (nothing to start), gated (the usage gate held the
 # chosen Claude job back: `Runner.gate_until` says when to look again).
 STARTED, BUSY, IDLE, GATED = 'started', 'busy', 'idle', 'gated'
+RESTART = 'restart'   # run_forever's end when the runner's own code moved (`restart.py`)
 
 WALL_STEP = 30      # a long sleep looks at the wall clock this often (seconds)
 T3_RETRY = 30       # waiting for T3's server at logon: how often to look again (seconds)
@@ -66,8 +67,12 @@ def _when(stamp: str) -> datetime.datetime:
 
 class Runner:
     def __init__(self, config: Config, *, github, t3, git, out, log_line, sol=None,
-                 toaster=None, gate=None, limits=None, now=None, waker=None):
+                 toaster=None, gate=None, limits=None, now=None, waker=None, self_update=None):
         self.config, self.github, self.t3, self.git = config, github, t3, git
+        # restart.SelfUpdate: the runner's own checkout, restarted on when its base moves
+        # (continuous mode, and only when the runner serves its own repo)
+        self.self_update = self_update
+        self.restart_sha: str | None = None
         # wake.Waker: the Windows wake tasks for the times the lanes wait for (continuous mode)
         self.waker = waker or NoWaker()
         self._wake_lock = threading.Lock()
@@ -609,12 +614,26 @@ class Runner:
         finally:
             sol.join()
 
-    def run_forever(self, sleep) -> None:
-        """The Claude lane here; the Sol lane in a thread that stops when this loop does. After
-        each pass of either lane the wake tasks are set to the times they wait for."""
-        stop = threading.Event()
+    def _start_sol_lane(self, stop: threading.Event) -> threading.Thread:
         sol = threading.Thread(target=self._sol_lane, args=(stop,), name='sol-lane', daemon=True)
         sol.start()
+        return sol
+
+    def _update_due(self) -> bool:
+        try:
+            return self.self_update is not None and self.self_update.due()
+        except Exception:
+            self.log_line('self-update check failed:\n' + traceback.format_exc())
+            return False
+
+    def run_forever(self, sleep) -> str:
+        """The Claude lane here; the Sol lane in a thread that stops when this loop does. After
+        each pass of either lane the wake tasks are set to the times they wait for. Between
+        Claude jobs, when the runner's own checkout is behind its base (`restart.py`), it lets
+        the Sol lane finish its pass, updates the checkout and returns RESTART, with the new
+        commit in `restart_sha`; if git won't update it, both lanes carry on."""
+        stop = threading.Event()
+        sol = self._start_sol_lane(stop)
         try:
             while True:
                 try:
@@ -624,6 +643,16 @@ class Runner:
                     did = IDLE
                 self._claude_waits = self.gate_until
                 self._wake()
+                if self._update_due():
+                    self.say("The runner's own code moved: restarting on the new code once the "
+                             'Sol lane ends its pass')
+                    stop.set()
+                    sol.join()
+                    if sha := self.self_update.update():
+                        self.restart_sha = sha
+                        return RESTART
+                    stop = threading.Event()
+                    sol = self._start_sol_lane(stop)
                 if did != STARTED:
                     sleep(self.idle_seconds())
         finally:
