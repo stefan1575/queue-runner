@@ -237,10 +237,13 @@ def _dry_run_fix(config, github, git, out, log_line) -> bool:
                       'Sol reviews it first', file=out)
                 continue
             brief = fixer.brief(repo, pr, review)
-            log_line(f'dry run: would start a fix round on {repo.github}#{pr.number}')
+            log_line(f'dry run: would start a {"fix" if review else "conflict"} round on '
+                     f'{repo.github}#{pr.number}')
             print('Would start a fix round (dry run: nothing started)', file=out)
             print(f'  repo:   {repo.github} ({repo.path})', file=out)
-            print(f'  PR:     #{pr.number} {pr.title}, after review {review.round}', file=out)
+            print(f'  PR:     #{pr.number} {pr.title}, '
+                  + (f'after review {review.round}' if review else
+                     f'a conflict round: it conflicts with {pr.base}'), file=out)
             print(f'  from:   {pr.head_sha[:7]} on {fix_branch(pr.number, pr.head_sha)}, pushing '
                   f'to {pr.branch}', file=out)
             print('  brief:', file=out)

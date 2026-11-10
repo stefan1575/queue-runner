@@ -2,7 +2,7 @@
 line, so a restarted runner knows what ran and what's still open.
 
 Job kinds: `build` (an issue), `review` (Sol on a PR's head H), `fix` (a Claude fix round on a
-blocking PR, from H), `merge` (the runner merging a clean PR at H, or Stefan's merge noticed),
+blocking PR, from H; `cause` `conflict` for a round that merges a conflicted PR's base in), `merge` (the runner merging a clean PR at H, or Stefan's merge noticed),
 `ready` (in a repo Stefan merges, `merge.py`: the PR at H `marked` ready for him, or `unmarked`), `stop` (a stop filed for
 Stefan on a PR at H: `filed`, then `answered` once he closes its `needs-info` issue or replies on
 the PR or the issue; `failed` if the issue couldn't be filed, so the next pass files it) and
@@ -123,6 +123,7 @@ class Job:
     context: int | None = None     # usage-limit: the thread's context in tokens (None: unknown)
     applied: list = field(default_factory=list)   # live: the migrations its thread applied
     prs: list = field(default_factory=list)       # live: the PRs merged in its batch
+    cause: str | None = None       # a fix: `conflict` for a conflict round (ticket 15), else None
 
     @property
     def open(self) -> bool:
@@ -148,19 +149,20 @@ class JobLog:
     def started(self, *, kind: str, repo: str, issue: int | None, branch: str | None,
                 title: str, sha: str | None = None, round: int | None = None,
                 stop: str | None = None, thread_id: str | None = None, about: str | None = None,
-                question: str | None = None, head: str | None = None) -> Job:
+                question: str | None = None, head: str | None = None,
+                cause: str | None = None) -> Job:
         at = _now()
         stamp = at[:19].replace('-', '').replace(':', '').replace('T', '-')
         job = Job(id=f'{stamp}-{kind}-{repo}-{issue}-{uuid.uuid4().hex[:6]}', kind=kind,
                   repo=repo, issue=issue, branch=branch, title=title, started_at=at, sha=sha,
                   round=round, stop=stop, thread_id=thread_id, about=about, question=question,
-                  head=head)
+                  head=head, cause=cause)
         record = {'event': 'start', 'job': job.id, 'kind': kind, 'repo': repo, 'issue': issue,
                   'branch': branch, 'title': title, 'at': at}
         if sha:
             record.update(sha=sha, round=round)
         for k, v in (('stop', stop), ('thread_id', thread_id), ('about', about),
-                     ('question', question), ('head', head)):
+                     ('question', question), ('head', head), ('cause', cause)):
             if v:
                 record[k] = v
         self._append(record)
@@ -187,7 +189,8 @@ class JobLog:
                           branch=e['branch'], title=e['title'], started_at=e['at'],
                           sha=e.get('sha'), round=e.get('round'), stop=e.get('stop'),
                           thread_id=e.get('thread_id'), about=e.get('about'),
-                          question=e.get('question'), head=e.get('head'))
+                          question=e.get('question'), head=e.get('head'),
+                          cause=e.get('cause'))
                 jobs[job.id] = job
                 if job.kind == 'build':
                     held[(job.repo, job.issue)] = True

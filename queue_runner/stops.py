@@ -7,8 +7,10 @@ round or merge) until Stefan answers: he closes the issue, or replies on the PR 
 (a decision on his reply comes first, `decisions.py`), or `--release NAME#PR`.
 
 The kinds (KINDS): a review that stopped (a new Important finding in an earlier class, a fixed
-finding reopening, a decline Sol kept), a failed check or a conflict on H, and a fix round that
-ended without pushing (H was reviewed already): each found here, and filed once per head H. Two
+finding reopening, a decline Sol kept), a failed check on H, a conflict on H that a conflict round
+couldn't resolve or that came back a third time (a conflict first gets a conflict round,
+`fix.py`), and a fix round that ended without pushing (H was reviewed already): each found here,
+and filed once per head H. Two
 come from decisions (`decisions.py`): review 3 or later still blocking (`approach-note`, filed
 with the Approach note a decision thread wrote) and a decision thread's own question
 (`decision`).
@@ -21,10 +23,15 @@ import json
 import os
 
 from .ledger import RUNNER_MARK, STOP_MARK, said_since
-from .state import REVIEWED
+from .state import NOT_SENT, NOT_STARTED, REVIEWED
 from .toast import NoToaster
 
 NEEDS_INFO = 'needs-info'
+CONFLICT = 'conflict'   # a fix job's `cause` for a conflict round (ticket 15)
+MAX_CONFLICT_HEADS = 2  # conflict rounds on this many heads, then a conflict again: a stop
+# A conflict round on H that ended so, with the PR still at H and conflicting: it couldn't
+# resolve it. (`failed` and `waiting` get a decision first, `usage-limit` a restart.)
+UNRESOLVED = ('no-push', 'head-unknown', 'branch-exists')
 KINDS = {
     'review': 'Sol\'s review stopped the loop',
     'approach-note': 'Still blocking after review 3',
@@ -94,7 +101,8 @@ class Stopper:
                 found.append(('approach-note', d.reason or f'review {review.round} on {h7} is '
                               'still blocking', d.link))
         fixes = [j for j in self.jobs.on('fix', repo.name, n, h) if not j.open]
-        if fixes and fixes[-1].outcome == 'no-push':
+        if fixes and fixes[-1].outcome == 'no-push' and fixes[-1].cause != CONFLICT:
+            # A conflict round's H was never reviewed: its no-push is a conflict stop (below).
             found.append(('no-push', f'the fix round after review {fixes[-1].round} ended '
                           f'without pushing, so the PR is still at {h7}, which was reviewed',
                           fixes[-1].link))
@@ -102,14 +110,28 @@ class Stopper:
         if checks.state == 'failed':
             found.append(('failed-check', f'a check failed on {h7} '
                           f'({", ".join(checks.failed)})', None))
-        if self.github.has_conflict(repo, n):
-            found.append(('conflict', f'it conflicts with {pr.base} at {h7}', None))
+        if self.github.has_conflict(repo, n) and (stop := conflict_stop(self.jobs, repo, pr)):
+            found.append(('conflict', *stop))
         return found
 
     def new_stops(self, repo, pr) -> list[tuple[str, str, str | None]]:
-        """The stops on H not filed yet."""
+        """The stops on H not filed yet. A conflict stop filed on H before a conflict round on
+        H (before ticket 15 a conflict was always a stop, and a release lets a round try) doesn't
+        count for the round's own stop."""
         return [s for s in self.detect(repo, pr)
-                if not self.jobs.stopped(repo.name, pr.number, pr.head_sha, s[0])]
+                if not self.jobs.stopped(repo.name, pr.number, pr.head_sha, s[0])
+                or (s[0] == CONFLICT and not self._conflict_filed_since_round(repo, pr))]
+
+    def _conflict_filed_since_round(self, repo, pr) -> bool:
+        rounds = [j for j in conflict_rounds(self.jobs, repo.name, pr.number)
+                  if j.sha == pr.head_sha]
+        if not rounds:
+            return True
+        pos = positions(self.jobs)
+        return any(j.stop == CONFLICT and j.outcome in ('filed', 'answered')
+                   and pos[j.id] > pos[rounds[-1].id]
+                   for j in self.jobs.on('stop', repo.name, pr.number, pr.head_sha,
+                                         released=True))
 
     def stop_pass(self) -> None:
         """Each repo: the stops Stefan answered go back to the loop, then every open PR's new
@@ -299,3 +321,27 @@ def undecided_replies(jobs, repo, n: int) -> list:
     return [s for s in jobs.on('stop', repo.name, n)
             if s.outcome == 'answered' and s.answer == 'replied'
             and not any(p > pos[s.id] for p in read)]
+
+
+def conflict_rounds(jobs, repo_name: str, n: int) -> list:
+    """The PR's conflict rounds that ran or are running (a release settles them), oldest
+    first."""
+    return [j for j in jobs.on('fix', repo_name, n)
+            if j.cause == CONFLICT and j.outcome not in (NOT_STARTED, NOT_SENT)]
+
+
+def conflict_stop(jobs, repo, pr) -> tuple[str, str | None] | None:
+    """Why a conflict on the PR's head H is a stop for Stefan, (why, link), or None while a
+    conflict round may still resolve it: the round on H ended without resolving it, or the PR
+    had conflict rounds on two earlier heads already, so this is its third conflict."""
+    h7 = pr.head_sha[:7]
+    rounds = conflict_rounds(jobs, repo.name, pr.number)
+    on_h = [j for j in rounds if j.sha == pr.head_sha and not j.open]
+    if on_h and on_h[-1].outcome in UNRESOLVED:
+        return (f'it conflicts with {pr.base} at {h7}, and the conflict round on {h7} '
+                f"couldn't resolve it (it ended {on_h[-1].outcome})", on_h[-1].link)
+    heads = list(dict.fromkeys(j.sha for j in rounds if j.sha != pr.head_sha))
+    if len(heads) >= MAX_CONFLICT_HEADS:
+        return (f'it conflicts with {pr.base} again at {h7}, a third conflict after conflict '
+                f'rounds on {", ".join(x[:7] for x in heads)}', rounds[-1].link)
+    return None

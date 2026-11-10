@@ -208,7 +208,7 @@ class Reviewer:
         if checks.state == 'failed':
             return f'a check failed on {h7} ({", ".join(checks.failed)}): a stop for Stefan'
         if self.github.has_conflict(repo, pr.number):
-            return f'it conflicts with {pr.base}: a stop for Stefan'
+            return f'it conflicts with {pr.base}: a conflict round (or a stop) comes first'
         return None
 
     # --- a review -------------------------------------------------------------------------

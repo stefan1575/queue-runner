@@ -59,6 +59,16 @@ class StopsTest(unittest.TestCase):
     def fail_check(self, sha=H2):
         self.gh.check_states[sha] = Checks('failed', failed=('ci',))
 
+    def conflict_stops(self):
+        """The PR conflicts a third time: conflict rounds pushed on two earlier heads, so this
+        conflict is a stop (ticket 15)."""
+        for sha in ('1' * 40, '2' * 40):
+            j = self.jobs.started(kind='fix', repo='first', issue=20, branch='claude/red-5',
+                                  title='Queue runner conflict: first#20', sha=sha,
+                                  cause='conflict')
+            self.jobs.ended(j.id, exit_code=0, outcome='pushed')
+        self.gh.conflicts.add(20)
+
     def review_ended(self, outcome, round=1, signals=(), sha=H2):
         j = self.jobs.started(kind='review', repo='first', issue=20, branch='claude/red-5',
                               title='t', sha=sha, round=round)
@@ -86,12 +96,19 @@ class StopsTest(unittest.TestCase):
         self.assertEqual((stop.stop, stop.sha, stop.outcome, stop.link),
                          ('failed-check', H2, 'filed', ISSUE_URL))
 
-    def test_a_conflict_is_a_stop(self):
+    def test_a_conflict_is_no_stop_until_a_conflict_round_tried(self):
         self.gh.conflicts.add(20)
+        self.reviewer().review_pass()
+        self.assertEqual(self.stops(), [])
+        self.assertTrue(any('a conflict round (or a stop) comes first' in s for s in self.said))
+
+    def test_a_third_conflict_is_a_stop(self):
+        self.conflict_stops()
         self.reviewer().review_pass()
         [stop] = self.stops()
         self.assertEqual(stop.stop, 'conflict')
-        self.assertIn('conflicts with main', stop.reason)
+        self.assertIn('conflicts with main again', stop.reason)
+        self.assertIn('a third conflict after conflict rounds on 1111111, 2222222', stop.reason)
 
     def test_a_review_that_stops_files_its_signals(self):
         # Review 1 raised F1 in "write logged wrongly"; review 2 on H3 raises F2 in that class.
@@ -158,7 +175,7 @@ class StopsTest(unittest.TestCase):
         self.fail_check()
         r = self.reviewer()
         r.review_pass()
-        self.gh.conflicts.add(20)
+        self.conflict_stops()
         r.review_pass()
         self.assertEqual(len(self.calls('issue')), 1)   # no second issue
         on_issue = [b for n, b in self.calls('comment') if n == 901]
@@ -175,7 +192,7 @@ class StopsTest(unittest.TestCase):
         r = self.reviewer()
         r.review_pass()
         self.gh.close_issue(901)
-        self.gh.conflicts.add(20)
+        self.conflict_stops()
         r.review_pass()
         self.assertEqual(len(self.calls('issue')), 2)
 
@@ -246,7 +263,7 @@ class StopsTest(unittest.TestCase):
     def test_the_runners_own_comment_on_the_needs_info_issue_is_no_answer(self):
         self.fail_check()
         self.reviewer().review_pass()
-        self.gh.conflicts.add(20)
+        self.conflict_stops()
         self.reviewer().review_pass()   # a second stop: added to issue 901 as a comment
         [(n, added)] = [c for c in self.calls('comment') if c[0] == 901]
         self.assertIn('Another stop on PR #20', added)
@@ -263,7 +280,7 @@ class StopsTest(unittest.TestCase):
         self.review_ended('clean')
         self.gh.comments[20] = [Comment('stefan1575', '2026-11-09T12:00:00Z',
                                         old_marker(1, 'clean', H2, []))]
-        self.gh.conflicts.add(20)   # has_conflict: the stop; pull().mergeable stays unknown
+        self.conflict_stops()   # has_conflict: the stop; pull().mergeable stays unknown
         merger = Merger(self.config, github=self.gh, git=self.git, jobs=self.jobs,
                         say=self.said.append)
         self.reviewer(merger=merger).review_pass()
@@ -274,7 +291,7 @@ class StopsTest(unittest.TestCase):
         self.review_ended('blocking')
         self.gh.comments[20] = [Comment('stefan1575', '2026-11-09T12:00:00Z',
                                         old_marker(1, 'blocking', H2, []))]
-        self.gh.conflicts.add(20)
+        self.conflict_stops()
         runner = Runner(self.config, github=self.gh, t3=FakeT3([]), git=self.git,
                         out=io.StringIO(), log_line=lambda line: None, sol=FakeSol([]),
                         toaster=self.toaster)

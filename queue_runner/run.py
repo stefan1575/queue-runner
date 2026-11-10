@@ -18,6 +18,7 @@ from .brief import build_brief
 from .config import Config, Repo
 from .decisions import Decider
 from .fix import Fixer, fix_branch, fix_title
+from .stops import CONFLICT
 from .gate import CLAUDE_KINDS
 from . import limits as lim
 from .live import LiveSteps
@@ -202,7 +203,8 @@ class Runner:
         return min(poll, left) if left >= 1 else poll
 
     def next_fix(self):
-        """(repo, PR, its blocking review job) for the first PR that needs a fix round now."""
+        """(repo, PR, its blocking review job) for the first PR that needs a fix round now;
+        the review is None for a conflict round."""
         for repo in self.config.repos:
             if not repo.github:
                 continue
@@ -332,7 +334,7 @@ class Runner:
         was waiting, ends `continued`."""
         job = self.jobs.started(kind=old.kind, repo=old.repo, issue=old.issue, branch=old.branch,
                                 title=old.title, sha=old.sha, round=old.round,
-                                thread_id=old.thread_id, about=old.id)
+                                thread_id=old.thread_id, about=old.id, cause=old.cause)
         if old.outcome == 'waiting':
             self.jobs.ended(old.id, exit_code=old.exit_code, outcome='continued')
         self.say(f'Continuing {self._name(job)} in {old.link or old.thread_id}')
@@ -360,9 +362,10 @@ class Runner:
 
     # --- a fix round ----------------------------------------------------------------------
 
-    def run_fix(self, repo: Repo, pr, review: Job) -> str:
+    def run_fix(self, repo: Repo, pr, review: Job | None) -> str:
         """A fresh Claude thread in a new T3 worktree at the PR's head H, on a local branch from
-        which it pushes to the PR's. IDLE if none was started."""
+        which it pushes to the PR's. With no review, a conflict round: it merges the base in.
+        IDLE if none was started."""
         n, h = pr.number, pr.head_sha
         try:
             _, fetched = self.git.fetch_pr(repo.path, n, pr.base)
@@ -374,8 +377,10 @@ class Runner:
                      'Sol reviews it first')
             return IDLE
         work = fix_branch(n, h)
+        cause = CONFLICT if review is None else None
         job = self.jobs.started(kind='fix', repo=repo.name, issue=n, branch=pr.branch,
-                                title=fix_title(repo, n), sha=h, round=review.round)
+                                title=fix_title(repo, n, cause), sha=h,
+                                round=review and review.round, cause=cause)
         if self.git.has_branch(repo.path, work):
             self.jobs.ended(job.id, exit_code=None, outcome='branch-exists',
                             error=f'A local branch {work} is left from an earlier run.')
@@ -389,7 +394,9 @@ class Runner:
                             error=f'building the brief failed: {type(e).__name__}: {e}')
             self.say(f'{self._name(job)} not started: building the brief failed ({e})')
             return IDLE
-        self.say(f'Starting {self._name(job)} ({repo.github}#{n}) after review {review.round}, '
+        why = (f'to resolve its conflict with {pr.base}' if review is None else
+               f'after review {review.round}')
+        self.say(f'Starting {self._name(job)} ({repo.github}#{n}) {why}, '
                  f'from {h[:7]} on {work}, pushing to {pr.branch}')
         return self._start(job, repo, brief, h, work)
 
@@ -505,7 +512,8 @@ class Runner:
         repo = self.repos[old.repo]
         work = fix_branch(old.issue, old.sha) if old.kind == 'fix' else old.branch
         job = self.jobs.started(kind=old.kind, repo=old.repo, issue=old.issue, branch=old.branch,
-                                title=old.title, sha=old.sha, round=old.round, about=old.id)
+                                title=old.title, sha=old.sha, round=old.round, about=old.id,
+                                cause=old.cause)
         try:
             brief = self._brief_again(repo, old)
             tip, wip = self.git.free_branch(repo.path, work, old.worktree)
@@ -539,6 +547,8 @@ class Runner:
         from dataclasses import replace
         pr = self.github.pull(repo, old.issue)
         self.git.fetch_pr(repo.path, old.issue, pr.base)
+        if old.cause == CONFLICT:
+            return self.fixer.conflict_brief(repo, replace(pr, head_sha=old.sha))
         review = next((j for j in reversed(self.jobs.on('review', repo.name, old.issue, old.sha,
                                                         released=True))
                        if j.round == old.round), None)
