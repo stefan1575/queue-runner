@@ -4,7 +4,11 @@ Every PR, whichever session built it (local, cloud, Lovable or the queue runner'
 reviewed by Sol before it merges, and only by Sol: a session never reviews its own work (spec
 #137). Since 2026-11-10 the loop is run by the queue runner on Stefan's PC
 (`stefan1575/queue-runner`, a script with no AI in it): it adopts every open PR without a clean
-review on its newest commit, starts each Sol review and each Claude fix round, and posts. Its
+review on its newest commit, starts each Sol review and each Claude fix round, and posts each
+review, status, follow-up issue and stop itself. Sol posts nothing; a Claude build or fix thread
+it starts only pushes, opens its PR, and comments a decline or a question for Stefan. **The exception:** a PR whose newest review on its head isn't the
+runner's (one from Stefan's own session, the old script or the orchestrator) gets no review and
+no fix round from it; it stays with Stefan until a new commit is pushed. Its
 global rules are Stefan's `~/.claude/docs/pr-review.md`, outside this repo. `~/sol-pr-review.py`,
 the label script that ran the loop before, and the T3 Code orchestrator that ran it from
 2026-11-07, are retired; their labels (`needs-sol-review`, `sol-reviewed`) mean nothing now.
@@ -26,7 +30,7 @@ This doc defines the loop's words and this repo's parts of it.
   `REVIEW.md`, which Sol reads in full on every review.
 - **Nit**: never blocks; fixing it is optional. A review keeps the first five and names the
   ones it dropped.
-- **Pre-existing**: a problem in code the PR didn't change. Sol files it as a
+- **Pre-existing**: a problem in code the PR didn't change. The runner files it as a
   `needs-triage` issue, linked from the review comment, once per finding ID; it doesn't block.
   One that loses or exposes data is tagged Important instead.
 - **Class**: the kind of problem a finding names ("write made outside the app logged wrongly").
@@ -80,8 +84,11 @@ This doc defines the loop's words and this repo's parts of it.
 
   Stops and approach notes end with Stefan, through a `needs-info` issue.
   `python3 -m queue_runner --needs-me` lists what waits on him.
-- **Failed review or Sol out of usage:** nothing counts; the runner starts a fresh review
-  later (after Sol's reset when it's out of usage).
+- **Failed review:** nothing counts, and the runner reviews the head again on a later pass.
+  After two failed reviews on one head it stops trying until a new commit is pushed or Stefan
+  runs `python3 -m queue_runner --release leads-dashboard#N`.
+- **Sol out of usage:** nothing counts; the runner reviews the PR afresh after Sol's reset, with
+  no limit on tries.
 
 ## Opening a PR
 
@@ -93,8 +100,9 @@ This doc defines the loop's words and this repo's parts of it.
    - `Closes #N`, one keyword per issue.
 2. **Stop.** A runner's build or fix thread ends with its report; any other session tells
    Stefan in one line that the PR is waiting on Sol. No label and no session line: the runner
-   adopts the PR. After Stefan merges, the runner's live thread finishes the live steps as
-   `docs/agents/lovable-cloud.md` says and posts a **Live.** comment on each PR it covered.
+   adopts the PR. After Stefan merges, a live thread the runner starts finishes the live steps
+   as `docs/agents/lovable-cloud.md` says, and the runner then posts a **Live.** comment on each
+   PR it covered.
 
 ## Briefs for other workers
 

@@ -18,13 +18,13 @@ stops:
 
 **Blocked by:** 06, 07, 09, 10, 11, 17 (Stefan merges leads-dashboard PRs himself from the cutover on)
 
-**Status:** ready-for-agent
+**Status:** needs-info (2026-11-10: the rule-file wording below waits on Stefan's go)
 
 - [ ] Recovery copies of every rule file edited go in personal-ops
       `.scratch/agent-instructions/<date>/` first (`~/.claude/CLAUDE.md`, Working notes).
-- [ ] Nothing from the old script is lost: each `held.json` and each open PR's state is accounted
+- [x] Nothing from the old script is lost: each `held.json` and each open PR's state is accounted
       for in Comments.
-- [ ] The runner's first real cycle runs (a real review posted, or the frontier is empty and the
+- [x] The runner's first real cycle runs (a real review posted, or the frontier is empty and the
       log says so) and is noted in Comments.
 - [ ] `~/.claude/docs/orchestration.md` and `sol.md` no longer describe the old script as running.
 
@@ -76,7 +76,7 @@ leads-dashboard PR at the cutover:
    `t3-wake.ps1` used to open it at 09:00. After a reboot the runner waits for T3's server until
    you open it. Adding T3 Code to Startup would close that; say if you want it.
 4. **The `## Review` table's merge and live-Check rows:** the orchestrator wrote them; the runner
-   doesn't (its live thread posts a **Live.** comment instead). The drafts below say so. If you
+   doesn't (it posts a **Live.** comment after its live thread instead). The drafts below say so. If you
    want the rows back, that's a runner ticket.
 
 **Drafts (exact wording):**
@@ -84,8 +84,8 @@ leads-dashboard PR at the cutover:
 1. `~/.claude/docs/orchestration.md`, replace the Status paragraph ("**Status (2026-11-07): being
    built** ... (last section).") with:
 
-   > **Status (2026-11-10): running.** The runner started at logon from the Startup folder on
-   > 2026-11-10 and took over from `~/sol-pr-review.py` and the T3 Code orchestrator (queue-runner
+   > **Status (2026-11-10): running.** The runner starts at logon from the Startup folder; it was
+   > first started by hand on 2026-11-10 and took over from `~/sol-pr-review.py` and the T3 Code orchestrator (queue-runner
    > ticket 13). Its own rules are in `~/Code/Personal/queue-runner/AGENTS.md`. Stefan's own
    > sessions work as before (last section).
 
@@ -106,8 +106,8 @@ leads-dashboard PR at the cutover:
 
 4. leads-dashboard `AGENTS.md`, `## Pull requests`: replace "run by the T3 Code orchestrator on
    Stefan's PC" with "run by the queue runner on Stefan's PC", and replace "and the orchestrator
-   the merge and the Check on `main` as the last rows." with "and the runner's live thread posts a
-   **Live.** comment after Stefan merges."
+   the merge and the Check on `main` as the last rows." with "and the runner posts a **Live.**
+   comment once its live thread has finished the live steps after Stefan merges."
 
 5. leads-dashboard `.claude/cloud/user-rules.md` (keeping its uncommitted sending-rule change):
    - under `## Review: Sol, from Stefan's PC`, replace "the T3 Code orchestrator there adopts every
@@ -122,3 +122,19 @@ leads-dashboard PR at the cutover:
    is gone) and `briefs/resume-opus-2026-11-06-0850/progress.md` (a settled handoff), committed
    there per its own rules with the four edits above, in one commit: "The queue runner runs the
    review loop (queue-runner ticket 13); the orchestrator's briefs retire".
+
+**First real cycle (2026-11-10 16:56-16:59):** the runner started from the Startup shortcut
+(pid 3624), recorded leads-dashboard's first sight (everything up to `ff58c6d` on main counts as
+live), filed `conflict` stops on #153 (#176) and #154 (#177), started build #109 (the usage gate:
+5 hours 23% used, the week 35%), and Sol's review 2 of #173 on `1fa3cb8` posted
+(https://github.com/RoyalBullyAgency-RBA/leads-dashboard/pull/173#issuecomment-6763253661):
+blocking, next a fix round, which follows once the #109 build ends (one Claude job at a time).
+#109's 2026-11-04 hold comment is out of date: both blockers it names (#108, #126) are closed.
+
+**Sol review (2026-11-10, eba92e7..92f8c3a):** no regression found in the label removal (399 tests
+pass). Three Important findings, all on the drafts, all fixed: the review-loop draft now names the
+exception (a head whose newest review isn't the runner's stays with Stefan), says the runner, not
+Sol or the live thread, posts issues and **Live.** comments, and gives the two-failed-reviews
+limit and `--release` apart from Sol's usage resets. Nits taken: the Status draft no longer says
+the runner started at logon (it was started by hand), and a stops test lost "the old script" from
+its name. No second review (the fixes are wording).

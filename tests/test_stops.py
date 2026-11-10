@@ -136,7 +136,7 @@ class StopsTest(unittest.TestCase):
         self.assertEqual(stop.stop, 'no-push')
         self.assertIn('ended without pushing', stop.reason)
 
-    def test_nothing_stops_a_pr_a_job_is_writing_to_or_the_old_script_has(self):
+    def test_nothing_stops_a_pr_a_job_is_writing_to(self):
         self.fail_check()
         self.jobs.started(kind='build', repo='first', issue=5, branch='claude/red-5', title='b')
         self.reviewer().review_pass()
