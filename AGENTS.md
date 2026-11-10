@@ -94,6 +94,31 @@ Ticket 10 (`orchestration.md`, The runner and Sleep).
   hibernate after a while ("S4 Doze to Hibernate" in the System log), and whether a wake timer
   wakes it from hibernate depends on its firmware: a wait of hours may find the PC hibernated.
 
+## Serving itself
+
+Ticket 14. The runner serves its own repo, `stefan1575/queue-runner` (`config.toml`, after
+leads-dashboard): GitHub issues, builds, Sol reviews, and it merges its own clean PRs.
+`.github/workflows/tests.yml` runs `python -m unittest` on Windows on every PR and on main, so
+"checks passed on H" means the tests passed on H.
+
+- **Restarting on new code** (`restart.py`): in continuous mode, when a served repo's `path` is
+  the folder the runner's code runs from, the Claude lane fetches its base after every pass
+  (between jobs). When `origin/main` is ahead and fast-forwards (the runner's own merge, or any
+  push), it says `The runner's own code moved: restarting...`, lets the Sol lane finish its pass,
+  runs `git merge --ff-only` in the checkout and ends the loop; the CLI lets go of `runner.lock`
+  and `runner.pid`, starts the same command again (`sys.executable` and `sys.orig_argv`,
+  detached), and waits until the new runner's pid is in `runner.pid` and it stays up 20 seconds:
+  `runner restarted on <sha7> (pid N)`, then the new one's `runner started`. Another runner
+  taking the lock instead counts as restarted.
+- **New code that won't start** (dies, or doesn't take the lock in 2 minutes): the old runner
+  logs `the new code failed to start: <last error line>`, toasts "Queue runner didn't restart"
+  (opening the commit), and exits 1. The new one's stderr is in `<log_dir>/restart.err`. Fix it
+  on main and start the shortcut by hand. Live check: `python3 scripts/live_restart.py` (a clone
+  with a syntax error; a real toast). Run on 2026-11-10: `SyntaxError: invalid syntax`, toasted.
+- **Left alone** (said once, the old code carries on): a checkout on another branch, one whose
+  main has commits origin doesn't, and an update git refuses (a local change in the way), which
+  isn't tried again until main moves on.
+
 ## The usage gate
 
 `gate.py` and `usage.py` (ticket 08; `orchestration.md`, Limits). Before each Claude job (a build,
@@ -687,6 +712,8 @@ changed files in `tests/test_git.py`.
 Stefan merges: `StefanMergesTest` in `tests/test_merge.py` (marked once, unmarked on a new head
 or a stop, his merge noticed once, a closed PR, a failed label) and `tests/test_needs_me.py`
 (`--needs-me` through `main`, and the `merge` setting).
+Serving itself: `tests/test_restart.py` (`SelfUpdate` on a real checkout with a bare origin,
+`relaunch` with a fake process and toaster, the loop through `main`).
 Running unattended: `tests/test_wake.py` (`Waker` against `FakeScheduler` in `fakes.py`, the
 task XML, `Schtasks` on canned calls, `wall_sleep`, a second start, waiting for T3, `--stop`
 with a fake kill); every test that runs `main` continuously passes a waker, so none touches the
@@ -736,9 +763,10 @@ temp folder.
   reset, the transcript's context, when and how a job resumes, the auto-resume warning.
 - `queue_runner/lock.py`: `runner.lock` and `sol.lock`.
 - `queue_runner/wake.py`: the wake tasks: `Waker.sync` and the `schtasks` adapter.
+- `queue_runner/restart.py`: restarting on its own new code after main moves (ticket 14).
 - `queue_runner/cli.py`: the command line.
 - `scripts/live_sandbox.py`, `scripts/live_review.py`, `scripts/live_fix_brief.py` and
   `scripts/live_merge.py`: the live checks.
 - `scripts/make_icon.py`: draws the toast icon, `queue_runner/assets/icon.png`.
 - `scripts/make_shortcut.py`: makes the logon shortcut; `scripts/live_wake.py`: the wake task's
-  live check.
+  live check; `scripts/live_restart.py`: a restart onto broken code, toasted.
