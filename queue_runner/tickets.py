@@ -19,8 +19,9 @@ _BLOCKED_BY = re.compile(r'^[\s>*_-]*blocked by\s*(?:\*\*)?\s*:?\s*(?:\*\*)?\s*(
                          re.IGNORECASE)
 _TITLE = re.compile(r'^#\s+(.+?)\s*$')
 _PARENS = re.compile(r'\([^)]*\)')
-# A ticket number on a Blocked by line: `05`, `05-merge-or-fix.md`, `#05`; not part of a date.
-_NUMBER = re.compile(r'(?<![\w/.-])(\d{1,3})(?![\d.])(?=\b|-)')
+# A ticket number on a Blocked by line: `05`, `05-merge-or-fix.md`, `#05`, `01.` ending a
+# sentence; not part of a date or a decimal.
+_NUMBER = re.compile(r'(?<![\w/.-])(\d{1,3})(?!\d|\.\d)(?=\b|-)')
 _COMMENTS = re.compile(r'^##\s+comments\s*$', re.IGNORECASE)
 
 

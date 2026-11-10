@@ -46,7 +46,10 @@ class BlockedByTest(unittest.TestCase):
                            ('Blocked by: 03-sol-review-dry-run.md, #04', (3, 4)),
                            ('Blocked by: 02 (done 2026-11-07), 06', (2, 6)),
                            ('Blocked by: None (can start immediately)', ()),
-                           ('**Blocked by:** none', ())]:
+                           ('**Blocked by:** none', ()),
+                           ('Blocked by: 01.', (1,)),
+                           ('**Blocked by:** #01.', (1,)),
+                           ('Blocked by: 01 and 02.', (1, 2))]:
             with self.subTest(line=line):
                 self.assertEqual(blocked_by(f'# 07: x\n\n{line}\n'), want)
 

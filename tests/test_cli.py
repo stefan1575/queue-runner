@@ -113,6 +113,14 @@ issues = "local"
         self.assertIn('chain/02', out)
         self.assertNotIn('On GitHub', out)
 
+    def test_a_github_repo_after_it_still_shows_its_build(self):
+        gh_repo = f'\n[[repos]]\nname = "gh"\ngithub = "owner/gh"\npath = "{self.dir}"'
+        self.write_config(gh_repo.replace('\\', '/'))
+        code, out = self.run_main(FakeGitHub(issues=[issue(4, 'Red', 'Red.')]))
+        self.assertIn('chain/02', out)
+        self.assertIn('Would start a build job', out)
+        self.assertIn('#4 Red', out)
+
     def test_a_bad_issues_value_is_an_error(self):
         self.write_config()
         with open(self.config, encoding='utf-8') as f:
