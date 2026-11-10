@@ -3,7 +3,8 @@ the Claude lane.
 
 A PR gets a fix round when the runner's own newest review of its head H is `blocking` (decide()'s
 `fix` outcome; a stop or an approach note goes to Stefan instead) and that review is still the
-PR's newest review comment. One round per head: once a round on H has ended, H gets no other,
+PR's newest review comment; with no runner review of H, a blocking review posted before the
+runner's cutover counts as its own (`Fixer.adopted`, issue 3). One round per head: once a round on H has ended, H gets no other,
 whatever its outcome, until a `--release`. A round that pushes moves the head, and the Sol lane
 reviews the new one; a round that ends without pushing leaves the PR at H, which was reviewed
 already, so it waits for Stefan.
