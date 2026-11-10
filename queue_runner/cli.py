@@ -294,8 +294,8 @@ def _dry_run_build(config, github, out, log_line) -> None:
 
 
 def _dry_run_ticket(repo, out, log_line) -> None:
-    """A repo whose tickets are local: the ticket a build would take. The runner doesn't build
-    these yet (ticket 12 waits for Stefan on the no-remote flow), so the dry run says so."""
+    """A repo whose tickets are local: the ticket a build would take. The runner builds none
+    (no served repo needs the no-remote flow: ticket 12), so the dry run says so."""
     from .tickets import pick_ticket
     ticket = pick_ticket(repo.path)
     if ticket is None:

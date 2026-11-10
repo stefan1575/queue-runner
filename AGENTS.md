@@ -405,10 +405,9 @@ tickets as markdown, `.scratch/<feature>/issues/NN-<slug>.md` (its
   going to the feature first by name. Numbers repeat across features, so a ticket is
   `<feature>/NN`. Checked on 2026-11-10 against every ticket in personal-ops and royal-bully-ops
   (128): each has a status this reads.
-- **Not built yet:** the Claude lane skips local repos, and `--once --dry-run` only names the
-  next ticket. Ticket 12 builds the no-remote flow (a worktree branch, Sol on its diff
-  against `main`, a local `--no-ff` merge) for queue-runner only; personal-ops is not served
-  (Stefan, 2026-11-10).
+- **Not built:** the Claude lane skips local repos, and `--once --dry-run` only names the
+  next ticket. The no-remote flow was dropped (ticket 12): queue-runner moved to GitHub and
+  personal-ops is not served (Stefan, 2026-11-10).
 
 ## A Sol pass
 

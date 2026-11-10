@@ -33,14 +33,14 @@ live_doc = "docs/agents/lovable-cloud.md"
 # next pass and its live steps follow. `merge = "runner"` (the default) has the runner merge.
 merge = "stefan"
 
+# The runner's own repo (ticket 14, Stefan 2026-11-10): served like any other, and it merges its
+# own PRs. After main moves, the runner updates its checkout and restarts on the new code.
+[[repos]]
+name = "queue-runner"
+github = "stefan1575/queue-runner"
+path = "~/Code/Personal/queue-runner"
+base = "main"
+
 # A repo whose tickets are local markdown (`.scratch/<feature>/issues/NN-<slug>.md`, ticket 12)
-# says `issues = "local"`; every other repo's come from GitHub. None is turned on: Stefan turns a
-# repo on. `github` stays its remote's owner/name, or is left out for a repo with no GitHub. For
-# now the runner only shows the next local ticket in `--once --dry-run`; it builds none (ticket
-# 12's Comments ask Stefan how the no-remote flow should fit personal-ops and queue-runner).
-#
-# [[repos]]
-# name = "personal-ops"
-# path = "~/Code/Personal/personal-ops"
-# base = "main"
-# issues = "local"
+# would say `issues = "local"`; the runner only names its next ticket in `--once --dry-run` and
+# builds none (no served repo needs it: Stefan, 2026-11-10).
