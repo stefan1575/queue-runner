@@ -271,8 +271,7 @@ class Reviewer:
             self.say(f'{name}: Sol reviews {h[:7]} (review {rnd}) in {run_dir}')
             reply = self.sol.review(brief_path, os.path.join(run_dir, 'reply.md'), wt,
                                     os.path.join(run_dir, 'run.out'),
-                                    writable=[self.deps.cache_dir]
-                                    if prepared and prepared.ready else [])
+                                    writable=list(prepared.writable) if prepared else [])
             d = decide(repo.github, n, h, rnd, earlier, guidelines is not None, reply, wt,
                        run_dir, gone)
         except SolOutOfUsage as e:

@@ -9,28 +9,34 @@ one that changes them gets its own install, as CI would. bun.lock installs with
 **Unlink before git removes a checkout:** `git worktree remove --force` follows a junction and
 empties its target (checked 2026-11-10), so `unlink` comes first (`GitCli.remove_checkout`).
 
-Sol runs tests in its sandbox with `deps_dir` writable (vitest writes `node_modules/.vite-temp`),
-so a run could change the cache. A marker inside `node_modules` is checked on every use: a cache
-whose marker is gone is installed again.
+Sol runs tests in its sandbox with only `node_modules/.vite-temp` and `.vite` writable in the
+cache (vitest writes its bundled config there), so a test can't change the packages. A marker
+inside `node_modules` is checked on every use: a cache whose marker is gone is installed again.
 """
 import dataclasses
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
+import tempfile
 import time
 
 HOME = os.path.expanduser('~')
 INSTALL_TIMEOUT_S = 15 * 60
 KEEP = 3   # caches kept per repo, the most recently used
+STALE_S = 4 * INSTALL_TIMEOUT_S   # a temp install folder this old was left by a dead runner
 READY = '.queue-runner-ready'   # in node_modules once an install finished
 # package.json fields that change what an install puts in node_modules.
 DEP_FIELDS = ('dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies',
               'overrides', 'resolutions', 'patchedDependencies', 'trustedDependencies',
               'workspaces')
-# Files an install reads besides package.json and the lockfile.
+# Files an install reads besides package.json and the lockfile (and `patches/`).
 EXTRA = ('.npmrc', 'bunfig.toml')
+# Where vite and vitest write inside node_modules: the only part of the cache Sol may write, so a
+# test can't change the installed packages that later reviews reuse.
+WRITES = ('.vite-temp', '.vite')
 
 
 def node_dir() -> str | None:
@@ -74,6 +80,14 @@ def run_install(cmd: list[str], cwd: str, out_path: str, timeout: float) -> int:
             return -1
 
 
+def _bytes(path: str) -> bytes:
+    try:
+        with open(path, 'rb') as f:
+            return f.read()
+    except OSError:
+        return b''
+
+
 def _link(target: str, link: str) -> None:
     if os.name == 'nt':
         import _winapi
@@ -87,6 +101,7 @@ class Prepared:
     ready: bool               # node_modules is linked into the checkout
     note: str | None = None   # for Sol's brief; None when the repo has no package.json
     how: str = ''             # for the log: installed (with its time) or cached
+    writable: tuple = ()      # the cache folders Sol may write in (WRITES)
 
 
 class Deps:
@@ -130,6 +145,15 @@ class Deps:
         with open(os.path.join(worktree, lock), 'rb') as f:
             h = hashlib.sha256(f.read())
         h.update(json.dumps({k: pkg.get(k) for k in DEP_FIELDS}, sort_keys=True).encode())
+        for name in EXTRA:   # install settings change what's installed too
+            h.update(f'\0{name}\0'.encode() + _bytes(os.path.join(worktree, name)))
+        patches = os.path.join(worktree, 'patches')
+        for top, dirs, names in sorted(os.walk(patches)):
+            dirs.sort()
+            for name in sorted(names):
+                path = os.path.join(top, name)
+                rel = os.path.relpath(path, worktree).replace(os.sep, '/')
+                h.update(f'\0{rel}\0'.encode() + _bytes(path))
         key = h.hexdigest()[:12]
         final = os.path.join(self.cache_dir, f'{repo}-{key}')
         modules = os.path.join(final, 'node_modules')
@@ -143,17 +167,19 @@ class Deps:
                                 'failed')
             how = f'installed in {time.monotonic() - started:.0f}s'
         os.utime(final)   # most recently used: kept by the prune
+        writable = tuple(os.path.join(modules, w) for w in WRITES)
+        for w in writable:
+            os.makedirs(w, exist_ok=True)
         _link(modules, os.path.join(worktree, 'node_modules'))
         self._prune(repo)
         return Prepared(True, f'its dependencies are installed in `node_modules` (from `{lock}`, '
-                              f'as CI installs them)', f'{how} ({repo}-{key})')
+                              f'as CI installs them)', f'{how} ({repo}-{key})', writable)
 
     def _install(self, worktree, final, lock, cmd) -> str | None:
         """Installs into a fresh folder, then moves it into place. The error's tail, or None."""
         os.makedirs(self.cache_dir, exist_ok=True)
-        tmp = f'{final}.tmp-{os.getpid()}'
-        shutil.rmtree(tmp, ignore_errors=True)
-        os.makedirs(tmp)
+        # Its own folder: another install of the same key may be running (live_review.py).
+        tmp = tempfile.mkdtemp(prefix=f'{os.path.basename(final)}.tmp-', dir=self.cache_dir)
         for name in ('package.json', lock, *EXTRA):
             src = os.path.join(worktree, name)
             if os.path.isfile(src):
@@ -174,14 +200,25 @@ class Deps:
             return f'{why}{": " + tail if tail else ""}'
         with open(os.path.join(modules, READY), 'w', encoding='utf-8') as f:
             f.write(' '.join(cmd[1:]) + '\n')
+        if os.path.isfile(os.path.join(final, 'node_modules', READY)):
+            # Another runner (live_review.py) published this key meanwhile, and a review may be
+            # using it: keep that one.
+            shutil.rmtree(tmp, ignore_errors=True)
+            return None
         shutil.rmtree(final, ignore_errors=True)   # an emptied cache's leftovers
         os.replace(tmp, final)
         return None
 
     def _prune(self, repo):
+        name = re.compile(re.escape(repo) + r'-[0-9a-f]{12}')
         mine = [os.path.join(self.cache_dir, n) for n in os.listdir(self.cache_dir)
-                if n.startswith(f'{repo}-') and '.' not in n[len(repo) + 1:]]
+                if name.fullmatch(n)]
         mine.sort(key=os.path.getmtime, reverse=True)
+        stale = re.compile(re.escape(repo) + r'-[0-9a-f]{12}\.tmp-.*')
+        for n in os.listdir(self.cache_dir):   # an install a dead runner left
+            path = os.path.join(self.cache_dir, n)
+            if stale.fullmatch(n) and time.time() - os.path.getmtime(path) > STALE_S:
+                shutil.rmtree(path, ignore_errors=True)
         for old in mine[KEEP:]:
             shutil.rmtree(old, ignore_errors=True)
             try:

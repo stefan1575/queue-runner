@@ -125,6 +125,65 @@ class DepsTest(unittest.TestCase):
         self.deps().prepare('app', self.checkout(lock_text='{"v": 4}'))   # the newest stayed
         self.assertEqual(len(self.install.calls), 5)
 
+    def test_an_install_setting_or_patch_is_part_of_the_key(self):
+        self.deps().prepare('app', self.checkout())
+        wt = self.checkout()
+        with open(os.path.join(wt, '.npmrc'), 'w', encoding='utf-8') as f:
+            f.write('omit=dev' + chr(10))
+        self.deps().prepare('app', wt)
+        self.assertEqual(len(self.install.calls), 2)
+        wt = self.checkout()
+        os.makedirs(os.path.join(wt, 'patches'))
+        with open(os.path.join(wt, 'patches', 'react.patch'), 'w', encoding='utf-8') as f:
+            f.write('--- a' + chr(10))
+        self.deps().prepare('app', wt)
+        self.assertEqual(len(self.install.calls), 3)
+
+    def test_sol_may_write_only_where_vite_writes_not_the_packages(self):
+        got = self.deps().prepare('app', self.checkout())
+        self.assertEqual([os.path.basename(w) for w in got.writable], ['.vite-temp', '.vite'])
+        for w in got.writable:
+            self.assertTrue(os.path.isdir(w))
+            self.assertTrue(w.startswith(self.cache))
+
+    def test_an_install_that_finishes_second_keeps_the_one_already_in_use(self):
+        wt = self.checkout()
+        first = self.deps()
+        inner = self.install
+
+        def slow(cmd, cwd, out_path, timeout):   # another runner publishes the same key meanwhile
+            code = inner(cmd, cwd, out_path, timeout)
+            if len(inner.calls) == 1:
+                Deps(self.cache, run=inner, bun='bun', npm='npm').prepare('app', self.checkout())
+                with open(os.path.join(wt, 'in-use'), 'w') as f:
+                    f.write('x')
+            return code
+        first.run = slow
+        self.assertTrue(first.prepare('app', wt).ready)
+        [cache] = [n for n in os.listdir(self.cache) if '.' not in n]
+        self.assertEqual(len(inner.calls), 2)
+        self.assertTrue(os.path.isfile(os.path.join(self.cache, cache, 'node_modules',
+                                                    '.queue-runner-ready')))
+        self.assertEqual([n for n in os.listdir(self.cache) if '.tmp-' in n], [])
+
+    def test_pruning_leaves_a_repo_whose_name_starts_the_same(self):
+        self.deps().prepare('app-tools', self.checkout())
+        for v in range(4):
+            self.deps().prepare('app', self.checkout(lock_text=f'{{"v": {v}}}'))
+        self.assertEqual(len([n for n in os.listdir(self.cache)
+                              if n.startswith('app-tools-') and '.' not in n]), 1)
+
+    def test_an_install_a_dead_runner_left_is_swept_once_it_is_old(self):
+        os.makedirs(self.cache)
+        old = os.path.join(self.cache, 'app-0123456789ab.tmp-dead')
+        young = os.path.join(self.cache, 'app-0123456789ab.tmp-running')
+        os.makedirs(old)
+        os.makedirs(young)
+        os.utime(old, (0, 0))
+        self.deps().prepare('app', self.checkout())
+        self.assertFalse(os.path.exists(old))
+        self.assertTrue(os.path.exists(young))
+
     def test_unlink_removes_the_junction_and_keeps_the_cache(self):
         wt = self.checkout()
         self.deps().prepare('app', wt)

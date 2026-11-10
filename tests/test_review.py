@@ -190,13 +190,14 @@ class ReviewerTest(unittest.TestCase):
 
     def test_with_its_dependencies_linked_sol_is_told_to_run_the_tests_and_may_write_the_cache(self):
         deps = FakeDeps(Prepared(True, 'its dependencies are installed in `node_modules` (from '
-                                       '`bun.lock`, as CI installs them)', 'cached (first-abc)'))
+                                       '`bun.lock`, as CI installs them)', 'cached (first-abc)',
+                                 ('C:/deps/first-abc/node_modules/.vite-temp',)))
         self.one_pr(deps=deps, files={'AGENTS.md': '# Agents', 'package.json': '{}'}).review_pass()
         [(name, wt)] = deps.prepared
         self.assertEqual(name, 'first')
         [b] = self.sol.briefs
         self.assertEqual(wt, b['workdir'])
-        self.assertEqual(b['writable'], [deps.cache_dir])
+        self.assertEqual(b['writable'], ['C:/deps/first-abc/node_modules/.vite-temp'])
         self.assertIn('from `bun.lock`', b['brief'])
         self.assertIn('`npm test`', b['brief'])
         self.assertIn('quote', b['brief'])                 # its summary line, in the reply
