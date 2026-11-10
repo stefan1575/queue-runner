@@ -14,10 +14,10 @@ GitHub issues, PRs, Sol reviews, and merging itself when the review is clean (St
 
 **Blocked by:** None
 
-**Status:** done (2026-11-10: built and landed; boxes 1 and 2 wait on the runner's first real cycle in its own repo, issue #1: see Comments)
+**Status:** done (2026-11-10)
 
-- [ ] One real PR in queue-runner goes through build, Sol review and merge, noted in Comments.
-- [ ] A merge into queue-runner restarts the runner, and the restart is in the log.
+- [x] One real PR in queue-runner goes through build, Sol review and merge, noted in Comments.
+- [x] A merge into queue-runner restarts the runner, and the restart is in the log.
 - [x] A runner that fails to start after its own merge toasts; checked once with a broken stub.
 
 ## Comments
@@ -65,3 +65,8 @@ first bullet of "The runner":
 >   clean PRs it merges itself. When queue-runner's `main` moves, it updates its checkout and
 >   restarts on the new code between jobs; if the new code won't start, it toasts. A session
 >   that pushes to queue-runner's `main` needn't restart it.
+
+**First real cycle (2026-11-10):** the runner built issue #1 into
+[PR #2](https://github.com/stefan1575/queue-runner/pull/2), Sol reviewed it clean, the runner
+merged it (`66a5ea1`), and the log says `runner restarted on 66a5ea1 (pid 36220)` at 21:22:09.
+Boxes 1 and 2 ticked.
