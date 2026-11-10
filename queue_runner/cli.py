@@ -265,6 +265,10 @@ def _dry_run_build(config, github, out, log_line) -> None:
     from .picker import pick
     jobs = _jobs(config)
     for repo in config.repos:
+        if repo.local_issues:
+            if _dry_run_ticket(repo, out, log_line):
+                return
+            continue
         if not repo.github:
             continue
         job = pick(repo, github, held=jobs.held_issues(repo.name))
@@ -284,6 +288,22 @@ def _dry_run_build(config, github, out, log_line) -> None:
     log_line('dry run: nothing to start')
     print('Nothing to start: no repo has an unblocked ready-for-agent issue that isn\'t already '
           'being built or held.', file=out)
+
+
+def _dry_run_ticket(repo, out, log_line) -> bool:
+    """A repo whose tickets are local: the ticket a build would take. The runner doesn't build
+    these yet (ticket 12 waits for Stefan on the no-remote flow), so the dry run says so."""
+    from .tickets import pick_ticket
+    ticket = pick_ticket(repo.path)
+    if ticket is None:
+        return False
+    log_line(f'dry run: next local ticket in {repo.name} is {ticket.key}')
+    print(f'Next local ticket in {repo.name} (dry run; the runner builds no local tickets yet: '
+          'ticket 12 asks Stefan how)', file=out)
+    print(f'  repo:   {repo.name} ({repo.path})', file=out)
+    print(f'  ticket: {ticket.key} {ticket.title}', file=out)
+    print(f'  file:   {ticket.path}', file=out)
+    return True
 
 
 def _dry_run_reviews(config, github, out) -> None:

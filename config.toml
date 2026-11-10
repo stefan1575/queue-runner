@@ -28,3 +28,15 @@ review_table = true   # docs/agents/review-loop.md: each review adds a row to th
 # Live steps after merges (ticket 11): one Claude thread per batch follows this doc (the Lovable
 # connector's deploy_project, query_database per migration, npm run check:live-schema).
 live_doc = "docs/agents/lovable-cloud.md"
+
+# A repo whose tickets are local markdown (`.scratch/<feature>/issues/NN-<slug>.md`, ticket 12)
+# says `issues = "local"`; every other repo's come from GitHub. None is turned on: Stefan turns a
+# repo on. `github` stays its remote's owner/name, or is left out for a repo with no GitHub. For
+# now the runner only shows the next local ticket in `--once --dry-run`; it builds none (ticket
+# 12's Comments ask Stefan how the no-remote flow should fit personal-ops and queue-runner).
+#
+# [[repos]]
+# name = "personal-ops"
+# path = "~/Code/Personal/personal-ops"
+# base = "main"
+# issues = "local"

@@ -38,7 +38,8 @@ second runner out: it logs `a second runner started (pid N) and exited at once` 
 `--review` and the running lane never run two at once.
 
 `config.toml` names the repos it serves (GitHub repo, local clone, base branch, and
-`review_table` for a repo whose PR bodies keep a `## Review` table), in priority order; the runner's `state_dir` and `log_dir` (`~/.queue-runner/`, outside every served repo);
+`review_table` for a repo whose PR bodies keep a `## Review` table, `issues = "local"` for one
+whose tickets are local markdown: Local tickets, below), in priority order; the runner's `state_dir` and `log_dir` (`~/.queue-runner/`, outside every served repo);
 `runs_dir` and `checkouts_dir` for reviews; `poll_seconds`, the pause after a pass that started
 nothing; `[claude]`, the T3 provider instance and model for Claude jobs; and `[sol]`,
 `codex-sol.sh` and the Git bash that runs it. `--config <path>` reads another one.
@@ -356,6 +357,28 @@ pass says `merged`, the live run says `live` (the log, and a **Live.** comment o
   `stefan` steps on a `live` result file a `live-todo` stop, which holds nothing.
 - `--once --dry-run` prints the live run it would start, with its brief, and records nothing.
 
+## Local tickets
+
+`tickets.py` (ticket 12). A repo whose `config.toml` entry says `issues = "local"` keeps its
+tickets as markdown, `.scratch/<feature>/issues/NN-<slug>.md` (its
+`docs/agents/issue-tracker.md`). **No repo is local by default**; Stefan turns one on.
+
+- **Status:** the first `Status:` line above `## Comments`, in either form (`Status: x` or
+  `**Status:** x`), with or without a trailing date or note: `done (2026-11-10)`, `done.` and
+  `needs-info (2026-11-10: ...)` read as their first word. Done is `done` (or `resolved`, a
+  wayfinding child's done).
+- **Blockers:** the numbers on the first `Blocked by:` line (`05`, `01, 02`,
+  `03-sol-review-dry-run.md`, `#04`; words and dates in brackets and `None` name nothing), in
+  the ticket's own feature folder. A blocker with no file blocks.
+- **Picking** (`pick_ticket`): `ready-for-agent`, every blocker done, lowest number first, a tie
+  going to the feature first by name. Numbers repeat across features, so a ticket is
+  `<feature>/NN`. Checked on 2026-11-10 against every ticket in personal-ops and royal-bully-ops
+  (128): each has a status this reads.
+- **Not built yet:** the Claude lane skips local repos, and `--once --dry-run` only names the
+  next ticket. Ticket 12's Comments (personal-ops) ask Stefan how the no-remote flow (a
+  worktree branch, Sol on its diff against `main`, a local `--no-ff` merge) should fit
+  personal-ops and queue-runner, where his own sessions commit straight to `main`.
+
 ## A Sol pass
 
 The review loop's rules are `~/.claude/docs/pr-review.md`; leads-dashboard's
@@ -625,6 +648,8 @@ SQLite holding the real stop's rows, the transcript, the auto-resume warning) an
 `LimitRecoveryTest` in `tests/test_run.py` and a fix round's in `tests/test_fix.py` (fixed clocks,
 `FakeLimits` in `fakes.py`; every test that runs `main` passes it, and a `t3_settings` path, so
 none reads T3's real database or settings).
+Local tickets: `tests/test_tickets.py` (both status forms, blocker lines, a sandbox git repo
+with three tickets in a blocker chain) and `LocalTicketsDryRunTest` in `tests/test_cli.py`.
 Live steps: `tests/test_live.py` (the answer block, the batch from `FakeLiveGit`, about to land,
 each outcome and its stop, a restart through the real `Runner`); `GitCli`'s first-parent log and
 changed files in `tests/test_git.py`.
@@ -643,6 +668,7 @@ temp folder.
   PR on one, or an open PR that closes it or that GitHub links to it by hand), not a spec with
   open sub-issues (its children are the work); lowest number first. The job branches `claude/<slug>-<issue>` from
   `origin/<base>`.
+- `queue_runner/tickets.py`: local tickets: status, blockers and the next one (ticket 12).
 - `queue_runner/brief.py` and `templates/<kind>.md`: a job's brief, filled from the issue and the
   repo; no handoff files.
 - `queue_runner/github.py`: the GitHub seam and its `gh api` adapter.

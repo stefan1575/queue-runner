@@ -147,8 +147,11 @@ class Runner:
         if fix := self.next_fix():
             return 'fix', None, lambda: self.run_fix(*fix)
         for repo in self.config.repos:
-            if not repo.github:
-                continue   # no GitHub issues to pick from (local-issue repos come in ticket 12)
+            if not repo.github or repo.local_issues:
+                # No GitHub issues to pick from. A repo whose tickets are local (`tickets.py`)
+                # is shown by --dry-run, but its builds wait for Stefan's answer on how the
+                # no-remote flow fits it (personal-ops, queue-runner ticket 12, Comments).
+                continue
             job = pick(repo, self.github, held=self.jobs.held_issues(repo.name))
             if job is not None:
                 return 'build', None, lambda: self.run_build(job)

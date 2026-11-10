@@ -19,6 +19,13 @@ class Repo:
     live_doc: str | None = None
     live_migrations: str = 'supabase/migrations'
     live_functions: str = 'supabase/functions'
+    # Where its tickets are (ticket 12, `tickets.py`): 'github' (issues), or 'local' (markdown
+    # under `.scratch/*/issues/`). No repo is local unless its entry says so.
+    issues: str = 'github'
+
+    @property
+    def local_issues(self) -> bool:
+        return self.issues == 'local'
 
 
 @dataclass(frozen=True)
@@ -39,6 +46,14 @@ def _path(p: str) -> str:
     return os.path.normpath(os.path.expanduser(p))
 
 
+def _issues(entry: dict) -> str:
+    issues = entry.get('issues', 'github')
+    if issues not in ('github', 'local'):
+        raise ValueError(f"repo {entry['name']}: issues must be 'github' or 'local', "
+                         f"not {issues!r}")
+    return issues
+
+
 def load_config(path: str = DEFAULT_CONFIG) -> Config:
     with open(path, 'rb') as f:
         raw = tomllib.load(f)
@@ -46,8 +61,9 @@ def load_config(path: str = DEFAULT_CONFIG) -> Config:
                   base=r.get('base', 'main'), review_table=bool(r.get('review_table')),
                   live_doc=r.get('live_doc') or None,
                   live_migrations=r.get('live_migrations', 'supabase/migrations'),
-                  live_functions=r.get('live_functions', 'supabase/functions'))
-             for r in raw['repos']]
+                  live_functions=r.get('live_functions', 'supabase/functions'),
+                  issues=_issues(r))
+             for r in raw.get('repos', [])]
     claude, sol = raw.get('claude', {}), raw.get('sol', {})
     state_dir = _path(raw['state_dir'])
     home = os.path.dirname(state_dir)   # runs and checkouts sit beside the state folder
