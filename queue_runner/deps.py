@@ -51,8 +51,13 @@ def node_dir() -> str | None:
 
 
 def find_bun() -> str | None:
-    scoop = os.path.join(HOME, 'scoop', 'shims', 'bun.exe')
-    return shutil.which('bun') or (scoop if os.path.isfile(scoop) else None)
+    """bun on PATH, else where bun's own installer puts it (`~/.bun/bin`, as on this PC since
+    2026-11-10: scoop's install stalled on its second download), else scoop's shim."""
+    for path in (os.path.join(HOME, '.bun', 'bin', 'bun.exe'),
+                 os.path.join(HOME, 'scoop', 'shims', 'bun.exe')):
+        if os.path.isfile(path):
+            return shutil.which('bun') or path
+    return shutil.which('bun')
 
 
 def find_npm() -> str | None:
