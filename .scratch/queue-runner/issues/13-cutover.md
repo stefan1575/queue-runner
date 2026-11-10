@@ -16,7 +16,7 @@ stops:
 - change `~/.claude/docs/orchestration.md`'s Status line;
 - drop 04's skip of the old labels, and put 10's shortcut in the Startup folder.
 
-**Blocked by:** 06, 07, 09, 10, 11
+**Blocked by:** 06, 07, 09, 10, 11, 17 (Stefan merges leads-dashboard PRs himself from the cutover on)
 
 **Status:** ready-for-agent
 

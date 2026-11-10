@@ -10,7 +10,7 @@ review merges locally with `--no-ff`; a stop sets the ticket's status to `needs-
 
 **Blocked by:** 05
 
-**Status:** needs-info (2026-11-10: the no-remote flow, under Comments)
+**Status:** done (2026-11-10: picking built; the no-remote flow dropped, see the last comment)
 
 - [x] Both status forms in use (`Status: x` and `**Status:** x`, with or without a trailing date)
       are read.
@@ -64,3 +64,9 @@ answer: a local ticket's key is `<feature>/NN` (numbers repeat across features),
 ticket after a stopped one was picked. Its nit fixed too: the dry run now goes on to the GitHub
 build the lane would start after showing a local ticket. Sol also asked that question 1 cover
 `main` moving during a review (added). 383 tests pass.
+
+**2026-11-10, Stefan's answer (relayed by Claude):** no repo needs the no-remote flow. The
+runner won't serve personal-ops, and queue-runner moved to GitHub as the private
+`stefan1575/queue-runner`, with these tickets in its own `.scratch/queue-runner/`. So the
+ticket closes with picking built and the no-remote flow dropped. Its leftovers (config and
+`run.py` comments that still say the flow waits on Stefan) go in 14.
