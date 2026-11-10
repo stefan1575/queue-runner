@@ -554,6 +554,8 @@ class Runner:
         review = next((j for j in reversed(self.jobs.on('review', repo.name, old.issue, old.sha,
                                                         released=True))
                        if j.round == old.round), None)
+        if review is None:   # a review from before the cutover (`Fixer.adopted`)
+            review = self.fixer.adopted(repo, old.issue, old.sha, old.round)
         if review is None:
             raise ValueError(f'no review {old.round} of {old.sha[:7]} in the job log')
         return self.fixer.brief(repo, replace(pr, head_sha=old.sha), review)

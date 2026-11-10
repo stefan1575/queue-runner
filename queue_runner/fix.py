@@ -26,7 +26,7 @@ from string import Template
 from .brief import _agents_pointer
 from .ledger import OPEN, STATUSES, newest_on, norm, read_reviews, state
 from .picker import closed_issues
-from .state import NOT_SENT, NOT_STARTED, JobLog
+from .state import NOT_SENT, NOT_STARTED, Job, JobLog
 from .stops import CONFLICT, conflict_rounds, conflict_stop, held, positions
 
 BASE_COMMITS = 30   # a conflict brief lists at most this many of the base's new commits
@@ -60,12 +60,37 @@ class Fixer:
 
     def review_to_fix(self, repo, pr):
         """The runner's newest review of the PR's head, if it says fix, or if it stopped and a
-        decision ordered a fix round since: else None."""
+        decision ordered a fix round since; with none, a blocking review from before the
+        cutover (`adopted`): else None."""
         review = self.jobs.runner_review(repo.name, pr.number, pr.head_sha)
-        if review and (review.outcome == 'blocking' or (
-                review.outcome in ('stop', 'approach-note') and self.order(repo, pr))):
+        if review is None:
+            return self.adopted(repo, pr.number, pr.head_sha)
+        if review.outcome == 'blocking' or (
+                review.outcome in ('stop', 'approach-note') and self.order(repo, pr)):
             return review
         return None
+
+    def adopted(self, repo, number: int, sha: str, rnd: int | None = None) -> Job | None:
+        """The PR's newest review comment (or, with `rnd`, its review of that number), as a
+        review job, when it's blocking on `sha` and was posted before the runner's cutover
+        (`adopt_reviews_before`): the old loop's, or Sol's from a T3 child, before the runner
+        reviewed anything. It counts as the runner's review of H for the fix lane only. A
+        hand-run review after the cutover is left to the session that ran it. None if not."""
+        cutover = self.config.adopt_reviews_before
+        if not cutover:
+            return None
+        reviews = read_reviews(self.github.issue_comments(repo, number))
+        if rnd is not None:
+            reviews = [r for r in reviews if r['round'] == rnd]
+        r = reviews[-1] if reviews else None
+        if not (r and r['sha'] and sha.startswith(r['sha']) and r['verdict'] == 'blocking'
+                and r['at'] and r['at'] < cutover):
+            return None
+        return Job(id=f'adopted:{repo.name}#{number}:{sha[:7]}:{r["round"]}', kind='review',
+                   repo=repo.name, issue=number, branch=None,
+                   title=f'review {r["round"]} from before the runner', started_at=r['at'],
+                   ended_at=r['at'], sha=sha, round=r['round'], verdict='blocking',
+                   outcome='blocking')
 
     def why_not(self, repo, pr) -> str | None:
         """Why a PR whose head the runner found blocking gets no fix round now, or None."""
@@ -133,8 +158,9 @@ class Fixer:
         prs = sorted(self.github.open_pulls(repo), key=lambda p: p.number)
         first = None   # the conflicted PR whose round goes first this pass
         for pr in prs:
-            review = self.review_to_fix(repo, pr)
+            review = None
             try:
+                review = self.review_to_fix(repo, pr)   # may read its comments (`adopted`)
                 if review is not None:
                     why = self.why_not(repo, pr)
                 elif self.github.has_conflict(repo, pr.number):
