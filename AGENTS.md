@@ -7,8 +7,8 @@ spec and the tickets that build it are in this repo's `.scratch/queue-runner/` (
 `issues/NN-*.md`; moved from personal-ops on 2026-11-10). The tracker's conventions are
 `docs/agents/issue-tracker.md` and `docs/agents/triage-labels.md`.
 
-**This repo never goes to GitHub**: local git only, no remote, no push. Commit after every
-completed step, with a message that says what changed and why.
+**On GitHub as the private `stefan1575/queue-runner`** (Stefan, 2026-11-10; it was local-only
+before). Commit after every completed step, with a message that says what changed and why.
 
 ## Run it
 
