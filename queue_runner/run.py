@@ -10,6 +10,7 @@ PR a pass, under `<state_dir>/sol.lock`. A second runner process is kept out by 
 import datetime
 import os
 import threading
+import time
 import traceback
 
 from .brief import build_brief
@@ -25,11 +26,24 @@ from .state import NOT_SENT, NOT_STARTED, RESTART_FAILED, USAGE_LIMIT, Job, JobL
 from .stops import Stopper
 from .t3 import T3Error, Thread
 from .toast import NoToaster
+from .wake import NoWaker
 
 # What a pass did: started (a job ran to its end), busy (a Claude job is still running from an
 # earlier runner, so none was started), idle (nothing to start), gated (the usage gate held the
 # chosen Claude job back: `Runner.gate_until` says when to look again).
 STARTED, BUSY, IDLE, GATED = 'started', 'busy', 'idle', 'gated'
+
+WALL_STEP = 30      # a long sleep looks at the wall clock this often (seconds)
+T3_RETRY = 30       # waiting for T3's server at logon: how often to look again (seconds)
+
+
+def wall_sleep(seconds: float, sleep=time.sleep, clock=time.time, step: float = WALL_STEP) -> None:
+    """Sleeps until `seconds` of wall-clock time have passed, in steps of at most `step`, so a
+    PC that slept and was woken for this time doesn't sleep on (Windows' timers may not count
+    the time the PC was asleep)."""
+    end = clock() + seconds
+    while (left := end - clock()) > 0:
+        sleep(min(step, left))
 
 
 def job_title(repo: Repo, issue: int) -> str:
@@ -49,8 +63,12 @@ def _when(stamp: str) -> datetime.datetime:
 
 class Runner:
     def __init__(self, config: Config, *, github, t3, git, out, log_line, sol=None,
-                 toaster=None, gate=None, limits=None, now=None):
+                 toaster=None, gate=None, limits=None, now=None, waker=None):
         self.config, self.github, self.t3, self.git = config, github, t3, git
+        # wake.Waker: the Windows wake tasks for the times the lanes wait for (continuous mode)
+        self.waker = waker or NoWaker()
+        self._wake_lock = threading.Lock()
+        self._claude_waits: datetime.datetime | None = None   # gate_until as the last pass left it
         # limits.T3Store, where T3 keeps a usage-limit stop's reset; None reads only what the
         # thread said (tests, the live checks).
         self.limits = limits
@@ -517,10 +535,45 @@ class Runner:
             self.log_line('Sol pass failed:\n' + traceback.format_exc())
             return IDLE
 
+    def wake_times(self) -> list[datetime.datetime]:
+        """The times the lanes wait for now: the Claude lane's gate or limit, Sol's resume."""
+        times = [self._claude_waits]
+        if resume := self.jobs.sol_resume_at():
+            times.append(_when(resume))
+        return [t for t in times if t is not None and t > self.now()]
+
+    def _wake(self) -> None:
+        try:
+            with self._wake_lock:   # both lanes sync after their passes
+                self.waker.sync(self.wake_times())
+        except Exception:
+            self.log_line('wake sync failed:\n' + traceback.format_exc())
+
+    def wait_for_t3(self, sleep) -> None:
+        """At logon T3 may not be up yet: look until its server answers (`thread list` on the
+        first repo's project), saying once why it waits, and again only when that changes."""
+        said = None
+        while True:
+            try:
+                self.t3.list(self.config.repos[0].path)
+            except T3Error as e:
+                if str(e) != said:
+                    self.say(f"Waiting for T3's server: {e}")
+                said = str(e)
+                sleep(T3_RETRY)
+                continue
+            if said is not None:
+                self.say("T3's server is up")
+            return
+
     def _sol_lane(self, stop: threading.Event) -> None:
         while not stop.is_set():
-            if self._sol_pass() != STARTED:
-                stop.wait(self.config.poll_seconds)
+            did = self._sol_pass()
+            self._wake()
+            if did != STARTED:
+                end = time.time() + self.config.poll_seconds
+                while not stop.is_set() and (left := end - time.time()) > 0:
+                    stop.wait(min(WALL_STEP, left))
 
     def run_once(self) -> None:
         """One pass of each lane, side by side. The Claude lane chooses its job before the Sol
@@ -535,7 +588,8 @@ class Runner:
             sol.join()
 
     def run_forever(self, sleep) -> None:
-        """The Claude lane here; the Sol lane in a thread that stops when this loop does."""
+        """The Claude lane here; the Sol lane in a thread that stops when this loop does. After
+        each pass of either lane the wake tasks are set to the times they wait for."""
         stop = threading.Event()
         sol = threading.Thread(target=self._sol_lane, args=(stop,), name='sol-lane', daemon=True)
         sol.start()
@@ -546,6 +600,8 @@ class Runner:
                 except Exception:
                     self.log_line('pass failed:\n' + traceback.format_exc())
                     did = IDLE
+                self._claude_waits = self.gate_until
+                self._wake()
                 if did != STARTED:
                     sleep(self.idle_seconds())
         finally:

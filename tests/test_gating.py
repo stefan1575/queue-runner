@@ -8,6 +8,7 @@ import tempfile
 import unittest
 
 from queue_runner.cli import main
+from queue_runner.wake import NoWaker
 from queue_runner.state import JobLog
 from queue_runner.usage import Usage, UsageError, Window
 from tests.fakes import FakeGitHubWithPulls, FakeLimits, FakeToaster, FakeUsage, issue
@@ -52,7 +53,8 @@ path = "{self.dir}"
         code = main(args + ['--config', self.config], github=gh, out=out, t3=self.t3,
                     git=FakeGit(), sleep=sleep or (lambda s: None), sol=FakeSol(),
                     toaster=FakeToaster(), usage=usage_reader, clock=lambda: self.now,
-                    limits=FakeLimits(), t3_settings=os.path.join(self.dir, 't3.json'))
+                    limits=FakeLimits(), t3_settings=os.path.join(self.dir, 't3.json'),
+                    waker=NoWaker())
         return code, out.getvalue()
 
     def runner_log(self):

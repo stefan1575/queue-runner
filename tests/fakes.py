@@ -220,3 +220,31 @@ class FakeLimits:
 
     def context_tokens(self, thread_id):
         return self.contexts.get(thread_id)
+
+
+class FakeScheduler:
+    """Plays Task Scheduler for `wake.Waker`: `tasks` maps a wake task's name to its time, and
+    `calls` records each create and delete in order; with `fail`, every call raises. Tests never
+    touch the real one."""
+
+    def __init__(self, tasks=None, fail=None):
+        self.tasks, self.calls, self.fail = dict(tasks or {}), [], fail
+
+    def _check(self):
+        if self.fail:
+            from queue_runner.wake import WakeError
+            raise WakeError(self.fail)
+
+    def names(self):
+        self._check()
+        return set(self.tasks)
+
+    def create(self, name, when):
+        self._check()
+        self.calls.append(('create', name))
+        self.tasks[name] = when
+
+    def delete(self, name):
+        self._check()
+        self.calls.append(('delete', name))
+        del self.tasks[name]

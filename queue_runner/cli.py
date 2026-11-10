@@ -12,6 +12,7 @@
     python -m queue_runner --gate             # Claude's usage now, and whether each job kind fits
     python -m queue_runner --pause | --resume # hold Claude jobs back, or let them start again
     python -m queue_runner --reserve PERCENT  # the share of the week kept for Stefan (default 5)
+    python -m queue_runner --stop             # stop the running runner (its pid in runner.pid)
 """
 import argparse
 import datetime
@@ -19,10 +20,11 @@ import os
 import re
 import sys
 import time
+import traceback
 
 from .brief import build_brief
 from .config import DEFAULT_CONFIG, load_config
-from .run import Runner, RunnerBusy, runner_lock
+from .run import Runner, RunnerBusy, runner_lock, wall_sleep
 from .state import JobLog
 
 EXIT_LOCKED = 3
@@ -291,10 +293,46 @@ def _review(config, github, git, sol, value, out, log_line, toaster=None) -> int
     return 0
 
 
-def main(argv=None, github=None, out=None, t3=None, git=None, sleep=time.sleep,
+def _pid_file(config) -> str:
+    return os.path.join(config.state_dir, 'runner.pid')
+
+
+def _kill(pid: int) -> tuple[int, str]:
+    import subprocess
+    p = subprocess.run(['taskkill', '/PID', str(pid), '/F'], capture_output=True, text=True,
+                       errors='replace', creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+    return p.returncode, (p.stdout + p.stderr).strip()
+
+
+def _stop(config, out, log_line, kill) -> int:
+    """`--stop`: kills the process that holds runner.lock, named in runner.pid. A job it was
+    running is settled by the next runner (its thread runs on in T3)."""
+    try:
+        with runner_lock(config.state_dir):
+            print('No queue runner is running.', file=out)
+            return 1
+    except RunnerBusy:
+        pass
+    try:
+        with open(_pid_file(config), encoding='utf-8') as f:
+            pid = int(f.read().strip())
+    except (OSError, ValueError) as e:
+        print(f'A runner holds runner.lock, but runner.pid is unreadable ({e}).', file=out)
+        return 1
+    code, text = kill(pid)
+    if code:
+        print(f'Could not stop the runner (pid {pid}): {text}', file=out)
+        return 1
+    log_line(f'runner stopped by --stop (pid {pid})')
+    print(f'Stopped the queue runner (pid {pid}).', file=out)
+    return 0
+
+
+def main(argv=None, github=None, out=None, t3=None, git=None, sleep=None,
          sol=None, toaster=None, usage=None, clock=None, limits=None,
-         t3_settings=None) -> int:
-    out = out or sys.stdout
+         t3_settings=None, waker=None, kill=_kill) -> int:
+    out = out or sys.stdout   # None under pythonw: print() then prints nothing
+    sleep = sleep or wall_sleep
     parser = argparse.ArgumentParser(prog='queue_runner')
     parser.add_argument('--once', action='store_true', help='one pass, then exit')
     parser.add_argument('--dry-run', action='store_true', help='print what it would do; start nothing')
@@ -309,6 +347,7 @@ def main(argv=None, github=None, out=None, t3=None, git=None, sleep=time.sleep,
     knob.add_argument('--resume', action='store_true', help='let Claude jobs start again')
     parser.add_argument('--reserve', type=float, metavar='PERCENT',
                         help='the share of the week kept for Stefan until 24h before its reset')
+    parser.add_argument('--stop', action='store_true', help='stop the running runner')
     parser.add_argument('--config', default=DEFAULT_CONFIG)
     args = parser.parse_args(argv)
     if args.dry_run and not args.once:
@@ -317,6 +356,8 @@ def main(argv=None, github=None, out=None, t3=None, git=None, sleep=time.sleep,
 
     config = load_config(args.config)
     log_line = _logger(config)
+    if args.stop:
+        return _stop(config, out, log_line, kill)
 
     if args.release:
         ref = _repo_ref(args.release, config, '--release', out)
@@ -365,18 +406,28 @@ def main(argv=None, github=None, out=None, t3=None, git=None, sleep=time.sleep,
     from .limits import T3Store, auto_resume_warning
     if limits is None:
         limits = T3Store()
+    if waker is None and not args.once:
+        from .wake import Schtasks, Waker
+        waker = Waker(Schtasks(), say=lambda line: runner.say(line), now=clock)
     runner = Runner(config, github=github, t3=t3, git=git, out=out, log_line=log_line, sol=sol,
-                    toaster=toaster, gate=gate, limits=limits, now=clock)
+                    toaster=toaster, gate=gate, limits=limits, now=clock, waker=waker)
     if warning := auto_resume_warning(*([t3_settings] if t3_settings else [])):
         runner.say(f'Warning: {warning}')
     try:
         with runner_lock(config.state_dir):
+            with open(_pid_file(config), 'w', encoding='utf-8') as f:
+                f.write(str(os.getpid()))
             if args.once:
                 runner.run_once()
             else:
-                log_line('runner started')
+                log_line(f'runner started (pid {os.getpid()})')
+                runner.wait_for_t3(sleep)
                 runner.run_forever(sleep)
     except RunnerBusy as e:
+        log_line(f'a second runner started (pid {os.getpid()}) and exited at once: {e}')
         print(f'A queue runner is already running ({e}).', file=out)
         return EXIT_LOCKED
+    except Exception:
+        log_line('runner stopped on an error:\n' + traceback.format_exc())
+        raise
     return 0

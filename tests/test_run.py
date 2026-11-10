@@ -7,6 +7,7 @@ import tempfile
 import unittest
 
 from queue_runner.cli import main
+from queue_runner.wake import NoWaker
 from queue_runner.state import JobLog
 from queue_runner.t3 import Message, T3Error
 from tests.fakes import (FakeGitHubForReviews, FakeGitHubWithPulls, FakeLimits, FakeToaster,
@@ -54,7 +55,8 @@ path = "{self.dir}"
         code = main(args + ['--config', self.config], github=github, out=out, t3=t3,
                     git=git or FakeGit(), sleep=sleep or (lambda s: None), sol=sol or FakeSol(),
                     toaster=self.toaster, usage=FakeUsage(), limits=self.limits,
-                    clock=self.clock, t3_settings=os.path.join(self.dir, 't3.json'))
+                    clock=self.clock, t3_settings=os.path.join(self.dir, 't3.json'),
+                    waker=NoWaker())
         return code, out.getvalue()
 
     def runner_log(self):

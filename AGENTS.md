@@ -12,7 +12,7 @@ completed step, with a message that says what changed and why.
 ## Run it
 
 ```
-python3 -m queue_runner                       # run: both lanes, pass after pass (nothing starts it at logon yet)
+python3 -m queue_runner                       # run: both lanes, pass after pass (unattended: see Running unattended)
 python3 -m queue_runner --once                # one pass of each lane: at most one Claude job (a decision, a fix round or a build), merges, at most one Sol review
 python3 -m queue_runner --once --dry-run      # print the next Claude job's brief (a job cut off by a usage limit first, then a decision, then a fix round), list the stops it would file, what Sol would review and what would merge
 python3 -m queue_runner --release NAME#N      # let the picker take a held issue again (a PR: retry its failed reviews, merges and fix round; let a stopped PR go)
@@ -20,6 +20,7 @@ python3 -m queue_runner --review NAME#N       # Sol reviews that PR's head now, 
 python3 -m queue_runner --gate                # Claude's usage now, and whether a build, fix or decision would start
 python3 -m queue_runner --pause | --resume    # Stefan's knob: start no Claude job, or start them again
 python3 -m queue_runner --reserve PERCENT     # the share of the week kept for Stefan (default 5)
+python3 -m queue_runner --stop                # stop the running runner
 ```
 
 **`--once`, the bare command and `--review` start real Claude builds, fix rounds and decision
@@ -31,8 +32,9 @@ starts and merges nothing; it only fetches a PR's head into the runner's local r
 fix brief.
 
 In production it runs under `pythonw`, so it never needs a console: every subprocess runs with
-no window. A lock on `<state_dir>/runner.lock` keeps a second runner out (exit 3); `--dry-run`,
-`--release` and `--review` don't take it. Each Sol review holds `<state_dir>/sol.lock`, so
+no window, and `print` goes nowhere (the log has it all). A lock on `<state_dir>/runner.lock` keeps a
+second runner out: it logs `a second runner started (pid N) and exited at once` and exits 3;
+`--dry-run`, `--release`, `--review` and `--stop` don't take it. Each Sol review holds `<state_dir>/sol.lock`, so
 `--review` and the running lane never run two at once.
 
 `config.toml` names the repos it serves (GitHub repo, local clone, base branch, and
@@ -40,6 +42,50 @@ no window. A lock on `<state_dir>/runner.lock` keeps a second runner out (exit 3
 `runs_dir` and `checkouts_dir` for reviews; `poll_seconds`, the pause after a pass that started
 nothing; `[claude]`, the T3 provider instance and model for Claude jobs; and `[sol]`,
 `codex-sol.sh` and the Git bash that runs it. `--config <path>` reads another one.
+
+## Running unattended
+
+Ticket 10 (`orchestration.md`, The runner and Sleep).
+
+- **Start:** at logon, `~/.queue-runner/Queue runner.lnk` (made by `scripts/make_shortcut.py`)
+  runs `~/scoop/apps/python/current/pythonw.exe -m queue_runner` in this repo. **It is not in the
+  Startup folder yet:** the cutover (ticket 13) copies it to
+  `%APPDATA%/Microsoft/Windows/Start Menu/Programs/Startup/`, so the runner doesn't race
+  `~/sol-pr-review.py` until then. By hand: double-click the shortcut, or
+  `pythonw -m queue_runner` from this folder.
+- **Stop:** `python3 -m queue_runner --stop` kills the process named in `<state_dir>/runner.pid`
+  (written once it holds `runner.lock`). A Claude job it was blocked on runs on in T3, and the
+  next runner settles it (A Claude pass, Settle); a Sol review is cut off and counts as `failed`.
+  Better to stop between jobs: the log says when one starts and ends.
+- **Restart:** `--stop`, then start it again (the shortcut). A second start while one runs exits
+  at once (above).
+- **The log:** `~/.queue-runner/logs/runner.log` (`log_dir`), one stamped line per event,
+  `runner started (pid N)` at each start; a crash's traceback ends with `runner stopped on an
+  error`. Read the tail: `Get-Content ~/.queue-runner/logs/runner.log -Tail 40`.
+- **T3 not up yet at logon:** before its first pass the runner calls `t3 thread list` on the first
+  repo's project every 30 seconds until it answers, logging `Waiting for T3's server: ...` once
+  (again only if the error changes) and `T3's server is up`. No AI, nothing else starts meanwhile.
+- **Wake tasks** (`wake.py`): after every pass of either lane, the runner keeps one Task Scheduler
+  task per time a lane waits for: the Claude lane's `gate_until` (the gate's reset, a limit's
+  resume) and Sol's resume. They live in the folder `\Queue runner\`, named `wake YYYY-MM-DD
+  HHMM` (local, the minute after the time), one-off time triggers with **wake to run**, run as
+  Stefan only while he's logged on, and run `pythonw -I -c ...` to hold off idle sleep for 10
+  minutes (`SetThreadExecutionState`), so the runner's pass starts before the PC drops back to
+  sleep; the keep-awake hooks then hold it while a job runs. A task whose time has passed, or
+  that nothing waits for any more, is deleted at the next sync (said in the log), and each
+  expires an hour after its time so Windows deletes it if the runner is gone. Times under a
+  minute ahead get none. Plain idle polls (`poll_seconds`) set no wake: a sleeping PC just
+  polls later. A Task Scheduler error is logged once and never stops the loop.
+- **Sleeping by the wall clock:** the loop's waits (`run.wall_sleep`, the Sol lane's too) look at
+  the wall clock every 30 seconds, since Windows' timers may not count time the PC slept.
+- `--once` sets no wake tasks.
+- **Live check** `python3 scripts/live_wake.py [MINUTES] [--sleep]`: sets one real wake task
+  a few minutes ahead, prints its settings, waits for it, and removes it. Run on 2026-11-10
+  without `--sleep`: `WakeToRun=True`, a one-off `MSFT_TaskTimeTrigger` at 10:15+08:00, it ran at
+  10:15 (result `0x41301`, the hold still running), and was removed. **Waking from sleep is
+  unconfirmed:** run it with `--sleep` once with nothing else running. The PC goes from sleep to
+  hibernate after a while ("S4 Doze to Hibernate" in the System log), and whether a wake timer
+  wakes it from hibernate depends on its firmware: a wait of hours may find the PC hibernated.
 
 ## The usage gate
 
@@ -522,6 +568,10 @@ SQLite holding the real stop's rows, the transcript, the auto-resume warning) an
 `LimitRecoveryTest` in `tests/test_run.py` and a fix round's in `tests/test_fix.py` (fixed clocks,
 `FakeLimits` in `fakes.py`; every test that runs `main` passes it, and a `t3_settings` path, so
 none reads T3's real database or settings).
+Running unattended: `tests/test_wake.py` (`Waker` against `FakeScheduler` in `fakes.py`, the
+task XML, `Schtasks` on canned calls, `wall_sleep`, a second start, waiting for T3, `--stop`
+with a fake kill); every test that runs `main` continuously passes a waker, so none touches the
+real Task Scheduler.
 `tests/test_git.py` runs `GitCli` on a real local repo in a
 temp folder.
 
@@ -562,7 +612,10 @@ temp folder.
 - `queue_runner/limits.py` and `templates/restart.md`: usage-limit stops: T3's record of the
   reset, the transcript's context, when and how a job resumes, the auto-resume warning.
 - `queue_runner/lock.py`: `runner.lock` and `sol.lock`.
+- `queue_runner/wake.py`: the wake tasks: `Waker.sync` and the `schtasks` adapter.
 - `queue_runner/cli.py`: the command line.
 - `scripts/live_sandbox.py`, `scripts/live_review.py`, `scripts/live_fix_brief.py` and
   `scripts/live_merge.py`: the live checks.
 - `scripts/make_icon.py`: draws the toast icon, `queue_runner/assets/icon.png`.
+- `scripts/make_shortcut.py`: makes the logon shortcut; `scripts/live_wake.py`: the wake task's
+  live check.
