@@ -191,9 +191,17 @@ class DepsTest(unittest.TestCase):
         import subprocess
         self.deps().prepare('app', self.checkout())
         [cache] = [n for n in os.listdir(self.cache) if '.' not in n]
-        acl = subprocess.run(['icacls', os.path.join(self.cache, cache)], capture_output=True,
-                             text=True).stdout
-        self.assertIn('(I)', acl)
+        # Compared with a folder made plainly beside it, not with a fixed "(I)": what a folder
+        # inherits depends on the machine (GitHub's Windows runner gives this temp folder's
+        # children explicit entries, 2026-11-10), but the cache must get the same as any other.
+        control = os.path.join(self.cache, 'control')
+        os.makedirs(control)
+
+        def aces(path):
+            out = subprocess.run(['icacls', path], capture_output=True, text=True).stdout
+            lines = [l.replace(path, '').strip() for l in out.splitlines()]
+            return sorted(l for l in lines if l and not l.startswith('Successfully'))
+        self.assertEqual(aces(os.path.join(self.cache, cache)), aces(control))
 
     def test_unlink_removes_the_junction_and_keeps_the_cache(self):
         wt = self.checkout()
