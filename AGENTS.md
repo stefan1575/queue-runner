@@ -87,7 +87,7 @@ Ticket 10 (`orchestration.md`, The runner and Sleep).
   10:15 (result `0x41301`, the hold still running), and was removed. **Woke the PC from sleep**
   on 2026-11-10 (`--sleep`): asleep 10:49:12, awake 10:53:06, and the System log named the wake
   source as `\Queue runner\wake 2026-11-10 1053+0800`; the task ran and was removed. Hibernate
-  is still untested: The PC goes from sleep to
+  is still untested: the PC goes from sleep to
   hibernate after a while ("S4 Doze to Hibernate" in the System log), and whether a wake timer
   wakes it from hibernate depends on its firmware: a wait of hours may find the PC hibernated.
 
