@@ -201,14 +201,22 @@ class FakeUsage:
 
 class FakeLimits:
     """Plays T3's database for limit recovery: `resets` maps a thread id to the reset T3 stored
-    for its latest run's limit stop (None: a stop with no reset), `contexts` a thread id to its
-    context in tokens. Tests never read the real database."""
+    for its runs' limit stop (None: a stop with no reset), `failures` a thread id to another
+    failure class T3 recorded, `contexts` a thread id to its context in tokens. Tests never read
+    the real database."""
 
-    def __init__(self, resets=None, contexts=None):
+    def __init__(self, resets=None, contexts=None, failures=None):
         self.resets, self.contexts = dict(resets or {}), dict(contexts or {})
+        self.failures = dict(failures or {})
 
-    def limit_reset(self, thread_id, run_id):
-        return (thread_id in self.resets), self.resets.get(thread_id)
+    def run_failure(self, thread_id, run_id):
+        if thread_id in self.resets:
+            reset = self.resets[thread_id]
+            return {'class': 'usage_limit',
+                    'resetAt': reset.isoformat().replace('+00:00', 'Z') if reset else None}
+        if thread_id in self.failures:
+            return {'class': self.failures[thread_id]}
+        return None
 
     def context_tokens(self, thread_id):
         return self.contexts.get(thread_id)

@@ -52,6 +52,13 @@ def _when(stamp: str) -> datetime.datetime:
     return datetime.datetime.fromisoformat(stamp.replace('Z', '+00:00'))
 
 
+def _reset(failure: dict) -> datetime.datetime | None:
+    try:
+        return _when(failure['resetAt']) if failure.get('resetAt') else None
+    except (TypeError, ValueError):
+        return None
+
+
 def context_tokens(transcript: str) -> int | None:
     """The tokens of the transcript's last real call (its whole prompt, cached or not, plus its
     reply), or None if there's none. Claude Code's own `<synthetic>` messages don't count."""
@@ -95,24 +102,33 @@ class T3Store:
         except sqlite3.Error:
             return []
 
+    def run_failure(self, thread_id: str, run_id: str | None) -> dict | None:
+        """The failure T3 recorded for this run (`{class, message, code, resetAt...}`), or None
+        if it recorded none or can't be read. A usage limit is `class` `usage_limit`."""
+        if not run_id:
+            return None
+        found = None
+        for (payload,) in self._rows(
+                "select payload_json from orchestration_v2_projection_turn_items "
+                "where thread_id = ? and run_id = ? and type = 'error' order by ordinal",
+                (thread_id, run_id)):
+            try:
+                failure = json.loads(payload).get('failure')
+            except ValueError:
+                continue
+            if isinstance(failure, dict) and failure.get('class'):
+                found = failure
+                if failure['class'] == 'usage_limit':
+                    return failure
+        return found
+
     def limit_reset(self, thread_id: str, run_id: str | None):
         """(found, reset): whether T3 recorded this run stopping on a usage limit, and the reset
         it stored (None if it stored none)."""
-        if not run_id:
+        failure = self.run_failure(thread_id, run_id)
+        if not failure or failure.get('class') != 'usage_limit':
             return False, None
-        for (payload,) in self._rows(
-                "select payload_json from orchestration_v2_projection_turn_items "
-                "where thread_id = ? and run_id = ? and type = 'error'", (thread_id, run_id)):
-            try:
-                failure = json.loads(payload).get('failure') or {}
-            except ValueError:
-                continue
-            if failure.get('class') == 'usage_limit':
-                try:
-                    return True, _when(failure['resetAt']) if failure.get('resetAt') else None
-                except ValueError:
-                    return True, None
-        return False, None
+        return True, _reset(failure)
 
     def claude_session(self, thread_id: str) -> str | None:
         """The Claude session id behind the thread's newest provider thread."""
@@ -143,11 +159,12 @@ class LimitStop:
 
 
 def limit_stop(store, thread_id: str, run_id: str | None, said: list[str]) -> LimitStop | None:
-    """Whether a failed run stopped on a usage limit: T3's record of it, or failing that the
-    limit message in what the thread said (its error, its last messages)."""
-    found, reset = store.limit_reset(thread_id, run_id) if store else (False, None)
-    if found:
-        return LimitStop(reset)
+    """Whether a failed run stopped on a usage limit. T3's record of the run's failure decides
+    when there is one (another class is no limit stop); only without one does the limit message
+    in what this run said (its error, its last message) count."""
+    failure = store.run_failure(thread_id, run_id) if store else None
+    if failure:
+        return LimitStop(_reset(failure)) if failure.get('class') == 'usage_limit' else None
     if any(LIMIT_SAID.search(s or '') for s in said):
         return LimitStop(None)
     return None
@@ -168,9 +185,10 @@ def auto_resume_warning(path: str = T3_SETTINGS) -> str | None:
             'T3 Settings.')
 
 
-def restart_section(old, work: str, tip: str, messages) -> str:
+def restart_section(old, work: str, tip: str, wip: str | None, messages) -> str:
     """What a fresh thread after a limit gets below its job's own brief: the old thread's link,
-    where it starts and the old thread's last 3 messages (each clipped, as a decision's are)."""
+    where it starts, what it left uncommitted, and its last 3 messages (each clipped, as a
+    decision's are)."""
     from importlib import resources
     from string import Template
     from .decisions import _clip
@@ -178,4 +196,8 @@ def restart_section(old, work: str, tip: str, messages) -> str:
     return Template(resources.files(__package__).joinpath('templates/restart.md')
                     .read_text(encoding='utf-8')).substitute(
         link=old.link or old.thread_id, work=work, tip7=tip[:7],
-        old_worktree=old.worktree or '(unknown)', messages=said)
+        uncommitted=(f'It left uncommitted changes; they are kept in commit `{wip[:7]}` (see '
+                     f'them with `git stash show -p {wip[:7]}` and take what '
+                     f'is worth keeping with `git stash apply {wip[:7]}`).' if wip else
+                     'It left nothing uncommitted.'),
+        messages=said)

@@ -87,9 +87,10 @@ isn't gated**, and neither is an Approach-note answer read from Stefan's words (
 Claude usage limit ends `usage-limit`, not `failed`, so no decision thread (which would hit the
 same limit) is started on it.
 
-- **Spotting one:** T3's record of the run's stop (below), or, if that can't be read, Claude
-  Code's message in the run's error or the thread's last assistant message ("You've hit your
-  weekly limit · resets ...", "Claude API rate limit reached").
+- **Spotting one:** T3's record of the run's failure (below) decides: `usage_limit` is a limit
+  stop, any other class isn't. Only with no record (or none readable) does Claude Code's message
+  count, in the run's error or the run's own last assistant message, never an earlier run's
+  ("You've hit your weekly limit · resets ...", "Claude API rate limit reached").
 - **When:** 10 minutes after the reset T3 stored for the stop; 5h05m from the stop if it stored
   none. The end record has `resume_at` and `context` (the thread's tokens, or null). Until then
   the Claude lane starts nothing (`gated`, said once: the limit is the whole account's); the Sol
@@ -98,16 +99,20 @@ same limit) is started on it.
   old thread, as a continued job (`t3 thread send`, the message `limits.RESUME_MESSAGE`).
   Anything bigger, or unknown, starts a fresh thread: the job's own brief rebuilt from its
   sources (the issue; for a fix, the fix brief from the same review of H), plus
-  `templates/restart.md` (the old thread's link, where it starts, its last 3 messages). T3 can't
-  make a worktree on a branch that exists, so `GitCli.free_branch` keeps the branch's tip under
-  `refs/queue-runner/limit/<branch>`, detaches the old worktree (anything uncommitted stays
-  there) and deletes the branch; T3 then makes the same branch again at that tip
+  `templates/restart.md` (the old thread's link, where it starts, what it left uncommitted, its
+  last 3 messages). T3 can't make a worktree on a branch that exists, and makes it at the same
+  folder (`~/.t3/worktrees/<project>/<branch>`), so `GitCli.free_branch` keeps the branch's tip
+  under `refs/queue-runner/limit/<branch>` and anything uncommitted (untracked files too) as a
+  `git stash create` commit under `.../<branch>-uncommitted`, removes the old worktree and
+  deletes the branch; T3 then makes the same branch again at that tip, in that folder
   (`--worktree <tip> --branch <same>`). For a fix that's the round's own local branch
   `claude/fix-pr<n>-<H7>`; it still pushes to the PR's.
 - **The new job** has the old job's kind, issue, branch, title, H and round, and `about` the old
   job: that's what marks it recovered. One that never reached a thread (`not-started`,
   `not-sent`) doesn't count, so the next pass tries again. A fresh restart whose brief or branch
-  can't be made ends `failed` and holds the issue until `--release`.
+  can't be made (the old worktree won't go, the review isn't in the log) ends `restart-failed`:
+  it isn't tried again, the old job stays the PR's writer, and Stefan gets a toast, until
+  `--release`.
 - **Until then it's the PR's writer** (`JobLog.writer`): Sol doesn't review a head it pushed
   before the limit, nothing merges, and no other fix round starts. `--release` lets it go.
 - **The old thread is left as it is** (not settled): see T3, below.

@@ -433,6 +433,37 @@ class LimitRecoveryTest(RunHarness):
         self.assertIn('Warning: T3\'s "Resume after usage limits" is on', out)
         self.assertIn('Resume after usage limits', self.runner_log())
 
+    def test_t3s_record_of_another_failure_wins_over_a_limit_message(self):
+        job = self.limited_build(FakeT3([(1, 'failed')]), failures={'mcp:t1': 'provider_error'})
+        self.assertEqual(job.outcome, 'failed')
+
+    def test_an_earlier_runs_limit_message_doesnt_make_a_later_failure_a_limit_stop(self):
+        t3 = FakeT3([(1, 'failed')])
+        t3.messages['mcp:t1'] = [Message('assistant', LIMIT_SAID, 'run:mcp:t1:0')]
+        self.run_main(['--once'], self.gh, t3)   # this run is run:mcp:t1:1 and said nothing
+        self.assertEqual(self.log.jobs()[0].outcome, 'failed')
+
+    def test_a_restart_that_cant_be_made_holds_the_job_and_isnt_tried_again(self):
+        from queue_runner.git import GitError
+        t3 = FakeT3([(1, 'failed')])
+        git = FakeGit()
+        git.tips = GitError('the old worktree could not be removed')
+        self.limits = FakeLimits(resets={'mcp:t1': RESET})   # context unknown: fresh
+        t3.messages['mcp:t1'] = [Message('assistant', LIMIT_SAID)]
+        self.run_main(['--once'], self.gh, t3, git)
+        old = self.log.jobs()[0]
+        self.at = RESET + datetime.timedelta(minutes=11)
+        self.run_main(['--once'], self.gh, t3, git)
+        failed = self.log.jobs()[1]
+        self.assertEqual((failed.about, failed.outcome), (old.id, 'restart-failed'))
+        self.assertIn('could not be removed', failed.error)
+        self.assertEqual(self.log.writer('first', old.branch).id, old.id)   # still held
+        self.assertEqual([t['title'] for t in self.toaster.toasts], ['first #4 needs you'])
+        t3.outcomes.append((0, 'completed'))
+        self.run_main(['--once'], self.gh, t3, git)   # not tried again: issue 5 builds
+        self.assertEqual([s['branch'] for s in t3.starts], ['claude/a-ticket-4',
+                                                             'claude/a-ticket-5'])
+
     def test_claude_codes_limit_message_is_enough_when_t3_recorded_nothing(self):
         job = self.limited_build(FakeT3([(1, 'failed')]))
         self.assertEqual((job.outcome, job.context), ('usage-limit', None))

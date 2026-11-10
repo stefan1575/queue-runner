@@ -39,6 +39,9 @@ OUT_OF_USAGE = 'out-of-usage'
 # A build or fix whose thread stopped on a Claude usage limit (ticket 09): it waits until
 # `resume_at`, then a later job of its kind (`about` it) continues the thread or starts afresh.
 USAGE_LIMIT = 'usage-limit'
+# A fresh restart after a limit whose brief or branch couldn't be made: the limited job stays the
+# PR's writer, and the runner doesn't try again, until a release.
+RESTART_FAILED = 'restart-failed'
 
 # Both lanes write the log from one process: one lock per file.
 _LOCKS: dict[str, threading.Lock] = {}
@@ -235,18 +238,21 @@ class JobLog:
         open, waiting for an answer, or cut off by a usage limit and not yet recovered (until
         it ends or is released). One writer per PR."""
         jobs, _, gone = self._fold()
-        limited = {j.id for j in self._limited(jobs, gone)}
+        limited = {j.id for j in self._limited(jobs, gone, stuck=True)}
         return next((j for j in jobs if j.kind in ('build', 'fix') and j.repo == repo
                      and j.branch == branch and (j.open or j.id in limited or (
                          j.outcome == 'waiting' and j.id not in gone))), None)
 
     @staticmethod
-    def _limited(jobs, gone):
-        # A recovery that never reached a thread (not-started, not-sent) doesn't count.
-        recovered = {j.about for j in jobs if j.about and j.kind in ('build', 'fix')
-                     and j.outcome not in (NOT_STARTED, NOT_SENT)}
+    def _limited(jobs, gone, stuck=False):
+        """Limited jobs not yet recovered: a recovery that never reached a thread (not-started,
+        not-sent) doesn't count. One whose restart failed is left out, unless `stuck`."""
+        later = [j for j in jobs if j.about and j.kind in ('build', 'fix')]
+        recovered = {j.about for j in later
+                     if j.outcome not in (NOT_STARTED, NOT_SENT, RESTART_FAILED)}
+        failed = {j.about for j in later if j.outcome == RESTART_FAILED}
         return [j for j in jobs if j.outcome == USAGE_LIMIT and j.id not in gone
-                and j.id not in recovered]
+                and j.id not in recovered and (stuck or j.id not in failed)]
 
     def limited_jobs(self) -> list[Job]:
         """Builds and fixes cut off by a usage limit that no later job has picked up (and no

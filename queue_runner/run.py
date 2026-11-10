@@ -21,7 +21,7 @@ from . import limits as lim
 from .lock import RunnerBusy, runner_lock  # noqa: F401 (the CLI takes them from here)
 from .picker import BuildJob, pick
 from .review import Reviewer
-from .state import NOT_SENT, NOT_STARTED, USAGE_LIMIT, Job, JobLog
+from .state import NOT_SENT, NOT_STARTED, RESTART_FAILED, USAGE_LIMIT, Job, JobLog
 from .stops import Stopper
 from .t3 import T3Error, Thread
 from .toast import NoToaster
@@ -429,7 +429,9 @@ class Runner:
         `context` (`limits.py`), said once in the log. None for any other end."""
         if exit_code != 1:
             return None
-        last = [m.text for m in said if m.role == 'assistant'][-1:]
+        # Only this run's own message: an earlier run's limit message may still be the last.
+        last = [m.text for m in said if m.role == 'assistant'
+                and (m.run_id is None or run_id is None or m.run_id == run_id)][-1:]
         stop = lim.limit_stop(self.limits, thread_id, run_id, [error, *last])
         if stop is None:
             return None
@@ -464,18 +466,22 @@ class Runner:
                                 title=old.title, sha=old.sha, round=old.round, about=old.id)
         try:
             brief = self._brief_again(repo, old)
-            tip = self.git.free_branch(repo.path, work, old.worktree)
+            tip, wip = self.git.free_branch(repo.path, work, old.worktree)
         except Exception as e:
-            # Not `not-started`, which would retry every pass: held like any failed job.
-            self.jobs.ended(job.id, exit_code=None, outcome='failed',
-                            error=f'restarting after the usage limit failed: '
-                                  f'{type(e).__name__}: {e}')
-            self.say(f'{self._name(job)}: restarting after the usage limit failed ({e}); '
+            # Not `not-started`, which would retry every pass. The old job stays the PR's
+            # writer (nothing reviews or merges what it pushed) until Stefan releases it.
+            why = f'{type(e).__name__}: {e}'
+            self.jobs.ended(job.id, exit_code=None, outcome=RESTART_FAILED,
+                            error=f'restarting after the usage limit failed: {why}')
+            self.say(f'{self._name(job)}: restarting after the usage limit failed ({why}); '
                      f'held until --release {old.repo}#{old.issue}')
+            self.toaster.toast(f'{old.repo} #{old.issue} needs you',
+                               f'Restarting its {old.kind} after a usage limit failed: '
+                               f'{why}'[:250], old.link or '', tag=f'restart-{old.id}'[-60:])
             return IDLE
         if tip is None:   # it made no commit: from where the old thread started
             tip = old.sha if old.kind == 'fix' else f'origin/{repo.base}'
-        brief += lim.restart_section(old, work, tip, messages)
+        brief += lim.restart_section(old, work, tip, wip, messages)
         self.say(f'Restarting {self._name(job)} fresh after the usage limit, on {work} at '
                  f'{tip[:7]}; the old thread was {old.link or old.thread_id}')
         return self._start(job, repo, brief, tip, work)

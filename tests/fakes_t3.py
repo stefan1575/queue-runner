@@ -74,7 +74,8 @@ class FakeGit:
         self.local_branches = set(branches)
         self.commit_log = dict(commits or {})
         self.fetches = []
-        self.tips = {}    # branch -> its tip, for free_branch
+        self.tips = {}    # branch -> its tip, for free_branch (an exception: it fails)
+        self.uncommitted = {}   # branch -> the commit keeping what its worktree left
         self.freed = []   # (branch, worktree) freed after a usage limit
 
     def fetch(self, path, branch):
@@ -89,7 +90,9 @@ class FakeGit:
     def free_branch(self, path, branch, worktree):
         self.freed.append((branch, worktree))
         self.local_branches.discard(branch)
-        return self.tips.get(branch)
+        if isinstance(self.tips, Exception):
+            raise self.tips
+        return self.tips.get(branch), self.uncommitted.get(branch)
 
 
 class FakeReviewGit(FakeGit):

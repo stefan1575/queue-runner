@@ -58,6 +58,7 @@ class Thread:
 class Message:
     role: str   # user | assistant
     text: str
+    run_id: str | None = None   # the run that wrote it
 
 
 def run_t3(args: list[str], stdin: str | None = None) -> tuple[int, str, str]:
@@ -126,7 +127,8 @@ class T3Cli:
 
     def show(self, thread_id: str, messages: int = 3) -> tuple[Thread, list[Message]]:
         raw = self._json(['thread', 'show', '--messages', str(messages), '--json', thread_id])
-        return _thread(raw['thread']), [Message(m['role'], m['text']) for m in raw['messages']]
+        return _thread(raw['thread']), [Message(m['role'], m['text'], m.get('runId'))
+                                           for m in raw['messages']]
 
     def list(self, project: str) -> list[Thread]:
         return [_thread(t) for t in self._json(['thread', 'list', '--json', '--project', project])]

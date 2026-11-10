@@ -34,26 +34,42 @@ class GitCli:
                                 f'refs/heads/{branch}'])
         return code == 0
 
-    def free_branch(self, path: str, branch: str, worktree: str | None) -> str | None:
-        """Frees a job's branch for a fresh T3 worktree after a usage limit (T3 can't make a
-        worktree on a branch that exists): keeps its tip under `refs/queue-runner/limit/<branch>`,
-        detaches the old worktree (its files, anything uncommitted included, stay) and deletes the
-        branch, so T3 makes it again at that tip. Returns the tip; the kept one if the branch is
-        gone already (an earlier try); None if there's neither."""
-        keep = f'refs/queue-runner/limit/{branch}'
-        code, out, _ = self._run(['-C', path, 'rev-parse', '--verify', '--quiet',
-                                  f'refs/heads/{branch}'])
-        if code:
-            code, out, _ = self._run(['-C', path, 'rev-parse', '--verify', '--quiet', keep])
-            return out.strip() if code == 0 else None
-        tip = out.strip()
-        self._ok(['-C', path, 'update-ref', keep, tip])
+    def _ref(self, path: str, ref: str) -> str | None:
+        code, out, _ = self._run(['-C', path, 'rev-parse', '--verify', '--quiet', ref])
+        return out.strip() if code == 0 else None
+
+    def free_branch(self, path: str, branch: str,
+                    worktree: str | None) -> tuple[str | None, str | None]:
+        """Frees a job's branch and its worktree's folder for a fresh T3 worktree after a usage
+        limit: T3 can't make a worktree on a branch that exists, and it makes it at the same
+        folder (`~/.t3/worktrees/<project>/<branch>`). Keeps the branch's tip under
+        `refs/queue-runner/limit/<branch>` and anything left uncommitted (untracked files
+        included) as a stash-like commit under `.../<branch>-uncommitted`, removes the old
+        worktree and deletes the branch, so T3 makes it again at the tip.
+
+        Returns (tip, uncommitted): the kept ones if the branch is gone already (an earlier try
+        whose thread never started); None for either there isn't. Raises GitError if the old
+        worktree can't be removed."""
         import os
+        keep, wip_ref = f'refs/queue-runner/limit/{branch}', f'refs/queue-runner/limit/{branch}-uncommitted'
+        tip = self._ref(path, f'refs/heads/{branch}')
+        if tip is None:
+            return self._ref(path, keep), self._ref(path, wip_ref)
+        self._ok(['-C', path, 'update-ref', keep, tip])
+        wip = None
         if worktree and os.path.isdir(worktree):
-            self._ok(['-C', worktree, 'checkout', '--quiet', '--detach'])
+            if self._ok(['-C', worktree, 'status', '--porcelain']).strip():
+                self._ok(['-C', worktree, 'add', '-A'])
+                wip = self._ok(['-C', worktree, 'stash', 'create',
+                                'left uncommitted by a thread a usage limit cut off']).strip() or None
+                if wip:
+                    self._ok(['-C', path, 'update-ref', wip_ref, wip])
+            if not self.remove_worktree(path, worktree):
+                raise GitError(f'the old worktree {worktree} could not be removed')
         self._run(['-C', path, 'worktree', 'prune'])
-        self._ok(['-C', path, 'branch', '-D', branch])
-        return tip
+        if self._ref(path, f'refs/heads/{branch}'):
+            self._ok(['-C', path, 'branch', '-D', branch])
+        return tip, wip
 
     def commits(self, path: str, base: str, branch: str) -> list[dict]:
         """The branch's commits not on `base`, oldest first: [{sha, subject}]."""
