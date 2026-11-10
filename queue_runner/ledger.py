@@ -151,6 +151,30 @@ def state(earlier: list[dict]) -> list[dict]:
             for f in m['findings'] if isinstance(f, dict) and f.get('id') and f.get('tag') in TAGS]
 
 
+def escalation(reviews: list[dict]) -> str | None:
+    """Why the newest of the PR's reviews (read_reviews()) went to Stefan rather than to a fix
+    round, read from the ledgers alone, as decide() would have said: a kept decline, a closed
+    finding reopened, a new Important finding in an earlier class, or review 3 or later still
+    blocking (an Approach note). None if it only says fix."""
+    if not reviews:
+        return None
+    now, before = state(reviews), {f['id']: f for f in state(reviews[:-1])}
+    rnd = reviews[-1]['round']
+    important = [f for f in now if f['tag'] == 'important' and f['status'] in OPEN]
+    if kept := [f['id'] for f in now if f['status'] == 'decline-kept']:
+        return f'a decline kept open ({", ".join(kept)})'
+    if back := [f['id'] for f in now if f['status'] in OPEN and (f.get('reopened') or
+            f['id'] in before and before[f['id']]['status'] in ('fixed', 'decline-accepted'))]:
+        return f'a finding reopened ({", ".join(back)})'
+    seen = {norm(p['class']) for p in before.values() if p['tag'] == 'important'
+            and norm(p['class'])}
+    if rep := [f['id'] for f in important if f['id'] not in before and norm(f['class']) in seen]:
+        return f'an earlier class repeated ({", ".join(rep)})'
+    if important and rnd >= APPROACH_REVIEW:
+        return f'review {rnd} still blocking (an Approach note)'
+    return None
+
+
 def norm(c: str) -> str:
     """A class name as reviews compare it: lower case, words only."""
     return ' '.join(re.findall(r'[^\W_]+', (c or '').lower()))

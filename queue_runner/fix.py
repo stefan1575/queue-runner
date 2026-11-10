@@ -25,7 +25,7 @@ from importlib import resources
 from string import Template
 
 from .brief import _agents_pointer
-from .ledger import OPEN, STATUSES, newest_on, norm, read_reviews, state
+from .ledger import OPEN, STATUSES, escalation, newest_on, norm, read_reviews, state
 from .picker import closed_issues
 from .state import NOT_SENT, NOT_STARTED, Job, JobLog
 from .stops import CONFLICT, conflict_rounds, conflict_stop, held, positions
@@ -76,16 +76,21 @@ class Fixer:
         review job, when it's blocking on `sha` and was posted before the runner's cutover
         (`adopt_reviews_before`): the old loop's, or Sol's from a T3 child, before the runner
         reviewed anything. It counts as the runner's review of H for the fix lane only. A
-        hand-run review after the cutover is left to the session that ran it. None if not."""
+        hand-run review after the cutover is left to the session that ran it, and so is one
+        decide() would have sent to Stefan (`ledger.escalation`: a stop or an Approach note),
+        since the stops and notes read only the runner's own reviews. None if not."""
         cutover = self.config.adopt_reviews_before
         if not cutover:
             return None
         reviews = read_reviews(self.github.issue_comments(repo, number))
-        if rnd is not None:
-            reviews = [r for r in reviews if r['round'] == rnd]
+        if rnd is not None:   # that review, and the ones before it
+            reviews = reviews[:1 + max((i for i, r in enumerate(reviews) if r['round'] == rnd),
+                                       default=-1)]
         r = reviews[-1] if reviews else None
         if not (r and r['sha'] and sha.startswith(r['sha']) and r['verdict'] == 'blocking'
                 and r['at'] and r['at'] < cutover):
+            return None
+        if escalation(reviews):   # it went to Stefan, not to a fix round: it stays his
             return None
         return Job(id=f'adopted:{repo.name}#{number}:{sha[:7]}:{r["round"]}', kind='review',
                    repo=repo.name, issue=number, branch=None,

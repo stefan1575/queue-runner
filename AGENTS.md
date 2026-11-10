@@ -251,7 +251,10 @@ and it gets no other fix round.
    runner's review of H: its findings, classes and declines feed the brief, and a restarted
    round finds it by its round. Checked on 2026-11-10: leads-dashboard #152, #162, #163 and #168
    each get a round from their old review 1. A PR whose newest review was hand-run after the
-   cutover is left to the session that ran it. **One round per head:**
+   cutover is left to the session that ran it, and so is one that decide() would have sent to
+   Stefan (`ledger.escalation`, read from the ledgers: a kept decline, a reopened finding, an
+   earlier class repeated, or review 3 or later still blocking), since stops and Approach notes
+   read only the runner's own reviews. **One round per head:**
    once a round on H ended (except `not-started`), H gets no other until `--release NAME#PR`. The
    runner fetches the PR's head (moved since listing: nothing starts, Sol reviews it first),
    writes a start record (`sha` H, `round` the review's, `branch` the PR's), then blocks on
