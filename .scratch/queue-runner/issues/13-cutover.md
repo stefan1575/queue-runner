@@ -18,7 +18,7 @@ stops:
 
 **Blocked by:** 06, 07, 09, 10, 11, 17 (Stefan merges leads-dashboard PRs himself from the cutover on)
 
-**Status:** needs-info (2026-11-10: drafts 1 and 2 applied; drafts 3-6 and questions 2 and 4 are leads-dashboard's, left to Stefan's leads-dashboard session)
+**Status:** needs-info (2026-11-10: drafts 1 and 2 applied; drafts 3-6 and question 4 are leads-dashboard's, left to Stefan's leads-dashboard session; question 2 is queue-runner#3)
 
 - [ ] Recovery copies of every rule file edited go in personal-ops
       `.scratch/agent-instructions/<date>/` first (`~/.claude/CLAUDE.md`, Working notes).
@@ -145,3 +145,7 @@ recovery copies in personal-ops `.scratch/agent-instructions/2026-11-10/*.before
 Question 3: yes, `T3 Code (Beta).lnk` copied from the Start menu into the Startup folder.
 Drafts 3-6 and questions 2 and 4 touch only leads-dashboard; Stefan takes them in a
 leads-dashboard session. This ticket is done once they are.
+
+**Question 2 answered (2026-11-10):** the runner takes them.
+[queue-runner#3](https://github.com/stefan1575/queue-runner/issues/3) (fix rounds adopt blocking
+reviews from before the cutover) was filed `ready-for-agent`, and the runner is building it.
