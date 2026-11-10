@@ -18,7 +18,7 @@ stops:
 
 **Blocked by:** 06, 07, 09, 10, 11, 17 (Stefan merges leads-dashboard PRs himself from the cutover on)
 
-**Status:** needs-info (2026-11-10: the rule-file wording below waits on Stefan's go)
+**Status:** needs-info (2026-11-10: drafts 1 and 2 applied; drafts 3-6 and questions 2 and 4 are leads-dashboard's, left to Stefan's leads-dashboard session)
 
 - [ ] Recovery copies of every rule file edited go in personal-ops
       `.scratch/agent-instructions/<date>/` first (`~/.claude/CLAUDE.md`, Working notes).
@@ -138,3 +138,10 @@ Sol or the live thread, posts issues and **Live.** comments, and gives the two-f
 limit and `--release` apart from Sol's usage resets. Nits taken: the Status draft no longer says
 the runner started at logon (it was started by hand), and a stops test lost "the old script" from
 its name. No second review (the fixes are wording).
+
+**Stefan's answers (2026-11-10, evening):** go on the queue-runner side. Drafts 1
+(`~/.claude/docs/orchestration.md`) and 2 (`~/.claude/docs/sol.md`) applied word for word;
+recovery copies in personal-ops `.scratch/agent-instructions/2026-11-10/*.before-cutover`.
+Question 3: yes, `T3 Code (Beta).lnk` copied from the Start menu into the Startup folder.
+Drafts 3-6 and questions 2 and 4 touch only leads-dashboard; Stefan takes them in a
+leads-dashboard session. This ticket is done once they are.

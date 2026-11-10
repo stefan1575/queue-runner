@@ -52,11 +52,10 @@ nothing; `[claude]`, the T3 provider instance and model for Claude jobs; and `[s
 Ticket 10 (`orchestration.md`, The runner and Sleep).
 
 - **Start:** at logon, `~/.queue-runner/Queue runner.lnk` (made by `scripts/make_shortcut.py`)
-  runs `~/scoop/apps/python/current/pythonw.exe -m queue_runner` in this repo. **It is not in the
-  Startup folder yet:** the cutover (ticket 13) copies it to
-  `%APPDATA%/Microsoft/Windows/Start Menu/Programs/Startup/`, so the runner doesn't race
-  `~/sol-pr-review.py` until then. By hand: double-click the shortcut, or
-  `pythonw -m queue_runner` from this folder.
+  runs `~/scoop/apps/python/current/pythonw.exe -m queue_runner` in this repo. A copy is in
+  `%APPDATA%/Microsoft/Windows/Start Menu/Programs/Startup/` since the cutover (ticket 13), with
+  `T3 Code (Beta).lnk` beside it (Stefan, 2026-11-10), so T3's server comes up at logon too. By
+  hand: double-click the shortcut, or `pythonw -m queue_runner` from this folder.
 - **Stop:** `python3 -m queue_runner --stop` kills the process named in `<state_dir>/runner.pid`
   (written once it holds `runner.lock`, removed when it ends), and only a Python process: a stale pid
   that Windows gave to something else is left alone. A Claude job it was blocked on runs on in T3, and the
