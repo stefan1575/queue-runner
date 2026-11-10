@@ -96,7 +96,10 @@ class GitCli:
 
     def remove_checkout(self, path: str, worktree: str, ref: str | None = None) -> None:
         import os
+        from .deps import Deps
         if os.path.exists(worktree):
+            # First: git follows the node_modules junction and empties the dependency cache.
+            Deps.unlink(worktree)
             self._run(['-C', path, 'worktree', 'remove', '--force', worktree])
         self._run(['-C', path, 'worktree', 'prune'])
         if ref:

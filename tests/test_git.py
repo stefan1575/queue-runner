@@ -57,6 +57,21 @@ class GitCliTest(unittest.TestCase):
         self.assertFalse(os.path.exists(os.path.join(self.wt, 'b.txt')))
         self.assertFalse(self.cli.has_branch(self.repo, 'claude/x-1'))
 
+    def test_removing_a_review_checkout_keeps_what_its_node_modules_links_to(self):
+        """git worktree remove --force follows a junction and empties its target (ticket 16):
+        the dependency cache behind a checkout's node_modules must survive."""
+        import _winapi
+        cache = os.path.join(os.path.dirname(self.repo), 'cache', 'node_modules')
+        os.makedirs(os.path.join(cache, 'react'))
+        checkout = os.path.join(os.path.dirname(self.repo), 'checkout')
+        self.cli.checkout(self.repo, self.head, checkout)
+        _winapi.CreateJunction(cache, os.path.join(checkout, 'node_modules'))
+        self.cli.checkout(self.repo, self.head, checkout)   # made afresh: the old one removed
+        _winapi.CreateJunction(cache, os.path.join(checkout, 'node_modules'))
+        self.cli.remove_checkout(self.repo, checkout)
+        self.assertFalse(os.path.exists(checkout))
+        self.assertTrue(os.path.isdir(os.path.join(cache, 'react')))
+
     def test_a_limited_jobs_branch_and_folder_are_freed_for_t3_to_make_again(self):
         with open(os.path.join(self.wt, 'b.txt'), 'w') as f:
             f.write('half done')   # left uncommitted by the thread the limit cut off
