@@ -33,6 +33,8 @@ KINDS = {
     'conflict': 'It conflicts with its base',
     'no-push': 'The fix round pushed nothing',
     'decision': 'A decision needs you',
+    'live': 'Merged, but not live yet',
+    'live-todo': 'Live, with steps only you can do',
 }
 SIGNALS = {   # decide()'s stop signals, when the review's run folder can't say more
     'repeated-class': 'a new Important finding repeats an earlier class',
@@ -137,7 +139,8 @@ class Stopper:
 
     # --- filing -------------------------------------------------------------------------------
 
-    def file(self, repo, pr, kind: str, why: str, link: str | None = None) -> str:
+    def file(self, repo, pr, kind: str, why: str, link: str | None = None,
+             after: str | None = None) -> str:
         """Files one stop: the PR's `needs-info` issue (opened, or a comment on the open one),
         a comment on the PR, a toast. 'filed', or 'failed' if the issue couldn't be filed (then
         nothing counts, and the next pass files it)."""
@@ -156,9 +159,10 @@ class Stopper:
                  + (f'filed {url}' if opened else f'added to {url}'))
         try:
             self.github.post_comment(repo, n, (
-                f'**The review loop stopped here for Stefan.** {line}\n\n'
-                f'Tracked in #{number_of(url)}. The queue runner leaves this PR alone until that '
-                'issue is closed or Stefan replies here.\n\n'
+                f'**The {"queue runner" if after else "review loop"} stopped here for Stefan.** '
+                f'{line}\n\nTracked in #{number_of(url)}. '
+                + (after or 'The queue runner leaves this PR alone until that issue is closed or '
+                   'Stefan replies here.') + '\n\n'
                 f'{STOP_MARK}kind={kind} sha={h} issue={number_of(url)} -->\n'))
         except Exception as e:
             self.say(f'{name}: recording the stop on the PR failed: {e}')

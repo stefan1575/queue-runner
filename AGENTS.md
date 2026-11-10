@@ -207,7 +207,9 @@ and it gets no other fix round.
    off with its runner: `not-started`, so it's decided again.
 2. **A decision** (`decisions.py`; Decision threads, below), before any fix round or build: the
    first case the fixed flow doesn't cover.
-3. **A fix round** (`fix.py`), before any build, so open PRs finish first. A PR gets one when
+3. **Live steps** (`live.py`; Live steps, below): a repo's merges since its last live run, once no
+   other merge is about to land.
+4. **A fix round** (`fix.py`), before any build, so open PRs finish first. A PR gets one when
    the runner's own newest review of its head H is `blocking` (decide()'s `fix`; a stop or an
    approach note goes to Stefan) and that review is still the PR's newest review comment, or
    when that review stopped and a decision has since ordered a round (`Fixer.order`: Stefan's
@@ -225,7 +227,7 @@ and it gets no other fix round.
    declined before, from the newest review's ledger; the PR's description and the issues it
    closes; its commits and changed files from git (`origin/<base>..H`); the earlier build and
    fix threads' links from the job log (as T3 gave them).
-4. **Pick and build** (`run.py`): the first repo with a pickable issue gets one build. The runner
+5. **Pick and build** (`run.py`): the first repo with a pickable issue gets one build. The runner
    fetches `origin/<base>`, writes a start record, then blocks on
    `t3 thread start --wait --json --worktree origin/<base> --branch claude/<slug>-<n>` with the
    brief on stdin. Afterwards it records the outcome.
@@ -305,6 +307,47 @@ taken, `reason` the text acted on, `link` the thread (an approach note: the note
 `error` why an answer couldn't be read; `not-started` when T3 started no thread, so the next pass
 tries again.
 
+## Live steps
+
+`live.py` and `templates/live.md` (ticket 11; `pr-review.md`, Merge). A repo whose `config.toml`
+entry has `live_doc` (leads-dashboard: `docs/agents/lovable-cloud.md`; `live_migrations` and
+`live_functions` default to `supabase/migrations` and `supabase/functions`) gets one Claude thread
+per batch, `Queue runner live: <repo>`, gated as kind `live` (default cost 20% of 5 hours, 5% of
+the week), after decisions and before fix rounds. Merged and live are reported apart: the merge
+pass says `merged`, the live run says `live` (the log, and a **Live.** comment on each PR).
+
+- **The batch** is read from git, not handoff files: `origin/<base>` now (T) against where the
+  last live run reached (R): the PRs from the first-parent subjects (`Merge pull request #N`, or
+  a squash's `(#N)`), the migrations added under `live_migrations` (in file order, their
+  timestamps), migrations changed or deleted (the repo forbids it: the thread is told to stop)
+  and the edge functions changed. Commits with no PR (Lovable's own pushes) wait for the next PR.
+- **About to land** (`LiveSteps.about_to_land`): an open merge, review or fix job in the repo, or
+  an open PR whose runner review of its head is clean and that the merge re-check would merge now
+  or that waits only for its checks. While one is, no live run starts (said once). A clean PR held
+  for Stefan doesn't hold the live steps.
+- **The thread** runs in a T3 worktree at T on `claude/live-<T7>-<id6>`, never pushed, removed
+  after (`.env` is tracked, so `npm run check:live-schema` runs there with plain node). Its brief:
+  the live doc to follow, the PRs, commits, migrations in order, functions, migrations an earlier
+  run applied, Stefan's words after the last live stop, and the fixed answer block. It may not
+  ask Lovable in its chat (credits): such steps go in `stefan`.
+- **The answer** is the reply's last ```` ```queue-runner-live ```` block: `version` 1, `result`
+  `live`, `partial` (with `failed`) or `stop` (with `question`), `applied` (the migrations it
+  applied this run), `stefan`, optional `notes`. `live` that didn't apply every listed migration
+  reads as `partial`; a file it wasn't given, or anything unreadable, is `failed`.
+- **State** is the job log, kind `live`: `sha` R, `head` T, `issue` the batch's newest PR; at the
+  end `applied`, `prs`, `reason`. Outcomes: `live` (R moves to T), `partial`, `stop`, `failed`,
+  `usage-limit` (waits for `resume_at`; no stop), `not-started`, and `assumed`: **on first sight
+  of a repo the runner records its base's head as live**, since the steps before were Stefan's.
+  A run that didn't go live keeps R; its `applied` are left out of the next run's list, and a
+  `failed` or `usage-limit` run marks its batch "maybe applied", so the next thread checks each
+  migration through `query_database` before running it. A dead runner's open live job is settled
+  from its thread's last reply, like a build.
+- **Stops:** `partial`, `stop` and `failed` file a `live` stop (Stops for Stefan, below) on the
+  batch's newest PR; no live run starts in that repo until it's answered (issue closed or a
+  reply) or `--release <repo>#<that PR>`, and one that couldn't be filed is filed next pass.
+  `stefan` steps on a `live` result file a `live-todo` stop, which holds nothing.
+- `--once --dry-run` prints the live run it would start, with its brief, and records nothing.
+
 ## A Sol pass
 
 The review loop's rules are `~/.claude/docs/pr-review.md`; leads-dashboard's
@@ -325,7 +368,8 @@ The review loop's rules are `~/.claude/docs/pr-review.md`; leads-dashboard's
    Two failed merges on H leave it until a push or `--release`. After the merge the worktrees of
    the PR's build and fix jobs are removed with their local branches (`GitCli.remove_worktree`:
    gone from `git worktree list` counts, since T3 may hold the empty folder), and one that
-   can't be is said. The repo's live steps (leads-dashboard: Lovable) are ticket 11's.
+   can't be is said. The repo's live steps (leads-dashboard: Lovable) run later in the Claude
+   lane (Live steps, below).
    **Merge job records** (kind `merge`): `sha` H, `head` the merge commit; outcomes `merged`,
    `head-moved`, `failed`.
 4. **Adopt** (`Reviewer.why_not`): open PRs, lowest number first. A PR is left alone, and why is
@@ -397,7 +441,8 @@ the run folder's `decision.json`), `no-push` (a fix round on H ended without pus
 `failed-check` and `conflict`. A review that stops files right after it posts. Two kinds are
 filed by decisions in the Claude lane: `approach-note` (review 3 or later still blocking, filed
 with the Approach note; the Sol pass files it again from the decision's record if filing failed)
-and `decision` (a decision thread's question on a PR).
+and `decision` (a decision thread's question on a PR). Live runs file `live` and `live-todo` on a
+merged PR (Live steps, above).
 
 **Filing** (automated posts, no go-ahead): the PR's one open `needs-info` issue, found by its
 hidden `<!-- queue-runner needs-info owner/name#N -->` line, gets the stop as a comment; with
@@ -572,6 +617,9 @@ SQLite holding the real stop's rows, the transcript, the auto-resume warning) an
 `LimitRecoveryTest` in `tests/test_run.py` and a fix round's in `tests/test_fix.py` (fixed clocks,
 `FakeLimits` in `fakes.py`; every test that runs `main` passes it, and a `t3_settings` path, so
 none reads T3's real database or settings).
+Live steps: `tests/test_live.py` (the answer block, the batch from `FakeLiveGit`, about to land,
+each outcome and its stop, a restart through the real `Runner`); `GitCli`'s first-parent log and
+changed files in `tests/test_git.py`.
 Running unattended: `tests/test_wake.py` (`Waker` against `FakeScheduler` in `fakes.py`, the
 task XML, `Schtasks` on canned calls, `wall_sleep`, a second start, waiting for T3, `--stop`
 with a fake kill); every test that runs `main` continuously passes a waker, so none touches the
@@ -600,6 +648,8 @@ temp folder.
 - `queue_runner/decisions.py` and `templates/decision.md`: decision threads: the cases, the
   brief, the answer and acting on it.
 - `queue_runner/fix.py` and `templates/fix.md`: which PRs get a fix round, and its brief.
+- `queue_runner/live.py` and `templates/live.md`: live steps after merges: the batch, about to
+  land, the brief, the answer and its stops.
 - `queue_runner/merge.py`: the pre-merge re-check, the expected-head merge and the worktrees
   removed after. A fix round's local branch name (`fix_branch`) is `fix.py`'s.
 - `queue_runner/review.py` and `templates/review.md`: the Sol lane: adoption, the brief, a review.

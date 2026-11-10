@@ -25,7 +25,7 @@ RESERVE_RELEASE = datetime.timedelta(hours=24)   # before the weekly reset, the 
 AFTER_RESET = datetime.timedelta(minutes=2)      # wait this past a reset before reading again
 SAME_WINDOW = datetime.timedelta(minutes=10)     # two reads' resets this close: the same window
 SAMPLES, RECENT = 3, 5
-CLAUDE_KINDS = ('build', 'fix', 'decision')
+CLAUDE_KINDS = ('build', 'fix', 'decision', 'live')
 
 # Gate verdicts: why a job starts or waits.
 FITS = 'fits'
@@ -47,7 +47,9 @@ class Cost:
 
 
 # Cautious until learned: a build is a long Opus thread, a fix round shorter, a decision one call.
-DEFAULTS = {'build': Cost(60, 15), 'fix': Cost(40, 10), 'decision': Cost(15, 4)}
+# A live run reads the live doc, runs a few connector calls and one check: a little over a decision.
+DEFAULTS = {'build': Cost(60, 15), 'fix': Cost(40, 10), 'decision': Cost(15, 4),
+            'live': Cost(20, 5)}
 
 
 @dataclass(frozen=True)

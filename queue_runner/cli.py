@@ -122,6 +122,7 @@ def _dry_run_limited(config, out, log_line) -> bool:
 def _dry_run(config, github, git, out, log_line, t3=None, gate=None) -> int:
     if not _dry_run_limited(config, out, log_line) and \
             not _dry_run_decision(config, github, t3, out, log_line) and \
+            not _dry_run_live(config, github, git, t3, out, log_line) and \
             not _dry_run_fix(config, github, git, out, log_line):
         _dry_run_build(config, github, out, log_line)
     if gate is not None:
@@ -171,6 +172,48 @@ def _dry_run_decision(config, github, t3, out, log_line) -> bool:
     print(decider.brief(case), file=out)
     print('-' * 72, file=out)
     return True
+
+
+class _NoStops:
+    """A dry run's stopper: files nothing."""
+
+    def file(self, *args, **kwargs):
+        return 'dry-run'
+
+
+def _dry_run_live(config, github, git, t3, out, log_line) -> bool:
+    """Prints the live run the Claude lane would start, with its brief, and why each repo with
+    live steps waits. It fetches the base (a remote ref only) and records and files nothing, not
+    even a first sight."""
+    from .live import LiveSteps
+    from .merge import Merger
+    jobs = _jobs(config)
+    said = []
+    live = LiveSteps(config, github=github, git=git, t3=t3, jobs=jobs, say=said.append,
+                     stopper=_NoStops(), merger=Merger(config, github=github, git=git, jobs=jobs,
+                                                       say=lambda line: None))
+    for repo in live.served():
+        try:
+            b = live.batch(repo, record=False)
+        except Exception as e:
+            print(f'Live {repo.name}: reading its state failed ({type(e).__name__}: {e})',
+                  file=out)
+            continue
+        for line in said:
+            print('L' + line[1:], file=out)
+        said.clear()
+        if b is None:
+            continue
+        log_line(f'dry run: would start live steps on {repo.name} at {b.target[:7]}')
+        print(f'Would start the live steps on {repo.name} (dry run: nothing started)', file=out)
+        print(f'  batch:  {", ".join(f"#{n}" for n in b.prs)} merged, '
+              f'{b.start[:7]}..{b.target[:7]}', file=out)
+        print('  brief:', file=out)
+        print('-' * 72, file=out)
+        print(live.brief(repo, b), file=out)
+        print('-' * 72, file=out)
+        return True
+    return False
 
 
 def _dry_run_fix(config, github, git, out, log_line) -> bool:

@@ -6,7 +6,9 @@ blocking PR, from H), `merge` (the runner merging a clean PR at H), `stop` (a st
 Stefan on a PR at H: `filed`, then `answered` once he closes its `needs-info` issue or replies on
 the PR or the issue; `failed` if the issue couldn't be filed, so the next pass files it) and
 `decision` (a one-off Claude decision thread, or Stefan's reply read directly, on a case the flow
-doesn't cover: `about` the job it decides on, its outcome the action taken).
+doesn't cover: `about` the job it decides on, its outcome the action taken) and `live` (a repo's
+live steps after merges, `live.py`: `sha` where the last live run reached, `head` the base's
+commit this one brings live).
 
 A build or fix started by a decision continues an earlier job's thread: its start record has
 `thread_id` (that thread) and `about` (the earlier job).
@@ -118,6 +120,8 @@ class Job:
     about: str | None = None       # a decision: the job it decides on; a continued job: the earlier
     question: str | None = None    # a decision: which question (decisions.QUESTIONS)
     context: int | None = None     # usage-limit: the thread's context in tokens (None: unknown)
+    applied: list = field(default_factory=list)   # live: the migrations its thread applied
+    prs: list = field(default_factory=list)       # live: the PRs merged in its batch
 
     @property
     def open(self) -> bool:
@@ -126,7 +130,7 @@ class Job:
 
 _END_FIELDS = ('thread_id', 'link', 'run_id', 'exit_code', 'status', 'outcome', 'commits', 'pr',
                'worktree', 'error', 'verdict', 'signals', 'run_dir', 'resume_at', 'head',
-               'reason', 'answer', 'context')
+               'reason', 'answer', 'context', 'applied', 'prs')
 
 
 class JobLog:
@@ -143,18 +147,19 @@ class JobLog:
     def started(self, *, kind: str, repo: str, issue: int | None, branch: str | None,
                 title: str, sha: str | None = None, round: int | None = None,
                 stop: str | None = None, thread_id: str | None = None, about: str | None = None,
-                question: str | None = None) -> Job:
+                question: str | None = None, head: str | None = None) -> Job:
         at = _now()
         stamp = at[:19].replace('-', '').replace(':', '').replace('T', '-')
         job = Job(id=f'{stamp}-{kind}-{repo}-{issue}-{uuid.uuid4().hex[:6]}', kind=kind,
                   repo=repo, issue=issue, branch=branch, title=title, started_at=at, sha=sha,
-                  round=round, stop=stop, thread_id=thread_id, about=about, question=question)
+                  round=round, stop=stop, thread_id=thread_id, about=about, question=question,
+                  head=head)
         record = {'event': 'start', 'job': job.id, 'kind': kind, 'repo': repo, 'issue': issue,
                   'branch': branch, 'title': title, 'at': at}
         if sha:
             record.update(sha=sha, round=round)
         for k, v in (('stop', stop), ('thread_id', thread_id), ('about', about),
-                     ('question', question)):
+                     ('question', question), ('head', head)):
             if v:
                 record[k] = v
         self._append(record)
@@ -181,7 +186,7 @@ class JobLog:
                           branch=e['branch'], title=e['title'], started_at=e['at'],
                           sha=e.get('sha'), round=e.get('round'), stop=e.get('stop'),
                           thread_id=e.get('thread_id'), about=e.get('about'),
-                          question=e.get('question'))
+                          question=e.get('question'), head=e.get('head'))
                 jobs[job.id] = job
                 if job.kind == 'build':
                     held[(job.repo, job.issue)] = True
@@ -251,7 +256,8 @@ class JobLog:
         recovered = {j.about for j in later
                      if j.outcome not in (NOT_STARTED, NOT_SENT, RESTART_FAILED)}
         failed = {j.about for j in later if j.outcome == RESTART_FAILED}
-        return [j for j in jobs if j.outcome == USAGE_LIMIT and j.id not in gone
+        return [j for j in jobs if j.outcome == USAGE_LIMIT and j.kind in ('build', 'fix')
+                and j.id not in gone
                 and j.id not in recovered and (stuck or j.id not in failed)]
 
     def limited_jobs(self) -> list[Job]:
@@ -259,6 +265,13 @@ class JobLog:
         release settled), oldest first."""
         jobs, _, gone = self._fold()
         return self._limited(jobs, gone)
+
+    def live(self, repo: str, released: bool = True) -> list[Job]:
+        """The repo's live jobs, oldest first; without `released`, leaving out those a release
+        settled (a release of the batch's newest PR)."""
+        jobs, _, gone = self._fold()
+        return [j for j in jobs if j.kind == 'live' and j.repo == repo
+                and (released or j.id not in gone)]
 
     def open_stops(self, repo: str, number: int) -> list[Job]:
         """Stops filed on this PR that Stefan hasn't answered (or released), oldest first: while

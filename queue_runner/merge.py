@@ -7,7 +7,8 @@ checks passed on H (`sol-review` not counted), no conflict, nothing said on it s
 and no unresolved review thread, and no Claude job writing to its branch. Then it merges with the
 expected head, so GitHub refuses if H moved in between, with a merge commit (Lovable syncs main).
 A head that moved is left to the Sol lane, which reviews the new one. After the merge, the
-worktrees of the PR's build and fix jobs are removed. The repo's live steps are ticket 11's.
+worktrees of the PR's build and fix jobs are removed. The repo's live steps run later, in
+the Claude lane (`live.py`).
 
 Merges are automated posts that need no go-ahead (`~/.claude/CLAUDE.md`, Merge when the review is
 clean).

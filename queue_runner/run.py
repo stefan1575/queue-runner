@@ -1,8 +1,9 @@
 """The run loop: two lanes side by side, one Claude job and one Sol job at a time.
 
 The Claude lane settles what earlier passes left open, then starts at most one job: a decision on a
-case the flow doesn't cover (`decisions.py`), then a fix round on a PR the runner found blocking
-(`fix.py`), before any new build, so open PRs finish first. It
+case the flow doesn't cover (`decisions.py`), then a repo's live steps after merges (`live.py`),
+then a fix round on a PR the runner found blocking (`fix.py`), before any new build, so open PRs
+finish first. It
 blocks on `t3 thread start --wait` while the job runs. The Sol lane (`review.py`) reviews at most one
 PR a pass, under `<state_dir>/sol.lock`. A second runner process is kept out by a lock on
 `<state_dir>/runner.lock`.
@@ -19,7 +20,9 @@ from .decisions import Decider
 from .fix import Fixer, fix_branch, fix_title
 from .gate import CLAUDE_KINDS
 from . import limits as lim
+from .live import LiveSteps
 from .lock import RunnerBusy, runner_lock  # noqa: F401 (the CLI takes them from here)
+from .merge import Merger
 from .picker import BuildJob, pick
 from .review import Reviewer
 from .state import NOT_SENT, NOT_STARTED, RESTART_FAILED, USAGE_LIMIT, Job, JobLog
@@ -84,9 +87,15 @@ class Runner:
         self.reviewer = Reviewer(config, github=github, git=git, sol=sol, jobs=self.jobs,
                                  say=self.say, toaster=self.toaster) if sol is not None else None
         self.fixer = Fixer(config, github=github, git=git, jobs=self.jobs)
+        stopper = Stopper(config, github=github, jobs=self.jobs, say=self.say,
+                          toaster=self.toaster)
         self.decider = Decider(config, github=github, t3=t3, jobs=self.jobs, say=self.say,
-                               stopper=Stopper(config, github=github, jobs=self.jobs,
-                                               say=self.say, toaster=self.toaster))
+                               stopper=stopper)
+        self.live = LiveSteps(config, github=github, git=git, t3=t3, jobs=self.jobs,
+                              say=self.say, stopper=stopper,
+                              merger=Merger(config, github=github, git=git, jobs=self.jobs,
+                                            say=self.say),
+                              limit=self._limit, find_thread=self._find_thread, now=self.now)
         self._last_why: dict[tuple[str, int], str | None] = {}
 
     def say(self, line: str) -> None:
@@ -110,7 +119,8 @@ class Runner:
         return self._gated(*chosen) if isinstance(chosen, tuple) else chosen
 
     def choose(self):
-        """(kind, then, a callable that runs it), or IDLE, for the gate: `kind` None for a
+        """(kind, then, a callable that runs it), or IDLE, for the gate (a decision, a repo's
+        live steps, a fix round, a build, in that order): `kind` None for a
         decision Stefan's own words answer, which starts no thread; `then` the kind of job a
         decision may continue in the same pass (a retry or an answer). A job cut off by a usage
         limit comes before all of them, and until it may resume nothing else starts: the limit
@@ -132,6 +142,8 @@ class Runner:
                 return None, None, lambda: self.decider.run(case, self.continue_job)
             then = case.about.kind if {'retry', 'answer'} & set(case.allowed) else None
             return 'decision', then, lambda: self.decider.run(case, self.continue_job)
+        if live := self.live.next():
+            return 'live', None, lambda: self.live.run(*live)
         if fix := self.next_fix():
             return 'fix', None, lambda: self.run_fix(*fix)
         for repo in self.config.repos:
@@ -210,6 +222,10 @@ class Runner:
                 self.jobs.ended(job.id, exit_code=None, outcome=NOT_STARTED,
                                 error='The runner stopped mid-decision.')
                 self.say(f'{self._name(job)}: cut off with its runner; decided again')
+                continue
+            if job.kind == 'live':
+                if self.live.settle(job):
+                    busy = BUSY
                 continue
             if job.kind not in ('build', 'fix'):
                 continue   # an open review or merge is the Sol lane's to settle

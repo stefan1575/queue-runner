@@ -14,6 +14,11 @@ class Repo:
     path: str          # local clone; T3's project for its jobs
     base: str = 'main'
     review_table: bool = False   # a posted review adds a row to the PR body's `## Review` table
+    # Live steps after merges (ticket 11, `live.py`): the repo's doc that says how a merge goes
+    # live (None: the repo has none), and where its migrations and edge functions live.
+    live_doc: str | None = None
+    live_migrations: str = 'supabase/migrations'
+    live_functions: str = 'supabase/functions'
 
 
 @dataclass(frozen=True)
@@ -38,7 +43,10 @@ def load_config(path: str = DEFAULT_CONFIG) -> Config:
     with open(path, 'rb') as f:
         raw = tomllib.load(f)
     repos = [Repo(name=r['name'], github=r.get('github'), path=_path(r['path']),
-                  base=r.get('base', 'main'), review_table=bool(r.get('review_table')))
+                  base=r.get('base', 'main'), review_table=bool(r.get('review_table')),
+                  live_doc=r.get('live_doc') or None,
+                  live_migrations=r.get('live_migrations', 'supabase/migrations'),
+                  live_functions=r.get('live_functions', 'supabase/functions'))
              for r in raw['repos']]
     claude, sol = raw.get('claude', {}), raw.get('sol', {})
     state_dir = _path(raw['state_dir'])
