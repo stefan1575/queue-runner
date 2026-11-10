@@ -633,8 +633,8 @@ bug with a failing test; CI still gates the merge.
 - **Dependencies:** after the checkout, `Deps.prepare` links `node_modules` into it as a junction
   to `<deps_dir>/<repo>-<key>/node_modules`, installed once per key: the lockfile plus
   package.json's dependency fields (a script change reuses it). `bun.lock` installs with
-  `bun install --frozen-lockfile`, as leads-dashboard's CI does (bun from scoop, installed
-  2026-11-10; `package-lock.json` is gitignored there), `package-lock.json` with `npm ci`, into a
+  `bun install --frozen-lockfile`, as leads-dashboard's CI does (bun 1.4.4 at
+  `~/.bun/bin/bun.exe`, installed 2026-11-10; `package-lock.json` is gitignored there), `package-lock.json` with `npm ci`, into a
   temp folder moved into place. A marker in `node_modules` (`.queue-runner-ready`) is checked on
   every use; gone, it installs again. The 3 most recently used caches per repo are kept. No
   `package.json`, no lockfile, no bun, or a failed install: nothing is linked, the brief says why,
@@ -643,11 +643,15 @@ bug with a failing test; CI still gates the merge.
 - **`git worktree remove --force` follows a junction and empties its target** (checked
   2026-11-10), so `GitCli.remove_checkout` unlinks `node_modules` first (`Deps.unlink`).
 - **The sandbox:** Codex's read-only sandbox stops vitest at once (EPERM writing
-  `node_modules/.vite-temp`), so a review runs `codex-sol.sh --write --writable-root <deps_dir>`:
-  Codex's workspace-write sandbox, the checkout and the cache writable, the network off.
-  codex-sol.sh adds a Files rule (write only there) and puts fnm's default Node first on PATH
-  (`$FNM_DIR/aliases/default`), since the runner starts without fnm's shell PATH. A folder named
-  as a writable root covers folders made in it later, even on first use (checked 2026-11-10).
+  `node_modules/.vite-temp`), so a review runs `codex-sol.sh --write`, with a
+  `--writable-root` for each of the cache's `node_modules/.vite-temp` and `.vite`
+  (`Prepared.writable`): Codex's workspace-write sandbox, the checkout and those two writable,
+  the installed packages not (checked: writing into one is denied), the network off. codex-sol.sh
+  adds a Files rule (write only there) and puts fnm's default Node first on PATH
+  (`$FNM_DIR/aliases/default`), since the runner starts without fnm's shell PATH.
+- **The sandbox user reads the cache through `~/.queue-runner`'s inherited ACL**
+  (`CodexSandboxUsers` RX). An install folder made with `tempfile.mkdtemp` gets an owner-only ACL
+  on Windows and can't be read (vitest "not recognized", EPERM on stat), so it's `os.makedirs`.
 - **The brief** (step 4, `review._tests`) tells Sol what it can run: `npm test`, a failing test it
   adds, each command named with its summary line quoted; a failure the change doesn't explain
   (Windows only) is no finding. leads-dashboard's `src/test/callsling-relay.test.ts` has one

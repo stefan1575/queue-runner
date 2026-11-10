@@ -52,10 +52,7 @@ took about 30 s for the whole suite (302 passed, 8 skipped, and the one Windows 
 
 **Box 1:** `scripts/live_review.py leads-dashboard#181` (a dry run, nothing posted) at 0470a6e:
 the log says `dependencies cached (leads-dashboard-7aa4f99fb213)`, and `reply.md.log` says
-`sandbox: workspace-write [workdir, /tmp, $TMPDIR, ...
-ode_modules\.vite-temp,
-...
-ode_modules\.vite]` and `reasoning effort: high`. Sol's reply has a checks table:
+`sandbox: workspace-write [workdir, /tmp, $TMPDIR, <cache>/node_modules/.vite-temp, <cache>/node_modules/.vite]` and `reasoning effort: high`. Sol's reply has a checks table:
 `npm test` → `Tests 333 passed | 8 skipped (341)`, typecheck exit 0, lint 0 errors / 7 warnings,
 check:migrations OK. It also tried `npm run test:e2e`, which stalled with no Playwright browser;
 the brief now leaves browser tests to CI. The review took 4.5 minutes and was clean. Its run folder
