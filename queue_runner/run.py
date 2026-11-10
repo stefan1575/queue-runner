@@ -17,10 +17,11 @@ from .config import Config, Repo
 from .decisions import Decider
 from .fix import Fixer, fix_branch, fix_title
 from .gate import CLAUDE_KINDS
+from . import limits as lim
 from .lock import RunnerBusy, runner_lock  # noqa: F401 (the CLI takes them from here)
 from .picker import BuildJob, pick
 from .review import Reviewer
-from .state import NOT_SENT, NOT_STARTED, Job, JobLog
+from .state import NOT_SENT, NOT_STARTED, USAGE_LIMIT, Job, JobLog
 from .stops import Stopper
 from .t3 import T3Error, Thread
 from .toast import NoToaster
@@ -48,8 +49,12 @@ def _when(stamp: str) -> datetime.datetime:
 
 class Runner:
     def __init__(self, config: Config, *, github, t3, git, out, log_line, sol=None,
-                 toaster=None, gate=None):
+                 toaster=None, gate=None, limits=None, now=None):
         self.config, self.github, self.t3, self.git = config, github, t3, git
+        # limits.T3Store, where T3 keeps a usage-limit stop's reset; None reads only what the
+        # thread said (tests, the live checks).
+        self.limits = limits
+        self.now = now or (lambda: datetime.datetime.now(datetime.timezone.utc))
         self.gate = gate   # gate.Gate; None starts every Claude job (tests, the live checks)
         self.gate_until: datetime.datetime | None = None
         self._last_gate: str | None = None
@@ -89,7 +94,21 @@ class Runner:
     def choose(self):
         """(kind, then, a callable that runs it), or IDLE, for the gate: `kind` None for a
         decision Stefan's own words answer, which starts no thread; `then` the kind of job a
-        decision may continue in the same pass (a retry or an answer)."""
+        decision may continue in the same pass (a retry or an answer). A job cut off by a usage
+        limit comes before all of them, and until it may resume nothing else starts: the limit
+        is the whole account's."""
+        if limited := self.jobs.limited_jobs():
+            old = limited[0]
+            at = _when(old.resume_at) if old.resume_at else self.now()
+            if self.now() < at:
+                self.gate_until = at
+                text = (f'{self._name(old)} was cut off by a usage limit; it resumes after '
+                        f'{at.astimezone():%Y-%m-%d %H:%M}')
+                if text != self._last_gate:
+                    self.say(f'Claude lane waits: {text}')
+                self._last_gate = text
+                return GATED
+            return old.kind, None, lambda: self.recover(old)
         if case := self.decider.next_case():
             if self.decider.direct_answer(case):
                 return None, None, lambda: self.decider.run(case, self.continue_job)
@@ -139,9 +158,9 @@ class Runner:
         """The pause after a pass that started nothing: `poll_seconds`, or less when the gate
         opens sooner (pause, resume and the reserve are read again each pass)."""
         poll = self.config.poll_seconds
-        if self.gate_until is None or self.gate is None:
+        if self.gate_until is None:
             return poll
-        left = (self.gate_until - self.gate.clock()).total_seconds()
+        left = (self.gate_until - self.now()).total_seconds()
         return min(poll, left) if left >= 1 else poll
 
     def next_fix(self):
@@ -339,12 +358,13 @@ class Runner:
         else `failed` or `waiting`."""
         repo = self.repos[job.repo]
         link = worktree = head = pr = None
-        commits = []
+        commits, said = [], []
         try:
-            thread, _ = self.t3.show(thread_id)
+            thread, said = self.t3.show(thread_id)
             link, worktree = thread.link, thread.worktree_path
         except T3Error as e:
             error = error or f'thread show failed: {e}'
+        limit = self._limit(thread_id, run_id, exit_code, error, said)
         try:
             now = self.github.pull(repo, job.issue)
             head = now.head_sha
@@ -355,11 +375,12 @@ class Runner:
         except Exception as e:   # the record matters more than its commit list
             error = error or f'reading the PR after the round failed: {type(e).__name__}: {e}'
         pushed = head is not None and head != job.sha
-        outcome = ('waiting' if exit_code == 2 else 'failed' if exit_code else
+        outcome = ('waiting' if exit_code == 2 else USAGE_LIMIT if limit else
+                   'failed' if exit_code else
                    'head-unknown' if head is None else 'pushed' if pushed else 'no-push')
         self.jobs.ended(job.id, exit_code=exit_code, outcome=outcome, thread_id=thread_id,
                         link=link, run_id=run_id, status=status, commits=commits, pr=pr,
-                        worktree=worktree, error=error, head=head)
+                        worktree=worktree, error=error, head=head, **(limit or {}))
         moved = (f', head {job.sha[:7]} -> {head[:7]}, {len(commits)} commits' if pushed else
                  f', head still {job.sha[:7]}' if head else ', head unknown')
         self.say(f'{self._name(job)} ended: {outcome} (exit {exit_code}{moved}) '
@@ -372,11 +393,13 @@ class Runner:
             return self.finish_fix(job, thread_id, exit_code, status, error, run_id)
         repo = self.repos[job.repo]
         link = worktree = None
+        said = []
         try:
-            thread, _ = self.t3.show(thread_id)
+            thread, said = self.t3.show(thread_id)
             link, worktree = thread.link, thread.worktree_path
         except T3Error as e:
             error = error or f'thread show failed: {e}'
+        limit = self._limit(thread_id, run_id, exit_code, error, said)
         commits = []
         try:
             commits = self.git.commits(repo.path, f'origin/{repo.base}', job.branch)
@@ -391,14 +414,89 @@ class Runner:
         if exit_code == 0:
             outcome = 'done' if pr or not repo.github else 'done-no-pr'
         else:
-            outcome = 'waiting' if exit_code == 2 else 'failed'
+            outcome = 'waiting' if exit_code == 2 else USAGE_LIMIT if limit else 'failed'
         self.jobs.ended(job.id, exit_code=exit_code, outcome=outcome, thread_id=thread_id,
                         link=link, run_id=run_id, status=status, commits=commits, pr=pr,
-                        worktree=worktree, error=error)
+                        worktree=worktree, error=error, **(limit or {}))
         pr_note = f', PR #{pr["number"]}' if pr else ''
         self.say(f'{self._name(job)} ended: {outcome} (exit {exit_code}, {len(commits)} commits'
                  f'{pr_note}) {link or thread_id}')
         return job
+
+    def _limit(self, thread_id: str, run_id: str | None, exit_code: int, error: str | None,
+               said) -> dict | None:
+        """For a failed run that stopped on a usage limit: the end record's `resume_at` and
+        `context` (`limits.py`), said once in the log. None for any other end."""
+        if exit_code != 1:
+            return None
+        last = [m.text for m in said if m.role == 'assistant'][-1:]
+        stop = lim.limit_stop(self.limits, thread_id, run_id, [error, *last])
+        if stop is None:
+            return None
+        resume = lim.resume_at(self.now(), stop.reset_at)
+        tokens = self.limits.context_tokens(thread_id) if self.limits else None
+        known = (f'T3 says it resets at {stop.reset_at.astimezone():%Y-%m-%d %H:%M}'
+                 if stop.reset_at else "T3 doesn't say when it resets: 5h05m from now")
+        how = ('continued in place' if lim.in_place(tokens) else 'a fresh thread') + (
+            f', context {tokens:,} tokens' if tokens is not None else ', context unknown')
+        self.say(f'{thread_id} stopped on a usage limit; {known}. It resumes after '
+                 f'{resume.astimezone():%Y-%m-%d %H:%M} ({how}).')
+        return {'resume_at': resume.isoformat(timespec='seconds'), 'context': tokens}
+
+    # --- recovering a job cut off by a usage limit -----------------------------------------
+
+    def recover(self, old: Job) -> str:
+        """A build or fix cut off by a usage limit, once the limit has reset: its thread
+        continued in place when its context is about 50k tokens or less, else a fresh thread
+        from the job's own brief plus the old thread's link and last 3 messages, in a new
+        worktree on the same branch at the old thread's newest commit. The old thread is left
+        as it is: a script can't settle a T3 thread (AGENTS.md)."""
+        if lim.in_place(old.context):
+            return self.continue_job(old, lim.RESUME_MESSAGE)
+        try:
+            _, messages = self.t3.show(old.thread_id, 3)
+        except T3Error as e:
+            self.say(f'{self._name(old)}: reading its thread failed ({e}); next pass')
+            return IDLE
+        repo = self.repos[old.repo]
+        work = fix_branch(old.issue, old.sha) if old.kind == 'fix' else old.branch
+        job = self.jobs.started(kind=old.kind, repo=old.repo, issue=old.issue, branch=old.branch,
+                                title=old.title, sha=old.sha, round=old.round, about=old.id)
+        try:
+            brief = self._brief_again(repo, old)
+            tip = self.git.free_branch(repo.path, work, old.worktree)
+        except Exception as e:
+            # Not `not-started`, which would retry every pass: held like any failed job.
+            self.jobs.ended(job.id, exit_code=None, outcome='failed',
+                            error=f'restarting after the usage limit failed: '
+                                  f'{type(e).__name__}: {e}')
+            self.say(f'{self._name(job)}: restarting after the usage limit failed ({e}); '
+                     f'held until --release {old.repo}#{old.issue}')
+            return IDLE
+        if tip is None:   # it made no commit: from where the old thread started
+            tip = old.sha if old.kind == 'fix' else f'origin/{repo.base}'
+        brief += lim.restart_section(old, work, tip, messages)
+        self.say(f'Restarting {self._name(job)} fresh after the usage limit, on {work} at '
+                 f'{tip[:7]}; the old thread was {old.link or old.thread_id}')
+        return self._start(job, repo, brief, tip, work)
+
+    def _brief_again(self, repo: Repo, old: Job) -> str:
+        """The job's brief, built afresh from its sources as when it started."""
+        if old.kind == 'build':
+            self.git.fetch(repo.path, repo.base)
+            issue = self.github.issue(repo.github, old.issue)
+            build = BuildJob(repo=repo, issue=issue, branch=old.branch,
+                             base=f'origin/{repo.base}')
+            return build_brief(build, self.github.issue_comments(repo, old.issue))
+        from dataclasses import replace
+        pr = self.github.pull(repo, old.issue)
+        self.git.fetch_pr(repo.path, old.issue, pr.base)
+        review = next((j for j in reversed(self.jobs.on('review', repo.name, old.issue, old.sha,
+                                                        released=True))
+                       if j.round == old.round), None)
+        if review is None:
+            raise ValueError(f'no review {old.round} of {old.sha[:7]} in the job log')
+        return self.fixer.brief(repo, replace(pr, head_sha=old.sha), review)
 
     @staticmethod
     def _name(job: Job) -> str:

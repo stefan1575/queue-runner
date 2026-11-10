@@ -1,0 +1,30 @@
+{
+ "id": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Amcp%253Alaunch%253A224d9fdd0490455c641043a2b1e21b674ba028ab2f3b1ab3ce22c2c5f994c066%3Aordinal%3A1",
+ "driver": "claudeAgent",
+ "providerInstanceId": "claudeAgent",
+ "providerSessionId": "provider-session:provider-instance:claudeAgent:thread:mcp%3Alaunch%3A224d9fdd0490455c641043a2b1e21b674ba028ab2f3b1ab3ce22c2c5f994c066:94a26de8-5cbd-42de-a8b0-f96b88988786",
+ "appThreadId": "mcp:launch:224d9fdd0490455c641043a2b1e21b674ba028ab2f3b1ab3ce22c2c5f994c066",
+ "ownerNodeId": null,
+ "nativeThreadRef": {
+  "driver": "claudeAgent",
+  "nativeId": "79889bce-919b-48ed-ac44-9136d2e24268",
+  "strength": "strong"
+ },
+ "nativeConversationHeadRef": null,
+ "status": "idle",
+ "firstRunOrdinal": 1,
+ "lastRunOrdinal": 1,
+ "handoffIds": [],
+ "forkedFrom": null,
+ "pendingBackgroundTasks": [],
+ "contextUsage": null,
+ "nativeMetadata": {
+  "claudeAttachmentBudget": {
+   "bytesUsed": 1549,
+   "pagesUsed": 0
+  }
+ },
+ "goal": null,
+ "createdAt": "2026-11-08T07:31:44.390Z",
+ "updatedAt": "2026-11-08T07:34:13.775Z"
+}

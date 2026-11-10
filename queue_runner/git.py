@@ -34,6 +34,27 @@ class GitCli:
                                 f'refs/heads/{branch}'])
         return code == 0
 
+    def free_branch(self, path: str, branch: str, worktree: str | None) -> str | None:
+        """Frees a job's branch for a fresh T3 worktree after a usage limit (T3 can't make a
+        worktree on a branch that exists): keeps its tip under `refs/queue-runner/limit/<branch>`,
+        detaches the old worktree (its files, anything uncommitted included, stay) and deletes the
+        branch, so T3 makes it again at that tip. Returns the tip; the kept one if the branch is
+        gone already (an earlier try); None if there's neither."""
+        keep = f'refs/queue-runner/limit/{branch}'
+        code, out, _ = self._run(['-C', path, 'rev-parse', '--verify', '--quiet',
+                                  f'refs/heads/{branch}'])
+        if code:
+            code, out, _ = self._run(['-C', path, 'rev-parse', '--verify', '--quiet', keep])
+            return out.strip() if code == 0 else None
+        tip = out.strip()
+        self._ok(['-C', path, 'update-ref', keep, tip])
+        import os
+        if worktree and os.path.isdir(worktree):
+            self._ok(['-C', worktree, 'checkout', '--quiet', '--detach'])
+        self._run(['-C', path, 'worktree', 'prune'])
+        self._ok(['-C', path, 'branch', '-D', branch])
+        return tip
+
     def commits(self, path: str, base: str, branch: str) -> list[dict]:
         """The branch's commits not on `base`, oldest first: [{sha, subject}]."""
         if not self.has_branch(path, branch):

@@ -10,7 +10,7 @@ import unittest
 from queue_runner.cli import main
 from queue_runner.state import JobLog
 from queue_runner.usage import Usage, UsageError, Window
-from tests.fakes import FakeGitHubWithPulls, FakeToaster, FakeUsage, issue
+from tests.fakes import FakeGitHubWithPulls, FakeLimits, FakeToaster, FakeUsage, issue
 from tests.fakes_t3 import FakeGit, FakeSol, FakeT3
 
 UTC = datetime.timezone.utc
@@ -51,7 +51,8 @@ path = "{self.dir}"
         self.t3 = t3 or FakeT3([(0, 'completed')])
         code = main(args + ['--config', self.config], github=gh, out=out, t3=self.t3,
                     git=FakeGit(), sleep=sleep or (lambda s: None), sol=FakeSol(),
-                    toaster=FakeToaster(), usage=usage_reader, clock=lambda: self.now)
+                    toaster=FakeToaster(), usage=usage_reader, clock=lambda: self.now,
+                    limits=FakeLimits(), t3_settings=os.path.join(self.dir, 't3.json'))
         return code, out.getvalue()
 
     def runner_log(self):

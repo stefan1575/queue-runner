@@ -74,6 +74,8 @@ class Fixer:
                 return 'its fix round is still running'
             if last.outcome == 'waiting':
                 return 'its fix round waits for an answer'
+            if last.outcome == 'usage-limit':
+                return f'its fix round was cut off by a usage limit; it resumes after {last.resume_at}'
             return (f'a fix round on {h7} ended {last.outcome} and the head is still {h7}: '
                     f'left for Stefan (or --release {repo.name}#{pr.number})')
         if job := self.jobs.writer(repo.name, pr.branch):

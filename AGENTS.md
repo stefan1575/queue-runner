@@ -14,7 +14,7 @@ completed step, with a message that says what changed and why.
 ```
 python3 -m queue_runner                       # run: both lanes, pass after pass (nothing starts it at logon yet)
 python3 -m queue_runner --once                # one pass of each lane: at most one Claude job (a decision, a fix round or a build), merges, at most one Sol review
-python3 -m queue_runner --once --dry-run      # print the next Claude job's brief (a decision first, then a fix round), list the stops it would file, what Sol would review and what would merge
+python3 -m queue_runner --once --dry-run      # print the next Claude job's brief (a job cut off by a usage limit first, then a decision, then a fix round), list the stops it would file, what Sol would review and what would merge
 python3 -m queue_runner --release NAME#N      # let the picker take a held issue again (a PR: retry its failed reviews, merges and fix round; let a stopped PR go)
 python3 -m queue_runner --review NAME#N       # Sol reviews that PR's head now, if adoption says it needs one
 python3 -m queue_runner --gate                # Claude's usage now, and whether a build, fix or decision would start
@@ -81,6 +81,53 @@ isn't gated**, and neither is an Approach-note answer read from Stefan's words (
 - `Runner` without a `gate` (the tests, `live_sandbox.py`) starts every job; the CLI always passes
   one.
 
+## Usage limits
+
+`limits.py` (ticket 09; `orchestration.md`, Limits). A build or fix thread that ends failed on a
+Claude usage limit ends `usage-limit`, not `failed`, so no decision thread (which would hit the
+same limit) is started on it.
+
+- **Spotting one:** T3's record of the run's stop (below), or, if that can't be read, Claude
+  Code's message in the run's error or the thread's last assistant message ("You've hit your
+  weekly limit · resets ...", "Claude API rate limit reached").
+- **When:** 10 minutes after the reset T3 stored for the stop; 5h05m from the stop if it stored
+  none. The end record has `resume_at` and `context` (the thread's tokens, or null). Until then
+  the Claude lane starts nothing (`gated`, said once: the limit is the whole account's); the Sol
+  lane goes on. Then the usage gate checks the job as usual.
+- **In place or fresh:** `context` of about 50k tokens or less (`IN_PLACE_MAX`) continues the
+  old thread, as a continued job (`t3 thread send`, the message `limits.RESUME_MESSAGE`).
+  Anything bigger, or unknown, starts a fresh thread: the job's own brief rebuilt from its
+  sources (the issue; for a fix, the fix brief from the same review of H), plus
+  `templates/restart.md` (the old thread's link, where it starts, its last 3 messages). T3 can't
+  make a worktree on a branch that exists, so `GitCli.free_branch` keeps the branch's tip under
+  `refs/queue-runner/limit/<branch>`, detaches the old worktree (anything uncommitted stays
+  there) and deletes the branch; T3 then makes the same branch again at that tip
+  (`--worktree <tip> --branch <same>`). For a fix that's the round's own local branch
+  `claude/fix-pr<n>-<H7>`; it still pushes to the PR's.
+- **The new job** has the old job's kind, issue, branch, title, H and round, and `about` the old
+  job: that's what marks it recovered. One that never reached a thread (`not-started`,
+  `not-sent`) doesn't count, so the next pass tries again. A fresh restart whose brief or branch
+  can't be made ends `failed` and holds the issue until `--release`.
+- **Until then it's the PR's writer** (`JobLog.writer`): Sol doesn't review a head it pushed
+  before the limit, nothing merges, and no other fix round starts. `--release` lets it go.
+- **The old thread is left as it is** (not settled): see T3, below.
+- **T3's "Resume after usage limits"** (`autoResumeLimitedThreads` in
+  `~/.t3/userdata/settings.json`, off by default) stays off: it would send "Continue where you
+  left off." to the same thread itself. The runner logs a warning at start if it's on.
+- **Sol** isn't a T3 thread (below), so none of this applies to it: an `out-of-usage` review
+  counts for nothing and the PR is reviewed afresh, on its head then, once the Sol lane resumes:
+  10 minutes after the reset in Sol's own rollout (codex-sol.sh logs `session id:` in
+  `reply.md.log`; its `~/.codex/sessions/*/*/*/rollout-*-<id>.jsonl`'s newest `rate_limits`
+  record; the window at 99% or more, the later one if both), else the time Sol's error names,
+  else 30 minutes.
+
+**First real stop: confirm.** The fixtures are from one real Claude stop (2026-11-08, a weekly
+limit, before the runner existed): `tests/fixtures/t3/turn-item-usage-limit.json`,
+`thread-show-usage-limit.json`, `provider-thread-claude.json` and
+`tests/fixtures/claude/transcript-limit-stop.jsonl` (its text left out). The first stop under
+the runner should confirm the log line `<thread> stopped on a usage limit; T3 says it resets at
+...` and the end record's `resume_at` and `context`.
+
 ## Two lanes
 
 One Claude job and one Sol job at a time (`run.py`): the Claude lane runs in the main thread
@@ -134,6 +181,7 @@ ignored and cut off by the next write; a bad line anywhere else is an error. An 
 status, the branch's commits, the PR found by branch, the worktree path and any error.
 Outcomes: `done` (exit 0, a PR found), `done-no-pr`, `failed` (exit 1), `waiting` (exit 2),
 `continued` (it was waiting, and a decision's answer went to its thread as a later job),
+`usage-limit` (exit 1 on a Claude usage limit: Usage limits, above),
 `branch-exists` (a local `claude/*` branch left over, so T3 couldn't make it again) and
 `not-started` (T3 failed before any thread existed). Every build that got that far holds its
 issue: the picker skips it until `--release`. Only `not-started` holds nothing, so the next pass
@@ -144,7 +192,7 @@ and `head` (the PR's head afterwards, read from GitHub), with `commits` the ones
 (`H..head`). Outcomes: `pushed` (exit 0, the head moved: Sol reviews the new head), `no-push`
 (exit 0 at H: H was reviewed, so the PR waits for Stefan: a `no-push` stop),
 `head-unknown` (exit 0, but GitHub couldn't say afterwards; the Sol lane still reads the real
-head), `failed`,
+head), `failed`, `usage-limit`,
 `waiting`, `branch-exists` and `not-started`, as for builds.
 
 **A continued job** (a decision's `retry` or `answer`): a new build or fix job of the same issue,
@@ -346,8 +394,8 @@ threads that need Stefan, so the runner toasts instead.
 - It runs under Git's bash by full path, through a parent bash that waits: codex-sol.sh's
   watchdog ends the run once its caller is gone. 75 minutes, then tree-killed and `failed`.
 - **Out of usage** ("hit your usage limit" in `run.out` or `reply.md.log`): `out-of-usage`, and
-  the Sol lane starts no review until 10 minutes after the reset Sol names (30 minutes if it
-  names none). Ticket 09 does the rest of limit recovery.
+  the Sol lane starts no review until 10 minutes after the reset in Sol's rollout, else the time
+  Sol names, else 30 minutes (Usage limits, above).
 
 ## T3, as a script sees it
 
@@ -376,7 +424,28 @@ threads that need Stefan, so the runner toasts instead.
   is unknown. T3's own cleanup (Settings → storage: `worktreeOnMerge`, off by
   default; and on thread delete) is the alternative. It isn't used, because it would race the
   runner.
-- **Settling a thread:** the CLI has no command for it (spec, Verify while building).
+- **Settling a thread: a script can't, so the runner leaves threads unsettled.** The CLI has no
+  settle command. T3 settles through its `thread.settle` orchestration command, which the app
+  and MCP's `t3_thread_organize` send; the CLI reaches T3's MCP endpoint only by minting a session
+  from T3's local auth in-process (`withThreadTools`, `issueMcpClientSession` in
+  `apps/server/dist/binCli-*.mjs`, read 2026-11-10), which a Python script can't do. A thread
+  left unsettled costs nothing: T3's auto-resume is off (Usage limits, above) and its
+  notifications are off.
+- **A usage-limit stop, as T3 shows it** (read 2026-11-10 from `server.asar` and a real stop):
+  `thread show --json` gives the thread `status: failed` and Claude Code's message as the last
+  assistant message; it has no reset time. `--wait --json` exits 1 with the run's error. The
+  reset is only in T3's database, `~/.t3/userdata/statev2.sqlite`, which `limits.T3Store` reads
+  read-only: `orchestration_v2_projection_turn_items` where `thread_id`, `run_id` and `type =
+  'error'`, `payload_json.failure` `{class: "usage_limit", resetAt}` (T3's own recovery,
+  `usage-limit-recovery:<runId>`, checks the same `resetAt`). The CLI never shows a Codex thread's
+  stop either; the runner has none (Sol runs through codex-sol.sh).
+- **A Claude thread's context size:** `orchestration_v2_projection_provider_threads` (`thread_id`,
+  `driver = 'claudeAgent'`, newest `last_run_ordinal`) has the Claude session id in
+  `payload_json.nativeThreadRef.nativeId`; Claude Code's transcript is
+  `~/.claude/projects/<folder>/<session id>.jsonl`, and the context is its last real assistant
+  record's `usage`: `input_tokens + cache_creation_input_tokens + cache_read_input_tokens +
+  output_tokens` (Claude Code's `<synthetic>` limit message has zeros and is skipped). Checked on
+  the real stop: 108,633 tokens.
 
 ## Live check
 
@@ -443,6 +512,11 @@ The usage gate: `tests/test_usage.py` (the real response, the login, never the t
 `tests/test_gate.py` (`decide()` with a fixed clock, the knob, learned costs) and
 `tests/test_gating.py` (the run loop and the knob through `main`, `FakeUsage` in `fakes.py`; every
 test that runs `main` passes one, so none reads the real endpoint).
+Limit recovery: `tests/test_limits.py` (the resume time, in place or fresh, `T3Store` on a temp
+SQLite holding the real stop's rows, the transcript, the auto-resume warning) and
+`LimitRecoveryTest` in `tests/test_run.py` and a fix round's in `tests/test_fix.py` (fixed clocks,
+`FakeLimits` in `fakes.py`; every test that runs `main` passes it, and a `t3_settings` path, so
+none reads T3's real database or settings).
 `tests/test_git.py` runs `GitCli` on a real local repo in a
 temp folder.
 
@@ -480,6 +554,8 @@ temp folder.
 - `queue_runner/usage.py`: Claude's usage windows from `api/oauth/usage`, with the Claude login.
 - `queue_runner/gate.py`: the usage gate: `decide()`, Stefan's knob (`gate.json`), learned costs
   (`usage.jsonl`).
+- `queue_runner/limits.py` and `templates/restart.md`: usage-limit stops: T3's record of the
+  reset, the transcript's context, when and how a job resumes, the auto-resume warning.
 - `queue_runner/lock.py`: `runner.lock` and `sol.lock`.
 - `queue_runner/cli.py`: the command line.
 - `scripts/live_sandbox.py`, `scripts/live_review.py`, `scripts/live_fix_brief.py` and

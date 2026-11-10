@@ -9,6 +9,8 @@ codex-sol.sh's watchdog ends the run once its caller is gone, and launched strai
 it has none, so it runs under a Git bash that waits for it (as `~/sol-pr-review.py` did).
 """
 import datetime
+import glob
+import json
 import os
 import re
 import subprocess
@@ -21,6 +23,8 @@ SOL_SCRIPT = os.path.join(HOME, 'codex-sol.sh')
 GIT_BASH = r'C:\Program Files\Git\bin\bash.exe'
 EFFORT = 'high'   # ~/.claude/CLAUDE.md: high for every Sol run, never lower
 TIMEOUT_S = 75 * 60
+SESSIONS = os.path.join(HOME, '.codex', 'sessions')   # Codex's rollouts, YYYY/MM/DD/rollout-*.jsonl
+FULL = 99   # used percent at which a window counts as the one that ran out
 
 OUT_OF_USAGE = re.compile(r'hit your usage limit', re.I)
 # "try again at 8:55 AM" or "try again at Oct 27th, 2026 12:01 AM", in this PC's time.
@@ -48,6 +52,33 @@ def usage_back(text: str, now: datetime.datetime) -> datetime.datetime | None:
         return datetime.datetime(int(m['year']), month, int(m['day']), h, int(m['m']))
     back = now.replace(hour=h, minute=int(m['m']), second=0, microsecond=0)
     return back if back > now - datetime.timedelta(minutes=1) else back + datetime.timedelta(days=1)
+
+
+def rollout_reset(log: str, sessions: str = SESSIONS) -> datetime.datetime | None:
+    """When Sol's plan resets, from its own run's rollout (`~/.claude/docs/sol.md`, Gotchas):
+    the session id codex-sol.sh logs, that session's newest `rate_limits` record, and the reset
+    of the window that ran out (the later one if both did), in this PC's local time. None if
+    any of that is missing."""
+    m = re.search(r'^session id: ([\w-]+)', log, re.M)
+    if not m:
+        return None
+    found = glob.glob(os.path.join(glob.escape(sessions), '*', '*', '*',
+                                   f'rollout-*-{m[1]}.jsonl'))
+    limits = None
+    for path in found:
+        with open(path, encoding='utf-8', errors='replace') as f:
+            for line in f:
+                if '"rate_limits"' not in line:
+                    continue
+                try:
+                    limits = json.loads(line)['payload']['rate_limits'] or limits
+                except (KeyError, TypeError, ValueError):
+                    continue
+    if not limits:
+        return None
+    full = [w['resets_at'] for w in (limits.get('primary'), limits.get('secondary'))
+            if w and (w.get('used_percent') or 0) >= FULL and w.get('resets_at')]
+    return datetime.datetime.fromtimestamp(max(full)) if full else None
 
 
 def _slash(p: str) -> str:
@@ -81,8 +112,10 @@ class SolCli:
     TimeoutError if it ran past `timeout` seconds."""
 
     def __init__(self, script: str = SOL_SCRIPT, bash: str = GIT_BASH,
-                 timeout_s: int = TIMEOUT_S, run=run_detached, now=datetime.datetime.now):
+                 timeout_s: int = TIMEOUT_S, run=run_detached, now=datetime.datetime.now,
+                 sessions: str = SESSIONS):
         self.script, self.bash, self.timeout_s = script, bash, timeout_s
+        self.sessions = sessions
         self._run, self._now = run, now
 
     def review(self, brief: str, reply: str, workdir: str, out: str) -> str:
@@ -97,7 +130,9 @@ class SolCli:
             raise SolFailed(f'Sol ran past {self.timeout_s // 60} minutes and was stopped.') from None
         said = _read(out) + _read(reply + '.log')
         if code != 0 and OUT_OF_USAGE.search(said):
-            raise SolOutOfUsage(usage_back(said, self._now()))
+            # The rollout's reset first; else the time Sol's error names.
+            raise SolOutOfUsage(rollout_reset(_read(reply + '.log'), self.sessions)
+                                or usage_back(said, self._now()))
         if code != 0:
             tail = ' / '.join(_read(out).strip().splitlines()[-3:])
             raise SolFailed(f"Sol's run failed (codex-sol exit {code}): {tail}")

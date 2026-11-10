@@ -1,5 +1,6 @@
 """The run loop through its command line: `--once`, the continuous mode and `--release`, with
 GitHub, T3 and git faked."""
+import datetime
 import io
 import os
 import tempfile
@@ -7,9 +8,9 @@ import unittest
 
 from queue_runner.cli import main
 from queue_runner.state import JobLog
-from queue_runner.t3 import T3Error
-from tests.fakes import (FakeGitHubForReviews, FakeGitHubWithPulls, FakeToaster, FakeUsage,
-                         full_pr, issue)
+from queue_runner.t3 import Message, T3Error
+from tests.fakes import (FakeGitHubForReviews, FakeGitHubWithPulls, FakeLimits, FakeToaster,
+                         FakeUsage, full_pr, issue)
 from tests.fakes_t3 import FakeGit, FakeReviewGit, FakeSol, FakeT3, decision_reply
 from tests.test_ledger import H2, important, reply
 
@@ -20,7 +21,9 @@ class Stop(Exception):
     pass
 
 
-class RunTest(unittest.TestCase):
+class RunHarness(unittest.TestCase):
+    """A config, a job log and `main` with GitHub, T3 and git faked."""
+
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
@@ -42,19 +45,25 @@ github = "owner/first"
 path = "{self.dir}"
 ''')
         self.log = JobLog(os.path.join(self.dir, 'state', 'jobs.jsonl'))
+        self.limits = FakeLimits()
+        self.clock = None   # the real one
 
     def run_main(self, args, github, t3, git=None, sleep=None, sol=None):
         out = io.StringIO()
         self.toaster = FakeToaster()   # a waiting job toasts: never a real one in tests
         code = main(args + ['--config', self.config], github=github, out=out, t3=t3,
                     git=git or FakeGit(), sleep=sleep or (lambda s: None), sol=sol or FakeSol(),
-                    toaster=self.toaster, usage=FakeUsage())
+                    toaster=self.toaster, usage=FakeUsage(), limits=self.limits,
+                    clock=self.clock, t3_settings=os.path.join(self.dir, 't3.json'))
         return code, out.getvalue()
 
     def runner_log(self):
         with open(os.path.join(self.dir, 'logs', 'runner.log'), encoding='utf-8') as f:
             return f.read()
 
+
+
+class RunTest(RunHarness):
     def test_once_starts_the_picked_build_in_a_t3_worktree_and_records_it(self):
         gh = FakeGitHubWithPulls(issues=[issue(4, 'Red widget', 'Make it red.')],
                                  pulls_by_branch={'claude/red-widget-4': PR})
@@ -326,6 +335,107 @@ path = "{self.dir}"
         self.assertIn('Merges (dry run: nothing merged):', out)
         self.assertEqual(t3.starts, [])
         self.assertEqual([j.kind for j in self.log.jobs()], ['review'])
+
+
+UTC = datetime.timezone.utc
+STOP = datetime.datetime(2026, 11, 8, 7, 34, tzinfo=UTC)
+RESET = datetime.datetime(2026, 11, 9, 11, 0, tzinfo=UTC)
+LIMIT_SAID = "You've hit your weekly limit · resets Nov 9, 7pm (Asia/Singapore)"
+
+
+class LimitRecoveryTest(RunHarness):
+    """A build or fix cut off by a usage limit (ticket 09): it waits until 10 minutes after the
+    reset, then continues in place (about 50k tokens or less) or starts afresh. Fixed clocks."""
+
+    def setUp(self):
+        super().setUp()
+        self.at = STOP
+        self.clock = lambda: self.at
+        self.gh = FakeGitHubWithPulls(issues=[issue(4), issue(5)])
+
+    def limited_build(self, t3, **limits):
+        self.limits = FakeLimits(**limits)
+        t3.messages['mcp:t1'] = [Message('assistant', LIMIT_SAID)]
+        self.run_main(['--once'], self.gh, t3)
+        return self.log.jobs()[0]
+
+    def test_a_limit_stop_is_recorded_with_its_resume_time_and_context(self):
+        job = self.limited_build(FakeT3([(1, 'failed')]), resets={'mcp:t1': RESET},
+                                 contexts={'mcp:t1': 108_633})
+        self.assertEqual((job.outcome, job.exit_code), ('usage-limit', 1))
+        self.assertEqual(job.resume_at, '2026-11-09T11:10:00+00:00')
+        self.assertEqual(job.context, 108_633)
+        self.assertIn('stopped on a usage limit; T3 says it resets at', self.runner_log())
+
+    def test_nothing_else_starts_until_ten_minutes_after_the_reset(self):
+        t3 = FakeT3([(1, 'failed')])
+        self.limited_build(t3, resets={'mcp:t1': RESET}, contexts={'mcp:t1': 20_000})
+        self.at = RESET + datetime.timedelta(minutes=9)
+        _, out = self.run_main(['--once'], self.gh, t3)
+        self.assertEqual(len(t3.starts), 1)   # issue 5 waits too: the limit is the account's
+        self.assertEqual(t3.sends, [])
+        self.assertIn('Claude lane waits: build first#4 was cut off by a usage limit', out)
+
+    def test_a_small_thread_is_continued_in_place_after_the_reset(self):
+        t3 = FakeT3([(1, 'failed'), (0, 'completed')])
+        old = self.limited_build(t3, resets={'mcp:t1': RESET}, contexts={'mcp:t1': 50_000})
+        self.at = RESET + datetime.timedelta(minutes=10)
+        self.run_main(['--once'], self.gh, t3)
+        self.assertEqual(len(t3.starts), 1)
+        [sent] = t3.sends
+        self.assertEqual(sent['thread_id'], 'mcp:t1')
+        self.assertIn('usage limit that stopped you has reset', sent['message'])
+        again = self.log.jobs()[1]
+        self.assertEqual((again.kind, again.issue, again.about, again.thread_id),
+                         ('build', 4, old.id, 'mcp:t1'))
+        self.assertEqual(again.outcome, 'done-no-pr')
+        self.assertEqual(self.log.limited_jobs(), [])
+
+    def test_a_big_thread_restarts_fresh_on_its_branch_at_its_newest_commit(self):
+        t3 = FakeT3([(1, 'failed'), (0, 'completed')])
+        git = FakeGit()
+        git.tips = {'claude/a-ticket-4': 'abc1234def'}
+        self.limits = FakeLimits(contexts={'mcp:t1': 108_633})   # no reset stored
+        t3.messages['mcp:t1'] = [Message('user', 'Go.'), Message('assistant', LIMIT_SAID)]
+        self.run_main(['--once'], self.gh, t3, git)
+        old = self.log.jobs()[0]
+        # No reset known: 5h05m from the stop, then 10 minutes more.
+        self.assertEqual(old.resume_at, '2026-11-08T12:49:00+00:00')
+        self.at = STOP + datetime.timedelta(hours=5, minutes=14)
+        self.run_main(['--once'], self.gh, t3, git)
+        self.assertEqual(len(t3.starts), 1)
+        self.at = STOP + datetime.timedelta(hours=5, minutes=15)
+        self.run_main(['--once'], self.gh, t3, git)
+        self.assertEqual(t3.sends, [])
+        fresh = t3.starts[1]
+        self.assertEqual((fresh['worktree'], fresh['branch'], fresh['title']),
+                         ('abc1234def', 'claude/a-ticket-4', 'Queue runner build: first#4'))
+        self.assertTrue(fresh['message'].startswith('/implement GitHub issue #4 in owner/first'))
+        self.assertIn('## Picking up after a usage limit', fresh['message'])
+        self.assertIn(old.link, fresh['message'])
+        self.assertIn(LIMIT_SAID, fresh['message'])
+        self.assertIn('at `abc1234`', fresh['message'])
+        self.assertEqual(git.freed, [('claude/a-ticket-4', 'C:/t3/worktrees/mcp:t1')])
+        again = self.log.jobs()[1]
+        self.assertEqual((again.about, again.thread_id, again.outcome), (old.id, 'mcp:t2',
+                                                                         'done-no-pr'))
+
+    def test_any_other_failure_is_not_a_limit_stop(self):
+        t3 = FakeT3([(1, 'failed')])
+        t3.messages['mcp:t1'] = [Message('assistant', 'The type checker keeps failing.')]
+        self.run_main(['--once'], self.gh, t3)
+        self.assertEqual(self.log.jobs()[0].outcome, 'failed')
+
+    def test_the_runner_warns_at_start_if_t3_resumes_limited_threads_itself(self):
+        with open(os.path.join(self.dir, 't3.json'), 'w', encoding='utf-8') as f:
+            f.write('{"autoResumeLimitedThreads": true}')
+        _, out = self.run_main(['--once'], self.gh, FakeT3([(0, 'completed')]))
+        self.assertIn('Warning: T3\'s "Resume after usage limits" is on', out)
+        self.assertIn('Resume after usage limits', self.runner_log())
+
+    def test_claude_codes_limit_message_is_enough_when_t3_recorded_nothing(self):
+        job = self.limited_build(FakeT3([(1, 'failed')]))
+        self.assertEqual((job.outcome, job.context), ('usage-limit', None))
 
 
 if __name__ == '__main__':

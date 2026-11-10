@@ -1,0 +1,24 @@
+{
+ "id": "turn-item:provider:claudeAgent:native-item:terminal-failure%3Aprovider-turn%3Aprovider%3AclaudeAgent%3Anative-turn%3Aturn%253Arun-attempt%253Arun%253Arun%25253Athread%25253Amcp%2525253Alaunch%2525253A224d9fdd0490455c641043a2b1e21b674ba028ab2f3b1ab3ce22c2c5f994c066%25253Aordinal%25253A1%253Aattempt%253A1",
+ "threadId": "mcp:launch:224d9fdd0490455c641043a2b1e21b674ba028ab2f3b1ab3ce22c2c5f994c066",
+ "runId": "run:thread:mcp%3Alaunch%3A224d9fdd0490455c641043a2b1e21b674ba028ab2f3b1ab3ce22c2c5f994c066:ordinal:1",
+ "nodeId": "node:run:run%3Athread%3Amcp%253Alaunch%253A224d9fdd0490455c641043a2b1e21b674ba028ab2f3b1ab3ce22c2c5f994c066%3Aordinal%3A1:root",
+ "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Amcp%253Alaunch%253A224d9fdd0490455c641043a2b1e21b674ba028ab2f3b1ab3ce22c2c5f994c066%3Aordinal%3A1",
+ "providerTurnId": "provider-turn:provider:claudeAgent:native-turn:turn%3Arun-attempt%3Arun%3Arun%253Athread%253Amcp%25253Alaunch%25253A224d9fdd0490455c641043a2b1e21b674ba028ab2f3b1ab3ce22c2c5f994c066%253Aordinal%253A1%3Aattempt%3A1",
+ "nativeItemRef": null,
+ "parentItemId": null,
+ "ordinal": 1000035,
+ "status": "failed",
+ "title": "Usage limit reached",
+ "startedAt": "2026-11-08T07:34:13.756Z",
+ "completedAt": "2026-11-08T07:34:13.756Z",
+ "updatedAt": "2026-11-08T07:34:13.756Z",
+ "type": "error",
+ "failure": {
+  "class": "usage_limit",
+  "message": "Claude API rate limit reached. Try again later.",
+  "code": "api_error_429",
+  "retryable": true,
+  "resetAt": "2026-11-09T11:00:00.000Z"
+ }
+}

@@ -48,6 +48,24 @@ class GitCliTest(unittest.TestCase):
         self.assertFalse(os.path.exists(os.path.join(self.wt, 'b.txt')))
         self.assertFalse(self.cli.has_branch(self.repo, 'claude/x-1'))
 
+    def test_a_limited_jobs_branch_is_freed_for_a_fresh_worktree_at_its_tip(self):
+        with open(os.path.join(self.wt, 'b.txt'), 'w') as f:
+            f.write('half done')   # left uncommitted by the thread the limit cut off
+        self.assertEqual(self.cli.free_branch(self.repo, 'claude/x-1', self.wt), self.head)
+        self.assertFalse(self.cli.has_branch(self.repo, 'claude/x-1'))
+        with open(os.path.join(self.wt, 'b.txt')) as f:
+            self.assertEqual(f.read(), 'half done')   # the old worktree keeps it, detached
+        self.assertEqual(git('rev-parse', 'HEAD', cwd=self.wt), self.head)
+        # T3 can make the branch again, at the tip, in a new worktree.
+        git('worktree', 'add', '-q', '-b', 'claude/x-1', self.wt + '2', self.head, cwd=self.repo)
+        # A second try (T3 failed to start the first time) finds the tip it kept.
+        git('worktree', 'remove', '--force', self.wt + '2', cwd=self.repo)
+        git('branch', '-D', 'claude/x-1', cwd=self.repo)
+        self.assertEqual(self.cli.free_branch(self.repo, 'claude/x-1', self.wt), self.head)
+
+    def test_a_branch_never_made_has_no_tip(self):
+        self.assertIsNone(self.cli.free_branch(self.repo, 'claude/none-2', None))
+
     def test_a_worktree_already_gone_counts_as_removed(self):
         self.cli.remove_worktree(self.repo, self.wt, None)
         self.assertTrue(self.cli.remove_worktree(self.repo, self.wt, 'claude/x-1'))

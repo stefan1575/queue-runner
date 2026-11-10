@@ -215,6 +215,33 @@ class FixTest(unittest.TestCase):
         self.assertEqual([j.outcome for j in self.fixes(r)], ['failed'])
         self.assertIsNone(r.next_fix())
 
+    def test_a_round_cut_off_by_a_usage_limit_restarts_fresh_from_its_work_branch(self):
+        import datetime
+        from queue_runner.t3 import Message
+        from tests.fakes import FakeLimits
+        stop = datetime.datetime(2026, 11, 8, 7, 34, tzinfo=datetime.timezone.utc)
+        r = self.blocking(pushes=H3, outcomes=[(1, 'failed'), (0, 'completed')])
+        r.limits = FakeLimits(resets={'mcp:t1': None}, contexts={'mcp:t1': 90_000})
+        r.now = lambda: stop
+        self.t3.messages['mcp:t1'] = [Message('assistant', 'Fixing F1 next.')]
+        r.run_pass()
+        [old] = self.fixes(r)
+        self.assertEqual((old.outcome, old.head), ('usage-limit', H3))
+        # It pushed H3 before the limit, but it's still the PR's one writer: Sol leaves H3 alone.
+        why = r.reviewer.why_not(self.repo, self.gh.pull(self.repo, 20))
+        self.assertIn('cut off by a usage limit', why)
+        self.git.tips = {WORK: H3}
+        r.now = lambda: stop + datetime.timedelta(hours=6)
+        self.assertEqual(r.run_pass(), 'started')
+        fresh = self.t3.starts[1]
+        self.assertEqual((fresh['worktree'], fresh['branch'], fresh['title']),
+                         (H3, WORK, 'Queue runner fix: first#20'))
+        self.assertIn('F1', fresh['message'])   # the fix brief, from review 1 of H2
+        self.assertIn('## Picking up after a usage limit', fresh['message'])
+        self.assertIn('Fixing F1 next.', fresh['message'])
+        again = self.fixes(r)[1]
+        self.assertEqual((again.about, again.sha, again.round), (old.id, H2, 1))
+
     def test_a_round_waiting_for_an_answer_is_the_prs_one_writer(self):
         r = self.blocking(outcomes=[(2, 'waiting')])
         r.run_pass()

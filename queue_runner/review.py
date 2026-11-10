@@ -187,6 +187,8 @@ class Reviewer:
         if job := self.jobs.writer(repo.name, pr.branch):
             return (f'its {job.kind} waits for an answer, and may write to the branch again'
                     if job.outcome == 'waiting' else
+                    f'its {job.kind} was cut off by a usage limit and resumes after '
+                    f'{job.resume_at}' if job.outcome == 'usage-limit' else
                     f'a {job.kind} job is still writing to its branch')
         if why := held(self.jobs, repo, pr.number):
             return why

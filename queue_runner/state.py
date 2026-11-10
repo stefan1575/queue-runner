@@ -36,6 +36,9 @@ REVIEWED = frozenset({'clean', 'blocking', 'stop', 'approach-note'})
 # PR and fetching it).
 FAILED_REVIEW = 'failed'
 OUT_OF_USAGE = 'out-of-usage'
+# A build or fix whose thread stopped on a Claude usage limit (ticket 09): it waits until
+# `resume_at`, then a later job of its kind (`about` it) continues the thread or starts afresh.
+USAGE_LIMIT = 'usage-limit'
 
 # Both lanes write the log from one process: one lock per file.
 _LOCKS: dict[str, threading.Lock] = {}
@@ -111,6 +114,7 @@ class Job:
     answer: str | None = None      # a stop: how Stefan answered (issue-closed, replied)
     about: str | None = None       # a decision: the job it decides on; a continued job: the earlier
     question: str | None = None    # a decision: which question (decisions.QUESTIONS)
+    context: int | None = None     # usage-limit: the thread's context in tokens (None: unknown)
 
     @property
     def open(self) -> bool:
@@ -119,7 +123,7 @@ class Job:
 
 _END_FIELDS = ('thread_id', 'link', 'run_id', 'exit_code', 'status', 'outcome', 'commits', 'pr',
                'worktree', 'error', 'verdict', 'signals', 'run_dir', 'resume_at', 'head',
-               'reason', 'answer')
+               'reason', 'answer', 'context')
 
 
 class JobLog:
@@ -228,11 +232,27 @@ class JobLog:
 
     def writer(self, repo: str, branch: str) -> Job | None:
         """A Claude job that is writing to this branch, or may again: a build or fix still
-        open, or waiting for an answer (until it ends or is released). One writer per PR."""
+        open, waiting for an answer, or cut off by a usage limit and not yet recovered (until
+        it ends or is released). One writer per PR."""
         jobs, _, gone = self._fold()
+        limited = {j.id for j in self._limited(jobs, gone)}
         return next((j for j in jobs if j.kind in ('build', 'fix') and j.repo == repo
-                     and j.branch == branch and (j.open or (j.outcome == 'waiting'
-                                                            and j.id not in gone))), None)
+                     and j.branch == branch and (j.open or j.id in limited or (
+                         j.outcome == 'waiting' and j.id not in gone))), None)
+
+    @staticmethod
+    def _limited(jobs, gone):
+        # A recovery that never reached a thread (not-started, not-sent) doesn't count.
+        recovered = {j.about for j in jobs if j.about and j.kind in ('build', 'fix')
+                     and j.outcome not in (NOT_STARTED, NOT_SENT)}
+        return [j for j in jobs if j.outcome == USAGE_LIMIT and j.id not in gone
+                and j.id not in recovered]
+
+    def limited_jobs(self) -> list[Job]:
+        """Builds and fixes cut off by a usage limit that no later job has picked up (and no
+        release settled), oldest first."""
+        jobs, _, gone = self._fold()
+        return self._limited(jobs, gone)
 
     def open_stops(self, repo: str, number: int) -> list[Job]:
         """Stops filed on this PR that Stefan hasn't answered (or released), oldest first: while

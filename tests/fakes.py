@@ -49,6 +49,9 @@ class FakeGitHubWithPulls(FakeGitHub):
     def pull_for_branch(self, repo, branch):
         return self.pulls_by_branch.get(branch)
 
+    def issue(self, github, number):
+        return next(i for i in self.issues if i.number == number)
+
 
 class FakeGitHubForReviews(FakeGitHubWithPulls):
     """Also what the Sol lane reads (a PR's checks, conflicts, review replies, its issues and
@@ -194,3 +197,18 @@ class FakeUsage:
         if isinstance(got, Exception):
             raise got
         return got
+
+
+class FakeLimits:
+    """Plays T3's database for limit recovery: `resets` maps a thread id to the reset T3 stored
+    for its latest run's limit stop (None: a stop with no reset), `contexts` a thread id to its
+    context in tokens. Tests never read the real database."""
+
+    def __init__(self, resets=None, contexts=None):
+        self.resets, self.contexts = dict(resets or {}), dict(contexts or {})
+
+    def limit_reset(self, thread_id, run_id):
+        return (thread_id in self.resets), self.resets.get(thread_id)
+
+    def context_tokens(self, thread_id):
+        return self.contexts.get(thread_id)

@@ -38,7 +38,8 @@ class SolCliTest(unittest.TestCase):
 
     def review(self, run):
         sol = SolCli(script='C:/Users/me/codex-sol.sh', bash='C:/Git/bin/bash.exe', run=run,
-                     now=lambda: datetime.datetime(2026, 11, 9, 8, 0))
+                     now=lambda: datetime.datetime(2026, 11, 9, 8, 0),
+                     sessions=os.path.join(self.dir, 'no-sessions'))
         return sol.review(os.path.join(self.dir, 'brief.md'), os.path.join(self.dir, 'reply.md'),
                           'C:\\wt\\pr7', os.path.join(self.dir, 'run.out'))
 
@@ -67,6 +68,29 @@ class SolCliTest(unittest.TestCase):
         with self.assertRaises(SolOutOfUsage) as e:
             self.review(FakeRun(code=1, reply=None, log=log))
         self.assertEqual(e.exception.back, datetime.datetime(2026, 11, 9, 8, 55))
+
+    def test_out_of_usage_reads_the_reset_from_the_runs_own_rollout(self):
+        import json
+        sid = '01a1c120-8a26-7050-a9a0-d72e3a7ef6b5'
+        day = os.path.join(self.dir, 'sessions', '2026', '11', '09')
+        os.makedirs(day)
+        reset = int(datetime.datetime(2026, 11, 9, 13, 20).timestamp())
+        records = [{'payload': {'rate_limits': {'primary': {'used_percent': 40.0,
+                                                            'resets_at': 1}}}},
+                   {'payload': {'rate_limits': {
+                       'primary': {'used_percent': 100.0, 'resets_at': reset},
+                       'secondary': {'used_percent': 61.0, 'resets_at': reset + 9999}}}}]
+        with open(os.path.join(day, f'rollout-2026-11-09T08-00-00-{sid}.jsonl'), 'w') as f:
+            f.write(''.join(json.dumps(r) + '\n' for r in records))
+        log = (f"session id: {sid}\n--------\n"
+               "ERROR: You've hit your usage limit. Upgrade or try again at 8:55 AM.\n")
+        sol = SolCli(script='s.sh', bash='bash.exe', run=FakeRun(code=1, reply=None, log=log),
+                     now=lambda: datetime.datetime(2026, 11, 9, 8, 0),
+                     sessions=os.path.join(self.dir, 'sessions'))
+        with self.assertRaises(SolOutOfUsage) as e:
+            sol.review(os.path.join(self.dir, 'brief.md'), os.path.join(self.dir, 'reply.md'),
+                       'C:/wt', os.path.join(self.dir, 'run.out'))
+        self.assertEqual(e.exception.back, datetime.datetime(2026, 11, 9, 13, 20))
 
     def test_a_run_past_its_time_is_stopped_and_failed(self):
         def run(cmd, out_path, timeout):

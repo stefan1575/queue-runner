@@ -100,8 +100,25 @@ def _knob(config, args, out) -> int:
     return 0
 
 
+def _dry_run_limited(config, out, log_line) -> bool:
+    """A job cut off by a usage limit comes first: when, and in place or fresh."""
+    from .limits import in_place
+    limited = _jobs(config).limited_jobs()
+    if not limited:
+        return False
+    j = limited[0]
+    how = 'continue its thread in place' if in_place(j.context) else 'restart it in a fresh thread'
+    line = (f'dry run: {j.kind} {j.repo}#{j.issue} was cut off by a usage limit; after '
+            f'{j.resume_at} the runner would {how} ({j.link or j.thread_id}), and starts no '
+            'other Claude job before')
+    log_line(line)
+    print(line, file=out)
+    return True
+
+
 def _dry_run(config, github, git, out, log_line, t3=None, gate=None) -> int:
-    if not _dry_run_decision(config, github, t3, out, log_line) and \
+    if not _dry_run_limited(config, out, log_line) and \
+            not _dry_run_decision(config, github, t3, out, log_line) and \
             not _dry_run_fix(config, github, git, out, log_line):
         _dry_run_build(config, github, out, log_line)
     if gate is not None:
@@ -275,7 +292,8 @@ def _review(config, github, git, sol, value, out, log_line, toaster=None) -> int
 
 
 def main(argv=None, github=None, out=None, t3=None, git=None, sleep=time.sleep,
-         sol=None, toaster=None, usage=None, clock=None) -> int:
+         sol=None, toaster=None, usage=None, clock=None, limits=None,
+         t3_settings=None) -> int:
     out = out or sys.stdout
     parser = argparse.ArgumentParser(prog='queue_runner')
     parser.add_argument('--once', action='store_true', help='one pass, then exit')
@@ -344,8 +362,13 @@ def main(argv=None, github=None, out=None, t3=None, git=None, sleep=time.sleep,
     if t3 is None:
         from .t3 import T3Cli
         t3 = T3Cli()
+    from .limits import T3Store, auto_resume_warning
+    if limits is None:
+        limits = T3Store()
     runner = Runner(config, github=github, t3=t3, git=git, out=out, log_line=log_line, sol=sol,
-                    toaster=toaster, gate=gate)
+                    toaster=toaster, gate=gate, limits=limits, now=clock)
+    if warning := auto_resume_warning(*([t3_settings] if t3_settings else [])):
+        runner.say(f'Warning: {warning}')
     try:
         with runner_lock(config.state_dir):
             if args.once:
