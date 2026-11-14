@@ -1,0 +1,55 @@
+@import "tailwindcss";
+
+/* PROTOTYPE (throwaway): the queue runner's dashboard on fake data. */
+
+@theme {
+  --font-sans: "Instrument Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  --color-page: #f5f6f8;
+  --color-surface: #ffffff;
+  --color-ink: #15171c;
+  --color-ink-2: #3b3f4a;
+  --color-mute: #6a6f7c;
+  --color-faint: #9aa0ac;
+  --color-line: #e3e5ea;
+  --color-line-2: #eef0f3;
+
+  /* The two lanes and Stefan: each always means the same thing. */
+  --color-builder: #5546d6;
+  --color-builder-soft: #eeecfd;
+  --color-reviewer: #0b7f78;
+  --color-reviewer-soft: #e3f4f2;
+  --color-you: #a35200;
+  --color-you-soft: #fff1dc;
+  --color-you-line: #f3cf98;
+
+  --color-ok: #177245;
+  --color-ok-soft: #e4f4ea;
+  --color-warn: #8a5a00;
+  --color-warn-soft: #fbf3dc;
+  --color-bad: #b4233d;
+  --color-bad-soft: #fbe8eb;
+}
+
+html, body, #root { height: 100%; }
+body {
+  margin: 0;
+  background: var(--color-page);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: "ss01", "tnum";
+}
+:focus-visible { outline: 2px solid var(--color-builder); outline-offset: 2px; border-radius: 6px; }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+
+@keyframes pulse-ring { 0% { box-shadow: 0 0 0 0 currentColor; } 70% { box-shadow: 0 0 0 6px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
+.live-dot { animation: pulse-ring 2s ease-out infinite; }
+
+@keyframes slide-in { from { transform: translateX(16px); opacity: 0; } to { transform: none; opacity: 1; } }
+.sheet-in { animation: slide-in 160ms ease-out; }
+@keyframes slide-in-left { from { transform: translateX(-16px); opacity: 0; } to { transform: none; opacity: 1; } }
+.sheet-in-left { animation: slide-in-left 160ms ease-out; }
