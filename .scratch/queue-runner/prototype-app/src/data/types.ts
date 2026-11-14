@@ -1,17 +1,16 @@
-// The dashboard's read model: a projection of the runner's job log, GitHub and the usage gate
-// (prior-art-and-ui.md §4). Fake here; every field is something the runner already knows.
+// The dashboard's read model: a projection of the runner's job log, GitHub, the usage gate and the
+// two providers' usage. Fake here; every field is something the runner already knows or can read.
 
 export type RepoId = string;
 
 export interface Repo {
-  id: RepoId; // the config.toml name
-  github: string; // owner/name
+  id: RepoId;
+  github: string;
   path: string;
   base: string;
   merge: "stefan" | "runner";
-  issues: "github" | "local";
   liveDoc?: string;
-  readable: boolean; // GitHub answered on the last pass
+  readable: boolean;
 }
 
 export type JobKind = "build" | "fix" | "conflict" | "decision" | "live" | "review" | "merge";
@@ -19,24 +18,32 @@ export type JobKind = "build" | "fix" | "conflict" | "decision" | "live" | "revi
 export interface LaneJob {
   kind: JobKind;
   repo: RepoId;
-  ref: string; // "#212" or "PR #210"
-  href?: string; // where it lives in this app
+  ref: string;
+  pr?: number;
   title: string;
-  since: string; // clock time
-  elapsed: string;
+  since: string;
+  minutes: number; // elapsed; ticks while the page is live
   sha?: string;
   round?: number;
-  thread?: string; // T3 thread title
+  thread?: string;
 }
 
-export type LaneStatus = "working" | "idle" | "waiting" | "paused" | "unavailable";
+export type LaneStatus = "working" | "idle" | "waiting" | "stopping" | "stopped" | "unavailable";
+
+// One thing that decides whether the lane may start its next job.
+export interface Gate {
+  label: string;
+  ok: boolean;
+  note?: string;
+}
 
 export interface Lane {
   status: LaneStatus;
   job?: LaneJob;
-  headline: string; // one line: what it's doing or waiting for
-  next: string; // the concrete next condition
+  headline: string;
+  next: string;
   until?: string;
+  gates: Gate[];
 }
 
 export type AskKind = "merge" | "decide" | "answer" | "live" | "repair";
@@ -46,38 +53,34 @@ export interface Ask {
   kind: AskKind;
   repo: RepoId;
   ref: string;
-  prHref?: string;
+  pr?: number;
   title: string;
   why: string[];
   options?: { label: string; means: string; recommended?: boolean }[];
-  blocks?: string[]; // what it holds up
-  since: string; // "2 h"
-  action: { label: string; where: string }; // where = GitHub, T3...
+  unblocks?: number;
+  since: string;
+  action: string;
 }
 
-export type IssueState = "ready" | "in-progress" | "blocked" | "held" | "not-ready" | "done";
+export type IssueState = "ready" | "building" | "review" | "fixing" | "you" | "merge" | "blocked" | "not-ready" | "done";
+
+export interface Feature {
+  id: string; // "repo#n" of the spec issue, or "repo:none"
+  repo: RepoId;
+  n?: number;
+  title: string;
+}
 
 export interface Issue {
   repo: RepoId;
   n: number;
   title: string;
+  feature?: string;
   state: IssueState;
   reason?: string;
   blockedBy?: string[]; // "repo#n"
   pr?: number;
 }
-
-export type PrPhase =
-  | "building"
-  | "awaiting-review"
-  | "reviewing"
-  | "fixing"
-  | "ready"
-  | "merging"
-  | "merged"
-  | "closed";
-
-export type LiveState = "not-required" | "pending" | "running" | "live" | "needs-attention" | "unknown" | "assumed";
 
 export type Tone = "ok" | "warn" | "bad" | "info" | "run" | "you";
 
@@ -99,7 +102,6 @@ export interface TEvent {
   title: string;
   detail?: string;
   findings?: Finding[];
-  link?: string;
   running?: boolean;
 }
 
@@ -110,28 +112,23 @@ export interface PR {
   issue: number;
   branch: string;
   head: string;
-  phase: PrPhase;
-  gate?: string; // the merge gate's summary when ready
-  held?: string; // overlay: why it's held
-  live?: LiveState;
-  next: string; // what happens next / why it waits
-  ask?: string; // ask id
-  commits: number;
-  files: number;
+  phase: "building" | "awaiting-review" | "reviewing" | "fixing" | "ready" | "merged" | "closed";
+  gate?: string;
+  held?: string;
+  live?: "pending" | "live" | "needs-attention" | "unknown";
+  next: string;
+  ask?: string;
   timeline: TEvent[];
 }
 
-export interface ActivityRow {
-  day: "Today" | "Yesterday" | "Wed 12 Nov";
+export interface DigestRow {
   at: string;
   actor: TEvent["actor"];
   repo: RepoId;
-  kind: TEvent["kind"];
   text: string;
-  ref?: string;
-  href?: string;
-  outcome: string; // the raw job-log outcome
+  pr?: number;
   tone: Tone;
+  group: "merged" | "reviewed" | "built" | "stopped" | "recovered";
 }
 
 export interface Window {
@@ -139,24 +136,27 @@ export interface Window {
   resets: string;
 }
 
-export interface Usage {
-  readable: boolean;
-  error?: string;
-  readAt: string;
+export interface Meter {
   five: Window;
-  week: Window & { releaseAt: string };
-  costs: { kind: string; five: number; week: number; source: "default" | "learned"; n: number }[];
-  sol: { available: boolean; until?: string; source?: string };
+  week: Window;
+  readAt: string;
+  error?: string;
+}
+
+export interface Connection {
+  id: string;
+  name: string;
+  role: string;
+  ok: boolean;
+  status: string;
+  how: [string, string][];
 }
 
 export interface Runner {
   process: "running" | "starting" | "restarting" | "stopped";
-  pid?: number;
   since: string;
   note?: string;
-  connection: "live" | "stale";
   lastSeen: string;
-  claudePaused: boolean;
   reserve: number;
   github: { ok: boolean; note?: string };
 }
@@ -166,10 +166,11 @@ export interface World {
   runner: Runner;
   claude: Lane;
   sol: Lane;
-  usage: Usage;
+  usage: { claude: Meter & { releaseAt: string }; chatgpt: Meter };
   asks: Ask[];
+  features: Feature[];
   issues: Issue[];
   prs: PR[];
-  activity: ActivityRow[];
-  nextClaude: { text: string; href?: string } | null;
+  digest: { since: string; rows: DigestRow[] };
+  connections: Connection[];
 }

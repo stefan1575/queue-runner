@@ -11,7 +11,7 @@ import { cn } from "@/lib/cn";
 import { useStore } from "@/store";
 import { Button } from "./ui";
 
-export function RepoPicker({ variant }: { variant: "content" | "sidebar" }) {
+export function RepoPicker() {
   const { world, repo, setRepo } = useStore();
   const [open, setOpen] = useState(false);
   const [adding, setAdding] = useState(false);
@@ -24,21 +24,11 @@ export function RepoPicker({ variant }: { variant: "content" | "sidebar" }) {
       <Popover.Root open={open} onOpenChange={setOpen}>
         <Popover.Trigger
           aria-label={`Repository scope: ${current ? current.github : "All repositories"}`}
-          className={cn(
-            "group flex min-w-0 items-center gap-2.5 rounded-lg border border-line bg-surface text-left hover:bg-page data-[state=open]:bg-page",
-            variant === "content" ? "max-w-full py-1.5 pl-1.5 pr-2.5" : "w-full py-1.5 pl-1.5 pr-2",
-          )}
+          className="flex h-7 min-w-0 items-center gap-1.5 rounded-md px-2 text-[13px] font-medium hover:bg-sunk data-[state=open]:bg-sunk"
         >
-          <span className={cn("flex size-7 shrink-0 items-center justify-center rounded-md text-[12px] font-semibold", current ? "bg-line-2 text-ink-2" : "bg-ink text-white")}>
-            {current ? idx : <Layers className="size-3.5" />}
-          </span>
-          <span className="min-w-0 flex-1 leading-tight">
-            <span className="block truncate text-[13.5px] font-semibold">{current ? current.id : "All repositories"}</span>
-            <span className="block truncate text-[11.5px] text-mute">
-              {current ? current.github.split("/")[0] : `${world.repos.length} served, in priority order`}
-            </span>
-          </span>
-          <ChevronsUpDown className="size-4 shrink-0 text-faint" />
+          {current ? <span className="text-faint tabular-nums">{idx}</span> : <Layers className="size-3.5 text-faint" />}
+          <span className="truncate">{current ? current.id : "All repos"}</span>
+          <ChevronsUpDown className="size-3.5 shrink-0 text-faint" />
         </Popover.Trigger>
         <Popover.Portal>
           <Popover.Content
@@ -120,7 +110,7 @@ function AddRepo({ open, onOpenChange }: { open: boolean; onOpenChange: (o: bool
 
   const add = () => {
     setWorld((w) => {
-      const r = { id: name, github: `RoyalBullyAgency-RBA/${name}`, path: folder, base: "main", merge, issues: "github" as const, liveDoc: live || undefined, readable: true };
+      const r = { id: name, github: `RoyalBullyAgency-RBA/${name}`, path: folder, base: "main", merge, liveDoc: live || undefined, readable: true };
       w.repos.splice(Math.min(pos - 1, w.repos.length), 0, r);
       return w;
     });

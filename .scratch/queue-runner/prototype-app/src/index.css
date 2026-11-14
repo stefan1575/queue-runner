@@ -1,55 +1,72 @@
 @import "tailwindcss";
 
-/* PROTOTYPE (throwaway): the queue runner's dashboard on fake data. */
+/* PROTOTYPE (throwaway): the queue runner's dashboard on fake data.
+   Colour carries ownership: rose = needs you, amber = Claude, blue = Sol / ChatGPT. */
 
 @theme {
-  --font-sans: "Instrument Sans", ui-sans-serif, system-ui, sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  --font-sans: "Geist", ui-sans-serif, system-ui, "Segoe UI", sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, monospace;
 
-  --color-page: #f5f6f8;
-  --color-surface: #ffffff;
-  --color-ink: #15171c;
-  --color-ink-2: #3b3f4a;
-  --color-mute: #6a6f7c;
-  --color-faint: #9aa0ac;
-  --color-line: #e3e5ea;
-  --color-line-2: #eef0f3;
+  --color-page: var(--c-page);
+  --color-surface: var(--c-surface);
+  --color-sunk: var(--c-sunk);
+  --color-ink: var(--c-ink);
+  --color-ink-2: var(--c-ink-2);
+  --color-mute: var(--c-mute);
+  --color-faint: var(--c-faint);
+  --color-line: var(--c-line);
+  --color-line-2: var(--c-line-2);
+  --color-accent: var(--c-accent);
+  --color-builder: var(--c-claude);
+  --color-builder-soft: var(--c-claude-soft);
+  --color-reviewer: var(--c-sol);
+  --color-reviewer-soft: var(--c-sol-soft);
+  --color-you: var(--c-you);
+  --color-you-soft: var(--c-you-soft);
+  --color-you-line: var(--c-you-line);
+  --color-ok: var(--c-ok);
+  --color-ok-soft: var(--c-ok-soft);
+  --color-warn: var(--c-warn);
+  --color-warn-soft: var(--c-warn-soft);
+  --color-bad: var(--c-bad);
+  --color-bad-soft: var(--c-bad-soft);
+}
 
-  /* The two lanes and Stefan: each always means the same thing. */
-  --color-builder: #5546d6;
-  --color-builder-soft: #eeecfd;
-  --color-reviewer: #0b7f78;
-  --color-reviewer-soft: #e3f4f2;
-  --color-you: #a35200;
-  --color-you-soft: #fff1dc;
-  --color-you-line: #f3cf98;
-
-  --color-ok: #177245;
-  --color-ok-soft: #e4f4ea;
-  --color-warn: #8a5a00;
-  --color-warn-soft: #fbf3dc;
-  --color-bad: #b4233d;
-  --color-bad-soft: #fbe8eb;
+:root {
+  --c-page: #f6f7f6; --c-surface: #ffffff; --c-sunk: #eef0ee; --c-ink: #161b1a; --c-ink-2: #34403d;
+  --c-mute: #66706d; --c-faint: #9aa4a1; --c-line: #dfe3e1; --c-line-2: #eceeed; --c-accent: #155e57;
+  --c-claude: #b4690e; --c-claude-soft: #fbf0e0; --c-sol: #3d5f9e; --c-sol-soft: #e8eef9;
+  --c-you: #c23a55; --c-you-soft: #fbe9ed; --c-you-line: #efc3cd;
+  --c-ok: #217a4b; --c-ok-soft: #e3f3ea; --c-warn: #966400; --c-warn-soft: #fbf3dc; --c-bad: #b42318; --c-bad-soft: #fde9e6;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --c-page: #0f1312; --c-surface: #161b1a; --c-sunk: #1d2423; --c-ink: #e8eeec; --c-ink-2: #c3ccc9;
+    --c-mute: #94a19d; --c-faint: #6b7774; --c-line: #2a3331; --c-line-2: #222a29; --c-accent: #5cc2b5;
+    --c-claude: #e7a24c; --c-claude-soft: #34281a; --c-sol: #8fb0ec; --c-sol-soft: #1c2638;
+    --c-you: #f0758d; --c-you-soft: #3a1d25; --c-you-line: #5a2a36;
+    --c-ok: #5fcb8f; --c-ok-soft: #173326; --c-warn: #e2b54f; --c-warn-soft: #33290f; --c-bad: #f2836f; --c-bad-soft: #3a1c18;
+    color-scheme: dark;
+  }
 }
 
 html, body, #root { height: 100%; }
 body {
   margin: 0;
-  background: var(--color-page);
-  color: var(--color-ink);
+  background: var(--c-page);
+  color: var(--c-ink);
   font-family: var(--font-sans);
-  font-size: 14px;
-  line-height: 1.5;
+  font-size: 13px;
+  line-height: 1.45;
+  font-variant-numeric: tabular-nums;
   -webkit-font-smoothing: antialiased;
-  font-feature-settings: "ss01", "tnum";
 }
-:focus-visible { outline: 2px solid var(--color-builder); outline-offset: 2px; border-radius: 6px; }
+:focus-visible { outline: 2px solid var(--c-accent); outline-offset: 1px; border-radius: 4px; }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
 
-@keyframes pulse-ring { 0% { box-shadow: 0 0 0 0 currentColor; } 70% { box-shadow: 0 0 0 6px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
+@keyframes pulse-ring { 0% { box-shadow: 0 0 0 0 currentColor; } 70% { box-shadow: 0 0 0 5px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
 .live-dot { animation: pulse-ring 2s ease-out infinite; }
-
 @keyframes slide-in { from { transform: translateX(16px); opacity: 0; } to { transform: none; opacity: 1; } }
 .sheet-in { animation: slide-in 160ms ease-out; }
-@keyframes slide-in-left { from { transform: translateX(-16px); opacity: 0; } to { transform: none; opacity: 1; } }
-.sheet-in-left { animation: slide-in-left 160ms ease-out; }
+@keyframes flash { from { background: var(--c-sunk); } to { background: transparent; } }
+.flash { animation: flash 900ms ease-out; }
