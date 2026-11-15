@@ -21,9 +21,9 @@
     sentence), unread ones marked, and the picked one open on the right as a briefing that
     still makes sense a week later: the story down the left, the ask standing beside it. A row
     reads like a thread in T3's sidebar: the repository and its mark, then the tag, then the
-    title. An ask can be snoozed out of the list for a while. One you've decided moves to the
-    Decided group at the foot of the list, which folds to one line, until the runner is
-    through with it: "Runner's turn" until a lane takes it up, then "Working".
+    title. Two groups sit at the foot of the list, each folding to one line: Snoozed (out of
+    the list until a time you chose, each with its Unsnooze button) and Decided (until the
+    runner is through with it: "Runner's turn" until a lane takes it up, then "Working").
   - A point in time is written whole, as he asked: November 15, 2026 Sunday 1:14pm.
   - Nothing moves by itself.
   - Colour is state and nothing else: blue is yours, amber is working, green is done or healthy,
@@ -208,7 +208,6 @@ body.page-inbox .stage { padding-bottom: 24px; }
 .kind-tag .i { width: 15px; height: 15px; stroke-width: 2; }
 .kind-tag.broken { background: var(--bad-wash); color: var(--bad); }
 .kind-tag.quiet { background: none; box-shadow: inset 0 0 0 1px var(--line); color: var(--mute); font-weight: 600; }
-.mail-sep { padding: 16px 14px 6px; font-size: 14px; color: var(--dim); }
 .mrow.quiet .m2 b { color: var(--mute); }
 .mrow.quiet .m3 { color: var(--dim); }
 .mrow.quiet[aria-current="true"] { box-shadow: inset 0 0 0 1px var(--line); }
@@ -221,17 +220,21 @@ body.page-inbox .stage { padding-bottom: 24px; }
 .pulse { width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex: none; animation: pulse 1.4s ease-in-out infinite; }
 @keyframes pulse { 50% { opacity: .25; } }
 @media (prefers-reduced-motion: reduce) { .pulse { animation: none; } }
-/* what you've decided, at the foot of the list until the runner is through with it; folds to one line */
-.decided { flex: none; display: flex; flex-direction: column; max-height: 45%; min-height: 0; border-top: 1px solid var(--line-soft); }
-.decided-head { flex: none; display: flex; align-items: center; gap: 8px; width: 100%; padding: 12px 20px; background: none; border: 0; cursor: pointer; text-align: left; font-size: 14px; color: var(--mute); }
-.decided-head:hover { background: var(--hover); color: var(--ink); }
-.decided-head .i { width: 16px; height: 16px; transition: transform .15s; }
-.decided-head[aria-expanded="false"] .i { transform: rotate(-90deg); }
-.decided-head b { font-weight: 600; color: var(--ink-2); }
-.decided-head .n { margin-left: auto; display: inline-flex; align-items: center; gap: 7px; }
-.decided-head .pulse { color: var(--run); }
-.decided ol { overflow-y: auto; scrollbar-width: thin; padding: 0 8px 8px; }
-.decided .mrow .m2 b { color: var(--ink-2); }
+/* the groups at the foot of the list, Snoozed and Decided; each folds to one line */
+.fold { flex: none; display: flex; flex-direction: column; max-height: 40%; min-height: 0; border-top: 1px solid var(--line-soft); }
+.fold-head { flex: none; display: flex; align-items: center; gap: 8px; width: 100%; padding: 12px 20px; background: none; border: 0; cursor: pointer; text-align: left; font-size: 14px; color: var(--mute); }
+.fold-head:hover { background: var(--hover); color: var(--ink); }
+.fold-head .i { width: 16px; height: 16px; transition: transform .15s; }
+.fold-head[aria-expanded="false"] .i { transform: rotate(-90deg); }
+.fold-head b { font-weight: 600; color: var(--ink-2); }
+.fold-head .n { margin-left: auto; display: inline-flex; align-items: center; gap: 7px; }
+.fold-head .pulse { color: var(--run); }
+.fold ol { overflow-y: auto; scrollbar-width: thin; padding: 0 8px 8px; }
+.fold .mrow .m2 b { color: var(--ink-2); }
+.fold + .fold { border-top-color: var(--line-soft); }
+.has-wake { position: relative; }
+.has-wake .mrow .m1 { padding-right: 96px; }
+.wake { position: absolute; top: 8px; right: 10px; }
 
 /* the briefing */
 .letter { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow-y: auto; scrollbar-width: thin; container-type: inline-size; }
@@ -751,9 +754,9 @@ function notices() {
 // yours (each kind has its icon), what it is, the situation in a sentence, how long it has waited.
 // The runner lists them in the order they're worth taking. One you haven't opened is marked
 // unread. The picked one is open on the right as a briefing that still makes sense a week later.
-// Under the waiting ones: the snoozed (out of the list until a time you chose; they still hold
-// their work up). At the foot, folding: the ones you've decided, until the runner is through with
-// them, so "handled" and "still held" can be told apart.
+// At the foot, two groups that fold: the snoozed (out of the list until a time you chose; they
+// still hold their work up, and each can be unsnoozed from its row) and the decided (until the
+// runner is through with them, so "handled" and "still held" can be told apart).
 const KIND_ICON = { stuck: ICON.stuck, decision: ICON.decision, merge: ICON.merge, broken: ICON.broken };
 
 // Read and snoozed are kept in this browser while the page is a prototype. The real ones go
@@ -786,7 +789,6 @@ function pickAsk() {
 const laneOn = (a) => (snap.lanes || []).find((l) => l.state === "working" && l.job && l.job.repo === a.repo && (l.job.ref === a.ref || (a.pr && l.job.pr === a.pr)));
 function kindTag(a) {
   if (a.answered) return laneOn(a) ? `<span class="kind-tag run"><i class="pulse"></i>Working</span>` : `<span class="kind-tag quiet">${ICON.check}Runner's turn</span>`;
-  if (snoozedUntil(a)) return `<span class="kind-tag quiet">${ICON.snooze}Snoozed</span>`;
   return `<span class="kind-tag${a.kind === "broken" ? " broken" : ""}">${KIND_ICON[a.kind] || ""}${esc(askWords(a)[0])}</span>`;
 }
 
@@ -805,24 +807,30 @@ function inbox() {
     const zz = snoozedUntil(a), quiet = !!(a.answered || zz), unread = !quiet && !isRead(a);
     const line = a.answered ? `You said "${a.answered.said}". ${doing(a)}` : zz ? `Back ${stamp(zz)}` : a.situation || a.question;
     const when = a.answered ? a.answered.at : a.since;
-    return `<li><button class="mrow${zz ? " quiet" : ""}${unread ? " unread" : ""}" data-act="ask" data-id="${esc(a.id)}" aria-current="${a === cur}">
+    return `<li${zz ? ' class="has-wake"' : ""}><button class="mrow${zz ? " quiet" : ""}${unread ? " unread" : ""}" data-act="ask" data-id="${esc(a.id)}" aria-current="${a === cur}">
       <span class="m1">${repoMark(a.repo)}${kindTag(a)}
-        <span class="ma" title="${a.answered ? "You answered" : "Waiting since"} ${esc(stamp(when))}">${esc(ago(when))}</span></span>
+        ${zz ? "" : `<span class="ma" title="${a.answered ? "You answered" : "Waiting since"} ${esc(stamp(when))}">${esc(ago(when))}</span>`}</span>
       <span class="m2">${unread ? `<i class="dot" title="Unread"></i>` : ""}<b>${esc(a.subject)}</b><span>${esc(a.ref)}</span></span>
-      <span class="m3">${esc(line)}</span></button></li>`;
+      <span class="m3">${esc(line)}</span></button>${zz ? `<button class="btn sm wake" data-act="wake" data-id="${esc(a.id)}">Unsnooze</button>` : ""}</li>`;
   };
   const oldest = open.reduce((m, a) => (!m || ms(a.since) < ms(m.since) ? a : m), null);
   const unread = open.filter((a) => !isRead(a)).length;
   const count = open.length ? `<b>${open.length} waiting on you</b><span>${unread ? `${unread} unread, ` : ""}oldest ${esc(ago(oldest.since))}</span>` : `<b>Nothing waiting</b>`;
-  const folded = recall("decided") === "folded";
+  // A group at the foot of the list that folds to one line, remembered in this browser.
+  const group = (id, name, xs, hint, mark = "") => {
+    if (!xs.length) return "";
+    const folded = recall(id) === "folded";
+    return `<div class="fold">
+      <button class="fold-head" data-act="fold" data-id="${id}" aria-expanded="${!folded}" title="${esc(hint)}">${ICON.chevron}<b>${name}</b>
+        <span class="n">${mark}${xs.length}</span></button>
+      ${folded ? "" : `<ol aria-label="${name}">${xs.map(row).join("")}</ol>`}</div>`;
+  };
   const working = answered.filter(laneOn).length;
-  const decided = answered.length ? `<div class="decided">
-      <button class="decided-head" data-act="decided" aria-expanded="${!folded}">${ICON.chevron}<b>Decided</b>
-        <span class="n">${working ? `<i class="pulse" title="${working} being worked on"></i>` : ""}${answered.length}</span></button>
-      ${folded ? "" : `<ol aria-label="Decided">${answered.map(row).join("")}</ol>`}</div>` : "";
   const list = `<div class="mail-list"><p class="mail-count">${count}</p>
-    <ol class="mail-rows" data-scroll="asks" aria-label="Waiting on you">${open.map(row).join("")}
-      ${snoozed.length ? `<li class="mail-sep">Snoozed. Still holding ${snoozed.length === 1 ? "its" : "their"} work up.</li>${snoozed.map(row).join("")}` : ""}</ol>${decided}</div>`;
+    <ol class="mail-rows" data-scroll="asks" aria-label="Waiting on you">${open.map(row).join("")}</ol>
+    ${group("snoozed", "Snoozed", snoozed, "Out of the list until the time you chose. They still hold their work up.")}
+    ${group("decided", "Decided", answered, "You've answered these. They stay until the runner is through with them.",
+      working ? `<i class="pulse" title="${working} being worked on"></i>` : "")}</div>`;
 
   let right;
   if (cur) right = letter(cur);
@@ -841,7 +849,7 @@ function inbox() {
 function tools(a) {
   if (a.answered) return "";
   const id = esc(a.id);
-  if (snoozedUntil(a)) return `<span class="letter-tools"><button class="btn sm" data-act="wake" data-id="${id}">${ICON.snooze}Bring it back now</button></span>`;
+  if (snoozedUntil(a)) return `<span class="letter-tools"><button class="btn sm" data-act="wake" data-id="${id}">${ICON.snooze}Unsnooze</button></span>`;
   const menu = ui.pop === "snooze" ? `<div class="pop right" role="menu" aria-label="Snooze">
       <p class="pop-label">Out of the list until then. It still holds its work up.</p>
       ${snoozeChoices().map(([label, t]) => `<button class="mi" role="menuitem" data-act="snooze" data-id="${id}" data-until="${t.toISOString()}"><span class="two"><b>${label}</b><span>${esc(stamp(t.toISOString()))}</span></span></button>`).join("")}</div>` : "";
@@ -1339,7 +1347,7 @@ document.addEventListener("click", (e) => {
     }
     case "snooze": setSnooze(d.id, d.until); ui.pop = null; if (ui.ask === d.id) ui.ask = null; break;
     case "wake": setSnooze(d.id, null); break;
-    case "decided": remember("decided", recall("decided") === "folded" ? "open" : "folded"); break;
+    case "fold": remember(d.id, recall(d.id) === "folded" ? "open" : "folded"); break;
     case "view": ui.view = d.view; remember("view", d.view); break;
     case "stop": ui.pop = null; send([{ lane: d.lane, stop: d.how || null }]); return;
     case "all": {

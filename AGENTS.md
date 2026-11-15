@@ -614,9 +614,9 @@ threads that need Stefan, so the runner toasts instead.
 `dashboard/` (ticket 18; Stefan, 2026-11-15). **Three pages do three jobs** (Stefan, 2026-11-15,
 after four takes that put everything on one page): **Overview** is the first glance, **Inbox** is
 what waits on him ("Needs you" before; the name is his), **Queue** is the work. Activity, Usage
-and Settings follow. **Only the Inbox is being rebuilt, and it isn't agreed yet:** Overview still
-shows the two lanes and Queue the work list and pyramid, as they were, each marked "Not rebuilt
-yet"; both are pinned until the Inbox is agreed (tickets 20 and 21). Its frame is the one Stefan asked
+and Settings follow. **The Inbox is agreed** (Stefan, 2026-11-15, after takes 5 to 7, kept in
+`dashboard/earlier/`). Overview still shows the two lanes and Queue the work list and pyramid,
+as they were, each marked "Not rebuilt yet"; they're next, as tickets 20 and 21. Its frame is the one Stefan asked
 for in the prototype rounds: a sidebar for getting around (the repository switcher and the
 pages), one centred column, and the machine's readings floating on the right, in his order:
 usage, the build order, then the runner's status. **It is its own process and depends on nothing:** no build step, no
@@ -659,33 +659,32 @@ python3 -m dashboard --sample    # sample data, no runner needed; ?sample=<state
   `holds_up` and `go` (where it's answered: `label`, `url`, and `where`, `t3` or `github`, which
   picks the mark on the button). The runner lists asks in the order they're worth taking.
 - **How it looks** is explained at the top of `dashboard/index.html`. **The Inbox reads like a
-  mail client:** the list down the left for the page's whole height, a row per ask (kind,
-  subject, situation, how long it has waited) in the runner's order, with the sidebar's Inbox
-  entry carrying the count; the picked ask open on the right as a briefing (what it is, the
-  specifics, the story so far), ending in the one blue panel: what it needs from him, the
-  options, what it holds up and the link it's answered at. An answered ask stays greyed at the
-  foot of the list until the runner has acted on it, so "handled" and "still held" can be told
-  apart. The up and down arrow keys walk the list. Each kind has its own icon. The Inbox
+  mail client:** the list down the left for the page's whole height, in the runner's order,
+  with the sidebar's Inbox entry carrying the count. **A row reads like a thread in T3's
+  sidebar** (Stefan): the repository's mark and name on top with the tag (Stuck, Ready to
+  merge, Your decision, Broken; each with its icon) and the age, then the subject and the
+  situation in a sentence. The mark is the repository's first letter on a plain tile until the
+  snapshot carries a favicon. **The briefing is layout C** (Stefan's pick): the situation as
+  the headline and the story as a timeline down the left (what it is, the specifics, each step
+  with its time), and the one blue panel standing on the right: what it needs from him, the
+  options, what it holds up and the link it's answered at. **Two groups at the list's foot,
+  each folding to one line** (remembered in the browser): Snoozed, and Decided, which holds an
+  ask he has answered until the runner is through with it, tagged "Runner's turn" until a
+  lane's job is on it (same repo and ref or PR) and "Working", pulsing amber, while one is. So
+  "handled" and "still held" can be told apart. The up and down arrow keys walk the list. The Inbox
   takes all the width there is (Stefan, 2026-11-15; the other pages keep their 1120px column),
   its briefing keeps a readable measure inside that, and under 2000px its right panel steps
-  aside behind the Usage button. An answered ask's row is a tick and a sentence ("You said
-  "fix on" 7 min ago. The runner..."), with no tags: he read the tags there as noise. A lane has one Stop button, which asks which stop
-  is meant while a job runs.
+  aside behind the Usage button. A decided ask's line says what he said and what the runner
+  is doing with it ("You said "fix on". Claude is fixing PR #209, 4 min in."). A lane has one
+  Stop button, which asks which stop is meant while a job runs.
 - **Read and snoozed** (Stefan, 2026-11-15: "like an IRL inbox"): an ask he hasn't opened is
   unread (a dot, bold); opening it reads it, and Mark unread puts it back. Snooze takes an ask
   out of the list and the count until a time he picks (3 hours, tomorrow 9:00, next Monday
-  9:00); it sits under "Snoozed", still holding its work up, and Bring it back now undoes it.
+  9:00); it sits in the Snoozed group, still holding its work up, and its row's Unsnooze
+  button (or the briefing's) undoes it. Choosing the snooze times in Settings is pinned (ticket 24).
   **Both live in the browser's localStorage while the page is a prototype**, so Firefox and
   Chrome disagree; the real ones go through `control.json` (not built), so every browser agrees
   and the runner can hold a snoozed ask's toast.
-- **PROTOTYPE, to be folded in: three layouts of the briefing** (`?variant=A|B|C`, the pill
-  floating over the sidebar's foot, where it takes no room from the page, or the left and right
-  arrow keys; sample data only): A, background
-  first (what it is, what's wrong, the story, then the ask); B, question first (the ask leads,
-  the background under it); C, the story beside the ask (the situation as the headline, a
-  timeline down the left, the ask standing on the right). Once Stefan picks, fold the winner
-  into the briefing, and move the other two, the pill and `turnVariant` to a `prototype/inbox-briefing`
-  branch, out of main.
 - **A point in time is written whole** (Stefan, 2026-11-15): `stamp()` gives "November 15, 2026
   Sunday 1:14pm", for when an ask began waiting, a usage window's reset, the runner's start and
   a snooze's end. A list row keeps the short age ("2 h") with the whole time on hover. Choosing

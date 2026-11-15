@@ -80,6 +80,10 @@ grill settled the split instead:
 
 ## Comments
 
+2026-11-15, **the Inbox is agreed** (Stefan: "settle this"). Last change: Snoozed is a folding
+group at the list's foot like Decided, each row with its Unsnooze button. Granular snooze
+times in Settings are pinned as ticket 24. Overview and Queue (tickets 20 and 21) are next.
+
 2026-11-15, Stefan's third round (take 7, kept as `dashboard/earlier/take-7.html`): **layout C
 is settled**, so A, B and the layout pill are gone. A row now reads like a thread in T3's
 sidebar: the repository's mark and name on top with the tag, then the title and the
