@@ -3,9 +3,12 @@
 A script with no AI in it that runs Stefan's fixed build-and-review flow and starts fresh T3 Code
 threads only for work that needs Claude or Sol. The design and its rules live outside this repo:
 `~/Code/docs/orchestration.md`, `~/Code/docs/pr-review.md` and `~/Code/docs/sol.md`. The
-spec and the tickets that build it are in this repo's `.scratch/queue-runner/` (`spec.md`,
-`issues/NN-*.md`; moved from personal-ops on 2026-11-10). The tracker's conventions are
-`docs/agents/issue-tracker.md` and `docs/agents/triage-labels.md`.
+spec and the tickets that build it are GitHub issues: the spec is #8, the dashboard's runner
+side #9 (under ticket 18, #27), each ticket a sub-issue with native blocked-by links. They were
+local markdown in `.scratch/queue-runner/` until 2026-11-16 (moved from personal-ops on
+2026-11-10). **A ticket number in this file or a commit is the local one: ticket NN is issue
+#(NN+9)**, and #8 has the table. The tracker's conventions are `docs/agents/issue-tracker.md`
+and `docs/agents/triage-labels.md`.
 
 **On GitHub as the private `stefan1575/queue-runner`** (Stefan, 2026-11-10; it was local-only
 before). Commit after every completed step, with a message that says what changed and why.
