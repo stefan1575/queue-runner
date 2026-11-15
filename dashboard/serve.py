@@ -3,8 +3,11 @@
 Standard library only. It imports nothing from the runner and calls neither T3 nor GitHub, so
 neither can break it, and it can say truthfully that the runner has stopped writing.
 
-    python3 -m dashboard             # the runner's own snapshot, in ~/.queue-runner/state
-    python3 -m dashboard --sample    # sample data, no runner needed
+    python3 -m dashboard    # one process, two kinds of address on one port (5289):
+                            #   http://queue.localhost:5289/  the runner's snapshot (--state-dir) and controls
+                            #   http://localhost:5289/ and http://127.0.0.1:5289/  sample data, controls in a temp folder
+
+The request's Host picks which. Its port is bound alone, so a second start exits 3.
 
 The contract is two files in the state folder:
 
@@ -20,6 +23,7 @@ import argparse
 import json
 import os
 import re
+import socket
 import tempfile
 import threading
 from datetime import datetime
@@ -28,10 +32,16 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 HERE = Path(__file__).resolve().parent
-EARLIER = HERE / "earlier"   # takes of the page before this one, served with sample data only
+EARLIER = HERE / "earlier"   # takes of the page before this one, served on the sample addresses only
 DEFAULT_STATE_DIR = "~/.queue-runner/state"   # config.toml's state_dir; --state-dir for another
 DEFAULT_PORT = 5289
 MAX_BODY = 16_384
+
+# What the page says when the runner hasn't written a snapshot yet. Its logon shortcut is made by
+# scripts/make_shortcut.py; the dashboard can't tell whether the runner is up, only that no file is.
+START_RUNNER = (f"Start it with its shortcut, ~/.queue-runner/Queue runner.lnk (a copy in the Startup folder starts it "
+                f"at logon), or run pythonw -m queue_runner in {HERE.parent}. It writes one on every pass, "
+                "and this page fills in by itself.")
 
 NAME = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
 STOPS = (None, "after-job", "now")
@@ -96,9 +106,12 @@ class App:
             return 200, json.dumps(data).encode()
         try:
             raw = self.snapshot_path.read_bytes()
-            json.loads(raw)
+            data = json.loads(raw)
+            if isinstance(data, dict) and "sample" in data:   # the sample menu and the variant pill: never here
+                del data["sample"]
+                raw = json.dumps(data).encode()
         except FileNotFoundError:
-            return 404, json.dumps({"error": "missing", "path": str(self.snapshot_path)}).encode()
+            return 404, json.dumps({"error": "missing", "path": str(self.snapshot_path), "start": START_RUNNER}).encode()
         except (OSError, ValueError) as e:
             # The runner writes the file whole, so this is a real fault, not a torn read.
             return 500, json.dumps({"error": "unreadable", "path": str(self.snapshot_path), "detail": str(e)}).encode()
@@ -128,8 +141,17 @@ class App:
             return new
 
 
-def make_handler(app: App, port: int):
-    hosts = {f"127.0.0.1:{port}", f"localhost:{port}"}
+REAL_HOST = "queue.localhost"            # the runner's own snapshot and controls
+SAMPLE_HOSTS = ("localhost", "127.0.0.1")  # sample data, for judging the page
+
+
+def addresses(port: int) -> dict[str, bool]:
+    """Each address the dashboard answers on, and whether it's sample data."""
+    return {f"{REAL_HOST}:{port}": False, **{f"{h}:{port}": True for h in SAMPLE_HOSTS}}
+
+
+def make_handler(real: App, sample: App, port: int):
+    apps = {host: sample if is_sample else real for host, is_sample in addresses(port).items()}
 
     class Handler(BaseHTTPRequestHandler):
         server_version = "QueueRunnerDashboard"
@@ -148,16 +170,16 @@ def make_handler(app: App, port: int):
         def refuse(self, status: int, why: str):
             self.send(status, json.dumps({"error": why}).encode())
 
-        def local(self) -> bool:
-            # Only this PC's own address: a web page elsewhere can't reach the runner's controls
-            # by pointing a name at 127.0.0.1.
-            if self.headers.get("Host") not in hosts:
-                self.refuse(403, "this page is served on 127.0.0.1 only")
-                return False
-            return True
+        def app(self) -> App | None:
+            # Only this PC's own addresses, and the Host picks the data: a web page elsewhere
+            # can't reach the runner's controls by pointing a name at 127.0.0.1.
+            app = apps.get(self.headers.get("Host"))
+            if app is None:
+                self.refuse(403, f"this page is served on {', '.join(apps)} only")
+            return app
 
         def do_GET(self):
-            if not self.local():
+            if not (app := self.app()):
                 return
             url = urlsplit(self.path)
             if url.path in ("/", "/index.html"):
@@ -173,10 +195,9 @@ def make_handler(app: App, port: int):
                 self.refuse(404, "no such page")
 
         def do_POST(self):
-            if not self.local():
+            if not (app := self.app()):
                 return
-            origin = self.headers.get("Origin")
-            if origin is not None and origin not in {f"http://{h}" for h in hosts}:
+            if self.headers.get("Origin") != f"http://{self.headers.get('Host')}":
                 return self.refuse(403, "controls are written from this page only")
             if urlsplit(self.path).path != "/control":
                 return self.refuse(404, "no such page")
@@ -198,32 +219,47 @@ def make_handler(app: App, port: int):
     return Handler
 
 
-def serve(app: App, port: int) -> ThreadingHTTPServer:
-    server = ThreadingHTTPServer(("127.0.0.1", port), make_handler(app, port))
+class Server(ThreadingHTTPServer):
+    """Binds its port alone. Python's HTTPServer sets SO_REUSEADDR, which on Windows lets a second
+    process bind a port already listened on (three dashboards were found on 5289 at once)."""
+
+    allow_reuse_address = False
+    allow_reuse_port = False
+
+    def server_bind(self):
+        if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):   # Windows
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
+
+
+def serve(real: App, sample: App, port: int) -> ThreadingHTTPServer:
+    server = Server(("127.0.0.1", port), make_handler(real, sample, port))
     if port == 0:   # a test's free port: the handler checks Host against the real one
-        server.RequestHandlerClass = make_handler(app, server.server_address[1])
+        server.RequestHandlerClass = make_handler(real, sample, server.server_address[1])
     return server
 
 
 def main(argv: list[str] | None = None) -> int:
-    p = argparse.ArgumentParser(prog="python3 -m dashboard", description="The queue runner's dashboard.")
+    p = argparse.ArgumentParser(prog="python3 -m dashboard", description="The queue runner's dashboard: "
+                                f"the runner's own on {REAL_HOST}, sample data on localhost and 127.0.0.1.")
     p.add_argument("--port", type=int, default=DEFAULT_PORT)
     p.add_argument("--state-dir", default=DEFAULT_STATE_DIR, help="where the runner writes snapshot.json")
-    p.add_argument("--sample", action="store_true", help="serve sample data; controls go to a temp folder")
     args = p.parse_args(argv)
 
-    state_dir = Path(tempfile.mkdtemp(prefix="queue-runner-dashboard-")) if args.sample else Path(args.state_dir).expanduser()
-    app = App(state_dir, sample=args.sample)
-    try:
-        server = serve(app, args.port)
-    except OSError as e:
-        print(f"Port {args.port} is taken ({e}). Another dashboard may be running.")
-        return 3
-    print(f"Queue runner dashboard: http://127.0.0.1:{args.port}/" + ("  (sample data)" if args.sample else ""))
-    try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        pass
-    finally:
-        server.server_close()
+    with tempfile.TemporaryDirectory(prefix="queue-runner-dashboard-") as sample_dir:   # the sample's controls
+        real = App(Path(args.state_dir).expanduser())
+        sample = App(Path(sample_dir), sample=True)
+        try:
+            server = serve(real, sample, args.port)
+        except OSError as e:
+            print(f"A dashboard is already running on port {args.port} ({e}). Stop it first, or use --port.", flush=True)
+            return 3
+        print(f"Queue runner dashboard: http://{REAL_HOST}:{args.port}/ is the runner's ({real.state_dir}); "
+              f"http://localhost:{args.port}/ and http://127.0.0.1:{args.port}/ are sample data.", flush=True)
+        try:
+            server.serve_forever()
+        except KeyboardInterrupt:
+            pass
+        finally:
+            server.server_close()
     return 0

@@ -57,6 +57,10 @@ Ticket 10 (`orchestration.md`, The runner and Sleep).
   `%APPDATA%/Microsoft/Windows/Start Menu/Programs/Startup/` since the cutover (ticket 13), with
   `T3 Code (Beta).lnk` beside it (Stefan, 2026-11-10), so T3's server comes up at logon too. By
   hand: double-click the shortcut, or `pythonw -m queue_runner` from this folder.
+- **The dashboard starts beside it** (ticket 29): `~/.queue-runner/Queue runner dashboard.lnk`
+  runs the same pythonw `-m dashboard` in this repo (The dashboard, below). `python3
+  scripts/make_shortcut.py` makes both shortcuts; `--startup` also copies both into the Startup
+  folder (`--dir`, `--startup-dir` and `--pythonw` name other places; its test uses temp folders).
 - **Stop:** `python3 -m queue_runner --stop` kills the process named in `<state_dir>/runner.pid`
   (written once it holds `runner.lock`, removed when it ends), and only a Python process: a stale pid
   that Windows gave to something else is left alone. A Claude job it was blocked on runs on in T3, and the
@@ -630,9 +634,27 @@ package, no network, no runner code, no T3, no GitHub. One HTML file, served by 
 library.
 
 ```
-python3 -m dashboard             # the runner's snapshot, http://127.0.0.1:5289/
-python3 -m dashboard --sample    # sample data, no runner needed; ?sample=<state> picks a state
+python3 -m dashboard    # http://queue.localhost:5289/ is the runner's; http://localhost:5289/ is sample data
 ```
+
+- **One process, and the address is the switch** (ticket 29; Stefan, 2026-11-15). The request's
+  `Host` picks the data: `queue.localhost:<port>` is the runner's snapshot and control file in
+  `--state-dir`; `localhost:<port>` and `127.0.0.1:<port>` are sample data, whose controls go to
+  a temp folder removed when the dashboard stops. Any other `Host` is refused (403). There is no
+  `--sample` any more. `?sample=<state>` and `/earlier/take-N.html` work on the sample addresses
+  only, and the real snapshot is served with any `sample` key taken out, so the sample menu and
+  the Queue's variant pill (both shown only when `snap.sample` is set) never show there. The
+  start line names both addresses and which is which.
+- **A control is taken only from the address it was sent to:** `POST /control` needs an
+  `Origin` equal to `http://<its Host>` (a browser sends one on every POST), so the sample page
+  can never write the real control file, and a request with no `Origin` (not a page) is refused.
+- **No snapshot yet** on the real address: `/snapshot.json` is a 404 whose `start` says how to
+  start the runner (its shortcut, or `pythonw -m queue_runner` in this repo), and the page
+  shows that and no controls.
+- **One dashboard per port** (`serve.Server`): it binds with `SO_EXCLUSIVEADDRUSE` and without
+  `SO_REUSEADDR` (Python's `HTTPServer` sets it, which on Windows let three dashboards listen on
+  5289 at once). A second start says `A dashboard is already running on port N` and exits 3. It
+  starts at logon from the Startup folder (Running unattended, above).
 
 - **Two files are the whole contract,** both in the state folder (`--state-dir`, default
   `~/.queue-runner/state`). `snapshot.json`: the runner writes it whole, the page reads it.
@@ -726,7 +748,7 @@ python3 -m dashboard --sample    # sample data, no runner needed; ?sample=<state
 - **The Queue page is a prototype in three variants** (ticket 21; `queue()` in
   `dashboard/index.html`, sample data only, none agreed). `?page=queue&variant=a|b|c`; the pill
   over the sidebar's foot and the left and right arrow keys turn between them (the pill shows
-  with `--sample` only), and the last one looked at is remembered in the browser. **A, features
+  on the sample addresses only), and the last one looked at is remembered in the browser. **A, features
   first** (`queueA`): a card per feature in build order, with its bar, what's left in a sentence
   ("4 to go: 2 wait on you, 1 merged but not live, 1 blocked.") and its tickets as rows in the
   order they're built; a chip or a feature's name narrows the page to it (`?feature=<id>`,
@@ -779,7 +801,7 @@ python3 -m dashboard --sample    # sample data, no runner needed; ?sample=<state
   `?variant=a|b|c` and `?feature=<id>` (the Queue's arrangement, and the feature A is narrowed
   to), `?view=pyramid` and `?pr=<repo>:<n>` open the page there.
 - **Earlier takes, while the look is being agreed:** `dashboard/earlier/take-N.html` is the page
-  as it was before a rework, served at `/earlier/take-N.html` with `--sample` only and linked
+  as it was before a rework, served at `/earlier/take-N.html` on the sample addresses only and linked
   from the sidebar's sample menu (`sample.EARLIER`). Before reworking the page again, copy it
   there as the next take (take 8 is the page before the Overview was built, take 9 the page
   before the Queue was), add it to
@@ -974,8 +996,12 @@ Running unattended: `tests/test_wake.py` (`Waker` against `FakeScheduler` in `fa
 task XML, `Schtasks` on canned calls, `wall_sleep`, a second start, waiting for T3, `--stop`
 with a fake kill); every test that runs `main` continuously passes a waker, so none touches the
 real Task Scheduler.
-The dashboard: `tests/test_dashboard.py` (control requests, the server on a free port, every
-sample state, and that the page loads nothing from outside itself). The runner's snapshot:
+The dashboard: `tests/test_dashboard.py` (control requests, the server on a free port with both
+addresses' `Host` and `Origin`, every sample state, that the page loads nothing from outside
+itself, and `python -m dashboard` started twice on one free port: the start line, exit 3).
+The logon shortcuts: `tests/test_make_shortcut.py` (real `.lnk` files in temp folders, read back
+through WScript.Shell).
+The runner's snapshot:
 `tests/test_snapshot.py` (`build` from plain facts with a fixed clock, `Calls`, `Watch`,
 `Publisher`, `Snapshots` on a temp state folder, and the contract: the real snapshot holds the
 sample's keys at the top, in a lane, its job, a plan, a window and a source) and
@@ -1040,5 +1066,6 @@ temp folder.
 - `scripts/live_sandbox.py`, `scripts/live_review.py`, `scripts/live_fix_brief.py` and
   `scripts/live_merge.py`: the live checks.
 - `scripts/make_icon.py`: draws the toast icon, `queue_runner/assets/icon.png`.
-- `scripts/make_shortcut.py`: makes the logon shortcut; `scripts/live_wake.py`: the wake task's
+- `scripts/make_shortcut.py`: makes the logon shortcuts, the runner's and the dashboard's
+  (`--startup` copies both into the Startup folder); `scripts/live_wake.py`: the wake task's
   live check; `scripts/live_restart.py`: a restart onto broken code, toasted.

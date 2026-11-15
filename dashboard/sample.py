@@ -27,7 +27,7 @@ STATES = {
 }
 DEFAULT = "busy"
 # Takes of the page before this one, kept while its look is being agreed: `serve.py` serves the
-# ones in `dashboard/earlier/` in sample mode, and the sidebar's sample menu links them.
+# ones in `dashboard/earlier/` on the sample addresses, and the sidebar's sample menu links them.
 EARLIER = [
     {"href": "/earlier/take-9.html", "label": "Take 9", "note": "The Overview as three cards, the Queue still the old work list and pyramid"},
     {"href": "/earlier/take-8.html", "label": "Take 8", "note": "The Inbox as agreed, the Overview still the two lanes"},

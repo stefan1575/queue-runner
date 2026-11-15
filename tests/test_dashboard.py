@@ -1,6 +1,10 @@
 """The dashboard's server and its sample snapshots. No runner, no T3, no GitHub: two files."""
 import http.client
 import json
+import os
+import socket
+import subprocess
+import sys
 import tempfile
 import threading
 import unittest
@@ -9,6 +13,8 @@ from pathlib import Path
 
 from dashboard import sample
 from dashboard.serve import App, Refused, apply_control, serve
+
+REPO = Path(__file__).resolve().parent.parent
 
 NOW = "2026-11-15T13:00:00+08:00"
 
@@ -57,15 +63,25 @@ class AppTest(unittest.TestCase):
         self.dir = Path(tempfile.mkdtemp(prefix="qr-dashboard-test-"))
         self.app = App(self.dir, clock=lambda: NOW)
 
-    def test_no_snapshot_yet_says_where_it_looked(self):
+    def test_no_snapshot_yet_says_where_it_looked_and_how_to_start_the_runner(self):
         status, body = self.app.snapshot()
         self.assertEqual(status, 404)
-        self.assertEqual(json.loads(body)["path"], str(self.dir / "snapshot.json"))
+        body = json.loads(body)
+        self.assertEqual((body["error"], body["path"]), ("missing", str(self.dir / "snapshot.json")))
+        self.assertIn("Queue runner.lnk", body["start"])
+        self.assertIn("pythonw -m queue_runner", body["start"])
+        self.assertIn(str(REPO), body["start"])
 
     def test_the_runners_snapshot_is_served_as_written(self):
         raw = json.dumps({"version": 1, "asks": []}).encode()
         (self.dir / "snapshot.json").write_bytes(raw)
         self.assertEqual(self.app.snapshot(), (200, raw))
+
+    def test_the_runners_snapshot_never_carries_the_sample_menu(self):
+        # The page shows the sample menu and the Queue's variant pill only when `sample` is set.
+        (self.dir / "snapshot.json").write_text(json.dumps({"version": 1, "sample": {"state": "busy"}}), encoding="utf-8")
+        status, body = self.app.snapshot("busy")
+        self.assertEqual((status, json.loads(body)), (200, {"version": 1}))
 
     def test_a_snapshot_that_isnt_json_is_a_fault_not_an_empty_page(self):
         (self.dir / "snapshot.json").write_text("{ torn", encoding="utf-8")
@@ -226,12 +242,30 @@ class SampleTest(unittest.TestCase):
 class HttpTest(unittest.TestCase):
     def setUp(self):
         self.dir = Path(tempfile.mkdtemp(prefix="qr-dashboard-test-"))
+        self.real_dir = Path(tempfile.mkdtemp(prefix="qr-dashboard-real-"))
         self.app = App(self.dir, sample=True, clock=lambda: NOW)
-        self.server = serve(self.app, 0)
+        self.real = App(self.real_dir, clock=lambda: NOW)
+        self.server = serve(self.real, self.app, 0)
         self.port = self.server.server_address[1]
-        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        threading.Thread(target=self.server.serve_forever, args=(0.05,), daemon=True).start()
         self.addCleanup(self.server.server_close)
         self.addCleanup(self.server.shutdown)
+
+    def at(self, host):
+        return {"Host": f"{host}:{self.port}"}
+
+    def test_the_host_picks_the_data_queue_localhost_is_the_runners_and_the_rest_are_sample(self):
+        raw = json.dumps({"version": 1, "asks": [], "written_at": NOW}).encode()
+        (self.real_dir / "snapshot.json").write_bytes(raw)
+        status, _, body = self.call("GET", "/snapshot.json?sample=busy", headers=self.at("queue.localhost"))
+        self.assertEqual((status, body), (200, raw))   # ?sample= means nothing on the real address
+        for host in ("localhost", "127.0.0.1"):
+            status, _, body = self.call("GET", "/snapshot.json?sample=busy", headers=self.at(host))
+            self.assertEqual((status, json.loads(body)["sample"]["state"]), (200, "busy"), host)
+        status, kind, _ = self.call("GET", "/", headers=self.at("queue.localhost"))
+        self.assertEqual((status, kind), (200, "text/html; charset=utf-8"))
+        for host in ("queue.localhost:1", "evil.localhost:%d" % self.port, "queue.localhost", "127.0.0.1"):
+            self.assertEqual(self.call("GET", "/snapshot.json", headers={"Host": host})[0], 403, host)
 
     def call(self, method, path, body=None, headers=None):
         conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
@@ -242,6 +276,26 @@ class HttpTest(unittest.TestCase):
 
     def post(self, body, **headers):
         return self.call("POST", "/control", json.dumps(body), {"Content-Type": "application/json", **headers})
+
+    def json_post(self, path, body):   # from the sample page, as a browser sends it
+        return self.call("POST", path, body, {"Content-Type": "application/json", "Origin": f"http://127.0.0.1:{self.port}"})
+
+    def test_a_control_is_taken_only_from_the_address_it_was_sent_to(self):
+        real, sample = f"http://queue.localhost:{self.port}", f"http://localhost:{self.port}"
+        stop = {"lane": "claude", "stop": "now"}
+        self.assertEqual(self.post(stop, Origin=sample, **self.at("queue.localhost"))[0], 403)   # the sample page
+        self.assertEqual(self.post(stop, Origin=f"http://127.0.0.1:{self.port}", **self.at("queue.localhost"))[0], 403)
+        self.assertEqual(self.post(stop, **self.at("queue.localhost"))[0], 403)   # no Origin: not from a page
+        self.assertEqual(self.post(stop, Origin=real, **self.at("localhost"))[0], 403)
+        self.assertFalse((self.real_dir / "control.json").exists())
+        self.assertEqual(self.app.control()["lanes"], {})
+
+        self.assertEqual(self.post(stop, Origin=real, **self.at("queue.localhost"))[0], 200)
+        self.assertEqual(self.real.control()["lanes"]["claude"]["stop"], "now")
+        self.assertEqual(self.app.control()["lanes"], {})   # the sample's controls are its own
+        self.assertEqual(self.post({"lane": "sol", "stop": "now"}, Origin=sample, **self.at("localhost"))[0], 200)
+        self.assertEqual(set(self.real.control()["lanes"]), {"claude"})
+        self.assertEqual(set(self.app.control()["lanes"]), {"sol"})
 
     def test_the_page_the_snapshot_and_the_control_file_are_served(self):
         status, kind, body = self.call("GET", "/")
@@ -261,8 +315,8 @@ class HttpTest(unittest.TestCase):
             self.assertIn(b"<title>Queue runner</title>", body)
         for path in ("/earlier/take-999.html", "/earlier/serve.py", "/earlier/..%2Fserve.py", "/earlier/"):
             self.assertEqual(self.call("GET", path)[0], 404, path)
-        self.app.sample = False
-        self.assertEqual(self.call("GET", "/earlier/take-1.html")[0], 404)
+        self.assertEqual(self.call("GET", "/earlier/take-1.html", headers=self.at("localhost"))[0], 200)
+        self.assertEqual(self.call("GET", "/earlier/take-1.html", headers=self.at("queue.localhost"))[0], 404)
 
     def test_the_page_has_no_address_outside_itself_to_load(self):
         page = (Path(__file__).resolve().parent.parent / "dashboard" / "index.html").read_text(encoding="utf-8")
@@ -282,12 +336,62 @@ class HttpTest(unittest.TestCase):
         self.assertEqual(self.app.control()["lanes"], {})
 
     def test_a_request_that_isnt_small_json_is_refused(self):
-        self.assertEqual(self.call("POST", "/control", '{"lane":"claude","stop":"now"}', {"Content-Type": "text/plain"})[0], 415)
-        self.assertEqual(self.call("POST", "/control", "{ torn", {"Content-Type": "application/json"})[0], 400)
-        self.assertEqual(self.post({"lane": "claude", "stop": "sideways"})[0], 400)
-        self.assertEqual(self.call("POST", "/control", "", {"Content-Type": "application/json"})[0], 400)
-        self.assertEqual(self.call("POST", "/elsewhere", "{}", {"Content-Type": "application/json"})[0], 404)
+        origin = {"Origin": f"http://127.0.0.1:{self.port}"}
+        self.assertEqual(self.call("POST", "/control", '{"lane":"claude","stop":"now"}', {"Content-Type": "text/plain", **origin})[0], 415)
+        self.assertEqual(self.json_post("/control", "{ torn")[0], 400)
+        self.assertEqual(self.post({"lane": "claude", "stop": "sideways"}, **origin)[0], 400)
+        self.assertEqual(self.json_post("/control", "")[0], 400)
+        self.assertEqual(self.json_post("/elsewhere", "{}")[0], 404)
         self.assertEqual(self.app.control()["lanes"], {})
+
+
+class StartTest(unittest.TestCase):
+    """`python3 -m dashboard` as it's started at logon: one process, both addresses, one per port."""
+
+    def setUp(self):
+        self.dir = Path(tempfile.mkdtemp(prefix="qr-dashboard-start-"))
+        with socket.socket() as s:
+            s.bind(("127.0.0.1", 0))
+            self.port = s.getsockname()[1]
+
+    def start(self):
+        p = subprocess.Popen([sys.executable, "-m", "dashboard", "--port", str(self.port), "--state-dir", str(self.dir)],
+                             cwd=REPO, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                             env={**os.environ, "PYTHONUNBUFFERED": "1"})
+        self.addCleanup(lambda: (p.kill(), p.wait(), p.stdout.close()))
+        return p
+
+    def test_the_start_line_names_both_addresses_and_which_is_which(self):
+        first = self.start()
+        line = first.stdout.readline()
+        self.assertIn(f"http://queue.localhost:{self.port}/", line)
+        self.assertIn(f"http://localhost:{self.port}/", line)
+        real, sample = line.split(f"http://localhost:{self.port}/")
+        self.assertIn("runner", real)
+        self.assertIn("sample", sample)
+        conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
+        self.addCleanup(conn.close)
+        conn.request("GET", "/snapshot.json", headers={"Host": f"localhost:{self.port}"})
+        self.assertIn("sample", json.loads(conn.getresponse().read()))
+
+    def test_there_is_no_sample_switch_any_more_the_address_is_the_switch(self):
+        from dashboard.serve import main
+        with self.assertRaises(SystemExit) as e, open(os.devnull, "w") as quiet:
+            sys.stderr, err = quiet, sys.stderr
+            try:
+                main(["--sample", "--port", str(self.port)])
+            finally:
+                sys.stderr = err
+        self.assertEqual(e.exception.code, 2)
+
+    def test_a_second_dashboard_on_the_same_port_says_so_and_exits_3(self):
+        first = self.start()
+        first.stdout.readline()   # it's listening
+        second = self.start()
+        out, _ = second.communicate(timeout=30)
+        self.assertEqual(second.returncode, 3, out)
+        self.assertIn(f"A dashboard is already running on port {self.port}", out)
+        self.assertIsNone(first.poll())
 
 
 if __name__ == "__main__":
