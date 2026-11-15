@@ -60,3 +60,17 @@ after or now, build order, the pyramid, one HTML file). The first rebuild is kep
 
 2026-11-15: the original ticket asked for a page the runner serves, with pause after the
 current step only. Both changed above.
+
+2026-11-15, later: Stefan's notes on that page, taken up over two more takes (`take-2.html` is
+the page he annotated; `take-3.html` put the lanes on top with a tab per ask, which he
+rejected). Now: Needs you stays on top and reads like an inbox, a line per ask and the picked
+one open under them, each written to be read cold a week later (why it came to him, what the
+work is, what has happened). The lanes sit under it with one Stop button each and their own
+queue of what comes next. No moving line on a working lane. On the right, in his order: usage
+(a reset time under every window, a clearer rule between Claude and ChatGPT, wider), the build
+order, then the runner's status, moved from the sidebar because the left is for getting around.
+**Work is next, on its own:** at first glance it doesn't say what to do with it; Stefan's idea
+is a feature of the app with its prerequisites in view.
+
+The runner's side grows by this: it has to write each ask's `kind`, `situation`, `about`,
+`because` and `story`, and each lane's `queue`.

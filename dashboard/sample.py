@@ -29,6 +29,8 @@ DEFAULT = "busy"
 # Takes of the page before this one, kept while its look is being agreed: `serve.py` serves the
 # ones in `dashboard/earlier/` in sample mode, and the sidebar's sample menu links them.
 EARLIER = [
+    {"href": "/earlier/take-3.html", "label": "Take 3", "note": "Lanes on top, a tab per ask, status first on the right"},
+    {"href": "/earlier/take-2.html", "label": "Take 2", "note": "The asks listed beside the open one, lanes below, health in the sidebar"},
     {"href": "/earlier/take-1.html", "label": "Take 1", "note": "One page, no sidebar, the asks as bright slips"},
     {"href": "http://localhost:5288/", "label": "Prototype round 4", "note": "The React prototype, while its dev server runs"},
 ]
@@ -70,41 +72,62 @@ def build(name: str = DEFAULT, base: datetime | None = None, control: dict | Non
             {"name": LD, "github": GH[LD], "merge": "stefan"},
             {"name": QR, "github": GH[QR], "merge": "runner"},
         ],
+        # An ask is written to be picked up cold, a week later. `kind` is why it came to Stefan:
+        # `stuck` (the runner tried and couldn't get it through), `decision` (a product decision
+        # is his), `merge` (ready, his to merge) or `broken` (something failed). `situation` says
+        # it in a sentence, `about` what the work is, `because` the specifics, `story` what has
+        # happened, in order; then `question`, `options` and where it's answered (`go`).
+        # `why` is read by the earlier takes only, and goes when they do.
         "asks": [
             {
-                "id": "ask-152", "kind": "decide", "repo": LD, "ref": "PR #152", "pr": 152,
+                "id": "ask-152", "kind": "stuck", "repo": LD, "ref": "PR #152", "pr": 152,
                 "subject": "Ring-to number per Client", "since": ago(128),
-                "question": "Sol still blocks this PR after three reviews. Rework it, fix on, or hold?",
+                "situation": "Three fix rounds haven't got this PR past review.",
+                "about": "Each Client gets their own ring-to number: the phone that rings when a lead calls their tracking number.",
+                "because": "The check still reads the old owner when a Client changes owner during a call. "
+                           "That kind of problem was fixed in review 1 and came back in review 3.",
+                "story": ["Wed: built, PR #152 opened", "Review 1: two problems, fixed", "Review 2: one problem, fixed",
+                          "Today: review 3 found the first kind again", "A decision thread recommends rework"],
+                "question": "Rework the approach, patch this case too, or hold it?",
+                "options": [
+                    {"say": "rework", "means": "A fix round that reads the owner from the call's routing row", "recommended": True},
+                    {"say": "fix on", "means": "A fix round that patches this case, same approach"},
+                    {"say": "hold", "means": "Leave the PR until you release it"},
+                ],
+                "holds_up": ["#216 Ring-to audit page"],
+                "go": {"label": "Decide in T3", "url": T3 + "0481ebdf-41e8-4253-b3a1-3be2d40a80b2"},
                 "why": [
                     "Review 3 raised I-4 again: the ring-to check reads the Client's owner from before the move.",
                     "The decision thread's approach note recommends rework: read the owner from the call's routing row, not from the Client.",
                 ],
-                "options": [
-                    {"say": "rework", "means": "One more fix round that changes the approach", "recommended": True},
-                    {"say": "fix on", "means": "One more fix round on the same approach"},
-                    {"say": "hold", "means": "Leave it until you release it"},
-                ],
-                "holds_up": ["#216 Ring-to audit page"],
-                "go": {"label": "Decide in T3", "url": T3 + "0481ebdf-41e8-4253-b3a1-3be2d40a80b2"},
             },
             {
                 "id": "ask-207", "kind": "merge", "repo": LD, "ref": "PR #207", "pr": 207,
                 "subject": "A Client's Twilio number on their page", "since": ago(40),
-                "question": "This PR is ready for you to merge.",
-                "why": ["Clean on a0d5f6f after review 2. Checks passed, no conflict, nothing said since."],
+                "situation": "This PR is reviewed clean and ready for you to merge.",
+                "about": "A Client's page shows the Twilio tracking number assigned to them, once their Twilio account is verified.",
+                "because": "Clean on a0d5f6f, checks passed, no conflict, nothing said since. In leads-dashboard the merge is yours.",
+                "story": ["Thu: built, PR #207 opened", "Review 1: one problem, fixed", "Today: review 2 clean"],
+                "question": "Merge it when you've looked. Its live steps follow your merge.",
                 "holds_up": [],
                 "go": {"label": "Open PR to merge", "url": GH[LD] + "/pull/207"},
+                "why": ["Clean on a0d5f6f after review 2. Checks passed, no conflict, nothing said since."],
             },
             {
-                "id": "ask-214", "kind": "answer", "repo": LD, "ref": "#214", "pr": None,
+                "id": "ask-214", "kind": "decision", "repo": LD, "ref": "#214", "pr": None,
                 "subject": "Client onboarding form", "since": ago(12),
-                "question": "Must every Client fill in the onboarding form?",
+                "situation": "The build stopped at a question the issue doesn't answer.",
+                "about": "A form a new Client fills in after signing: business details, service areas and call hours.",
+                "because": "Whether the form is required decides which fields the build makes mandatory. "
+                           "A decision thread couldn't settle it from the issue.",
+                "story": ["Today: the build started", "It stopped before writing the form's required fields"],
+                "question": "Must every Client fill in the onboarding form before they go live?",
+                "holds_up": ["#215 SEO questions on the form", "#223 Welcome email after the form"],
+                "go": {"label": "Answer in T3", "url": T3 + "0d6566e9-86a3-4e0f-a64a-e0443d93d0fe"},
                 "why": [
                     "The build stopped before writing the form's required fields.",
                     "A decision thread couldn't answer it from the issue.",
                 ],
-                "holds_up": ["#215 SEO questions on the form", "#223 Welcome email after the form"],
-                "go": {"label": "Answer in T3", "url": T3 + "0d6566e9-86a3-4e0f-a64a-e0443d93d0fe"},
             },
         ],
         "lanes": [
@@ -178,6 +201,7 @@ def build(name: str = DEFAULT, base: datetime | None = None, control: dict | Non
     else:
         _obey(snap, control or {}, now)
     _number(snap)
+    _queue(snap)
     # The page lists them in the sidebar; the runner's file has no such key.
     snap["sample"] = {"state": name, "states": STATES, "earlier": EARLIER}
     return snap
@@ -343,19 +367,31 @@ def _vary(snap: dict, name: str, ago, ahead) -> None:
         _issue(snap, LD, 214).update(state="ready", note=None)
     elif name == "many":
         snap["asks"] += [
-            {"id": "ask-live", "kind": "live", "repo": LD, "ref": "PR #198", "pr": None, "subject": "Caller notes",
-             "since": ago(6), "question": "The live steps for PR #198 stopped halfway. What should happen to the second migration?",
-             "why": ["Deployed; 1 of 2 migrations applied.", "20261114_number_owner.sql failed: column \"owner_id\" already exists."],
+            {"id": "ask-live", "kind": "broken", "repo": LD, "ref": "PR #198", "pr": None, "subject": "Caller notes", "since": ago(6),
+             "situation": "The live steps for PR #198 stopped halfway.",
+             "about": "Notes a rep writes about a caller, shown on the caller's page. You merged it yesterday.",
+             "because": "The second migration failed: column \"owner_id\" already exists. The first is applied, so the database sits between the two.",
+             "story": ["Yesterday: you merged PR #198", "Today: deployed, migration 1 of 2 applied", "Migration 2 failed"],
+             "question": "What should happen to the second migration?",
              "holds_up": ["Every later live run in leads-dashboard"],
-             "go": {"label": "Decide in T3", "url": T3 + "136ab19d-14d7-4f6a-a235-4e1ac0ebb043"}},
-            {"id": "ask-qr4", "kind": "decide", "repo": QR, "ref": "PR #4", "pr": 4, "subject": "Wake tasks survive DST",
-             "since": ago(3), "question": "The tests failed on Windows for a reason the change doesn't explain. Retry them, or look first?",
-             "why": ["test_wake.py timed out once in CI and passes locally."], "holds_up": [],
-             "go": {"label": "Decide in T3", "url": T3 + "89d3ed68-05f2-418f-afd8-9b4a28709ddc"}},
-            {"id": "ask-ops", "kind": "answer", "repo": LD, "ref": "#231", "pr": None, "subject": "Monthly report email",
-             "since": ago(1), "question": "Who receives the monthly report: the Client's owner, or everyone on the account?",
-             "why": ["The issue names both in different places."], "holds_up": [],
-             "go": {"label": "Answer in T3", "url": T3 + "5823cce7-a3a7-4ac6-9f2b-5883404d9828"}},
+             "go": {"label": "Decide in T3", "url": T3 + "136ab19d-14d7-4f6a-a235-4e1ac0ebb043"},
+             "why": ["Deployed; 1 of 2 migrations applied.", "20261114_number_owner.sql failed: column \"owner_id\" already exists."]},
+            {"id": "ask-qr4", "kind": "stuck", "repo": QR, "ref": "PR #4", "pr": 4, "subject": "Wake tasks survive DST", "since": ago(3),
+             "situation": "The tests failed for a reason the change doesn't explain.",
+             "about": "Wake tasks are named with their UTC offset, so a clock change can't merge two of them.",
+             "because": "test_wake.py timed out once in CI and passes locally. A decision thread couldn't tell a flake from a fault.",
+             "story": ["Today: built, PR #4 opened", "Review 1 clean", "The tests timed out on Windows"],
+             "question": "Run the tests again, or look first?", "holds_up": [],
+             "go": {"label": "Decide in T3", "url": T3 + "89d3ed68-05f2-418f-afd8-9b4a28709ddc"},
+             "why": ["test_wake.py timed out once in CI and passes locally."]},
+            {"id": "ask-ops", "kind": "decision", "repo": LD, "ref": "#231", "pr": None, "subject": "Monthly report email", "since": ago(1),
+             "situation": "The issue names two different recipients.",
+             "about": "An email each month with a Client's call counts and where their leads came from.",
+             "because": "It says the Client's owner in one place and everyone on the account in another. The build stopped before writing the recipient list.",
+             "story": ["Today: the build started", "It stopped at the recipient list"],
+             "question": "Who receives the monthly report: the Client's owner, or everyone on the account?", "holds_up": [],
+             "go": {"label": "Answer in T3", "url": T3 + "5823cce7-a3a7-4ac6-9f2b-5883404d9828"},
+             "why": ["The issue names both in different places."]},
         ]
     elif name == "reserve":
         snap["usage"][0]["windows"][1]["used"] = 93
@@ -402,6 +438,18 @@ def _obey(snap: dict, control: dict, now: datetime) -> None:
     names = [r["name"] for r in snap["repos"]]
     if sorted(order) == sorted(names):
         snap["repos"].sort(key=lambda r: order.index(r["name"]))
+
+
+def _queue(snap: dict) -> None:
+    """Each lane's own queue, in the order it takes them up: Claude's fix rounds, then its builds
+    in pick order; the reviews waiting for Sol. `next` is read by the earlier takes only."""
+    job = _lane(snap, "claude")["job"] or {}
+    fixes = [{"kind": "fix", "repo": i["repo"], "ref": f"PR #{i['pr']}", "title": i["title"]}
+             for i in snap["issues"] if i["state"] == "fixing" and f"PR #{i['pr']}" != job.get("ref")]
+    builds = [{"kind": "build", "repo": i["repo"], "ref": f"#{i['n']}", "title": i["title"]}
+              for i in sorted((i for i in snap["issues"] if i["pick"]), key=lambda i: i["pick"])]
+    _lane(snap, "claude")["queue"] = fixes + builds
+    _lane(snap, "sol").update(queue=[], queue_empty="Nothing is waiting for review.")
 
 
 def _number(snap: dict) -> None:

@@ -110,6 +110,9 @@ class SampleTest(unittest.TestCase):
                     self.assertLessEqual(set(i["blocked_by"]), keys, i["title"])
                 for a in s["asks"]:
                     self.assertTrue(a["go"]["url"].startswith("https://"), a["id"])
+                    self.assertIn(a["kind"], ("stuck", "decision", "merge", "broken"), a["id"])
+                    for key in ("situation", "about", "because", "story", "question"):
+                        self.assertTrue(a[key], f"{a['id']} {key}")   # each can be picked up cold
 
     def test_every_lane_and_plan_names_its_provider_and_every_role_a_lane(self):
         s = sample.build("busy", base=self.T, now=self.T)
@@ -136,6 +139,14 @@ class SampleTest(unittest.TestCase):
         picks = sorted((i["pick"], i["repo"], i["n"]) for i in s["issues"] if i["pick"])
         self.assertEqual(picks, [(1, "leads-dashboard", 211), (2, "leads-dashboard", 226), (3, "queue-runner", 5), (4, "queue-runner", 6)])
         self.assertTrue(all(i["pick"] is None for i in s["issues"] if i["state"] != "ready"))
+
+    def test_each_lane_has_its_own_queue_fix_rounds_before_builds_in_pick_order(self):
+        s = sample.build("busy", base=self.T, now=self.T)
+        claude, sol = s["lanes"]
+        self.assertEqual([(q["kind"], q["repo"], q["ref"]) for q in claude["queue"]], [
+            ("fix", "leads-dashboard", "PR #204"), ("build", "leads-dashboard", "#211"), ("build", "leads-dashboard", "#226"),
+            ("build", "queue-runner", "#5"), ("build", "queue-runner", "#6")])
+        self.assertEqual((sol["queue"], sol["queue_empty"]), ([], "Nothing is waiting for review."))
 
     def test_the_dead_runner_stopped_writing_and_reads_no_control(self):
         asked = {"written_at": (self.T - timedelta(minutes=5)).isoformat(), "lanes": {"claude": {"stop": "now", "at": self.T.isoformat()}}}
@@ -196,9 +207,10 @@ class HttpTest(unittest.TestCase):
         self.assertEqual(self.call("GET", "/config.toml")[0], 404)
 
     def test_an_earlier_take_of_the_page_is_served_with_sample_data_only(self):
-        status, kind, body = self.call("GET", "/earlier/take-1.html")
-        self.assertEqual((status, kind), (200, "text/html; charset=utf-8"))
-        self.assertIn(b"<title>Queue runner</title>", body)
+        for take in ("take-1", "take-2", "take-3"):
+            status, kind, body = self.call("GET", f"/earlier/{take}.html")
+            self.assertEqual((status, kind), (200, "text/html; charset=utf-8"))
+            self.assertIn(b"<title>Queue runner</title>", body)
         for path in ("/earlier/take-999.html", "/earlier/serve.py", "/earlier/..%2Fserve.py", "/earlier/"):
             self.assertEqual(self.call("GET", path)[0], 404, path)
         self.app.sample = False

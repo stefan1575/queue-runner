@@ -10,10 +10,15 @@
   (the runner writes it) and writes /control (what you asked for). See dashboard/serve.py.
 
   How it is laid out, and why:
-  - A sidebar (the repository switcher, the pages, the runner's health), one centred column, and
-    usage and the build order floating on the right, in view however far the page is scrolled.
-  - Needs you is one box of one size, whatever is in it: the asks listed on its left, the picked
-    one open on its right with its question, the reasons and where it's answered.
+  - The left is for getting around: the repository switcher and the pages. The right is the
+    machine's readings, in view however far the page is scrolled: is it up, how much usage is
+    left, what it builds first. The column between them is centred in the space they leave.
+  - Needs you comes first, one box of one size whatever is in it. It reads like an inbox: a line
+    per ask (why it's yours, what it is, the situation in a sentence), so several can be weighed
+    in one look, and the picked one open under them as a briefing that still makes sense a week
+    later, with what you can do beside it. Past three, the rest fold away; nothing scrolls.
+  - Then the lanes: what each is doing right now, and its own queue of what comes next.
+  - Nothing moves by itself.
   - Colour is state and nothing else: blue is yours, amber is working, green is done or healthy,
     red is broken. Claude's clay and OpenAI's black or white are on their marks and names only.
   - Typefaces that ship with Windows: Segoe UI Variable for the page, Sitka for a question put to
@@ -118,6 +123,9 @@ code, .sha { font: 400 14px var(--mono); }
 .mi .two b { display: block; font-weight: 600; }
 .mi .two span { display: block; font-size: 14px; color: var(--mute); white-space: normal; }
 .mi.danger .two b { color: var(--bad); }
+.mi:disabled { cursor: not-allowed; }
+.mi:disabled:hover { background: none; }
+.mi:disabled .two b { color: var(--dim); }
 .mi[aria-current="true"] .two b::after { content: " (showing)"; font-weight: 400; color: var(--mute); }
 .pop-label { padding: 8px 10px 4px; font-size: 14px; color: var(--mute); }
 
@@ -126,7 +134,7 @@ code, .sha { font: 400 14px var(--mono); }
 .side { position: sticky; top: 0; height: 100vh; background: var(--side); border-right: 1px solid var(--line); display: flex; flex-direction: column; padding: 12px; z-index: 60; }
 .body { min-width: 0; }
 .top { position: sticky; top: 0; z-index: 30; height: 60px; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--page) 86%, transparent); backdrop-filter: blur(12px); }
-.top-in, .stage { display: grid; grid-template-columns: minmax(0, 1fr) 336px; column-gap: 28px; padding-left: 28px; padding-right: 28px; }
+.top-in, .stage { display: grid; grid-template-columns: minmax(0, 1fr) 380px; column-gap: 28px; padding-left: 28px; padding-right: 28px; }
 .top-in { height: 100%; }
 .top-col, main { width: 100%; max-width: 1120px; margin: 0 auto; }
 .top-col { display: flex; align-items: center; gap: 12px; }
@@ -156,16 +164,6 @@ main > * + * { margin-top: 16px; }
 .nav[aria-current="page"] { background: var(--surface); color: var(--ink); font-weight: 600; box-shadow: inset 0 0 0 1px var(--line); }
 .nav[aria-current="page"] .i { color: var(--ink); }
 .side .grow { flex: 1; }
-.health { display: block; text-decoration: none; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
-.health:hover { border-color: var(--btn-line); }
-.health.down { border-color: var(--bad-line); background: var(--bad-wash); }
-.h-top { display: flex; align-items: center; gap: 9px; }
-.h-top b { font-weight: 600; }
-.h-top .h-when { margin-left: auto; font-size: 14px; color: var(--mute); white-space: nowrap; }
-.h-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 10px; margin-top: 10px; font-size: 14.5px; color: var(--ink-2); }
-.h-grid span { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
-.h-grid .no { color: var(--bad); font-weight: 600; }
-.h-bad { display: block; margin-top: 8px; font-size: 14px; color: var(--bad); }
 .foot { margin-top: 10px; }
 .foot-btn { display: flex; align-items: center; gap: 8px; width: 100%; padding: 7px 10px; border-radius: 9px; background: none; border: 0; cursor: pointer; font-size: 14px; color: var(--mute); text-align: left; }
 .foot-btn:hover, .foot-btn[aria-expanded="true"] { background: var(--hover); color: var(--ink); }
@@ -177,59 +175,83 @@ main > * + * { margin-top: 16px; }
 .notice b { font-weight: 600; }
 
 /* ---------------------------------------------------------------- needs you */
+.inbox { display: flex; flex-direction: column; height: 500px; }
 .inbox.has { border-color: var(--you-line); }
-.inbox-body { display: grid; grid-template-columns: 364px minmax(0, 1fr); height: 376px; }
-.ask-list { overflow-y: auto; border-right: 1px solid var(--line-soft); padding: 8px; scrollbar-width: thin; }
-.ask-list li + li { margin-top: 2px; }
-.ask-row { display: block; width: 100%; text-align: left; background: none; border: 0; border-radius: 10px; padding: 9px 12px 10px 16px; cursor: pointer; position: relative; }
+.inbox.all { height: auto; }
+.inbox-head { flex: none; display: flex; align-items: center; gap: 10px; height: 52px; padding: 0 12px 0 20px; border-bottom: 1px solid var(--line-soft); }
+.inbox-head h2 { font: 600 17px/1.2 var(--display); }
+.inbox-head .fold { margin-left: auto; display: flex; align-items: center; gap: 12px; font-size: 14.5px; color: var(--mute); }
+.ask-rows { flex: none; padding: 8px; border-bottom: 1px solid var(--line-soft); }
+.ask-rows li + li { margin-top: 2px; }
+.ask-row {
+  display: flex; align-items: center; gap: 14px; width: 100%; height: 42px; padding: 0 12px;
+  background: none; border: 0; border-radius: 9px; cursor: pointer; text-align: left;
+}
 .ask-row:hover { background: var(--hover); }
 .ask-row[aria-current="true"] { background: var(--you-wash); }
-.ask-row[aria-current="true"]::before { content: ""; position: absolute; left: 5px; top: 11px; bottom: 11px; width: 3px; border-radius: 2px; background: var(--you); }
-.ask-row .r1 { display: flex; justify-content: space-between; gap: 10px; font-size: 14px; color: var(--mute); }
-.ask-row .kind { color: var(--you); font-weight: 700; }
-.ask-row .r2 { display: block; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ask-row .r3 { display: block; font-size: 14px; color: var(--mute); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ask { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
-.ask-body { flex: 1; overflow-y: auto; padding: 18px 24px 14px; scrollbar-width: thin; }
-.ask-meta { display: flex; align-items: center; gap: 10px; font-size: 14.5px; color: var(--mute); }
-.ask-meta .age { margin-left: auto; white-space: nowrap; }
-.question { font: 400 23px/1.3 var(--serif); margin-top: 10px; max-width: 32em; text-wrap: balance; }
-.why { margin-top: 10px; color: var(--ink-2); max-width: 44em; }
-.why li { padding-left: 15px; position: relative; }
-.why li + li { margin-top: 2px; }
-.why li::before { content: ""; position: absolute; left: 1px; top: .62em; width: 5px; height: 5px; border-radius: 50%; background: var(--dim); }
-.options { margin-top: 14px; display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; align-items: baseline; }
+.ask-row .rk { flex: 0 0 122px; display: flex; }
+.ask-row .rs { flex: 0 0 300px; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ask-row .rs b { font-weight: 600; }
+.ask-row .rs span { color: var(--dim); margin-left: 8px; font-size: 14.5px; }
+.ask-row .rt { flex: 1 1 0; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--mute); }
+.ask-row[aria-current="true"] .rt { color: var(--ink); }
+.ask-row .ra { flex: 0 0 52px; text-align: right; font-size: 14px; color: var(--dim); white-space: nowrap; }
+.kind-tag { font-size: 14px; font-weight: 700; line-height: 22px; padding: 0 9px; border-radius: 6px; background: var(--you-wash); color: var(--you); white-space: nowrap; }
+.kind-tag.broken { background: var(--bad-wash); color: var(--bad); }
+.ask-row[aria-current="true"] .kind-tag { background: var(--you); color: var(--you-ink); }
+.ask-row[aria-current="true"] .kind-tag.broken { background: var(--bad); color: var(--page); }
+
+.ask { flex: 1 1 auto; min-height: 304px; display: grid; grid-template-columns: minmax(0, 1fr) 420px; }
+.ask-main { padding: 18px 24px 16px 20px; overflow-y: auto; min-width: 0; scrollbar-width: thin; }
+.situation { display: none; font: 400 21px/1.3 var(--serif); margin-bottom: 14px; }
+.brief { display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 12px 14px; }
+.brief dt { color: var(--mute); font-size: 14.5px; padding-top: 1px; }
+.brief dd { color: var(--ink-2); max-width: 44em; }
+.trail { font-size: 15px; line-height: 1.4; padding-top: 1px; }
+.trail li { padding-left: 15px; position: relative; color: var(--mute); }
+.trail li::before { content: ""; position: absolute; left: 1px; top: .58em; width: 5px; height: 5px; border-radius: 50%; background: var(--dim); }
+.trail li:last-child { color: var(--ink); }
+.trail li:last-child::before { background: var(--you); }
+.ask-side { border-left: 1px solid var(--line-soft); padding: 18px 20px 16px; display: flex; flex-direction: column; min-width: 0; }
+.question { font: 400 19px/1.3 var(--serif); text-wrap: balance; }
+.options { margin-top: 12px; display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 7px 12px; align-items: baseline; }
 .options dt { font-weight: 600; font-size: 15px; padding: 0 9px; border: 1px solid var(--btn-line); border-radius: 7px; background: var(--raised); justify-self: start; }
-.options dd { color: var(--ink-2); }
-.options .rec { margin-left: 10px; color: var(--you); font-weight: 600; font-size: 14px; white-space: nowrap; }
-.ask-foot { display: flex; align-items: center; gap: 16px; padding: 12px 24px; border-top: 1px solid var(--line-soft); }
-.ask-foot .holds { color: var(--mute); font-size: 14.5px; margin-right: auto; }
-.ask-foot .holds b { color: var(--ink); font-weight: 600; }
-.inbox-body.none { grid-template-columns: 1fr; place-items: center; text-align: center; }
+.options dd { color: var(--ink-2); font-size: 15px; }
+.options .rec { color: var(--you); font-weight: 600; font-size: 14px; margin-left: 8px; white-space: nowrap; }
+.holds { margin-top: auto; padding-top: 10px; color: var(--mute); font-size: 14.5px; }
+.holds b { color: var(--ink); font-weight: 600; }
+.ask-go { display: flex; align-items: center; gap: 18px; margin-top: 10px; }
+.ask-go .btn { flex: 1; justify-content: center; height: 40px; }
+.ask.none { grid-template-columns: minmax(0, 1fr); place-items: center; text-align: center; }
 .calm .i { width: 34px; height: 34px; color: var(--ok); stroke-width: 1.5; }
 .calm-h { font: 600 22px/1.2 var(--display); margin: 10px 0 6px; }
 
 /* ---------------------------------------------------------------- lanes */
 .lanes { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-.lane { padding: 16px 20px 18px; position: relative; overflow: hidden; display: flex; flex-direction: column; }
-.lane.on::before { content: ""; position: absolute; top: 0; left: 0; height: 2px; width: 18%; background: var(--run); animation: run 2.8s linear infinite; }
-@keyframes run { from { transform: translateX(-100%); } to { transform: translateX(560%); } }
-.lane-head { display: flex; align-items: center; gap: 10px; }
+.lane { padding: 14px 16px 14px 20px; display: flex; flex-direction: column; }
+.lane-head { display: flex; align-items: center; gap: 10px; min-height: 30px; }
 .who { display: inline-flex; align-items: center; gap: 8px; font: 600 18px/1.2 var(--display); white-space: nowrap; }
 .who.claude { font-family: var(--serif); font-size: 19.5px; color: var(--claude); }
 .who.chatgpt { letter-spacing: -0.02em; color: var(--openai); }
-.model { color: var(--mute); font-size: 14.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.model { color: var(--mute); font-size: 14.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .chip { margin-left: auto; display: inline-flex; align-items: center; gap: 7px; height: 26px; padding: 0 10px; border-radius: 13px; font-size: 14px; font-weight: 600; background: var(--sunk); color: var(--ink-2); white-space: nowrap; flex: none; }
 .chip.run { background: var(--run-wash); color: var(--run); }
-.doing { font: 600 19px/1.3 var(--display); margin-top: 14px; text-wrap: balance; }
+.doing { font: 600 18px/1.3 var(--display); margin-top: 10px; text-wrap: balance; }
 .doing.quiet { font-weight: 400; color: var(--ink-2); }
-.lane-sub { color: var(--mute); margin-top: 4px; font-size: 15px; }
-.lane-next { margin-top: 10px; font-size: 15px; }
-.lane-next span { color: var(--dim); margin-right: 8px; }
-.lane-note { margin-top: 10px; padding-left: 10px; border-left: 2px solid var(--run); font-size: 15px; }
-.lane-ctl { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: auto; padding-top: 16px; }
-.confirm { margin-top: 14px; padding: 12px 14px; border: 1px solid var(--btn-line); border-radius: 10px; background: var(--raised); }
-.confirm .lane-ctl { padding-top: 10px; }
+.lane-sub { color: var(--mute); margin-top: 3px; font-size: 15px; }
+.lane-note { margin-top: 8px; padding-left: 10px; border-left: 2px solid var(--run); font-size: 15px; }
+.lane .pop { width: 340px; }
+.queue { margin-top: auto; display: grid; grid-template-columns: 48px minmax(0, 1fr); column-gap: 10px; font-size: 15px; }
+.queue::before { content: ""; grid-column: 1 / -1; border-top: 1px solid var(--line-soft); margin: 14px -16px 12px -20px; }
+.queue .q-h { color: var(--dim); }
+.queue li { display: flex; gap: 10px; align-items: baseline; }
+.queue li + li { margin-top: 3px; }
+.queue .q-n { color: var(--dim); flex: 0 0 10px; }
+.queue .q-t { flex: 1 1 0; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--mute); }
+.queue .q-t b { font-weight: 600; color: var(--ink-2); }
+.queue .q-r { font-size: 14px; color: var(--dim); white-space: nowrap; }
+.queue .q-more, .queue .q-none { color: var(--mute); }
+.queue .q-more { margin-top: 3px; padding-left: 20px; }
 
 /* ---------------------------------------------------------------- work */
 .seg { margin-left: auto; display: inline-flex; border: 1px solid var(--btn-line); border-radius: 9px; overflow: hidden; }
@@ -295,21 +317,32 @@ table.list { width: 100%; min-width: 760px; border-collapse: collapse; table-lay
 .loose { padding: 14px 20px 18px; color: var(--mute); }
 .loose b { color: var(--ink); font-weight: 400; }
 
-/* ---------------------------------------------------------------- usage and build order */
-.plan + .plan { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--line-soft); }
+/* ---------------------------------------------------------------- status, usage and build order */
+.status { display: block; text-decoration: none; padding: 14px 20px; }
+.status:hover { border-color: var(--btn-line); }
+.rail .status.down { border-color: var(--bad-line); background: var(--bad-wash); }
+.h-top { display: flex; align-items: center; gap: 9px; }
+.h-top b { font-weight: 600; }
+.h-top .h-when { margin-left: auto; font-size: 14px; color: var(--mute); white-space: nowrap; }
+.h-row { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-top: 10px; font-size: 14.5px; color: var(--ink-2); }
+.h-row span { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
+.h-row .no { color: var(--bad); font-weight: 600; }
+.h-bad { display: block; margin-top: 8px; font-size: 14px; color: var(--bad); }
+.plan + .plan { margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--line); }
 .plan-name { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .plan-name .who { font-size: 17px; }
 .plan-name .who.claude { font-size: 18.5px; }
-.meter { display: grid; grid-template-columns: 104px 1fr 46px; align-items: center; column-gap: 10px; margin-top: 10px; }
-.meter .bar { height: 5px; background: var(--line); border-radius: 3px; position: relative; overflow: hidden; }
-.meter .fill { position: absolute; inset: 0 auto 0 0; background: var(--ink); border-radius: 3px; }
-.meter .kept { position: absolute; inset: 0 0 0 auto; background: repeating-linear-gradient(90deg, var(--mute) 0 1px, transparent 1px 3px); }
+.meter { display: grid; grid-template-columns: 108px 1fr 48px; align-items: center; column-gap: 12px; margin-top: 12px; }
+.meter .label { color: var(--ink-2); }
+.meter .bar { height: 6px; background: var(--line); border-radius: 3px; position: relative; overflow: hidden; }
+.meter .fill { position: absolute; inset: 0 auto 0 0; background: var(--ink-2); border-radius: 3px; }
+.meter .kept { position: absolute; inset: 0 0 0 auto; background: var(--you); opacity: .5; }
 .meter .pct { text-align: right; font-weight: 600; }
+.meter.near .fill { background: var(--run); }
+.meter.near .pct { color: var(--run); }
 .meter .when { grid-column: 2 / 4; font-size: 14px; color: var(--dim); margin-top: 1px; }
 .meter.full .fill { background: var(--bad); }
 .meter.full .pct { color: var(--bad); }
-.meter.aside .fill { background: var(--dim); }
-.meter.aside .pct, .meter.aside .label { color: var(--dim); font-weight: 400; }
 .plan-note { font-size: 14px; color: var(--mute); margin-top: 10px; }
 .plan-note.bad { color: var(--bad); }
 .order li { display: flex; align-items: center; gap: 10px; padding: 6px 0; }
@@ -387,12 +420,17 @@ dialog.sheet::backdrop { background: rgba(4, 6, 10, .55); }
   .top-gap { display: none; }
   .only-mid { display: inline-flex; }
   .rail { display: none; }
-  body.rail-open .rail { display: grid; position: fixed; right: 16px; top: 70px; z-index: 40; width: min(336px, calc(100vw - 32px)); max-height: calc(100vh - 86px); }
+  body.rail-open .rail { display: grid; position: fixed; right: 16px; top: 70px; z-index: 40; width: min(380px, calc(100vw - 32px)); max-height: calc(100vh - 86px); }
 }
 @media (max-width: 1040px) {
-  .inbox-body { grid-template-columns: 1fr; height: auto; }
-  .ask-list { max-height: 214px; border-right: 0; border-bottom: 1px solid var(--line-soft); }
-  .inbox-body.none { height: 220px; }
+  .inbox, .inbox.all { height: auto; }
+  .inbox-head { height: auto; min-height: 52px; flex-wrap: wrap; padding-top: 8px; padding-bottom: 8px; }
+  .ask-row .rt { display: none; }
+  .ask-row .rs { flex: 1 1 0; }
+  .situation { display: block; }
+  .ask { grid-template-columns: minmax(0, 1fr); min-height: 0; }
+  .ask-side { border-left: 0; border-top: 1px solid var(--line-soft); }
+  .ask.none { height: 220px; }
   .lanes, .cols { grid-template-columns: 1fr; }
   .feature { grid-template-columns: minmax(0, 1fr) 132px; }
   .feature .count, .feature .hint { display: none; }
@@ -408,12 +446,10 @@ dialog.sheet::backdrop { background: rgba(4, 6, 10, .55); }
   .top-in, .stage { padding-left: 16px; padding-right: 16px; }
   .beat { display: none; }
   .top-col .btn:first-of-type + h1 { margin-right: auto; }
-  .ask-foot { flex-wrap: wrap; }
   .rows > li { grid-template-columns: 8px minmax(0, 1fr); }
   .rows > li > :nth-child(n+3) { grid-column: 2; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .lane.on::before { animation: none; width: 100%; opacity: .5; }
   .side { transition: none; }
 }
 </style>
@@ -425,7 +461,7 @@ dialog.sheet::backdrop { background: rgba(4, 6, 10, .55); }
     <header class="top" id="top"></header>
     <div class="stage">
       <main id="main"></main>
-      <aside class="rail" id="rail" aria-label="Usage and build order"></aside>
+      <aside class="rail" id="rail" aria-label="Usage, build order and status"></aside>
     </div>
   </div>
 </div>
@@ -468,7 +504,7 @@ let ctl = {};        // control.json, as last read
 let fault = null;    // why the snapshot couldn't be read: "server", "missing", "unreadable"
 const PAGES = [["dashboard", "Dashboard"], ["activity", "Activity"], ["usage", "Usage"], ["settings", "Settings"]];
 const sampleName = new URLSearchParams(location.search).get("sample");
-const ui = { page: "dashboard", repo: "", view: "list", pr: null, ask: null, confirm: null, sel: null, pop: null, nav: false, rail: false };
+const ui = { page: "dashboard", repo: "", view: "list", pr: null, ask: null, allAsks: false, sel: null, pop: null, nav: false, rail: false };
 
 function recall(k) { try { return localStorage.getItem("qr." + k); } catch { return null; } }
 function remember(k, v) { try { localStorage.setItem("qr." + k, v); } catch { /* a private window */ } }
@@ -533,7 +569,14 @@ const KIND = {
   review: ["Reviewing", "review"], merge: ["Merging", "merge"],
 };
 const kind = (k) => KIND[k] || [k ? k[0].toUpperCase() + k.slice(1) : "Working on", "job"];
-const ASK = { decide: "Decide", merge: "Merge", answer: "Answer", live: "Live steps" };
+// Why an ask came to you, and what its specifics are called.
+// Each: its name, what its specifics are called, and how one and several are counted.
+const ASK = {
+  stuck: ["Stuck", "What's wrong", "stuck", "stuck"], decision: ["Your decision", "Why it's yours", "decision", "decisions"],
+  merge: ["Ready to merge", "Where it stands", "ready to merge", "ready to merge"], broken: ["Broken", "What failed", "broken", "broken"],
+};
+const askWords = (a) => ASK[a.kind] || ["Needs you", "Why it's yours", "other", "others"];
+const QUEUED = { build: "Build", fix: "Fix round on", conflict: "Conflict round on", decision: "Decision on", live: "Live steps for", review: "Review", merge: "Merge" };
 const STATE = {
   ready: ["Ready", "ready"], building: ["Building", "moving"], review: ["In review", "moving"], fixing: ["Fixing", "moving"],
   you: ["Needs you", "yours"], blocked: ["Blocked", "blocked"], "not-ready": ["Not ready", "blocked"], done: ["Done", "done"],
@@ -566,16 +609,6 @@ function side() {
   const pages = PAGES.map(([id, label]) => `<a class="nav" href="${esc(href({ page: id, pr: null }))}" data-act="page" data-page="${id}" ${ui.page === id ? 'aria-current="page"' : ""}>
       ${ICON[id]}<span>${label}</span>${id === "dashboard" && count(ui.repo) ? `<span class="badge you" title="${plural(count(ui.repo), "thing needs", "things need")} you">${count(ui.repo)}</span>` : ""}</a>`).join("");
 
-  let health = "";
-  if (snap) {
-    const down = frozen(), bad = (s.sources || []).filter((x) => !x.ok);
-    health = `<a class="health${down ? " down" : ""}" href="${esc(href({ page: "settings", pr: null }))}" data-act="page" data-page="settings" title="Connections are in Settings">
-      <span class="h-top"><i class="dot ${down ? "bad" : "ok"}"></i><b>${down ? "Runner silent" : "Runner running"}</b>
-        <span class="h-when">since ${esc(clock(down ? s.written_at : s.runner.started_at))}</span></span>
-      <span class="h-grid">${(s.sources || []).map((x) => `<span class="${x.ok || down ? "" : "no"}" title="${esc(x.name)}: ${esc(x.note || "")}"><i class="dot ${down ? "" : x.ok ? "ok" : "bad"}"></i>${esc(x.short || x.name)}</span>`).join("")}</span>
-      ${!down && bad.length ? `<span class="h-bad">${bad.map((x) => `${esc(x.name)}: ${esc(x.note)}`).join(". ")}</span>` : ""}</a>`;
-  }
-
   let foot = "";
   if (s.sample) {
     const sm = s.sample;
@@ -584,7 +617,7 @@ function side() {
         ${Object.entries(sm.states).map(([k, v]) => `<a class="mi" role="menuitem" href="${esc(href({ sample: k }))}" aria-current="${k === sm.state}"><span class="two"><b>${esc(v)}</b></span></a>`).join("")}
         ${(sm.earlier || []).length ? `<p class="pop-label">Earlier takes of this page, in a new tab:</p>${sm.earlier.map((t) => `<a class="mi" role="menuitem" href="${esc(t.href)}" target="_blank" rel="noreferrer"><span class="two"><b>${esc(t.label)}</b><span>${esc(t.note || "")}</span></span>${ICON.out}</a>`).join("")}` : ""}</div>` : ""}</div>`;
   }
-  return `${switcher}<div class="pages">${pages}</div><div class="grow"></div>${health}${foot}`;
+  return `${switcher}<div class="pages">${pages}</div><div class="grow"></div>${foot}`;
 }
 
 // ------------------------------------------------------------------ top bar
@@ -622,48 +655,70 @@ function notices() {
 }
 
 // ------------------------------------------------------------------ needs you
-// One box of one size. The asks are listed on its left; the picked one is open on its right.
+// One box of one size, read like an inbox. Each ask is one line (why it's yours, what it is, the
+// situation in a sentence), so several can be weighed in one look: a merge takes a moment, a
+// stuck PR takes thought. The picked ask is open under them as a briefing that still makes sense
+// a week later, with what you can do beside it. Past three, the rest fold away, named in the
+// heading; nothing scrolls. The runner lists them in the order they're worth taking.
+const MAX_ASKS = 3;
 function inbox() {
   const all = snap.asks || [], asks = scoped(all);
-  if (!asks.some((a) => a.id === ui.ask)) ui.ask = asks.length ? asks[0].id : null;
-  const cur = asks.find((a) => a.id === ui.ask);
+  const folded = asks.length > MAX_ASKS && !ui.allAsks;
+  const shown = folded ? asks.slice(0, MAX_ASKS) : asks;
+  if (!shown.some((a) => a.id === ui.ask)) ui.ask = shown.length ? shown[0].id : null;
+  const cur = shown.find((a) => a.id === ui.ask);
   const blind = (snap.sources || []).find((s) => s.id === "github" && !s.ok);
-  let head = "", body;
-  if (asks.length) {
-    const oldest = asks.reduce((a, b) => (ms(a.since) <= ms(b.since) ? a : b));
-    head = `<span class="badge you">${asks.length}</span><span class="head-note">The oldest has waited ${esc(ago(oldest.since))}</span>`;
-    body = `<div class="inbox-body"><ol class="ask-list" data-scroll="asks">${asks.map((a) => `<li><button class="ask-row" data-act="ask" data-id="${esc(a.id)}" aria-current="${a.id === ui.ask}">
-        <span class="r1"><span class="kind">${esc(ASK[a.kind] || "Needs you")}</span><span>${esc(ago(a.since))}</span></span>
-        <span class="r2">${esc(a.subject)}</span>
-        <span class="r3">${esc(a.repo)} ${esc(a.ref)}</span></button></li>`).join("")}</ol>${ask(cur)}</div>`;
-  } else {
+  if (!asks.length) {
     const calm = blind ? ["Nothing seen that needs you", "GitHub can't be read, so something may be missing."]
       : ui.repo && all.length ? [`Nothing in ${esc(ui.repo)} needs you`, `${plural(all.length, "thing waits", "things wait")} in another repository. <button class="link" data-act="repo" data-repo="">Show all repositories</button>`]
       : ["Nothing needs you", "The runner carries on by itself."];
-    body = `<div class="inbox-body none"><div class="calm">${ICON.done}<p class="calm-h">${calm[0]}</p><p class="mute">${calm[1]}</p></div></div>`;
+    return `<section class="card inbox" aria-label="Needs you"><header class="inbox-head"><h2>Needs you</h2></header>
+      <div class="ask none"><div class="calm">${ICON.done}<p class="calm-h">${calm[0]}</p><p class="mute">${calm[1]}</p></div></div></section>`;
   }
-  return `<section class="card inbox${asks.length ? " has" : ""}" aria-label="Needs you"><header class="card-head"><h2>Needs you</h2>${head}</header>${body}</section>`;
+  let fold = "";
+  if (folded) {
+    const tally = new Map();
+    for (const a of asks.slice(MAX_ASKS)) tally.set(a.kind, (tally.get(a.kind) || 0) + 1);
+    const also = [...tally].map(([k, n]) => `${n} ${askWords({ kind: k })[n === 1 ? 2 : 3]}`).join(", ");
+    fold = `<span class="fold"><span>Also waiting: ${esc(also)}</span><button class="btn sm" data-act="fold">Show all ${asks.length}</button></span>`;
+  } else if (asks.length > MAX_ASKS) fold = `<span class="fold"><button class="btn sm" data-act="fold">Show the first ${MAX_ASKS}</button></span>`;
+
+  const rows = shown.map((a) => `<li><button class="ask-row" data-act="ask" data-id="${esc(a.id)}" aria-current="${a === cur}">
+      <span class="rk"><span class="kind-tag${a.kind === "broken" ? " broken" : ""}">${esc(askWords(a)[0])}</span></span>
+      <span class="rs"><b>${esc(a.subject)}</b><span>${esc(a.ref)}</span></span>
+      <span class="rt">${esc(a.situation || a.question)}</span>
+      ${repoTag(a.repo)}<span class="ra" title="Waiting since ${esc(clock(a.since))}">${esc(ago(a.since))}</span></button></li>`).join("");
+  return `<section class="card inbox has${folded || asks.length <= MAX_ASKS ? "" : " all"}" aria-label="Needs you">
+    <header class="inbox-head"><h2>Needs you</h2><span class="badge you">${asks.length}</span>${fold}</header>
+    <ol class="ask-rows">${rows}</ol>${ask(cur)}</section>`;
 }
 
 function ask(a) {
   const options = (a.options || []).length ? `<dl class="options">${a.options.map((o) =>
     `<dt>${esc(o.say)}</dt><dd>${esc(o.means)}${o.recommended ? '<span class="rec">Recommended</span>' : ""}</dd>`).join("")}</dl>` : "";
   const holds = (a.holds_up || []).length ? `Until then <b>${a.holds_up.map(esc).join("</b> and <b>")}</b> can't start.` : "It holds nothing else up.";
-  return `<article class="ask" aria-live="polite">
-    <div class="ask-body" data-scroll="ask">
-      <p class="ask-meta">${repoTag(a.repo)}<span>${esc(a.ref)} ${esc(a.subject)}</span><span class="age" title="${esc(clock(a.since))}">waiting ${esc(ago(a.since))}</span></p>
-      <h3 class="question">${esc(a.question)}</h3>
-      <ul class="why">${(a.why || []).map((w) => `<li>${esc(w)}</li>`).join("")}</ul>
-      ${options}
+  return `<article class="ask">
+    <div class="ask-main" data-scroll="ask">
+      <p class="situation">${esc(a.situation || "")}</p>
+      <dl class="brief">
+        ${a.about ? `<dt>What it is</dt><dd>${esc(a.about)}</dd>` : ""}
+        ${a.because ? `<dt>${esc(askWords(a)[1])}</dt><dd>${esc(a.because)}</dd>` : ""}
+        ${(a.story || []).length ? `<dt>So far</dt><dd><ol class="trail">${a.story.map((s) => `<li>${esc(s)}</li>`).join("")}</ol></dd>` : ""}
+      </dl>
     </div>
-    <p class="ask-foot"><span class="holds">${holds}</span>
-      ${a.pr ? prLink(a.repo, a.pr, "PR history") : ""}
-      <a class="btn go" href="${esc(a.go.url)}" target="_blank" rel="noreferrer">${esc(a.go.label)}${ICON.out}</a></p>
+    <div class="ask-side">
+      <p class="question">${esc(a.question)}</p>
+      ${options}
+      <p class="holds">${holds}</p>
+      <p class="ask-go">${a.pr ? prLink(a.repo, a.pr, "PR history") : ""}
+        <a class="btn go" href="${esc(a.go.url)}" target="_blank" rel="noreferrer">${esc(a.go.label)}${ICON.out}</a></p>
+    </div>
   </article>`;
 }
 
 // ------------------------------------------------------------------ lanes
-function lanes() { return `<section class="lanes" aria-label="The lanes">${(snap.lanes || []).map(lane).join("")}</section>`; }
+// What each lane is doing right now, and under a rule its own queue: what it takes up next.
+function lanes() { return `<section class="lanes" aria-label="What is working now">${(snap.lanes || []).map(lane).join("")}</section>`; }
 
 function lane(l) {
   const stale = frozen();
@@ -675,20 +730,18 @@ function lane(l) {
   if (l.state === "stopped") {
     chip = `<span class="chip">Stopped by you</span>`;
     head = l.stopped && l.stopped.at ? `Stopped at ${esc(clock(l.stopped.at))}` : "Stopped";
-    if (l.stopped && l.stopped.during) sub = `It was cut off during ${esc(l.stopped.during)}.`;
+    sub = l.stopped && l.stopped.during ? `It was cut off during ${esc(l.stopped.during)}.` : "It starts nothing until you resume it.";
   } else if (l.state === "waiting") {
     chip = `<span class="chip">Waiting</span>`;
     head = l.wait && l.wait.until ? `Waiting until ${esc(clock(l.wait.until))}` : "Waiting";
     sub = esc((l.wait && l.wait.reason) || "");
   } else if (job) {
-    chip = `<span class="chip run"><i class="dot run"></i>${l.state === "stopping" ? "Stopping" : "Working"}</span>`;
+    chip = `<span class="chip run"><i class="dot run"></i>${l.state === "stopping" ? "Stopping" : "Working"}, ${esc(ago(job.started_at))}</span>`;
     head = `${esc(doing)} ${esc(job.ref)} ${esc(job.title)}`;
-    const bits = [`${esc(ago(job.started_at))} so far`, `in ${esc(job.repo)}`];
-    if (job.sha) bits.push(`on head <span class="sha">${esc(job.sha)}</span>`);
-    sub = bits.join(", ") + ".";
+    sub = `In ${esc(job.repo)}${job.sha ? `, on head <span class="sha">${esc(job.sha)}</span>` : ""}.`;
     if (job.thread) sub += ` <a class="link" href="${esc(job.thread)}" target="_blank" rel="noreferrer">Open the thread</a>`;
     if (job.pr) sub += ` ${prLink(job.repo, job.pr, "PR history")}`;
-  } else { chip = `<span class="chip">Idle</span>`; head = "No job right now"; }
+  } else { chip = `<span class="chip">Idle</span>`; head = "Nothing to do right now"; }
   if (stale) chip = `<span class="chip">Last recorded</span>`;
 
   let note = "";
@@ -696,27 +749,30 @@ function lane(l) {
   else if (pending && off) note = `You asked it to carry on at ${esc(clock(a.at))}. The runner hasn't read that yet.`;
   else if (l.state === "stopping") note = `It stops when this ${esc(noun)} ends, and starts nothing after.`;
 
-  const now = l.stop_now || {};
-  let ctlHtml;
-  if (stale) ctlHtml = `<p class="lane-ctl small dim">Stop and resume come back when the runner does.</p>`;
-  else if (ui.confirm === l.id) ctlHtml = `<div class="confirm"><p><b class="strong">Stop ${esc(l.name)} now?</b> ${esc(now.effect || "")}</p>
-      <p class="lane-ctl"><button class="btn danger" data-act="stop" data-lane="${esc(l.id)}" data-how="now">Stop now</button>
-      <button class="btn" data-act="cancel">Keep it running</button></p></div>`;
-  else if (want || off) ctlHtml = `<p class="lane-ctl"><button class="btn solid" data-act="stop" data-lane="${esc(l.id)}" data-how="">${ICON.play}${l.state === "stopped" ? "Resume" : "Carry on after all"}</button></p>`;
-  else if (l.state === "working" && job) ctlHtml = `<p class="lane-ctl">
-      <button class="btn" data-act="stop" data-lane="${esc(l.id)}" data-how="after-job">Stop after this ${esc(noun)}</button>
-      <button class="btn danger" data-act="confirm" data-lane="${esc(l.id)}" ${now.available ? "" : "disabled"}>Stop now</button>
-      ${now.available ? "" : `<span class="small mute">${esc(now.note || "Stop now is unavailable.")}</span>`}</p>`;
-  else ctlHtml = `<p class="lane-ctl"><button class="btn" data-act="stop" data-lane="${esc(l.id)}" data-how="after-job">${ICON.pause}Stop ${esc(l.name)}</button></p>`;
+  // One Stop button. While a job runs it asks which stop you mean.
+  const now = l.stop_now || {}, id = esc(l.id), pop = `stop-${l.id}`;
+  let stop = "";
+  if (stale) stop = "";
+  else if (want || off) stop = `<button class="btn sm solid" data-act="stop" data-lane="${id}" data-how="">${ICON.play}${l.state === "stopped" ? "Resume" : "Carry on"}</button>`;
+  else if (l.state === "working" && job) stop = `<span class="pop-root"><button class="btn sm" data-act="pop" data-pop="${esc(pop)}" aria-haspopup="menu" aria-expanded="${ui.pop === pop}">${ICON.pause}Stop</button>
+      ${ui.pop === pop ? `<div class="pop right" role="menu" aria-label="Stop ${esc(l.name)}">
+        <button class="mi" role="menuitem" data-act="stop" data-lane="${id}" data-how="after-job"><span class="two"><b>After this ${esc(noun)}</b><span>It finishes the ${esc(noun)}, then starts nothing.</span></span></button>
+        <button class="mi danger" role="menuitem" data-act="stop" data-lane="${id}" data-how="now" ${now.available ? "" : "disabled"}><span class="two"><b>Now</b><span>${esc(now.available ? now.effect || "Cuts the job off." : now.note || "Unavailable.")}</span></span></button></div>` : ""}</span>`;
+  else stop = `<button class="btn sm" data-act="stop" data-lane="${id}" data-how="after-job" title="It starts nothing until you resume it">${ICON.pause}Stop</button>`;
 
+  const queue = l.queue || [], first = queue.slice(0, 3);   // a lane is one across repositories: never narrowed
+  const next = `<div class="queue"><span class="q-h">Next</span>${first.length
+    ? `<div><ol>${first.map((q, n) => `<li><span class="q-n">${n + 1}</span><span class="q-t"><b>${esc(QUEUED[q.kind] || q.kind)} ${esc(q.ref)}</b> ${esc(q.title)}</span><span class="q-r">${esc(q.repo)}</span></li>`).join("")}</ol>
+        ${queue.length > first.length ? `<p class="q-more">and ${queue.length - first.length} more</p>` : ""}</div>`
+    : `<p class="q-none">${esc(l.queue_empty || "Nothing is waiting for it.")}</p>`}</div>`;
   const moving = !stale && (l.state === "working" || l.state === "stopping");
-  return `<article class="card lane${moving ? " on" : ""}">
-    <p class="lane-head">${who(l.provider, l.name)}<span class="model">${esc(l.model)}, ${esc(l.does)}</span>${chip}</p>
+  const does = l.does ? l.does[0].toUpperCase() + l.does.slice(1) : "";
+  return `<article class="card lane">
+    <div class="lane-head">${who(l.provider, l.name)}<span class="model" title="With ${esc(l.model)}">${esc(does)}</span>${chip}${stop}</div>
     <p class="doing${moving ? "" : " quiet"}">${head}</p>
     ${sub ? `<p class="lane-sub">${sub}</p>` : ""}
-    ${l.next && l.state !== "stopping" ? `<p class="lane-next"><span>Next</span>${esc(l.next)}</p>` : ""}
     ${note ? `<p class="lane-note">${note}</p>` : ""}
-    ${ctlHtml}
+    ${next}
   </article>`;
 }
 
@@ -877,22 +933,34 @@ function pyramid(m) {
     + (loose.length ? `<p class="loose">On their own, blocking nothing: ${loose.map((i) => `<b>#${i.n} ${esc(i.title)}</b> (${esc(stateOf(i)[0].toLowerCase())})`).join(", ")}.</p>` : `<p class="loose"></p>`);
 }
 
-// ------------------------------------------------------------------ usage and build order
-function meter(w) {
+// ------------------------------------------------------------------ status, usage and build order
+// Every window says when it resets. The fill turns amber from 85% and red at the limit; the
+// blue end of a bar is the share kept for you. The Usage page adds what the runner makes of it.
+function meter(w, full) {
   const used = w.used, known = typeof used === "number";
-  const cls = !w.gates ? " aside" : known && used >= 100 ? " full" : "";
+  const cls = known && used >= 100 ? " full" : known && used >= 85 ? " near" : "";
   return `<div class="meter${cls}" title="${esc(w.note || "")}"><span class="label">${esc(w.label)}</span>
     <span class="bar" role="img" aria-label="${esc(w.label)}: ${known ? used + "% used" : "unknown"}">
-      ${known ? `<i class="fill" style="width:${Math.min(used, 100)}%"></i>` : ""}${w.reserve ? `<i class="kept" style="width:${w.reserve}%"></i>` : ""}</span>
+      ${known ? `<i class="fill" style="width:${Math.min(used, 100)}%"></i>` : ""}${w.reserve ? `<i class="kept" style="width:${w.reserve}%" title="${w.reserve}% kept for you"></i>` : ""}</span>
     <span class="pct">${known ? used + "%" : "?"}</span>
-    <span class="when">resets ${esc(clock(w.resets_at))}${w.gates ? "" : `. ${esc(w.note || "Not used by the runner.")}`}</span></div>`;
+    <span class="when">resets ${esc(clock(w.resets_at))}${full && !w.gates ? `. ${esc(w.note || "Not used by the runner.")}` : ""}</span></div>`;
 }
-const plan = (p) => `<div class="plan">
+const plan = (p, full) => `<div class="plan">
     <p class="plan-name">${who(p.provider, p.name)}<span class="dim small">${p.plan ? esc(p.plan) + ", " : ""}read ${esc(clock(p.read_at))}</span></p>
     ${p.error ? `<p class="plan-note bad">${esc(p.error)}</p>` : ""}
-    ${(p.windows || []).map(meter).join("")}
+    ${(p.windows || []).map((w) => meter(w, full)).join("")}
     ${(p.windows || []).filter((w) => w.reserve).map((w) => `<p class="plan-note">${w.reserve}% of the week is kept for you until ${esc(clock(w.reserve_opens_at))}.</p>`).join("")}
   </div>`;
+
+// Is it up, and is everything it leans on up. One line while all is well.
+function status() {
+  const down = frozen(), bad = (snap.sources || []).filter((x) => !x.ok);
+  return `<a class="card status${down ? " down" : ""}" href="${esc(href({ page: "settings", pr: null }))}" data-act="page" data-page="settings" title="Connections are in Settings">
+    <span class="h-top"><i class="dot ${down ? "bad" : "ok"}"></i><b>${down ? "Runner silent" : "Runner running"}</b>
+      <span class="h-when">since ${esc(clock(down ? snap.written_at : snap.runner.started_at))}</span></span>
+    <span class="h-row">${(snap.sources || []).map((x) => `<span class="${x.ok || down ? "" : "no"}" title="${esc(x.name)}: ${esc(x.note || "")}"><i class="dot ${down ? "" : x.ok ? "ok" : "bad"}"></i>${esc(x.short || x.name)}</span>`).join("")}</span>
+    ${!down && bad.length ? `<span class="h-bad">${bad.map((x) => `${esc(x.name)}: ${esc(x.note)}`).join(". ")}</span>` : ""}</a>`;
+}
 
 function orderRows() {
   const names = (snap.repos || []).map((r) => r.name), want = ctl.repo_order || [];
@@ -911,9 +979,9 @@ function orderRows() {
 function rail() {
   const usage = `<section class="card"><header class="card-head"><h2>Usage</h2>
       <a class="link small mute" style="margin-left:auto" href="${esc(href({ page: "usage", pr: null }))}" data-act="page" data-page="usage">Details</a></header>
-    <div class="card-pad">${(snap.usage || []).map(plan).join("")}</div></section>`;
+    <div class="card-pad">${(snap.usage || []).map((p) => plan(p, false)).join("")}</div></section>`;
   const order = `<section class="card"><header class="card-head"><h2>Build order</h2></header><div class="card-pad" style="padding-top:8px">${orderRows()}</div></section>`;
-  return (ui.page === "usage" ? "" : usage) + (ui.page === "settings" ? "" : order);
+  return (ui.page === "usage" ? "" : usage) + (ui.page === "settings" ? "" : order) + status();
 }
 
 // ------------------------------------------------------------------ the other pages
@@ -935,7 +1003,7 @@ function activity() {
 
 function usagePage() {
   const costs = snap.costs || [];
-  return `<div class="cols">${(snap.usage || []).map((p) => `<section class="card"><div class="card-pad">${plan(p)}</div></section>`).join("")}</div>
+  return `<div class="cols">${(snap.usage || []).map((p) => `<section class="card"><div class="card-pad">${plan(p, true)}</div></section>`).join("")}</div>
     ${costs.length ? `<section class="card"><header class="card-head"><h2>What a Claude job is expected to cost</h2><span class="head-note">A job starts only when this much is free</span></header>
       <table class="plain"><thead><tr><th>Job</th><th class="num">Of the session</th><th class="num">Of the week</th><th>Taken from</th></tr></thead>
       <tbody>${costs.map((c) => `<tr><td class="strong">${esc(c.label)}</td><td class="num">${c.session}%</td><td class="num">${c.week}%</td><td class="mute">${esc(c.basis)}</td></tr>`).join("")}</tbody></table>
@@ -1083,18 +1151,17 @@ document.addEventListener("click", (e) => {
     case "page":
       if (e.ctrlKey || e.metaKey || e.shiftKey) return;   // a new tab is the browser's to open
       e.preventDefault();
-      ui.page = d.page; ui.nav = false; ui.pop = null; ui.rail = false; ui.confirm = null;
+      ui.page = d.page; ui.nav = false; ui.pop = null; ui.rail = false;
       address(true); draw(); scrollTo(0, 0);
       return;
-    case "repo": ui.repo = d.repo; remember("repo", d.repo); ui.pop = null; ui.sel = null; break;
+    case "repo": ui.repo = d.repo; remember("repo", d.repo); ui.pop = null; ui.sel = null; ui.allAsks = false; break;
     case "ask": ui.ask = d.id; break;
+    case "fold": ui.allAsks = !ui.allAsks; break;
     case "view": ui.view = d.view; remember("view", d.view); break;
-    case "confirm": ui.confirm = d.lane; break;
-    case "cancel": ui.confirm = null; break;
-    case "stop": ui.confirm = null; send([{ lane: d.lane, stop: d.how || null }]); return;
+    case "stop": ui.pop = null; send([{ lane: d.lane, stop: d.how || null }]); return;
     case "all": {
       const how = d.how || null;
-      ui.pop = null; ui.confirm = null;
+      ui.pop = null;
       send((snap.lanes || []).map((l) => ({ lane: l.id, stop: how === "now" && l.state === "working" && !(l.stop_now || {}).available ? "after-job" : how })));
       return;
     }
