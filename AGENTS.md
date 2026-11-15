@@ -612,8 +612,10 @@ threads that need Stefan, so the runner toasts instead.
 ## The dashboard
 
 `dashboard/` (ticket 18; Stefan, 2026-11-15). A page that opens on what needs Stefan, then the
-two lanes, then the work (a list, and a pyramid of what blocks what), with usage, health and the
-build order beside it. **It is its own process and depends on nothing:** no build step, no
+two lanes, then the work (a list, and a pyramid of what blocks what). Its frame is the one Stefan
+asked for in the prototype rounds: a sidebar (the repository switcher, the pages Dashboard,
+Activity, Usage and Settings, the runner's health), one centred column, and usage and the build
+order floating on the right. **It is its own process and depends on nothing:** no build step, no
 package, no network, no runner code, no T3, no GitHub. One HTML file, served by Python's standard
 library.
 
@@ -629,20 +631,32 @@ python3 -m dashboard --sample    # sample data, no runner needed; ?sample=<state
 - **The snapshot's shape is what `dashboard/sample.py` builds** (version 1): `written_at` and
   `write_every` (a snapshot older than three times that, or 90 seconds, means the runner has
   gone quiet: the page says so, greys the health readings and takes the controls away),
-  `control_read_at`, `sources` (health), `repos` in build order, `asks`, `lanes`, `usage`,
-  `features`, `issues` (with `pick`, the order ready work is built in) and `prs` (each with its
-  timeline by head). Times are ISO strings; the page formats them. `sample.STATES` names every
-  state the page has to show.
+  `control_read_at`, `sources` (health; `short` is the name in the sidebar), `repos` in build
+  order, `asks`, `lanes`, `usage`, `features`, `issues` (with `pick`, the order ready work is
+  built in), `prs` (each with its timeline by head), `activity` (what happened, newest first),
+  `costs` (what the gate expects each kind of Claude job to take), `roles` (which lane does each
+  kind of job) and `knob` (`gate.json`). A lane and a plan name their `provider` (`claude`,
+  `chatgpt`), which picks the mark beside the name; the reviewing lane's id stays `sol`. Times
+  are ISO strings; the page formats them. `sample.STATES` names every state the page has to show.
 - **Control** (`serve.apply_control`): `POST /control` takes `{"lane", "stop"}` (`"after-job"`,
   `"now"` or null to carry on) or `{"repo_order": [...]}`, and anything else is refused. The page
   shows a request as asked until `control_read_at` reaches its time.
 - **Only this PC:** it binds 127.0.0.1, and refuses a request whose `Host` isn't its own address
   or whose `Origin` is another site's, so a web page elsewhere can't stop a lane.
-- **How it looks** is explained at the top of `dashboard/index.html`: the bright slips are what
-  needs Stefan and nothing else is raised; green is done or healthy, amber is near a limit or
-  out of date, red is broken; working is shown by movement. Fonts are ones Windows ships
-  (Bahnschrift, Sitka, Cascadia Mono).
-- `?view=pyramid` and `?pr=<repo>:<n>` open the page on the pyramid or on a PR's history.
+- **How it looks** is explained at the top of `dashboard/index.html`. Needs you is one box of
+  one size whatever is in it (Stefan: it mustn't change size between repositories): the asks
+  listed on its left, the picked one open on its right. Colour is state only: blue is Stefan's,
+  amber is working, green is done or healthy, red is broken; Claude's clay and OpenAI's black or
+  white are on their marks and names only (the marks are Simple Icons', CC0, inline). Fonts are
+  ones Windows ships (Segoe UI Variable, Sitka for an ask's question, Cascadia Mono), 16px and up.
+- **Stop all** (the top bar) is one `{"lane", "stop"}` request per lane; a lane whose Stop now is
+  unavailable is asked to stop after its job instead.
+- `?page=activity|usage|settings`, `?repo=<name>` (the switcher's choice, which narrows every
+  page), `?view=pyramid` and `?pr=<repo>:<n>` open the page there.
+- **Earlier takes, while the look is being agreed:** `dashboard/earlier/take-N.html` is the page
+  as it was before a rework, served at `/earlier/take-N.html` with `--sample` only and linked
+  from the sidebar's sample menu (`sample.EARLIER`). Before reworking the page again, copy it
+  there as the next take. Delete the folder, its route and its test once Stefan agrees the page.
 - The earlier React prototype is `.scratch/queue-runner/prototype-app/` (history only).
 
 ## Sol, as a script sees it
@@ -882,7 +896,8 @@ temp folder.
 - `queue_runner/restart.py`: restarting on its own new code after main moves (ticket 14).
 - `queue_runner/cli.py`: the command line.
 - `dashboard/`: the dashboard, apart from the runner: `index.html` (the page), `serve.py` (its
-  server and the control file), `sample.py` (the snapshot's shape, in every state).
+  server and the control file), `sample.py` (the snapshot's shape, in every state), `earlier/`
+  (the page before each rework, until its look is agreed).
 - `scripts/live_sandbox.py`, `scripts/live_review.py`, `scripts/live_fix_brief.py` and
   `scripts/live_merge.py`: the live checks.
 - `scripts/make_icon.py`: draws the toast icon, `queue_runner/assets/icon.png`.

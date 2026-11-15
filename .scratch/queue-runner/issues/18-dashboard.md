@@ -45,7 +45,18 @@ After four prototype rounds (`../prototype-app/`, kept as history) and an audit 
 - **Build order is a control,** not only config: Stefan reorders the repos from the page.
   Repo order only for now; pinning one issue as next is not built.
 
+- **The frame is the one from the prototype rounds** (Stefan, 2026-11-15, after the first
+  rebuild dropped it): a sidebar with the repository switcher, the pages (Dashboard, Activity,
+  Usage, Settings) and the runner's health; one centred column; usage floating on the right like
+  T3 Code's, with the build order under it. Claude and ChatGPT carry their own marks. Needs you
+  keeps one size whichever repository is picked. Type is 16px and up.
+
 ## Comments
+
+2026-11-15: the page was rebuilt a second time, joining the two before it: the prototype
+rounds' frame (above) around what the audit settled (questions shown open, links out, stop
+after or now, build order, the pyramid, one HTML file). The first rebuild is kept as
+`dashboard/earlier/take-1.html` to compare against until the look is agreed.
 
 2026-11-15: the original ticket asked for a page the runner serves, with pause after the
 current step only. Both changed above.

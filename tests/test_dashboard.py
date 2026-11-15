@@ -102,7 +102,7 @@ class SampleTest(unittest.TestCase):
                 json.dumps(s)
                 self.assertEqual(s["version"], 1)
                 for key in ("written_at", "write_every", "control_read_at", "runner", "sources", "repos",
-                            "asks", "lanes", "usage", "features", "issues", "prs"):
+                            "asks", "lanes", "usage", "features", "issues", "prs", "activity", "costs", "roles", "knob"):
                     self.assertIn(key, s)
                 self.assertEqual(s["sample"]["state"], name)
                 keys = {f"{i['repo']}#{i['n']}" for i in s["issues"]}
@@ -110,6 +110,22 @@ class SampleTest(unittest.TestCase):
                     self.assertLessEqual(set(i["blocked_by"]), keys, i["title"])
                 for a in s["asks"]:
                     self.assertTrue(a["go"]["url"].startswith("https://"), a["id"])
+
+    def test_every_lane_and_plan_names_its_provider_and_every_role_a_lane(self):
+        s = sample.build("busy", base=self.T, now=self.T)
+        self.assertEqual([(l["id"], l["provider"], l["name"]) for l in s["lanes"]],
+                         [("claude", "claude", "Claude"), ("sol", "chatgpt", "ChatGPT")])
+        self.assertEqual([p["provider"] for p in s["usage"]], ["claude", "chatgpt"])
+        self.assertLessEqual({r["lane"] for r in s["roles"]}, {l["id"] for l in s["lanes"]})
+
+    def test_activity_is_newest_first_and_holds_every_prs_events(self):
+        s = sample.build("busy", base=self.T, now=self.T)
+        times = [datetime.fromisoformat(a["at"]) for a in s["activity"]]
+        self.assertEqual(times, sorted(times, reverse=True))
+        self.assertGreaterEqual(len(s["activity"]), sum(len(p["timeline"]) for p in s["prs"]))
+        repos = {r["name"] for r in s["repos"]}
+        for a in s["activity"]:
+            self.assertIn(a["repo"], repos | {None}, a["title"])
 
     def test_an_unknown_state_is_an_error(self):
         with self.assertRaises(ValueError):
@@ -178,6 +194,15 @@ class HttpTest(unittest.TestCase):
         status, _, body = self.call("GET", "/control.json")
         self.assertEqual((status, json.loads(body)["lanes"]), (200, {}))
         self.assertEqual(self.call("GET", "/config.toml")[0], 404)
+
+    def test_an_earlier_take_of_the_page_is_served_with_sample_data_only(self):
+        status, kind, body = self.call("GET", "/earlier/take-1.html")
+        self.assertEqual((status, kind), (200, "text/html; charset=utf-8"))
+        self.assertIn(b"<title>Queue runner</title>", body)
+        for path in ("/earlier/take-999.html", "/earlier/serve.py", "/earlier/..%2Fserve.py", "/earlier/"):
+            self.assertEqual(self.call("GET", path)[0], 404, path)
+        self.app.sample = False
+        self.assertEqual(self.call("GET", "/earlier/take-1.html")[0], 404)
 
     def test_the_page_has_no_address_outside_itself_to_load(self):
         page = (Path(__file__).resolve().parent.parent / "dashboard" / "index.html").read_text(encoding="utf-8")

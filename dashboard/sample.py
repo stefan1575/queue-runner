@@ -20,12 +20,18 @@ STATES = {
     "clear": "Nothing needs you",
     "many": "Six asks",
     "reserve": "Claude waits: the rest of the week is kept for you",
-    "limit": "Claude hit its 5-hour limit in the middle of a build",
+    "limit": "Claude hit its session limit in the middle of a build",
     "github-down": "GitHub can't be read",
     "no-interrupt": "T3 refuses the interrupt, so Stop now is off for Claude",
     "dead": "The runner stopped writing 42 minutes ago",
 }
 DEFAULT = "busy"
+# Takes of the page before this one, kept while its look is being agreed: `serve.py` serves the
+# ones in `dashboard/earlier/` in sample mode, and the sidebar's sample menu links them.
+EARLIER = [
+    {"href": "/earlier/take-1.html", "label": "Take 1", "note": "One page, no sidebar, the asks as bright slips"},
+    {"href": "http://localhost:5288/", "label": "Prototype round 4", "note": "The React prototype, while its dev server runs"},
+]
 ACK_SECONDS = 3   # how long the pretend runner takes to read control.json
 
 
@@ -52,11 +58,12 @@ def build(name: str = DEFAULT, base: datetime | None = None, control: dict | Non
         "runner": {"pid": 18244, "started_at": ago(399), "commit": "66a5ea1"},
         "start_hint": "Double-click Queue runner.lnk in ~/.queue-runner, or run pythonw -m queue_runner in the repo.",
         "sources": [
-            {"id": "github", "name": "GitHub", "ok": True, "note": "gh as stefan1575", "checked_at": ago(1)},
-            {"id": "t3", "name": "T3 Code", "ok": True, "note": "server up", "checked_at": ago(1)},
-            {"id": "claude_usage", "name": "Claude usage", "ok": True, "note": "read", "checked_at": ago(1)},
-            {"id": "sol_usage", "name": "Sol usage", "ok": True, "note": "read", "checked_at": ago(9)},
-            {"id": "t3_interrupt", "name": "Stop now for Claude", "ok": True,
+            # `short` is the name beside its dot in the sidebar
+            {"id": "github", "name": "GitHub", "short": "GitHub", "ok": True, "note": "gh as stefan1575", "checked_at": ago(1)},
+            {"id": "t3", "name": "T3 Code", "short": "T3 Code", "ok": True, "note": "server up", "checked_at": ago(1)},
+            {"id": "claude_usage", "name": "Claude usage", "short": "Claude", "ok": True, "note": "read", "checked_at": ago(1)},
+            {"id": "sol_usage", "name": "ChatGPT usage", "short": "ChatGPT", "ok": True, "note": "read", "checked_at": ago(9)},
+            {"id": "t3_interrupt", "name": "Stop now for Claude", "short": "Stop now", "ok": True,
              "note": "T3 accepts the interrupt", "checked_at": ago(399)},
         ],
         "repos": [
@@ -102,7 +109,8 @@ def build(name: str = DEFAULT, base: datetime | None = None, control: dict | Non
         ],
         "lanes": [
             {
-                "id": "claude", "name": "Claude", "does": "builds and fixes", "model": "Opus 5.5",
+                # `provider` picks the mark and the name's type: "claude" or "chatgpt"; any other gets none
+                "id": "claude", "provider": "claude", "name": "Claude", "does": "builds and fixes", "model": "Opus 5.5",
                 "state": "working",
                 "job": {"kind": "build", "repo": LD, "ref": "#212", "title": "Archive view for old callers",
                         "started_at": ago(35), "sha": None, "pr": None,
@@ -113,7 +121,7 @@ def build(name: str = DEFAULT, base: datetime | None = None, control: dict | Non
                              "effect": "Cuts the thread off. Its branch stays, and the job carries on later from where it stopped."},
             },
             {
-                "id": "sol", "name": "Sol", "does": "reviews", "model": "GPT-6.1 Sol",
+                "id": "sol", "provider": "chatgpt", "name": "ChatGPT", "does": "reviews", "model": "GPT-6.1 Sol",
                 "state": "working",
                 "job": {"kind": "review", "repo": LD, "ref": "PR #210", "title": "Callers list: filter by tag",
                         "started_at": ago(12), "sha": "4be91c2", "pr": 210, "thread": None},
@@ -124,17 +132,34 @@ def build(name: str = DEFAULT, base: datetime | None = None, control: dict | Non
             },
         ],
         "usage": [
-            {"id": "claude", "name": "Claude", "plan": None, "read_at": ago(1), "error": None, "windows": [
-                {"id": "five_hour", "label": "5-hour", "used": 38, "resets_at": ahead(60), "gates": True},
-                {"id": "week", "label": "Week", "used": 46, "resets_at": ahead(60 * 49.7), "gates": True,
+            # A model's own weekly window (Fable's here) is listed only when the account has one.
+            {"id": "claude", "provider": "claude", "name": "Claude", "plan": None, "read_at": ago(1), "error": None, "windows": [
+                {"id": "five_hour", "label": "Session", "used": 38, "resets_at": ahead(60), "gates": True},
+                {"id": "week", "label": "Weekly", "used": 46, "resets_at": ahead(60 * 49.7), "gates": True,
                  "reserve": 5, "reserve_opens_at": ahead(60 * 25.7)},
-                {"id": "week_fable", "label": "Week, Fable", "used": 100, "resets_at": ahead(60 * 49.7),
+                {"id": "week_fable", "label": "Weekly, Fable", "used": 100, "resets_at": ahead(60 * 49.7),
                  "gates": False, "note": "The runner doesn't use Fable."},
             ]},
-            {"id": "sol", "name": "Sol", "plan": "ChatGPT plan", "read_at": ago(9), "error": None, "windows": [
-                {"id": "five_hour", "label": "5-hour", "used": 26, "resets_at": ahead(94), "gates": True},
-                {"id": "week", "label": "Week", "used": 6, "resets_at": ahead(60 * 152.9), "gates": True},
+            {"id": "sol", "provider": "chatgpt", "name": "ChatGPT", "plan": None, "read_at": ago(9), "error": None, "windows": [
+                {"id": "five_hour", "label": "Session", "used": 26, "resets_at": ahead(94), "gates": True},
+                {"id": "week", "label": "Weekly", "used": 6, "resets_at": ahead(60 * 152.9), "gates": True},
             ]},
+        ],
+        "knob": {"paused": False, "reserve": 5},   # gate.json, as the runner last read it
+        # What the gate expects a Claude job to take, per kind (the Usage page).
+        "costs": [
+            {"kind": "build", "label": "Build", "session": 60, "week": 15, "basis": "The cautious default, until 3 builds are recorded"},
+            {"kind": "fix", "label": "Fix round", "session": 34, "week": 6, "basis": "The largest of the last 5"},
+            {"kind": "decision", "label": "Decision", "session": 15, "week": 4, "basis": "The cautious default"},
+            {"kind": "live", "label": "Live steps", "session": 20, "week": 5, "basis": "The cautious default"},
+        ],
+        # Which lane does each kind of job (Settings).
+        "roles": [
+            {"job": "Build", "what": "A new issue becomes a PR", "lane": "claude"},
+            {"job": "Fix", "what": "Answers a blocking review, or merges main into a PR that conflicts", "lane": "claude"},
+            {"job": "Decision", "what": "Decides a case the fixed flow doesn't cover", "lane": "claude"},
+            {"job": "Live steps", "what": "After a merge, makes it live", "lane": "claude"},
+            {"job": "Review", "what": "Reviews each PR head", "lane": "sol"},
         ],
         "features": [
             {"id": f"{LD}#225", "repo": LD, "n": 225, "title": "Analytics"},
@@ -146,13 +171,15 @@ def build(name: str = DEFAULT, base: datetime | None = None, control: dict | Non
         "issues": _issues(),
         "prs": _prs(ago),
     }
+    snap["activity"] = _activity(snap["prs"], ago)
     _vary(snap, name, ago, ahead)
     if name == "dead":
         snap["written_at"] = (now - timedelta(minutes=42)).isoformat(timespec="seconds")
     else:
         _obey(snap, control or {}, now)
     _number(snap)
-    snap["sample"] = {"state": name, "states": STATES}   # the page lists them; the runner's file has no such key
+    # The page lists them in the sidebar; the runner's file has no such key.
+    snap["sample"] = {"state": name, "states": STATES, "earlier": EARLIER}
     return snap
 
 
@@ -275,6 +302,27 @@ def _prs(ago) -> list[dict]:
     ]
 
 
+def _activity(prs: list[dict], ago) -> list[dict]:
+    """What happened, newest first: every PR's events, and what the runner did between them."""
+    def e(minutes, actor, title, detail=None, tone=None, repo=None, pr=None, ref=None):
+        return {"at": ago(minutes), "actor": actor, "repo": repo, "pr": pr, "ref": ref or (pr and f"PR #{pr}"),
+                "title": title, "detail": detail, "tone": tone}
+
+    day = 24 * 60
+    rows = [{"at": t["at"], "actor": t["actor"], "repo": p["repo"], "pr": p["n"], "ref": f"PR #{p['n']}",
+             "title": t["title"], "detail": t["detail"], "tone": t["tone"]} for p in prs for t in p["timeline"]]
+    rows += [
+        e(35, "claude", "Started building #212", "Archive view for old callers", repo=LD, ref="#212"),
+        e(52, "claude", "The build of #214 stopped with a question", "A decision thread couldn't answer it", "you", repo=LD, ref="#214"),
+        e(399, "runner", "Runner started", "On commit 66a5ea1, after its own PR #2 merged"),
+        e(402, "runner", "Merged PR #2", "Clean on its head, checks passed", "ok", repo=QR, ref="PR #2"),
+        e(day + 95, "claude", "Went live: PR #198 and PR #201", "2 migrations applied, 1 function deployed", "ok", repo=LD, ref="PR #201"),
+        e(day + 130, "you", "Merged PR #201", "Caller notes on the caller's page", repo=LD, ref="PR #201"),
+        e(day + 300, "runner", "Claude waited 2 h for its session to reset", "A fix round needed 34% and 21% was left"),
+    ]
+    return sorted(rows, key=lambda r: datetime.fromisoformat(r["at"]), reverse=True)
+
+
 def _lane(snap: dict, id: str) -> dict:
     return next(l for l in snap["lanes"] if l["id"] == id)
 
@@ -318,7 +366,7 @@ def _vary(snap: dict, name: str, ago, ahead) -> None:
     elif name == "limit":
         snap["usage"][0]["windows"][0]["used"] = 100
         _lane(snap, "claude").update(state="waiting", next="Carries on with #212 in the same thread", wait={
-            "until": ahead(70), "reason": "The build of #212 hit Claude's 5-hour limit. It resumes 10 minutes after the reset."})
+            "until": ahead(70), "reason": "The build of #212 hit Claude's session limit. It resumes 10 minutes after the reset."})
     elif name == "github-down":
         _source(snap, "github").update(ok=False, note="No answer since then (HTTP 503)", checked_at=ago(18),
                                        affects="Asks, PRs and the work list are as they were then; some may be missing.")

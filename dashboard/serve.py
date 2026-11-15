@@ -28,6 +28,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 HERE = Path(__file__).resolve().parent
+EARLIER = HERE / "earlier"   # takes of the page before this one, served with sample data only
 DEFAULT_STATE_DIR = "~/.queue-runner/state"   # config.toml's state_dir; --state-dir for another
 DEFAULT_PORT = 5289
 MAX_BODY = 16_384
@@ -166,6 +167,8 @@ def make_handler(app: App, port: int):
                 self.send(*app.snapshot(state))
             elif url.path == "/control.json":
                 self.send(200, json.dumps(app.control()).encode())
+            elif app.sample and (take := re.fullmatch(r"/earlier/(take-\d+\.html)", url.path)) and (EARLIER / take[1]).is_file():
+                self.send(200, (EARLIER / take[1]).read_bytes(), "text/html; charset=utf-8")
             else:
                 self.refuse(404, "no such page")
 
