@@ -55,8 +55,9 @@ with its Claude lane paused.
   found one more, F9, in F2's class, so the runner stopped the loop for Stefan (needs-info
   issue #7). F9: with `control.json` holding JSON `null`, resuming one lane lets the other go
   too, in `queue_runner/control.py` (`repaired`) and `dashboard/serve.py` (`usable`): both
-  treat a parsed `null` as a missing file. Sol's test for it was in its review checkout
-  (`tests/test_review2_controls.py`), which can't be read back (ticket 45).
+  treat a parsed `null` as a missing file. Sol's test for it is still readable at
+  `~/.queue-runner/checkouts/queue-runner-pr6/tests/test_review2_controls.py` (the checkout
+  left behind, ticket 45; it goes at the next review of PR #6, so copy the test first).
 - **Not in PR #6:** tickets 42, 43 and 44, built by another session on `dash/42-usage-refresh`,
   `dash/43-status-sources` and `dash/44-inbox-row-icons`. 42 conflicts with the fix round in
   `serve.py`, `sol.py` and `snapshot.py`, and its new control request must start from
