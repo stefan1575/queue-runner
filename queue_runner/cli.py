@@ -170,12 +170,18 @@ def _knob(config, args, out) -> int:
 def _dry_run_limited(config, out, log_line) -> bool:
     """A job cut off by a usage limit comes first: when, and in place or fresh."""
     from .config import stopped
-    from .limits import in_place
+    import datetime
+    from .limits import resume_choice
     limited = [j for j in _jobs(config).limited_jobs() if j.repo not in stopped(config)]
     if not limited:
         return False
     j = limited[0]
-    how = 'continue its thread in place' if in_place(j.context) else 'restart it in a fresh thread'
+    when = datetime.datetime.fromisoformat
+    # As the stop's record says it would be chosen at its resume time; the run chooses again.
+    then = resume_choice(when(j.last_request) if j.last_request else None, j.context,
+                         when(j.resume_at)) if j.resume_at else None
+    how = ('continue its thread in place' if then and then.in_place else
+           'restart it in a fresh thread') + (f' ({then.why})' if then else '')
     line = (f'dry run: {j.kind} {j.repo}#{j.issue} was cut off by a usage limit; after '
             f'{j.resume_at} the runner would {how} ({j.link or j.thread_id}), and starts no '
             'other Claude job before')

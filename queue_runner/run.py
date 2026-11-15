@@ -68,6 +68,12 @@ def _when(stamp: str) -> datetime.datetime:
     return datetime.datetime.fromisoformat(stamp.replace('Z', '+00:00'))
 
 
+def _quote(text: str) -> str:
+    """A message as a Markdown quote, clipped as a decision's are."""
+    from .decisions import _clip
+    return '\n'.join('> ' + line if line else '>' for line in _clip(text, 1500).splitlines())
+
+
 class Runner:
     def __init__(self, config: Config, *, github, t3, git, out, log_line, sol=None,
                  toaster=None, gate=None, limits=None, now=None, waker=None, self_update=None,
@@ -426,17 +432,24 @@ class Runner:
 
     # --- a decision's retry or answer ------------------------------------------------------
 
-    def continue_job(self, old: Job, message: str) -> str:
-        """Sends `message` to an earlier build or fix job's thread (a decision's retry, or the
-        answer to its question) and records the run as a new job of its kind, which carries the
-        thread in its start record so a dead runner's settle finds it. The earlier job, if it
-        was waiting, ends `continued`."""
+    def continue_job(self, old: Job, message: str, *, limit: bool = False) -> str:
+        """Picks up an earlier build or fix job (a decision's retry, the answer to its question,
+        or with `limit` a job cut off by a usage limit) as a new job of its kind: in place, by
+        sending `message` to its thread, or in a fresh thread, as `limits.resume_choice` decides
+        from how long ago its last request started and its context. In place, the new job
+        carries the thread in its start record so a dead runner's settle finds it. The earlier
+        job, if it was waiting, ends `continued`."""
+        choice = self._resume_choice(old)
+        if not choice.in_place:
+            return self._restart(old, choice, None if limit else message)
         job = self.jobs.started(kind=old.kind, repo=old.repo, issue=old.issue, branch=old.branch,
                                 title=old.title, sha=old.sha, round=old.round,
-                                thread_id=old.thread_id, about=old.id, cause=old.cause)
+                                thread_id=old.thread_id, about=old.id, cause=old.cause,
+                                resume=choice.record())
         if old.outcome == 'waiting':
             self.jobs.ended(old.id, exit_code=old.exit_code, outcome='continued')
-        self.say(f'Continuing {self._name(job)} in {old.link or old.thread_id}')
+        self.say(f'Continuing {self._name(job)} in place: {choice.why}; '
+                 f'{old.link or old.thread_id}')
         try:
             result = self.t3.send(old.thread_id, message)
         except T3Error as e:
@@ -458,6 +471,16 @@ class Runner:
         self.finish(job, result.thread_id, result.exit_code, result.status, result.error,
                     result.run_id)
         return STARTED
+
+    def _resume_choice(self, old: Job) -> lim.ResumeChoice:
+        """In place or fresh for the earlier job's thread, now. Its last call is read from T3's
+        database and the transcript; a limit stop's recorded context stands in for a size that
+        can't be read, and its recorded request start for one that can't."""
+        call = (self.limits.last_call(old.thread_id) if self.limits and old.thread_id else
+                lim.LastCall(None, None))
+        tokens = call.tokens if call.tokens is not None else old.context
+        started = call.started or (_when(old.last_request) if old.last_request else None)
+        return lim.resume_choice(started, tokens, self.now())
 
     # --- a fix round ----------------------------------------------------------------------
 
@@ -587,25 +610,32 @@ class Runner:
         if stop is None:
             return None
         resume = lim.resume_at(self.now(), stop.reset_at)
-        tokens = self.limits.context_tokens(thread_id) if self.limits else None
+        call = self.limits.last_call(thread_id) if self.limits else lim.LastCall(None, None)
+        tokens = call.tokens
         known = (f'T3 says it resets at {stop.reset_at.astimezone():%Y-%m-%d %H:%M}'
                  if stop.reset_at else "T3 doesn't say when it resets: 5h05m from now")
-        how = ('continued in place' if lim.in_place(tokens) else 'a fresh thread') + (
-            f', context {tokens:,} tokens' if tokens is not None else ', context unknown')
+        # As it would be chosen then; the recovery chooses again when it runs.
+        then = lim.resume_choice(call.started, tokens, resume)
         self.say(f'{thread_id} stopped on a usage limit; {known}. It resumes after '
-                 f'{resume.astimezone():%Y-%m-%d %H:%M} ({how}).')
-        return {'resume_at': resume.isoformat(timespec='seconds'), 'context': tokens}
+                 f'{resume.astimezone():%Y-%m-%d %H:%M} '
+                 f'({"in place" if then.in_place else "a fresh thread"}: {then.why}).')
+        return {'resume_at': resume.isoformat(timespec='seconds'), 'context': tokens,
+                'last_request': (call.started.isoformat(timespec='seconds')
+                                 if call.started else None)}
 
     # --- recovering a job cut off by a usage limit -----------------------------------------
 
     def recover(self, old: Job) -> str:
-        """A build or fix cut off by a usage limit, once the limit has reset: its thread
-        continued in place when its context is about 50k tokens or less, else a fresh thread
-        from the job's own brief plus the old thread's link and last 3 messages, in a new
-        worktree on the same branch at the old thread's newest commit. The old thread is left
-        as it is: a script can't settle a T3 thread (AGENTS.md)."""
-        if lim.in_place(old.context):
-            return self.continue_job(old, lim.RESUME_MESSAGE)
+        """A build or fix cut off by a usage limit, once the limit has reset: continued in place
+        or in a fresh thread, as `limits.resume_choice` decides (`continue_job`)."""
+        return self.continue_job(old, lim.RESUME_MESSAGE, limit=True)
+
+    def _restart(self, old: Job, choice: lim.ResumeChoice, direction: str | None) -> str:
+        """The earlier job in a fresh thread: its own brief built afresh from its sources, after
+        `direction` (a decision's text, and for an answer the question it answers) and before
+        the old thread's link, where it starts, what it left uncommitted and its last 3
+        messages, in a new worktree on the same branch at the old thread's newest commit. The
+        old thread is left as it is: a script can't settle a T3 thread (AGENTS.md)."""
         try:
             _, messages = self.t3.show(old.thread_id, 3)
         except T3Error as e:
@@ -615,7 +645,8 @@ class Runner:
         work = fix_branch(old.issue, old.sha) if old.kind == 'fix' else old.branch
         job = self.jobs.started(kind=old.kind, repo=old.repo, issue=old.issue, branch=old.branch,
                                 title=old.title, sha=old.sha, round=old.round, about=old.id,
-                                cause=old.cause)
+                                cause=old.cause, resume=choice.record())
+        after = 'after the usage limit' if direction is None else 'for the decision'
         try:
             brief = self._brief_again(repo, old)
             tip, wip = self.git.free_branch(repo.path, work, old.worktree)
@@ -624,17 +655,31 @@ class Runner:
             # writer (nothing reviews or merges what it pushed) until Stefan releases it.
             why = f'{type(e).__name__}: {e}'
             self.jobs.ended(job.id, exit_code=None, outcome=RESTART_FAILED,
-                            error=f'restarting after the usage limit failed: {why}')
-            self.say(f'{self._name(job)}: restarting after the usage limit failed ({why}); '
+                            error=f'restarting {after} failed: {why}')
+            self.say(f'{self._name(job)}: restarting {after} failed ({why}); '
                      f'held until --release {old.repo}#{old.issue}')
             self.toaster.toast(f'{old.repo} #{old.issue} needs you',
-                               f'Restarting its {old.kind} after a usage limit failed: '
+                               f'Restarting its {old.kind} {after} failed: '
                                f'{why}'[:250], old.link or '', tag=f'restart-{old.id}'[-60:])
-            return IDLE
+            # A decision acted, and the new job holds the issue: it isn't decided again.
+            return IDLE if direction is None else STARTED
         if tip is None:   # it made no commit: from where the old thread started
             tip = old.sha if old.kind == 'fix' else f'origin/{repo.base}'
-        brief += lim.restart_section(old, work, tip, wip, messages)
-        self.say(f'Restarting {self._name(job)} fresh after the usage limit, on {work} at '
+        stopped = ('was cut off by a usage limit' if direction is None else
+                   'stopped to ask a question' if old.outcome == 'waiting' else
+                   'ended without a PR' if old.outcome == 'done-no-pr' else 'failed')
+        if direction is not None:
+            asked = ([m.text for m in messages if m.role == 'assistant'][-1:]
+                     if old.outcome == 'waiting' else [])
+            question = (f'The earlier thread asked:\n\n{_quote(asked[0])}\n\n' if asked else '')
+            brief = (f'## Direction first\n\nAn earlier thread on this job {stopped}, and the '
+                     'queue runner decided how to go on. Follow this; it comes before the brief '
+                     f'below.\n\n{question}{direction.strip()}\n\n' + brief)
+        brief = brief.rstrip('\n') + '\n\n' + lim.restart_section(
+            old, work, tip, wip, messages, stopped=stopped, why=choice.why)
+        if old.outcome == 'waiting':
+            self.jobs.ended(old.id, exit_code=old.exit_code, outcome='continued')
+        self.say(f'Restarting {self._name(job)} fresh {after} ({choice.why}), on {work} at '
                  f'{tip[:7]}; the old thread was {old.link or old.thread_id}')
         return self._start(job, repo, brief, tip, work)
 

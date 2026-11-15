@@ -264,9 +264,10 @@ class RunnerHarness(unittest.TestCase):
 
 class BuildTest(RunnerHarness):
     def runner(self, files, *outcomes):
+        import datetime
         import io
         from queue_runner.run import Runner
-        from tests.fakes import FakeGitHubWithPulls, issue
+        from tests.fakes import FakeGitHubWithPulls, FakeLimits, issue
         from tests.fakes_t3 import FakeGit, FakeT3
         self.t3 = FakeT3(list(outcomes) or [(0, 'completed')] * 3)
         pr = {'number': 12, 'url': 'https://github.com/owner/first/pull/12', 'state': 'open'}
@@ -276,6 +277,9 @@ class BuildTest(RunnerHarness):
                                                        'claude/blue-widget-5': pr})
         self.r = Runner(self.config, github=self.gh, t3=self.t3, git=FakeGit(),
                         out=io.StringIO(), log_line=self.said.append,
+                        # every thread warm (ticket 38): a retry continues in place
+                        limits=FakeLimits(default_start=datetime.datetime.now(
+                            datetime.timezone.utc)),
                         effort=self.effort(files))
         return self.r
 

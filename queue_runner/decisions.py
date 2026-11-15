@@ -19,8 +19,10 @@ The cases, in the order a pass takes them, each decided once (`JobLog.decided`):
   is a fix round told to rework the approach), `hold` leaves the PR until `--release`,
   `carry-on` lets the loop go on as it is.
 - `failed`, `waiting`, `no-pr`: a build or fix thread ended failed (exit 1), waiting for an answer
-  (exit 2), or (a build) done without a PR. `retry` and `answer` send the earlier thread a
-  message, as a new job of its kind (`Runner.continue_job`); `close` closes the issue as not
+  (exit 2), or (a build) done without a PR. `retry` and `answer` pick up the earlier job as a
+  new job of its kind (`Runner.continue_job`): a message to its thread, or, when that thread is
+  cold and large (`limits.resume_choice`), a fresh thread with the decision's text first and,
+  for an answer, the question it answers; `close` closes the issue as not
   planned. After MAX_CHAIN such decisions on one issue or PR, the next goes straight to Stefan.
 
 A decision job (kind `decision`, `about` the job it decides on, `question`) ends with the action
@@ -46,9 +48,11 @@ FENCE = re.compile(r'^[ \t]*```+[ \t]*queue-runner-decision[ \t]*\r?\n(.*?)^[ \t
 # Each action: the fields it needs (non-empty strings), and what the runner does with it.
 ACTIONS = {
     'retry': (('add',), 'the runner sends `add` to the earlier thread, which carries on in its '
-                        'own worktree from its commits'),
+                        'own worktree from its commits (or, if that thread has gone cold and '
+                        'large, gives `add` first to a fresh thread on the same branch)'),
     'answer': (('text',), 'the runner sends `text` to the waiting thread as the answer to its '
-                          'question'),
+                          'question (or, if that thread has gone cold and large, gives its '
+                          'question and `text` first to a fresh thread on the same branch)'),
     'fix': (('add',), "one more fix round on the PR's head, with `add` first in its brief"),
     'carry-on': ((), 'nothing to do: the loop carries on as it is'),
     'hold': ((), 'the PR is left alone until Stefan releases it'),
