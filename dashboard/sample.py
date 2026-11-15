@@ -29,6 +29,7 @@ DEFAULT = "busy"
 # Takes of the page before this one, kept while its look is being agreed: `serve.py` serves the
 # ones in `dashboard/earlier/` in sample mode, and the sidebar's sample menu links them.
 EARLIER = [
+    {"href": "/earlier/take-9.html", "label": "Take 9", "note": "The Overview as three cards, the Queue still the old work list and pyramid"},
     {"href": "/earlier/take-8.html", "label": "Take 8", "note": "The Inbox as agreed, the Overview still the two lanes"},
     {"href": "/earlier/take-7.html", "label": "Take 7", "note": "Briefing layouts A, B and C, the rows before T3's shape"},
     {"href": "/earlier/take-6.html", "label": "Take 6", "note": "The Inbox with icons, read, snooze and three briefing layouts, 1440px wide"},
@@ -40,6 +41,7 @@ EARLIER = [
     {"href": "http://localhost:5288/", "label": "Prototype round 4", "note": "The React prototype, while its dev server runs"},
 ]
 ACK_SECONDS = 3   # how long the pretend runner takes to read control.json
+WAITS_FOR_REVIEW = "Waiting for review"   # a PR's status while it's in the reviewing lane's queue
 
 
 def build(name: str = DEFAULT, base: datetime | None = None, control: dict | None = None,
@@ -225,13 +227,15 @@ def build(name: str = DEFAULT, base: datetime | None = None, control: dict | Non
             {"job": "Live steps", "what": "After a merge, makes it live", "lane": "claude"},
             {"job": "Review", "what": "Reviews each PR head", "lane": "sol"},
         ],
-        # In build order (`_order`, below): the page shows them as they come.
+        # In build order (`_order`, below): the page shows them as they come. Each gets `tickets`,
+        # its tickets in the order they're built (`_tickets`, below).
         "features": [
             {"id": f"{LD}#225", "repo": LD, "n": 225, "title": "Analytics"},
             {"id": f"{LD}#149", "repo": LD, "n": 149, "title": "Ring-to numbers"},
             {"id": f"{LD}#220", "repo": LD, "n": 220, "title": "Client onboarding"},
             {"id": f"{LD}#200", "repo": LD, "n": 200, "title": "Callers"},
             {"id": f"{QR}#9", "repo": QR, "n": 9, "title": "Dashboard"},
+            {"id": f"{LD}#180", "repo": LD, "n": 180, "title": "Missed-call texts"},   # finished: every ticket is live
         ],
         "issues": _issues(),
         "prs": _prs(ago),
@@ -246,6 +250,7 @@ def build(name: str = DEFAULT, base: datetime | None = None, control: dict | Non
         _obey(snap, control or {}, now)
     _number(snap)
     _order(snap)
+    _tickets(snap)
     _queue(snap)
     # The page lists them in the sidebar; the runner's file has no such key.
     snap["sample"] = {"state": name, "states": STATES, "earlier": EARLIER}
@@ -323,9 +328,10 @@ def _issues() -> list[dict]:
         i(LD, 229, "Lead source report", "blocked", 225, blocked_by=[227, 196]),
         i(LD, 230, "Export analytics as CSV", "blocked", 225, blocked_by=[228]),
         i(LD, 196, "Lead source on every call", "done", 225),
+        i(LD, 217, "Call length on every call", "review", 225, pr=232, note="PR #232 waits for its review, after PR #210"),
         i(LD, 151, "Save a Client's ring-to number", "done", 149),
         i(LD, 188, "Ring-to number in the call log", "merged", 149, pr=203,
-          note="Merged; its live steps wait for the review of PR #210"),
+          note="Its live steps wait for the review of PR #210"),
         i(LD, 191, "A Client's Twilio number on their page", "you", 149, pr=207, note="PR #207 is ready for you to merge"),
         i(LD, 150, "Ring-to number per Client", "you", 149, pr=152, note="PR #152 waits for your decision"),
         i(LD, 216, "Ring-to audit page", "blocked", 149, blocked_by=[150]),
@@ -337,6 +343,9 @@ def _issues() -> list[dict]:
         i(LD, 212, "Archive view for old callers", "building", 200, note="Claude is building it"),
         i(LD, 213, "Callers list: sort by last call", "ready", 200),
         i(LD, 218, "Export calls as CSV", "not-ready", 200, note="Not marked ready-for-agent"),
+        i(LD, 181, "Text the caller back when a call is missed", "done", 180),
+        i(LD, 183, "A Client's own wording for the text", "done", 180),
+        i(LD, 185, "Stop texting a caller who opts out", "done", 180),
         i(LD, 199, "Unassigned: assign several at once", "fixing", pr=204, note="Its fix round on PR #204 is next"),
         i(LD, 211, "Domain health check", "ready"),
         i(QR, 5, "Publish the snapshot the dashboard reads", "ready", 9),
@@ -420,6 +429,14 @@ def _prs(ago) -> list[dict]:
             ],
         },
         {
+            "repo": LD, "n": 232, "issue": 217, "title": "Call length on every call",
+            "head": "c93b0e5", "branch": "claude/call-length-on-217", "url": GH[LD] + "/pull/232",
+            "status": WAITS_FOR_REVIEW, "next": "Sol reviews c93b0e5 after PR #210.", "checks": [],
+            "timeline": [
+                e(36, "claude", "build", "c93b0e5", "Built it and opened PR #232", "3 commits", "ok"),
+            ],
+        },
+        {
             "repo": QR, "n": 4, "issue": 3, "title": "Wake tasks survive DST",
             "head": "e4c941a", "branch": "claude/wake-tasks-survive-3", "url": GH[QR] + "/pull/4",
             "status": "Clean, checks running", "next": "The runner merges it once its checks pass on e4c941a.",
@@ -477,6 +494,9 @@ def _vary(snap: dict, name: str, ago, ahead) -> None:
         _issue(snap, LD, 191).update(state="done", note=None)
         _issue(snap, LD, 150).update(state="fixing", note="You said rework; its fix round is queued")
         _issue(snap, LD, 214).update(state="ready", note=None)
+        _issue(snap, LD, 217).update(state="merged", note="Its live steps wait for the review of PR #210")
+        next(p for p in snap["prs"] if p["n"] == 232).update(
+            status="Merged, not live yet", next="Its live steps run after the review of PR #210.")
     elif name == "many":
         snap["asks"] += [
             {"id": "ask-live", "kind": "broken", "repo": LD, "ref": "PR #198", "pr": None, "subject": "Caller notes", "since": ago(6),
@@ -562,10 +582,31 @@ def _order(snap: dict) -> None:
     snap["features"].sort(key=lambda f: (first_open(f) == float("inf"), rank[f["repo"]], first_open(f)))
 
 
+# How far along a ticket is, furthest first: the order of a feature's progress bar.
+_FAR = {"done": 0, "merged": 1, "review": 2, "fixing": 2, "building": 3, "you": 4}
+
+
+def _tickets(snap: dict) -> None:
+    """Each feature's tickets (`tickets`: their `repo#n` keys) in the order they're built. What has
+    started comes first, furthest along first. Then what hasn't: a blocker before what it blocks,
+    the lowest number first (as the runner picks), and one not marked ready last."""
+    for f in snap["features"]:
+        its = [i for i in snap["issues"] if i["feature"] == f["id"]]
+        started = sorted((i for i in its if i["state"] in _FAR), key=lambda i: (_FAR[i["state"]], i["n"]))
+        rest = {f"{i['repo']}#{i['n']}": i for i in its if i["state"] not in _FAR}
+        later = []
+        while rest:
+            free = [i for i in rest.values() if not any(b in rest for b in i["blocked_by"])] or list(rest.values())
+            nxt = min(free, key=lambda i: (i["state"] == "not-ready", i["n"]))
+            later.append(nxt)
+            del rest[f"{nxt['repo']}#{nxt['n']}"]
+        f["tickets"] = [f"{i['repo']}#{i['n']}" for i in started + later]
+
+
 def _queue(snap: dict) -> None:
     """Each lane's own queue, in the order it takes them up: a job a limit cut off, Claude's fix
-    rounds, then its builds in pick order; the reviews waiting for Sol. `next` is read by the
-    earlier takes only."""
+    rounds, then its builds in pick order; the PRs waiting for Sol's review. `next` is read by
+    the earlier takes only."""
     claude = _lane(snap, "claude")
     job = claude["job"] or {}
     held = [{"kind": job["kind"], "repo": job["repo"], "ref": job["ref"], "title": job["title"]}] if job and claude["state"] == "waiting" else []
@@ -574,7 +615,9 @@ def _queue(snap: dict) -> None:
     builds = [{"kind": "build", "repo": i["repo"], "ref": f"#{i['n']}", "title": i["title"]}
               for i in sorted((i for i in snap["issues"] if i["pick"]), key=lambda i: i["pick"])]
     claude["queue"] = held + fixes + builds
-    _lane(snap, "sol").update(queue=[], queue_empty="Nothing is waiting for review.")
+    reviews = [{"kind": "review", "repo": p["repo"], "ref": f"PR #{p['n']}", "title": p["title"]}
+               for p in snap["prs"] if p["status"] == WAITS_FOR_REVIEW]
+    _lane(snap, "sol").update(queue=reviews, queue_empty="Nothing is waiting for review.")
 
 
 def _number(snap: dict) -> None:

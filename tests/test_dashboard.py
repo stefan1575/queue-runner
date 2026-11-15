@@ -156,7 +156,9 @@ class SampleTest(unittest.TestCase):
         self.assertEqual([(q["kind"], q["repo"], q["ref"]) for q in claude["queue"]], [
             ("fix", "leads-dashboard", "PR #204"), ("build", "leads-dashboard", "#211"), ("build", "leads-dashboard", "#213"),
             ("build", "leads-dashboard", "#226"), ("build", "queue-runner", "#5"), ("build", "queue-runner", "#6")])
-        self.assertEqual((sol["queue"], sol["queue_empty"]), ([], "Nothing is waiting for review."))
+        self.assertEqual([(q["kind"], q["repo"], q["ref"]) for q in sol["queue"]], [("review", "leads-dashboard", "PR #232")])
+        calm = sample.build("clear", base=self.T, now=self.T)["lanes"][1]
+        self.assertEqual((calm["queue"], calm["queue_empty"]), ([], "Nothing is waiting for review."))
 
     def test_a_job_a_limit_cut_off_is_first_in_its_lanes_queue(self):
         claude = sample.build("limit", base=self.T, now=self.T)["lanes"][0]
@@ -165,7 +167,7 @@ class SampleTest(unittest.TestCase):
     def test_features_come_in_build_order_and_the_first_three_show_every_part_of_a_progress_bar(self):
         s = sample.build("busy", base=self.T, now=self.T)
         self.assertEqual([f["title"] for f in s["features"]],
-                         ["Ring-to numbers", "Callers", "Client onboarding", "Analytics", "Dashboard"])
+                         ["Ring-to numbers", "Callers", "Client onboarding", "Analytics", "Dashboard", "Missed-call texts"])
         top = {f["id"] for f in s["features"][:3]}
         states = {i["state"] for i in s["issues"] if i["feature"] in top}
         # done, merged but not live, in a PR, building, waiting on Stefan, ready, blocked
@@ -173,6 +175,25 @@ class SampleTest(unittest.TestCase):
         swapped = {"written_at": self.T.isoformat(), "repo_order": ["queue-runner", "leads-dashboard"]}
         later = sample.build("busy", base=self.T, now=self.T + timedelta(seconds=sample.ACK_SECONDS), control=swapped)
         self.assertEqual(later["features"][0]["title"], "Dashboard")
+
+    def test_a_features_tickets_come_in_the_order_they_are_built(self):
+        for name in sample.STATES:
+            with self.subTest(state=name):
+                s = sample.build(name, base=self.T, now=self.T)
+                issues = {f"{i['repo']}#{i['n']}": i for i in s["issues"]}
+                for f in s["features"]:
+                    own = [k for k, i in issues.items() if i["feature"] == f["id"]]
+                    self.assertEqual(sorted(f["tickets"]), sorted(own), f["title"])   # each of its tickets, once
+                    for at, k in enumerate(f["tickets"]):
+                        for b in issues[k]["blocked_by"]:
+                            if b in f["tickets"]:
+                                self.assertLess(f["tickets"].index(b), at, f"{b} blocks {k}")
+        s = sample.build("busy", base=self.T, now=self.T)
+        issues = {f"{i['repo']}#{i['n']}": i for i in s["issues"]}
+        by_title = {f["title"]: [int(k.split("#")[1]) for k in f["tickets"]] for f in s["features"]}
+        self.assertEqual(by_title["Callers"], [193, 205, 212, 213, 218])   # done, in a PR, building, ready, not ready
+        self.assertEqual(by_title["Analytics"], [196, 217, 226, 227, 228, 229, 230])
+        self.assertEqual({issues[k]["state"] for k in s["features"][-1]["tickets"]}, {"done"})   # a finished one goes last
 
     def test_the_dead_runner_stopped_writing_and_reads_no_control(self):
         asked = {"written_at": (self.T - timedelta(minutes=5)).isoformat(), "lanes": {"claude": {"stop": "now", "at": self.T.isoformat()}}}
@@ -234,7 +255,7 @@ class HttpTest(unittest.TestCase):
         self.assertEqual(self.call("GET", "/config.toml")[0], 404)
 
     def test_an_earlier_take_of_the_page_is_served_with_sample_data_only(self):
-        for take in ("take-1", "take-2", "take-3", "take-4", "take-5", "take-6", "take-7", "take-8"):
+        for take in ("take-1", "take-2", "take-3", "take-4", "take-5", "take-6", "take-7", "take-8", "take-9"):
             status, kind, body = self.call("GET", f"/earlier/{take}.html")
             self.assertEqual((status, kind), (200, "text/html; charset=utf-8"))
             self.assertIn(b"<title>Queue runner</title>", body)

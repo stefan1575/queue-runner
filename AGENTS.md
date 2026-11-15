@@ -618,10 +618,10 @@ and Settings follow. **The Inbox is agreed** (Stefan, 2026-11-15, after takes 5 
 `dashboard/earlier/`). **The Overview on the page is a first take that Stefan didn't take to**
 (ticket 20: three cards, below; "way far off on what I want, or I don't actually know what I
 want"). **What's next, in order** (Stefan: "Queue, Inbox, then Overview, because Overview
-represents the data where it's from"): the Queue page (ticket 21; it still shows the work list
-and pyramid as they were, marked "Not rebuilt yet"), as several variants switched with
-`?variant=`; then, if it's still needed, a grill on what the Overview is for (ticket 25); then
-the Overview again (ticket 20), also as variants. Its frame is the one Stefan asked
+represents the data where it's from"): the Queue page (ticket 21), **built as three variants
+switched with `?variant=a|b|c`, waiting for Stefan to judge them** (The Queue page, below);
+then, if it's still needed, a grill on what the Overview is for (ticket 25); then the Overview
+again (ticket 20), also as variants. Its frame is the one Stefan asked
 for in the prototype rounds: a sidebar for getting around (the repository switcher and the
 pages), one centred column, and the machine's readings floating on the right, in his order:
 usage, the build order, then the runner's status. **It is its own process and depends on nothing:** no build step, no
@@ -644,8 +644,10 @@ python3 -m dashboard --sample    # sample data, no runner needed; ?sample=<state
   on the page: `provider`, `local` or `external`), `repos` in build
   order, `asks` (below), `answered` (asks Stefan has answered that the runner hasn't acted on
   yet: an ask plus `answered`: `at`, `said`, `next`; not counted as waiting on him), `lanes` (each with its `queue`, what it takes up next, in order, across
-  repositories, a job a limit cut off first; `queue_empty` says why there's none), `usage`, `features` (in build order: the repos'
-  order, then the feature whose first open ticket has the lowest number), `issues` (with `pick`, the order ready work is
+  repositories, a job a limit cut off first, and for the reviewing lane the PRs waiting for their review; `queue_empty` says why there's none), `usage`, `features` (in build order: the repos'
+  order, then the feature whose first open ticket has the lowest number, a finished one last; each with `tickets`, its
+  tickets' `repo#n` keys in the order they're built: what has started first, furthest along first, then a blocker
+  before what it blocks, lowest number first, one not marked ready last), `issues` (with `pick`, the order ready work is
   built in, and `state`: `done` only once it's live, `merged` while it's merged and its live
   steps haven't run, `review` and `fixing` in a PR, `building`, `you`, `ready`, `blocked`,
   `not-ready`), `prs` (each with its timeline by head), `activity` (what happened, newest first),
@@ -700,8 +702,31 @@ python3 -m dashboard --sample    # sample data, no runner needed; ?sample=<state
   ready one; else what's moving) and "N of M done". A line under them counts the features and
   the featureless tickets it doesn't show. Each card's head opens its page; Running now has no
   page of its own.
-- **A feature's bar is `featureBar(feature)`**, made to be reused under each feature on the
-  Queue page: a cell per ticket, named on hover, in `SEGMENTS`' order: done (live), merged but
+- **The Queue page is a prototype in three variants** (ticket 21; `queue()` in
+  `dashboard/index.html`, sample data only, none agreed). `?page=queue&variant=a|b|c`; the pill
+  over the sidebar's foot and the left and right arrow keys turn between them (the pill shows
+  with `--sample` only), and the last one looked at is remembered in the browser. **A, features
+  first** (`queueA`): a card per feature in build order, with its bar, what's left in a sentence
+  ("4 to go: 2 wait on you, 1 merged but not live, 1 blocked.") and its tickets as rows in the
+  order they're built; a chip or a feature's name narrows the page to it (`?feature=<id>`,
+  `none` for the work that belongs to no feature); "What blocks what" draws the same scope as
+  the pyramid; each lane's queue is the last card. **B, the page you land on** (`queueB`):
+  three bands, what waits on him (a tile per ask, opening it in the Inbox), what's running
+  (each lane with its Stop button and its whole queue), then the features folded to a line
+  each, which unfolds to the ticket rows. **C, tracks** (`queueC`): every row runs left to
+  right; a lane's row is what it's on and then its queue, numbered; a feature's row is its
+  tickets one after another, the cells along its top being its bar, ending in "Usable";
+  picking a ticket lights up what it waits on and what it holds up in every row. All three
+  read `queueModel()` (each feature's tickets in the snapshot's order, each ticket's place in
+  a lane's queue, the lane on it now) and `standing(ticket)` (its state's word and what comes
+  next for it: "3rd in Claude's queue", "After #226"). Work with no feature is shown as a
+  feature of its own, "No feature", without an end; a finished feature says "Usable". A
+  ticket that waits on him carries the Inbox's own tag and opens its ask. **Reordering
+  features or tickets from the page is not built: it's Stefan's to decide** (a new control
+  the runner would have to obey). Once he picks, fold the winner in, and move the other
+  variants and the pill to a throwaway branch (the `prototype` skill).
+- **A feature's bar** on the Overview is `featureBar(feature)`; the Queue's is
+  `ticketBar(title, tickets)`, the same cells in the order given: a cell per ticket, named on hover, in `SEGMENTS`' order: done (live), merged but
   not live, in a PR, building, waiting on him, ready, blocked (`not-ready` counts as blocked).
   Colour is the state's family and a hatched cell is the earlier step in it: green solid is
   done and green hatched merged, amber solid is in a PR and amber hatched building, blue is
@@ -730,11 +755,13 @@ python3 -m dashboard --sample    # sample data, no runner needed; ?sample=<state
   unavailable is asked to stop after its job instead.
 - `?page=inbox|queue|activity|usage|settings` (none is the Overview), `?ask=<id>` (the ask open
   in the Inbox), `?repo=<name>` (the switcher's choice, which narrows every page),
-  `?view=pyramid` and `?pr=<repo>:<n>` open the page there.
+  `?variant=a|b|c` and `?feature=<id>` (the Queue's arrangement, and the feature A is narrowed
+  to), `?view=pyramid` and `?pr=<repo>:<n>` open the page there.
 - **Earlier takes, while the look is being agreed:** `dashboard/earlier/take-N.html` is the page
   as it was before a rework, served at `/earlier/take-N.html` with `--sample` only and linked
   from the sidebar's sample menu (`sample.EARLIER`). Before reworking the page again, copy it
-  there as the next take (take 8 is the page before the Overview was built), add it to
+  there as the next take (take 8 is the page before the Overview was built, take 9 the page
+  before the Queue was), add it to
   `sample.EARLIER` and to the route's test. Delete the folder, its route and its test once
   Stefan agrees the page.
 - **A dashboard started before a change to `sample.py` keeps serving the old sample** (the page

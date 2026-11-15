@@ -14,7 +14,15 @@
     machine's readings, in view however far the page is scrolled: how much usage is left, what
     it builds first, is it up. The column between them is centred in the space they leave.
   - Three pages do three jobs. Overview is the first glance. Inbox is what waits on you. Queue is
-    the work. (Queue isn't rebuilt yet: it holds the work list as it was.)
+    the work.
+  - PROTOTYPE, with sample data only (ticket 21): the Queue is three arrangements of the same
+    work, ?variant=a|b|c, switched from the pill over the sidebar's foot or with the left and
+    right arrow keys. A, features first: a card per feature in build order, its bar, its
+    tickets as rows in the order they're built; picking a feature narrows the page to it; then
+    each lane's queue. B, the page you land on: what waits on you and what's running on top,
+    the features folded to a line each under them. C, tracks: every row runs left to right; a
+    lane's row is what it takes up next, a feature's row is its tickets one after another
+    until it's usable. All three read the same things from the snapshot (queueModel).
   - The Overview only summarises, in three cards read top to bottom: what's on your plate (the
     Inbox in counts by kind, and the ask that's first in line), what's running (a line per lane,
     with its Stop button and the one thing it takes up next), and what's next (a bar per
@@ -416,37 +424,184 @@ a.ov-kind:hover { background: var(--hover); }
 .seg button { background: none; border: 0; height: 32px; padding: 0 14px; cursor: pointer; font-weight: 600; font-size: 15px; color: var(--mute); }
 .seg button + button { border-left: 1px solid var(--btn-line); }
 .seg button[aria-pressed="true"] { background: var(--ink); color: var(--page); }
-.features { padding: 6px 20px; border-bottom: 1px solid var(--line-soft); }
-.feature { display: grid; grid-template-columns: 250px 132px 110px minmax(0, 1fr); gap: 16px; align-items: center; padding: 7px 0; }
-.feature + .feature { border-top: 1px solid var(--line-soft); }
-.feature .hint { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--mute); }
-.pips { display: flex; gap: 3px; flex-wrap: wrap; }
-.pip { width: 11px; height: 11px; border-radius: 3px; flex: none; display: inline-block; border: 1.5px solid var(--dim); }
-.pip.done { background: var(--ok); border-color: var(--ok); }
-.pip.moving { background: var(--run); border-color: var(--run); }
-.pip.yours { background: var(--you); border-color: var(--you); }
-.pip.ready { border-color: var(--ink); }
-.pip.blocked { border-style: dotted; }
 
-.scroll { overflow-x: auto; }
-table.list { width: 100%; min-width: 760px; border-collapse: collapse; table-layout: fixed; }
-.list th { text-align: left; font-weight: 400; font-size: 14px; color: var(--dim); padding: 12px 12px 6px 0; }
-.list td { padding: 10px 12px 10px 0; border-top: 1px solid var(--line-soft); vertical-align: baseline; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.list tr > :first-child { padding-left: 20px; }
-.list tr > :last-child { padding-right: 20px; }
-.list .group td { border-top: 1px solid var(--line); padding-top: 16px; padding-bottom: 6px; font-weight: 600; font-size: 15px; white-space: normal; }
-.list tbody tr:first-child td { border-top: 0; }
-.list .group td span { font-weight: 400; color: var(--dim); margin-left: 8px; }
-.list .num, .list th.num { text-align: right; }
-.list td.pick { color: var(--dim); }
-.list .title { font-weight: 600; }
-.list .title .link { font-weight: 600; text-decoration: none; }
-.list .title .link:hover { text-decoration: underline; }
-.list .ref { color: var(--dim); margin-left: 8px; font-weight: 400; }
-.state { display: inline-flex; align-items: center; gap: 8px; }
-.state.yours { background: var(--you); color: var(--you-ink); font-weight: 600; font-size: 14px; padding: 1px 8px; border-radius: 6px; }
-.state.done { color: var(--dim); }
-.state.blocked { color: var(--mute); }
+/* ---------------------------------------------------------------- queue (PROTOTYPE: three variants) */
+.q { display: grid; gap: 16px; container-type: inline-size; }
+.q .ok { color: var(--ok); }
+.q .mine { color: var(--you); font-weight: 600; }
+.q a.mine { text-underline-offset: 3px; text-decoration-thickness: 1px; }
+.q .fbar { height: 18px; }
+/* the switcher: over the sidebar's foot, so it takes no room from the page being judged */
+.proto { position: fixed; left: 12px; bottom: 76px; z-index: 70; width: 248px; display: flex; align-items: center; gap: 4px; padding: 5px; border-radius: 999px; background: var(--ink); color: var(--page); box-shadow: var(--float); white-space: nowrap; }
+.proto-name { flex: 1; min-width: 0; text-align: center; overflow: hidden; text-overflow: ellipsis; }
+.proto-name b { font-weight: 700; margin-right: 7px; }
+.proto button { flex: none; width: 30px; height: 30px; border-radius: 50%; border: 0; background: color-mix(in srgb, var(--page) 14%, transparent); color: inherit; cursor: pointer; display: grid; place-items: center; }
+.proto button:hover { background: color-mix(in srgb, var(--page) 26%, transparent); }
+@media (max-width: 900px) { .proto { left: 50%; bottom: 14px; transform: translateX(-50%); } }
+
+/* a ticket as a row: its cell from the bar, what it is, where it stands */
+.trow { display: grid; grid-template-columns: 26px minmax(0, 1fr) minmax(0, 360px); column-gap: 14px; align-items: baseline; padding: 9px 20px; }
+.trow + .trow { border-top: 1px solid var(--line-soft); }
+.trow .sg { width: 26px; height: 12px; align-self: center; }
+.trow .t-what { min-width: 0; font-weight: 600; }
+.trow .t-n { color: var(--mute); font-weight: 400; margin-right: 8px; }
+.trow .t-what .link, .trow .t-what .tag { margin-left: 10px; font-weight: 400; color: var(--mute); }
+.trow .t-say { min-width: 0; color: var(--mute); }
+.trow .t-say b { font-weight: 600; color: var(--ink-2); margin-right: 8px; }
+.trow.on .t-say b { color: var(--run); }
+.trow.done .t-what, .trow.done .t-say b { font-weight: 400; color: var(--dim); }
+.trow.blocked .t-what { font-weight: 400; color: var(--ink-2); }
+.trow .t-ask { display: inline-flex; align-items: center; gap: 10px; text-decoration: none; color: var(--you); }
+.trow .t-ask:hover span:last-child { text-decoration: underline; text-underline-offset: 3px; }
+
+/* a lane with its queue: what it's on, then what it takes up next, in order */
+.lqs { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.lq { padding: 14px 20px 16px; min-width: 0; }
+.lq + .lq { border-left: 1px solid var(--line-soft); }
+.lq-head { display: flex; align-items: center; gap: 12px; min-height: 36px; }
+.lq-head .does { color: var(--mute); margin-left: 10px; font: 400 16px/1.2 var(--sans); }
+.lq-head .l-for { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; font-weight: 600; white-space: nowrap; color: var(--ink-2); }
+.lq-head .l-for.run { color: var(--run); }
+.lq-head .l-stop:empty { display: none; }
+.lq .pop, .qc-row .pop { width: 340px; }
+.lq .doing { margin-top: 8px; }
+.lq-label { margin-top: 14px; color: var(--mute); }
+.lq-list { margin-top: 4px; }
+.lq-list li { display: grid; grid-template-columns: 20px minmax(0, 1fr) max-content; column-gap: 10px; align-items: baseline; padding: 6px 0; }
+.lq-list li + li { border-top: 1px solid var(--line-soft); }
+.lq-list .n { color: var(--dim); text-align: right; }
+.lq-list .j { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--mute); }
+.lq-list .j b { font-weight: 600; color: var(--ink); margin-right: 8px; }
+.lq-list .f { color: var(--dim); white-space: nowrap; }
+.lq-list li.off { opacity: .4; }
+
+/* ---- A: features first */
+.qa-bar { display: flex; align-items: flex-start; gap: 16px; padding: 12px 14px; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; flex: 1; min-width: 0; }
+.chip { display: inline-flex; align-items: center; gap: 7px; height: 34px; padding: 0 13px; border-radius: 17px; border: 1px solid var(--btn-line); background: none; cursor: pointer; white-space: nowrap; color: var(--ink-2); }
+.chip:hover { border-color: var(--mute); }
+.chip .i { width: 16px; height: 16px; color: var(--ok); }
+.chip[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: var(--page); font-weight: 600; }
+.chip[aria-pressed="true"] .i { color: inherit; }
+.qa-bar .seg { flex: none; margin-left: 0; }
+.qa-head { display: grid; grid-template-columns: minmax(0, 1fr) max-content; gap: 0 16px; align-items: baseline; padding: 16px 20px 14px; border-bottom: 1px solid var(--line-soft); }
+.qa-head h2 { font: 600 20px/1.2 var(--display); min-width: 0; }
+.qa-name { background: none; border: 0; padding: 0; cursor: pointer; font: inherit; text-align: left; }
+.qa-name:hover { text-decoration: underline; text-underline-offset: 4px; text-decoration-thickness: 1px; }
+.qa-head .repo { font: 400 16px/1.2 var(--sans); color: var(--mute); margin-left: 12px; }
+.qa-head .count { color: var(--mute); white-space: nowrap; }
+.qa-head .fbar { grid-column: 1 / -1; margin-top: 12px; }
+.qa-head .say { grid-column: 1 / -1; margin-top: 9px; color: var(--ink-2); }
+.qa-usable li + li { border-top: 1px solid var(--line-soft); }
+.qa-usable button { display: grid; grid-template-columns: 18px minmax(0, 1fr) max-content; column-gap: 12px; align-items: center; width: 100%; padding: 11px 20px; background: none; border: 0; cursor: pointer; text-align: left; }
+.qa-usable button:hover { background: var(--hover); }
+.qa-usable .i { color: var(--ok); }
+.qa-usable b { font-weight: 600; }
+.qa-usable b + span, .qa-usable .count { color: var(--mute); }
+.qa-usable b + span { margin-left: 10px; }
+
+/* ---- B: the page you land on */
+.qb-you.has { background: var(--you-wash); border-color: var(--you-line); }
+.qb-head { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; min-height: 52px; padding: 10px 20px 8px; }
+.qb-head h2 { font: 600 21px/1.2 var(--display); }
+.qb-head .btn { margin-left: auto; }
+.qb-asks { padding: 0 10px 10px; display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 6px; }
+.qb-asks li { display: flex; }
+.qb-asks .mrow { flex: 1; text-decoration: none; background: var(--surface); box-shadow: inset 0 0 0 1px var(--you-line); }
+.qb-asks .mrow:hover { background: var(--surface); box-shadow: inset 0 0 0 1px var(--you); }
+.qb-asks .mrow .m3 { -webkit-line-clamp: 1; }
+.qb-aside { padding: 2px 20px 14px; color: var(--ink-2); }
+.fb > li + li { border-top: 1px solid var(--line-soft); }
+.fb-row { display: grid; grid-template-columns: 18px 190px minmax(120px, 1fr) max-content minmax(0, 436px); grid-template-areas: "chev name bar count say"; column-gap: 16px; align-items: center; width: 100%; padding: 13px 20px; background: none; border: 0; cursor: pointer; text-align: left; }
+.fb-row:hover { background: var(--hover); }
+.fb-row > .i { grid-area: chev; width: 18px; height: 18px; color: var(--mute); }
+.fb-row[aria-expanded="false"] > .i { transform: rotate(-90deg); }
+.fb-name { grid-area: name; min-width: 0; }
+.fb-name b { display: block; font: 600 17px/1.25 var(--display); }
+.fb-name span { display: block; color: var(--mute); }
+.fb-row .fbar { grid-area: bar; }
+.fb-count { grid-area: count; color: var(--mute); white-space: nowrap; min-width: 96px; text-align: right; }
+.fb-say { grid-area: say; min-width: 0; color: var(--ink-2); }
+.fb .trows { background: var(--sunk); border-top: 1px solid var(--line-soft); }
+.fb .trow { padding-left: 54px; }
+
+/* ---- C: tracks. Every row runs left to right; the cells along the top of a feature's row are its bar */
+.qc-row { padding: 14px 20px 16px; }
+.qc-row + .qc-row { border-top: 1px solid var(--line-soft); }
+.qc-head { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; min-height: 36px; }
+.qc-head .name { font: 600 18px/1.25 var(--display); }
+.qc-head .does, .qc-head .repo { color: var(--mute); }
+.qc-head .lane-sub { margin: 0; }
+.qc-head .say { margin-left: auto; color: var(--ink-2); text-align: right; }
+.qc-head .say + .count { margin-left: 4px; }
+.qc-head .count { color: var(--mute); white-space: nowrap; padding-left: 12px; border-left: 1px solid var(--line); }
+.qc-head .l-stop { margin-left: auto; }
+.qc-head .l-stop:empty { display: none; }
+.track { display: flex; flex-wrap: wrap; gap: 8px 3px; margin-top: 8px; }
+.stn { flex: 1 1 118px; min-width: 0; max-width: 250px; display: flex; background: var(--sunk); border-radius: 5px; }
+.stn-in { flex: 1; min-width: 0; display: flex; flex-direction: column; padding: 0 0 10px; background: none; border: 0; border-radius: inherit; text-align: left; }
+button.stn-in { cursor: pointer; }
+button.stn-in:hover { background: var(--hover); }
+.stn .sg { height: 14px; flex: none; }
+.track > .stn:first-child .sg { border-top-left-radius: 8px; border-bottom-left-radius: 8px; }
+.track > .stn:last-child .sg { border-top-right-radius: 8px; border-bottom-right-radius: 8px; }
+.stn .s-top, .stn .s-t, .stn .s-s, .stn .s-d { padding: 0 10px; }
+.stn .s-top { display: flex; align-items: center; gap: 7px; margin-top: 8px; color: var(--mute); }
+.stn .s-top .tag { margin-left: auto; }
+.stn .s-t { font-weight: 600; line-height: 1.3; margin-top: 1px; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
+.stn .s-s { margin-top: auto; padding-top: 6px; line-height: 1.3; color: var(--mute); }
+.stn .s-d { margin-top: 2px; line-height: 1.3; color: var(--mute); display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.track.feat .stn { max-width: none; }
+.stn.on .s-s, .stn .s-top.run { color: var(--run); font-weight: 600; }
+.stn.yours { background: var(--you-wash); box-shadow: inset 0 0 0 1px var(--you-line); }
+.stn.yours .s-s { color: var(--you); font-weight: 600; }
+.stn.blocked .s-t { font-weight: 400; color: var(--ink-2); }
+.stn.sel { outline: 2px solid var(--ink); outline-offset: 1px; }
+.stn.fade { opacity: .3; }
+.stn.slim { flex: 0 0 34px; }
+.stn.slim .i { width: 16px; height: 16px; margin: 9px auto 0; color: var(--ok); stroke-width: 2.2; }
+.stn.end { flex: 0 0 116px; background: none; box-shadow: inset 0 0 0 1px var(--line); }
+.stn.end .s-t { margin-top: 8px; }
+.stn.end.ok .s-t { color: var(--ok); }
+.stn.wide { flex: 2 1 280px; max-width: 520px; }
+.stn.wide .s-t { -webkit-line-clamp: 4; }
+.stn.wide .s-d { margin-top: 4px; -webkit-line-clamp: 6; }
+.track-none { align-self: center; padding: 0 14px; color: var(--mute); }
+.qc-picked { margin-top: 12px; padding: 10px 14px; border-radius: 9px; background: var(--sunk); color: var(--ink-2); }
+.qc-picked b { font-weight: 600; color: var(--ink); }
+
+@container (max-width: 1000px) {
+  .fb-row { grid-template-columns: 18px 212px minmax(0, 1fr) max-content; grid-template-areas: "chev name bar count" ". say say say"; row-gap: 6px; }
+}
+@container (max-width: 900px) {
+  .qc-head .say { margin-left: 0; text-align: left; flex-basis: 100%; order: 3; }
+  .qc-head .count { margin-left: auto; border-left: 0; padding-left: 0; }
+}
+@container (max-width: 760px) {
+  .lqs { grid-template-columns: minmax(0, 1fr); }
+  .lq + .lq { border-left: 0; border-top: 1px solid var(--line-soft); }
+  .qa-bar { flex-direction: column; }
+  .trow { grid-template-columns: 26px minmax(0, 1fr); row-gap: 2px; }
+  .trow .t-say { grid-column: 2; }
+  .fb .trow { padding-left: 20px; }
+  .fb-row { grid-template-columns: 18px minmax(0, 1fr) max-content; grid-template-areas: "chev name count" ". bar bar" ". say say"; }
+}
+@container (max-width: 520px) {
+  .q .card-head .head-note { display: none; }
+  .track { flex-direction: column; gap: 3px; }
+  .stn, .stn.slim, .stn.end, .stn.wide { flex: none; max-width: none; }
+  .stn-in { display: grid; grid-template-columns: 14px minmax(0, 1fr); column-gap: 2px; padding: 0; }
+  .stn .sg { grid-row: 1 / span 3; height: auto; min-height: 34px; }
+  .track > .stn .sg { border-radius: 3px; }
+  .track > .stn:first-child .sg { border-radius: 8px 8px 3px 3px; }
+  .track > .stn:last-child .sg { border-radius: 3px 3px 8px 8px; }
+  .stn .s-top { margin-top: 7px; }
+  .stn .s-s { margin-top: 0; padding-top: 2px; padding-bottom: 8px; }
+  .stn.slim .i { margin: 9px 10px; }
+  .lq-list li { grid-template-columns: 20px minmax(0, 1fr); }
+  .lq-list .f { grid-column: 2; }
+  .lq-list .j { white-space: normal; }
+}
 
 /* the pyramid: what blocks what, blockers on top */
 .pyramid { padding: 20px 20px 4px; display: flex; flex-wrap: wrap; gap: 30px 36px; overflow-x: auto; }
@@ -598,8 +753,6 @@ dialog.sheet::backdrop { background: rgba(4, 6, 10, .55); }
   .vc-story, .vc-ask { overflow: visible; }
   .letter.none { min-height: 240px; }
   .cols { grid-template-columns: 1fr; }
-  .feature { grid-template-columns: minmax(0, 1fr) 132px; }
-  .feature .count, .feature .hint { display: none; }
   .act { grid-template-columns: 52px minmax(0, 1fr); row-gap: 2px; }
   .act .actor, .act .what, .act .where { grid-column: 2; }
 }
@@ -681,9 +834,12 @@ let snap = null;     // the runner's snapshot, as last read
 let ctl = {};        // control.json, as last read
 let fault = null;    // why the snapshot couldn't be read: "server", "missing", "unreadable"
 const PAGES = [["overview", "Overview"], ["inbox", "Inbox"], ["queue", "Queue"], ["activity", "Activity"], ["usage", "Usage"], ["settings", "Settings"]];
-const UNBUILT = ["queue"];   // as it was before the split, until its own turn (ticket 21)
+const UNBUILT = [];   // pages still as they were before the split
+// PROTOTYPE (ticket 21): the Queue page's three arrangements, ?variant=a|b|c
+const VARIANTS = [["a", "Features first"], ["b", "The page you land on"], ["c", "Tracks"]];
 const sampleName = new URLSearchParams(location.search).get("sample");
-const ui = { page: "overview", repo: "", view: "list", pr: null, ask: null, hold: null, sel: null, pop: null, nav: false, rail: false };
+const ui = { page: "overview", repo: "", view: "list", pr: null, ask: null, hold: null, sel: null, pop: null, nav: false, rail: false,
+  variant: "a", feature: "", open: [] };   // the Queue: which arrangement, the feature it's narrowed to (A), the features unfolded (B)
 
 function recall(k) { try { return localStorage.getItem("qr." + k); } catch { return null; } }
 function remember(k, v) { try { localStorage.setItem("qr." + k, v); } catch { /* a private window */ } }
@@ -698,12 +854,17 @@ function readAddress() {
   ui.view = (q.get("view") || recall("view")) === "pyramid" ? "pyramid" : "list";
   const m = /^(.+):(\d+)$/.exec(q.get("pr") || "");
   ui.pr = m ? { repo: m[1], n: Number(m[2]) } : null;
+  const v = (q.get("variant") || recall("variant") || "").toLowerCase();
+  ui.variant = VARIANTS.some((x) => x[0] === v) ? v : "a";
+  ui.feature = q.get("feature") || "";
 }
 function href(over = {}) {
-  const s = { page: ui.page, repo: ui.repo, view: ui.view, pr: ui.pr, ask: ui.ask, sample: sampleName, ...over };
+  const s = { page: ui.page, repo: ui.repo, view: ui.view, pr: ui.pr, ask: ui.ask, variant: ui.variant, feature: ui.feature, sample: sampleName, ...over };
   const q = new URLSearchParams();
   if (s.sample) q.set("sample", s.sample);
   if (s.page !== "overview") q.set("page", s.page);
+  if (s.page === "queue") q.set("variant", s.variant);
+  if (s.page === "queue" && s.variant === "a" && s.feature) q.set("feature", s.feature);
   if (s.page === "inbox" && s.ask) q.set("ask", s.ask);
   if (s.repo) q.set("repo", s.repo);
   if (s.view === "pyramid") q.set("view", "pyramid");
@@ -1055,7 +1216,9 @@ function stopButton(l) {
   return `<button class="btn" data-act="stop" data-lane="${id}" data-how="after-job" title="It starts nothing until you resume it">${ICON.pause}Stop</button>`;
 }
 
-function lane(l) {
+// What a lane is doing, in words: for how long (or what it is instead), what it's on, the detail,
+// and a note while something you asked of it hasn't been read. The Queue's lanes say the same.
+function laneSays(l) {
   const stale = frozen();
   const job = l.job, [doing, noun] = kind(job && job.kind);
   const a = asked(l), pending = a && !wasRead(a.at), want = a ? a.stop : null;
@@ -1084,7 +1247,11 @@ function lane(l) {
   if (pending && want) note = `You asked it to stop ${want === "now" ? "now" : `after this ${esc(noun)}`} at ${esc(clock(a.at))}. The runner hasn't read that yet.`;
   else if (pending && off) note = `You asked it to carry on at ${esc(clock(a.at))}. The runner hasn't read that yet.`;
   else if (l.state === "stopping") note = `It stops when this ${esc(noun)} ends, and starts nothing after.`;
+  return { how, head, sub, note, moving, job };
+}
 
+function lane(l) {
+  const { how, head, sub, note, moving, job } = laneSays(l);
   // A lane is one across repositories, so its next is never narrowed to the picked one.
   const queue = l.queue || [], q = queue[0];
   const next = q
@@ -1162,7 +1329,7 @@ function progress() {
     <div class="ov-foot">${rows ? `<p class="ov-legend" aria-label="What a cell's fill means">${SEGMENTS.map(([cls, label]) => `<span><i class="sg ${cls}"></i>${label}</span>`).join("")}</p>` : ""}${rest ? `<p class="${rows ? "ov-rest" : ""}"><a class="link" ${goto("queue")}>${rest[0].toUpperCase() + rest.slice(1)}.</a></p>` : ""}</div></section>`;
 }
 
-// ------------------------------------------------------------------ work
+// ------------------------------------------------------------------ the work, as every page reads it
 function model() {
   const issues = snap.issues || [];
   const byKey = new Map(issues.map((i) => [key(i), i]));
@@ -1181,64 +1348,268 @@ function model() {
   return { issues, shown: scoped(issues), byKey, dependents, below, waitsOn, order, feature };
 }
 
-function work() {
-  const m = model();
-  const open = m.shown.filter((i) => i.state !== "done").length;
-  return `<section class="card" aria-label="Work"><header class="card-head"><h2>Work</h2>
-      <span class="mute">${open} open${ui.repo ? "" : ` in ${plural((snap.repos || []).length, "repository", "repositories")}`}</span>
-      <span class="seg" role="group" aria-label="View">
-        <button data-act="view" data-view="list" aria-pressed="${ui.view === "list"}">List</button>
-        <button data-act="view" data-view="pyramid" aria-pressed="${ui.view === "pyramid"}">Pyramid</button></span></header>
-    ${features(m)}${ui.view === "list" ? list(m) : pyramid(m)}</section>`;
-}
-
-const PIP_ORDER = ["done", "moving", "yours", "ready", "blocked"];
-function features(m) {
-  const rows = scoped(snap.features || []).map((f) => {
-    const its = m.issues.filter((i) => i.feature === f.id);
-    if (!its.length) return "";
-    const sorted = [...its].sort((a, b) => PIP_ORDER.indexOf(stateOf(a)[1]) - PIP_ORDER.indexOf(stateOf(b)[1]) || a.n - b.n);
+// ------------------------------------------------------------------ queue
+// PROTOTYPE (ticket 21), on sample data: the same work arranged three ways, for Stefan to judge
+// by eye. All three read one model: each feature's tickets in the order they're built (the
+// snapshot's `tickets`), each ticket's place in a lane's queue, and the lane that's on it now.
+function queueModel() {
+  const m = model(), lanes = snap.lanes || [];
+  const issueOf = (j) => m.issues.find((i) => i.repo === j.repo && (j.ref === `#${i.n}` || (i.pr && j.ref === `PR #${i.pr}`)));
+  const line = new Map(), now = new Map();
+  for (const l of lanes) {
+    (l.queue || []).forEach((j, k) => { const i = issueOf(j); if (i && !line.has(key(i))) line.set(key(i), { lane: l, n: k + 1 }); });
+    const i = l.job && (l.state === "working" || l.state === "stopping") ? issueOf(l.job) : null;
+    if (i) now.set(key(i), l);
+  }
+  const view = (f) => {
+    const its = (f.tickets || featureCells(f).map((c) => key(c[0]))).map((k) => m.byKey.get(k)).filter(Boolean);
     const done = its.filter((i) => i.state === "done").length;
-    const yours = its.find((i) => i.state === "you");
-    const next = its.filter((i) => i.state === "ready").sort((a, b) => m.below(key(b)).length - m.below(key(a)).length)[0];
-    const moving = its.some((i) => stateOf(i)[1] === "moving");
-    let hint;
-    if (yours) hint = `<b class="strong" style="color:var(--ink)">Waits on you:</b> #${yours.n} ${esc(yours.title)}`;
-    else if (next) { const u = m.below(key(next)).length; hint = `Next is #${next.n} ${esc(next.title)}${u ? `, which unblocks ${u}` : ""}`; }
-    else hint = moving ? "Moving" : "Waits on other work";
-    return `<li class="feature"><span><b class="strong">${esc(f.title)}</b> ${ui.repo ? "" : `<span class="dim small">${esc(f.repo)}</span>`}</span>
-      <span class="pips">${sorted.map((i) => `<i class="pip ${stateOf(i)[1]}" title="#${i.n} ${esc(i.title)}: ${esc(stateOf(i)[0])}"></i>`).join("")}</span>
-      <span class="count mute">${done} of ${its.length} done</span><span class="hint">${hint}</span></li>`;
-  }).join("");
-  return rows ? `<ul class="features" aria-label="By feature">${rows}</ul>` : "";
+    return { id: f.id, title: f.title, repo: f.repo, its, done, left: its.length - done };
+  };
+  const all = scoped(snap.features || []).map(view).filter((v) => v.its.length);
+  // Work that belongs to no feature is shown as a feature of its own, without an end.
+  const loose = m.shown.filter((i) => !i.feature && i.state !== "done").sort((a, b) => segmentOf(a) - segmentOf(b) || m.order(a, b));
+  const none = loose.length ? [{ id: "none", title: "No feature", repo: "", its: loose, done: 0, left: loose.length, loose: true }] : [];
+  // Features with open work in build order, then the work that belongs to none, then the finished.
+  return { m, lanes, issueOf, line, now, views: [...all.filter((v) => v.left), ...none, ...all.filter((v) => !v.left)] };
 }
 
-const GROUPS = [
-  ["Build next, in this order", ["ready"]], ["Moving", ["building", "review", "fixing", "merged"]],
-  ["Waiting on you", ["you"]], ["Blocked", ["blocked"]], ["Not ready", ["not-ready"]],
-];
-function list(m) {
-  const all = !ui.repo, cols = all ? 7 : 6;
-  const body = GROUPS.map(([label, states]) => {
-    const rows = m.shown.filter((i) => states.includes(i.state)).sort(states[0] === "ready" ? (a, b) => (a.pick ?? 99) - (b.pick ?? 99) : m.order);
-    if (!rows.length) return "";
-    return `<tr class="group"><td colspan="${cols}">${label}<span>${rows.length}</span></td></tr>` + rows.map((i) => {
-      const [word, cls] = stateOf(i), f = m.feature(i), waits = m.waitsOn(i), u = m.below(key(i)).length;
-      const title = i.pr ? prLink(i.repo, i.pr, esc(i.title)) : esc(i.title);
-      return `<tr title="${esc(i.note || "")}">
-        <td class="pick">${i.pick ?? ""}</td>
-        <td class="title">${title}<span class="ref">#${i.n}${i.pr ? `, PR #${i.pr}` : ""}</span></td>
-        ${all ? `<td class="mute">${esc(i.repo)}</td>` : ""}
-        <td class="mute">${f ? esc(f.title) : ""}</td>
-        <td><span class="state ${cls}">${cls === "yours" ? "" : `<i class="pip ${cls}"></i>`}${esc(word)}</span></td>
-        <td class="mute">${waits.map((w) => `#${w.n}`).join(", ")}</td>
-        <td class="num${u >= 2 ? " strong" : " mute"}">${u || ""}</td></tr>`;
-    }).join("");
+const nth = (n) => `${n}${n % 100 > 10 && n % 100 < 14 ? "th" : ["th", "st", "nd", "rd"][n % 10] || "th"}`;
+// Where one ticket stands: its state's word, the cell it is in a bar, and what comes next for it,
+// at length (`more`, for a row) and in a few words (`short`, for a cell on a track).
+function standing(i, q) {
+  const said = stateOf(i)[0], seg = SEGMENTS[segmentOf(i)][0], k = key(i);
+  const on = q.now.get(k), at = q.line.get(k), ask = i.state === "you" ? askFor(i) : null, waits = q.m.waitsOn(i);
+  let word = said, more = i.note || "", short = said;
+  if (on) {
+    const t = ago(on.job.started_at);
+    more = frozen() ? `${on.name} was on it` : `${on.name} is on it, ${t} in`;
+    short = frozen() ? said : `${said}, ${t}`;
+  } else if (at) {
+    word = { fixing: "Fix round due", review: "Waits for review", building: "Build paused" }[i.state] || said;
+    more = at.n === 1 ? `Next for ${at.lane.name}` : `${nth(at.n)} in ${at.lane.name}'s queue`;
+    short = i.state === "ready" ? (at.n === 1 ? "Next in line" : `${nth(at.n)} in line`) : `${word}, ${at.n === 1 ? "next" : nth(at.n)} in line`;
+  } else if (ask) more = short = askWords(ask)[0];
+  else if (i.state === "blocked" && waits.length) more = short = `After ${waits.map((w) => `#${w.n}`).join(" and ")}`;
+  else if (i.state === "not-ready") { more = "Not marked ready for the runner"; short = "Not marked ready"; }
+  return { word, seg, on, at, ask, more, short };
+}
+
+// A bar for any list of tickets, in the order given: a cell per ticket, named on hover.
+function ticketBar(title, its) {
+  const said = SEGMENTS.map(([, label], k) => [its.filter((i) => segmentOf(i) === k).length, label]).filter((x) => x[0]).map(([n, label]) => `${n} ${label.toLowerCase()}`).join(", ");
+  return `<span class="fbar" role="img" aria-label="${esc(title)}: ${esc(said || "no tickets")}">${its.map((i) =>
+    `<i class="sg ${SEGMENTS[segmentOf(i)][0]}" title="#${i.n} ${esc(i.title)}: ${esc(stateOf(i)[0])}"></i>`).join("")}</span>`;
+}
+// What stands between a feature and usable, in a sentence: what waits on you first.
+const LEFT = [["yours", "waits on you", "wait on you"], ["building", "building"], ["pr", "in a PR"], ["merged", "merged but not live"], ["ready", "ready"], ["blocked", "blocked"]];
+function leftSay(v, link = true) {
+  if (!v.left) return `<b class="ok">Usable.</b> Every ticket is live.`;
+  const parts = LEFT.map(([seg, one, many]) => {
+    const its = v.its.filter((i) => SEGMENTS[segmentOf(i)][0] === seg);
+    if (!its.length) return "";
+    const text = `${its.length} ${its.length === 1 ? one : many || one}`;
+    if (seg !== "yours") return text;
+    const ask = its.map(askFor).find(Boolean);
+    return link && ask ? `<a class="mine" ${goto("inbox", ask)}>${text}</a>` : `<span class="mine">${text}</span>`;
+  }).filter(Boolean);
+  return `<b>${v.left} ${v.loose ? "open" : "to go"}:</b> ${parts.join(", ")}.`;
+}
+const countSay = (v) => (v.loose ? plural(v.left, "open ticket", "open tickets") : `${v.done} of ${v.its.length} done`);
+
+// A ticket as a row: its cell from the bar, what it is, where it stands. One that waits on you
+// carries the Inbox's own tag and opens its ask there.
+function ticketRow(i, q) {
+  const s = standing(i, q);
+  const say = s.ask ? `<a class="t-ask" ${goto("inbox", s.ask)} title="Opens it in the Inbox">${kindTag(s.ask)}<span>Waits on you</span></a>`
+    : `<b>${esc(s.word)}</b>${esc(s.more)}`;
+  return `<li class="trow ${s.seg}${s.on && !frozen() ? " on" : ""}"><i class="sg ${s.seg}" aria-hidden="true"></i>
+    <span class="t-what"><span class="t-n">#${i.n}</span>${esc(i.title)}${i.pr ? prLink(i.repo, i.pr, `PR #${i.pr}`) : ""}${i.feature ? "" : repoTag(i.repo)}</span>
+    <span class="t-say">${say}</span></li>`;
+}
+const ticketRows = (v, q) => `<ol class="trows" aria-label="${esc(v.title)}: its tickets, in the order they're built">${v.its.map((i) => ticketRow(i, q)).join("")}</ol>`;
+
+// A lane with its queue: what it's on, its Stop button, then what it takes up next, in order.
+// A lane is one across repositories, so its queue is never narrowed; with a feature picked,
+// the jobs that aren't that feature's step back.
+function laneQueue(l, q, picked) {
+  const s = laneSays(l), queue = l.queue || [];
+  const rows = queue.map((j, k) => {
+    const i = q.issueOf(j), f = i && q.m.feature(i);
+    return `<li${picked && !(i && picked.its.includes(i)) ? ' class="off"' : ""}><span class="n">${k + 1}</span>
+      <span class="j" title="${esc(j.title)}"><b>${esc(QUEUED[j.kind] || j.kind)} ${esc(j.ref)}</b>${esc(j.title)}</span><span class="f">${esc(f ? f.title : "No feature")}</span></li>`;
   }).join("");
-  if (!body) return `<p class="empty">Nothing is open${ui.repo ? ` in ${esc(ui.repo)}` : ""}.</p>`;
-  return `<div class="scroll"><table class="list"><colgroup><col style="width:54px"><col>${all ? '<col style="width:160px">' : ""}<col style="width:164px"><col style="width:124px"><col style="width:96px"><col style="width:98px"></colgroup>
-    <thead><tr><th class="pick" title="The order the runner builds in"></th><th>Item</th>${all ? "<th>Repository</th>" : ""}<th>Feature</th><th>State</th><th>Waits on</th><th class="num" title="Open items that can't start until this one is done">Unblocks</th></tr></thead>
-    <tbody>${body}</tbody></table></div>`;
+  return `<article class="lq" aria-label="${esc(l.name)}">
+    <header class="lq-head"><p>${who(l.provider, l.name)}<span class="does" title="With ${esc(l.model)}">${esc(l.does || "")}</span></p>
+      <span class="l-for${s.moving ? " run" : ""}"${s.moving ? ` title="Started ${esc(stamp(s.job.started_at))}"` : ""}>${s.moving ? `<i class="dot run"></i>` : ""}${s.how}</span>
+      <span class="l-stop">${stopButton(l)}</span></header>
+    <p class="doing${s.moving ? "" : " quiet"}">${s.head}</p>
+    ${s.sub ? `<p class="lane-sub">${s.sub}</p>` : ""}${s.note ? `<p class="lane-note">${s.note}</p>` : ""}
+    <p class="lq-label">${rows ? (s.moving ? "Then, in this order" : "Next, in this order") : esc(l.queue_empty || "Nothing is waiting for it.")}</p>
+    ${rows ? `<ol class="lq-list">${rows}</ol>` : ""}</article>`;
+}
+const noLanes = `<p class="empty">The snapshot names no lane.</p>`;
+const viewSeg = () => `<span class="seg" role="group" aria-label="View">
+    <button data-act="view" data-view="list" aria-pressed="${ui.view === "list"}">In build order</button>
+    <button data-act="view" data-view="pyramid" aria-pressed="${ui.view === "pyramid"}">What blocks what</button></span>`;
+
+function queue() {
+  const q = queueModel();
+  return `<div class="q q-${ui.variant}">${{ a: queueA, b: queueB, c: queueC }[ui.variant](q)}</div>${protoBar()}`;
+}
+
+// ---- A, features first. A card per feature, in build order: its bar, what stands between it and
+// usable, and its tickets as rows in the order they're built. A chip (or a feature's name) narrows
+// the page to that feature; "What blocks what" draws the same scope as the pyramid. Each lane's
+// queue follows the features.
+function queueA(q) {
+  const picked = q.views.find((v) => v.id === ui.feature) || null;
+  const chip = (id, label, usable) => `<button class="chip" data-act="feature" data-id="${esc(id)}" aria-pressed="${(picked ? picked.id : "") === id}"${usable ? ' title="Usable: every ticket is live"' : ""}>${usable ? ICON.check : ""}${esc(label)}</button>`;
+  const bar = `<section class="card qa-bar" aria-label="What to show">
+      <div class="chips" role="group" aria-label="Feature">${chip("", "All features")}${q.views.map((v) => chip(v.id, v.title, !v.left)).join("")}</div>${viewSeg()}</section>`;
+  const card = (v) => `<section class="card" aria-label="${esc(v.title)}"><header class="qa-head">
+      <h2><button class="qa-name" data-act="feature" data-id="${esc(v.id)}" title="${picked ? "Show every feature" : "Show only this feature"}">${esc(v.title)}</button>${v.repo && !ui.repo ? `<span class="repo">${esc(v.repo)}</span>` : ""}</h2>
+      <span class="count" title="Done means live">${countSay(v)}</span>${ticketBar(v.title, v.its)}<p class="say">${leftSay(v)}</p></header>
+    ${ticketRows(v, q)}</section>`;
+  let body;
+  if (ui.view === "pyramid") body = `<section class="card" aria-label="What blocks what">${pyramid({ ...q.m, shown: picked ? picked.its : q.m.shown })}</section>`;
+  else if (picked) body = card(picked);
+  else {
+    const usable = q.views.filter((v) => !v.left);
+    body = q.views.filter((v) => v.left).map(card).join("") + (usable.length ? `<section class="card" aria-label="Usable"><header class="card-head"><h2>Usable</h2><span class="head-note">Every ticket is live</span></header>
+      <ul class="qa-usable">${usable.map((v) => `<li><button data-act="feature" data-id="${esc(v.id)}">${ICON.check}<span><b>${esc(v.title)}</b>${ui.repo ? "" : `<span>${esc(v.repo)}</span>`}</span><span class="count">${countSay(v)}</span></button></li>`).join("")}</ul></section>` : "");
+    if (!q.views.length) body = `<section class="card"><p class="empty">Nothing is open${ui.repo ? ` in ${esc(ui.repo)}` : ""}.</p></section>`;
+  }
+  return `${bar}${body}<section class="card" aria-label="Each lane's queue"><header class="card-head"><h2>What each lane takes up next</h2>
+      <span class="head-note">${picked ? "Jobs that belong to other features are dimmed" : "One job at a time in each lane"}</span></header>
+    ${q.lanes.length ? `<div class="lqs">${q.lanes.map((l) => laneQueue(l, q, picked)).join("")}</div>` : noLanes}</section>`;
+}
+
+// ---- B, the page you land on. Three bands, top to bottom. First what an Overview would say:
+// what waits on you (each ask a tile that opens it in the Inbox), then what's running (each lane
+// with its Stop button and its queue). Under them the features, folded to a line each: its bar,
+// how far, what's left. A line unfolds to its tickets.
+function queueB(q) {
+  const { all, open, snoozed, answered } = inboxLists();
+  const aside = [snoozed.length ? `${snoozed.length} snoozed` : "", answered.length ? `${answered.length} decided, now with the runner` : ""].filter(Boolean).join(". ");
+  let you;
+  if (!open.length) {
+    const blind = (snap.sources || []).find((s) => s.id === "github" && !s.ok);
+    const elsewhere = ui.repo ? all.filter((a) => a.repo !== ui.repo && !snoozedUntil(a)).length : 0;
+    const calm = blind ? ["Nothing seen that waits on you", "GitHub can't be read, so something may be missing."]
+      : elsewhere ? [`Nothing in ${esc(ui.repo)} waits on you`, `${plural(elsewhere, "thing waits", "things wait")} in another repository.`]
+      : ["Nothing waits on you", "The runner carries on by itself."];
+    you = `<section class="card qb-you" aria-label="Waiting on you"><div class="ov-calm">${ICON.done}<p><b>${calm[0]}</b><span>${calm[1]}${aside ? ` ${aside}.` : ""}</span></p></div></section>`;
+  } else {
+    const SHOWN = 6, oldest = open.reduce((m, a) => (ms(a.since) < ms(m.since) ? a : m));
+    const rest = open.length > SHOWN ? `${open.length - SHOWN} more in the Inbox` : "";
+    you = `<section class="card qb-you has" aria-label="Waiting on you">
+      <header class="qb-head"><h2>${open.length} waiting on you</h2><span title="Waiting since ${esc(stamp(oldest.since))}">oldest ${esc(ago(oldest.since))}</span>
+        <a class="btn go" ${goto("inbox")}>${ICON.inbox}Open the Inbox</a></header>
+      <ol class="qb-asks">${open.slice(0, SHOWN).map((a) => `<li><a class="mrow${isRead(a) ? "" : " unread"}" ${goto("inbox", a)}>
+        <span class="m1">${repoMark(a.repo)}${kindTag(a)}<span class="ma" title="Waiting since ${esc(stamp(a.since))}">${esc(ago(a.since))}</span></span>
+        <span class="m2">${isRead(a) ? "" : `<i class="dot" title="Unread"></i>`}<b>${esc(a.subject)}</b><span>${esc(a.ref)}</span></span>
+        <span class="m3">${esc(a.situation || a.question)}</span></a></li>`).join("")}</ol>
+      ${rest || aside ? `<p class="qb-aside">${[rest, aside].filter(Boolean).join(". ")}.</p>` : ""}</section>`;
+  }
+  const run = `<section class="card" aria-label="Running now"><header class="card-head"><h2>Running now</h2><span class="head-note">and what each lane takes up next</span></header>
+    ${q.lanes.length ? `<div class="lqs">${q.lanes.map((l) => laneQueue(l, q, null)).join("")}</div>` : noLanes}</section>`;
+  const rows = q.views.map((v) => {
+    const open = ui.open.includes(v.id);
+    return `<li><button class="fb-row" data-act="open" data-id="${esc(v.id)}" aria-expanded="${open}">${ICON.chevron}
+        <span class="fb-name"><b>${esc(v.title)}</b>${v.repo && !ui.repo ? `<span>${esc(v.repo)}</span>` : ""}</span>
+        ${ticketBar(v.title, v.its)}<span class="fb-count" title="Done means live">${countSay(v)}</span><span class="fb-say">${leftSay(v, false)}</span></button>
+      ${open ? ticketRows(v, q) : ""}</li>`;
+  }).join("");
+  const going = q.views.filter((v) => v.left && !v.loose).length;
+  const feats = `<section class="card" aria-label="Features"><header class="card-head"><h2>Features</h2>
+      <span class="mute">${going ? `${going} with open work, in build order` : "none with open work"}</span>${viewSeg()}</header>
+    ${ui.view === "pyramid" ? pyramid(q.m) : rows ? `<ol class="fb">${rows}</ol>
+      <div class="ov-foot"><p class="ov-legend" aria-label="What a cell's fill means">${SEGMENTS.map(([cls, label]) => `<span><i class="sg ${cls}"></i>${label}</span>`).join("")}</p></div>`
+      : `<p class="empty">Nothing is open${ui.repo ? ` in ${esc(ui.repo)}` : ""}.</p>`}</section>`;
+  return `${you}${run}${feats}`;
+}
+
+// ---- C, tracks. Every row runs left to right. A lane's row is what it's on now and what it
+// takes up next, numbered. A feature's row is its tickets one after another until it's usable:
+// the cells along its top are its bar, each with its ticket under it, and the last cell is the
+// end. Picking a ticket lights up what it waits on and what it holds up, in every row.
+function queueC(q) {
+  const m = q.m;
+  let lit = null;
+  if (ui.sel && m.byKey.has(ui.sel)) {
+    lit = new Set([ui.sel]);
+    const up = (k) => (m.byKey.get(k).blocked_by || []).forEach((b) => { if (m.byKey.has(b) && !lit.has(b)) { lit.add(b); up(b); } });
+    const down = (k) => (m.dependents.get(k) || []).forEach((d) => { if (!lit.has(d)) { lit.add(d); down(d); } });
+    up(ui.sel); down(ui.sel);
+  }
+  const cls = (i) => `${lit && !(i && lit.has(key(i))) ? " fade" : ""}${i && ui.sel === key(i) ? " sel" : ""}`;
+  const pick = (i) => (i ? `button class="stn-in" data-act="sel" data-key="${esc(key(i))}" aria-pressed="${ui.sel === key(i)}"` : `div class="stn-in"`);
+  const end = (i) => (i ? "button" : "div");
+
+  const laneRow = (l) => {
+    const s = laneSays(l), cur = s.moving ? q.issueOf(s.job) : null;
+    const first = s.moving
+      ? `<li class="stn on${cls(cur)}"><${pick(cur)} title="${esc(s.job.title)}"><i class="sg ${cur ? SEGMENTS[segmentOf(cur)][0] : "pr"}"></i>
+          <span class="s-top run"><i class="dot run"></i>Now, ${esc(ago(s.job.started_at))}</span><b class="s-t">${esc(kind(s.job.kind)[0])} ${esc(s.job.ref)}</b><span class="s-d">${esc(s.job.title)}</span></${end(cur)}></li>`
+      : `<li class="stn wide${lit ? " fade" : ""}"><div class="stn-in"><i class="sg blocked"></i><span class="s-top">${s.how}</span><b class="s-t">${s.head}</b>${s.sub ? `<span class="s-d">${s.sub}</span>` : ""}</div></li>`;
+    const rest = (l.queue || []).map((j, k) => {
+      const i = q.issueOf(j);
+      return `<li class="stn${cls(i)}"><${pick(i)} title="${esc(j.title)}"><i class="sg ready"></i>
+        <span class="s-top">${k + 1}</span><b class="s-t">${esc(QUEUED[j.kind] || j.kind)} ${esc(j.ref)}</b><span class="s-d">${esc(j.title)}</span></${end(i)}></li>`;
+    }).join("");
+    return `<article class="qc-row" aria-label="${esc(l.name)}">
+      <header class="qc-head">${who(l.provider, l.name)}<span class="does" title="With ${esc(l.model)}">${esc(l.does || "")}</span>
+        ${s.moving && s.sub ? `<span class="lane-sub">${s.sub}</span>` : ""}<span class="l-stop">${stopButton(l)}</span></header>
+      <ol class="track" aria-label="What ${esc(l.name)} is on, then what it takes up next, in order">${first}${rest}
+        ${rest ? "" : `<li class="track-none">${esc(l.queue_empty || "Nothing is waiting for it.")}</li>`}</ol>
+      ${s.note ? `<p class="lane-note">${s.note}</p>` : ""}</article>`;
+  };
+
+  const featureRow = (v) => {
+    const cells = v.its.map((i) => {
+      const s = standing(i, q);
+      if (i.state === "done") return `<li class="stn slim${cls(i)}"><${pick(i)} title="#${i.n} ${esc(i.title)}: done" aria-label="#${i.n} ${esc(i.title)}: done"><i class="sg done"></i>${ICON.check}</button></li>`;
+      return `<li class="stn ${s.seg}${s.on && !frozen() ? " on" : ""}${cls(i)}"><${pick(i)} title="${esc(i.title)}"><i class="sg ${s.seg}"></i>
+        <span class="s-top">#${i.n}${i.feature || ui.repo ? "" : `<span class="tag">${esc(i.repo)}</span>`}</span><b class="s-t">${esc(i.title)}</b><span class="s-s">${esc(s.short)}</span></button></li>`;
+    }).join("");
+    const last = v.loose ? "" : `<li class="stn end${v.left ? "" : " ok"}"><div class="stn-in"><i class="sg ${v.left ? "ready" : "done"}"></i>
+        <b class="s-t">Usable</b><span class="s-d">${v.left ? `after ${v.left} more` : "every ticket is live"}</span></div></li>`;
+    const sel = lit && v.its.find((i) => key(i) === ui.sel);
+    let picked = "";
+    if (sel) {
+      const waits = m.waitsOn(sel), under = m.below(ui.sel).map((k) => m.byKey.get(k)), s = standing(sel, q);
+      picked = `<p class="qc-picked"><b>#${sel.n} ${esc(sel.title)}</b>. ${esc(s.word)}${s.more && s.more !== s.word && !waits.length ? `: ${esc(s.more.replace(/^./, (c) => c.toLowerCase()))}` : ""}.
+        ${waits.length ? `Waits on ${waits.map((w) => `#${w.n} ${esc(w.title)}`).join(" and ")}.` : ""}
+        ${under.length ? `Holds up ${under.sort(m.order).map((w) => `#${w.n} ${esc(w.title)}`).join(", ")}.` : "Holds nothing up."}
+        ${s.ask ? `<a class="mine" ${goto("inbox", s.ask)}>Open it in the Inbox</a>` : ""} ${sel.pr ? prLink(sel.repo, sel.pr, "PR history") : ""}</p>`;
+    }
+    return `<article class="qc-row" aria-label="${esc(v.title)}">
+      <header class="qc-head"><span class="name">${esc(v.title)}</span>${v.repo && !ui.repo ? `<span class="repo">${esc(v.repo)}</span>` : ""}
+        <span class="say">${leftSay(v)}</span>${v.loose ? "" : `<span class="count" title="Done means live">${countSay(v)}</span>`}</header>
+      <ol class="track feat" aria-label="${esc(v.title)}: its tickets, in the order they're built">${cells}${last}</ol>${picked}</article>`;
+  };
+
+  return `<section class="card" aria-label="Next in line"><header class="card-head"><h2>Next in line</h2><span class="head-note">One job at a time in each lane, left to right</span></header>
+      ${q.lanes.length ? q.lanes.map(laneRow).join("") : noLanes}</section>
+    <section class="card" aria-label="Features"><header class="card-head"><h2>Features</h2><span class="head-note">In build order. Each runs left to right until it's usable</span></header>
+      ${q.views.length ? q.views.map(featureRow).join("") : `<p class="empty">Nothing is open${ui.repo ? ` in ${esc(ui.repo)}` : ""}.</p>`}</section>`;
+}
+
+// ---- the switcher between the three. Sample data only, so it can never reach the real page.
+function protoBar() {
+  if (!snap.sample) return "";
+  const [k, name] = VARIANTS.find((v) => v[0] === ui.variant);
+  return `<div class="proto" role="group" aria-label="Prototype: the Queue page's variants" title="Prototype: three arrangements of the Queue page">
+    <button data-act="variant" data-by="-1" aria-label="Previous variant" title="Left arrow key">${ICON.left}</button>
+    <span class="proto-name"><b>${k.toUpperCase()}</b>${esc(name)}</span>
+    <button data-act="variant" data-by="1" aria-label="Next variant" title="Right arrow key">${ICON.right}</button></div>`;
+}
+function turnVariant(by) {
+  const at = VARIANTS.findIndex((v) => v[0] === ui.variant);
+  ui.variant = VARIANTS[(at + by + VARIANTS.length) % VARIANTS.length][0];
+  remember("variant", ui.variant);
+  ui.sel = null; ui.pop = null;
 }
 
 // The pyramid: each group of linked items drawn in layers, a blocker above what it blocks, so the
@@ -1485,7 +1856,7 @@ function draw() {
     put("rail", ""); put("sheet", "");
     return;
   }
-  const page = { inbox, queue: work, activity, usage: usagePage, settings }[ui.page] || overview;
+  const page = { inbox, queue, activity, usage: usagePage, settings }[ui.page] || overview;
   put("main", notices() + page());
   put("rail", rail());
   const s = sheet(), dlg = $("sheet");
@@ -1560,6 +1931,9 @@ document.addEventListener("click", (e) => {
     case "wake": setSnooze(d.id, null); break;
     case "fold": remember(d.id, recall(d.id) === "folded" ? "open" : "folded"); break;
     case "view": ui.view = d.view; remember("view", d.view); break;
+    case "feature": ui.feature = ui.feature === d.id ? "" : d.id; ui.sel = null; scrollTo(0, 0); break;   // the Queue, A
+    case "open": ui.open = ui.open.includes(d.id) ? ui.open.filter((x) => x !== d.id) : [...ui.open, d.id]; break;   // the Queue, B
+    case "variant": turnVariant(Number(d.by)); break;   // PROTOTYPE
     case "stop": ui.pop = null; send([{ lane: d.lane, stop: d.how || null }]); return;
     case "all": {
       const how = d.how || null;
@@ -1597,6 +1971,15 @@ document.addEventListener("keydown", (e) => {
   address(); draw();
   const row = document.querySelector('.mrow[aria-current="true"]');
   if (row) { row.focus(); row.scrollIntoView({ block: "nearest" }); }
+});
+// PROTOTYPE: on the Queue the left and right arrow keys turn to the next arrangement.
+document.addEventListener("keydown", (e) => {
+  if (ui.page !== "queue" || !snap || !snap.sample || ui.pr || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.target.closest?.("input, textarea, select, [contenteditable]")) return;
+  const turn = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
+  if (!turn) return;
+  e.preventDefault();
+  turnVariant(turn); address(); draw(); scrollTo(0, 0);
 });
 document.addEventListener("keydown", (e) => {
   if (e.key !== "Escape" || !(ui.pop || ui.rail || ui.nav)) return;
