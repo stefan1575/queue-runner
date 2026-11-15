@@ -617,9 +617,11 @@ what waits on him ("Needs you" before; the name is his), **Queue** is the work. 
 and Settings follow. **The Inbox is agreed** (Stefan, 2026-11-15, after takes 5 to 7, kept in
 `dashboard/earlier/`). **The Overview on the page is a first take that Stefan didn't take to**
 (ticket 20: three cards, below; "way far off on what I want, or I don't actually know what I
-want"). **What's next, in order:** a grill on what the Overview is for (ticket 25), the Queue
-page (ticket 21; it still shows the work list and pyramid as they were, marked "Not rebuilt
-yet"), then the Overview again as several variants switched with `?variant=`. Its frame is the one Stefan asked
+want"). **What's next, in order** (Stefan: "Queue, Inbox, then Overview, because Overview
+represents the data where it's from"): the Queue page (ticket 21; it still shows the work list
+and pyramid as they were, marked "Not rebuilt yet"), as several variants switched with
+`?variant=`; then, if it's still needed, a grill on what the Overview is for (ticket 25); then
+the Overview again (ticket 20), also as variants. Its frame is the one Stefan asked
 for in the prototype rounds: a sidebar for getting around (the repository switcher and the
 pages), one centred column, and the machine's readings floating on the right, in his order:
 usage, the build order, then the runner's status. **It is its own process and depends on nothing:** no build step, no

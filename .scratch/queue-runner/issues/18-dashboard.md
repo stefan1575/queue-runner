@@ -135,3 +135,7 @@ is a feature of the app with its prerequisites in view.
 
 The runner's side grows by this: it has to write each ask's `kind`, `situation`, `about`,
 `because` and `story`, and each lane's `queue`.
+
+2026-11-15, later, **corrected: the Queue page (ticket 21) is next, as several variants**; the
+grill (ticket 25) waits until the Overview's turn. Stefan's order is Queue, Inbox (agreed), then
+Overview, since the Overview shows what the other two hold.

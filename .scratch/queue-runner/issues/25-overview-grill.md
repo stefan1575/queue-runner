@@ -2,13 +2,18 @@
 
 Type: grilling
 
-**Blocked by:** None
+**Blocked by:** 21
 
 **Status:** ready-for-human
 
 Opened: 2026-11-15, Stefan, on seeing the first Overview (ticket 20, take 9): "at first glance
 it's way far off on what I want, or I don't actually know what I want. Think how I would use
-it." He asked for a grill of its own, before any more of the page is built.
+it." He asked whether it deserves a grill of its own.
+
+**Parked until the Queue page is judged** (Stefan, 2026-11-15). A thread started this grill
+before the Queue page and he stopped it: the questions were about a page whose sources he
+hadn't seen yet. His order is Queue, Inbox (agreed), then Overview, and seeing the Queue will
+answer some of what's below. Run it when the Overview's turn comes, if it's still needed.
 
 **The question:** when Stefan opens the dashboard, what is he there to find out and what does he
 do next, and so what is the first page for (or is there one at all)?
@@ -44,13 +49,13 @@ it has nothing for "what happened since I last looked".
 - Is the feature the unit he thinks in, when the next build may belong to no feature?
 
 One possible outcome is that there is no Overview: the pages are Inbox and Queue, and the lanes
-find a place in the frame. So this comes before the Queue page too (ticket 21).
+find a place in the frame. The Queue page's variants (ticket 21) show that option to judge by eye.
 
 ## What follows
 
 Record the answers under `## Answer` here and as decisions in ticket 18. Rewrite ticket 20's
-question from them. Then the Queue page (ticket 21), then the Overview (ticket 20) as several
-structurally different variants on the one page, switched with `?variant=` (the `prototype`
-skill's usual shape), which Stefan asked for.
+question from them. Then the Overview (ticket 20) as several structurally different variants on
+the one page, switched with `?variant=` (the `prototype` skill's usual shape), which Stefan
+asked for.
 
 ## Comments

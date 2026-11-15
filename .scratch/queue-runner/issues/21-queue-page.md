@@ -2,16 +2,19 @@
 
 Type: prototype
 
-**Blocked by:** 25
+**Blocked by:** None
 
 **Status:** ready-for-human
 
-Pinned: 2026-11-15, Stefan, until the grill on what the Overview is for (ticket 25), which may
-change what this page has to hold. It needs him at the screen: he judges it by eye.
+**Next up** (Stefan, 2026-11-15). It needs him at the screen: he judges it by eye.
 
-**It goes before the Overview** (Stefan, 2026-11-15; ticket 20 is blocked by this one now): the
-Overview summarises this page, so what build order means for features, which ticket is a
-feature's "next" and how a feature's bar reads are decided here.
+**It goes before the Overview** (Stefan, 2026-11-15; ticket 20 is blocked by this one now):
+"Queue, Inbox, then Overview, because Overview represents the data where it's from, like it's
+dripping down." The Overview summarises this page, so what build order means for features,
+which ticket is a feature's "next" and how a feature's bar reads are decided here. Build it as
+several structurally different variants on the one page, switched with `?variant=`. He isn't
+sure the Overview should be a page of its own at all, so one variant should show the Queue as
+where he lands, with the summary on top.
 
 **The question:** how should the work be shown so that "what's next" and "when is this feature
 usable" are answered at a glance, one ticket after another until a feature is done?

@@ -6,8 +6,9 @@ Type: prototype
 
 **Status:** ready-for-human
 
-Pinned: 2026-11-15, Stefan, until the grill on what the Overview is for (ticket 25) and then the
-Queue page (ticket 21) are done. It needs him at the screen: he judges it by eye.
+Pinned: 2026-11-15, Stefan, until the Queue page (ticket 21) is judged and then, if it's still
+needed, the grill on what the Overview is for (ticket 25). It needs him at the screen: he judges
+it by eye.
 
 **The question below is due to be rewritten from the grill's answers** (ticket 25). When this
 ticket's turn comes, build several structurally different variants on the one page, switched
@@ -95,3 +96,8 @@ I want, or I don't actually know what I want. Think how I would use it." Settled
 
 Take 9 stays in `dashboard/index.html` as it is, proposed and not agreed. `featureBar(feature)`
 is there for the Queue page to use.
+
+2026-11-15, later: **the Queue page goes first, and the grill waits** (Stefan). The grill was
+started ahead of the Queue page and he stopped it. His order: "Queue, Inbox, then Overview,
+because Overview represents the data where it's from, like it's dripping down." He isn't sure
+the Overview should be a page of its own at all; the Queue page's variants show that option.
