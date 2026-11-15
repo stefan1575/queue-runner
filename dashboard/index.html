@@ -19,11 +19,11 @@
   - The Inbox reads like a mail client, and takes all the width there is: the list down the
     left, a row per ask (why it's yours, with its own icon, what it is, the situation in a
     sentence), unread ones marked, and the picked one open on the right as a briefing that
-    still makes sense a week later. An ask can be snoozed out of the list for a while; one
-    you've answered stays greyed at the foot until the runner acts on it.
-  - PROTOTYPE, with sample data only: three layouts of the briefing, ?variant=A|B|C, switched
-    from the pill floating over the sidebar's foot (or the left and right arrow keys). It takes
-    no room from the page. The one Stefan picks stays; the other two and the pill go.
+    still makes sense a week later: the story down the left, the ask standing beside it. A row
+    reads like a thread in T3's sidebar: the repository and its mark, then the tag, then the
+    title. An ask can be snoozed out of the list for a while. One you've decided moves to the
+    Decided group at the foot of the list, which folds to one line, until the runner is
+    through with it: "Runner's turn" until a lane takes it up, then "Working".
   - A point in time is written whole, as he asked: November 15, 2026 Sunday 1:14pm.
   - Nothing moves by itself.
   - Colour is state and nothing else: blue is yours, amber is working, green is done or healthy,
@@ -213,23 +213,31 @@ body.page-inbox .stage { padding-bottom: 24px; }
 .mrow.quiet .m3 { color: var(--dim); }
 .mrow.quiet[aria-current="true"] { box-shadow: inset 0 0 0 1px var(--line); }
 .mrow.quiet[aria-current="true"]::before { background: var(--dim); }
-.mrow.done .m2 { margin-top: 0; }
-.mrow.done .m2 .i { width: 16px; height: 16px; color: var(--ok); stroke-width: 2.2; vertical-align: -3px; margin-right: 7px; display: inline; }
-.mrow.done .m3 { -webkit-line-clamp: 3; margin-top: 3px; }
+/* each row's top line, as in T3's sidebar: whose it is (the repository and its mark), the tag, the age */
+.rlogo { width: 20px; height: 20px; border-radius: 6px; flex: none; display: grid; place-items: center; background: var(--raised); box-shadow: inset 0 0 0 1px var(--line); font: 700 11.5px/1 var(--sans); color: var(--ink-2); }
+.rname { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; color: var(--mute); }
+.mrow .m1 .kind-tag { margin-left: 2px; }
+.kind-tag.run { background: var(--run-wash); color: var(--run); }
+.pulse { width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex: none; animation: pulse 1.4s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: .25; } }
+@media (prefers-reduced-motion: reduce) { .pulse { animation: none; } }
+/* what you've decided, at the foot of the list until the runner is through with it; folds to one line */
+.decided { flex: none; display: flex; flex-direction: column; max-height: 45%; min-height: 0; border-top: 1px solid var(--line-soft); }
+.decided-head { flex: none; display: flex; align-items: center; gap: 8px; width: 100%; padding: 12px 20px; background: none; border: 0; cursor: pointer; text-align: left; font-size: 14px; color: var(--mute); }
+.decided-head:hover { background: var(--hover); color: var(--ink); }
+.decided-head .i { width: 16px; height: 16px; transition: transform .15s; }
+.decided-head[aria-expanded="false"] .i { transform: rotate(-90deg); }
+.decided-head b { font-weight: 600; color: var(--ink-2); }
+.decided-head .n { margin-left: auto; display: inline-flex; align-items: center; gap: 7px; }
+.decided-head .pulse { color: var(--run); }
+.decided ol { overflow-y: auto; scrollbar-width: thin; padding: 0 8px 8px; }
+.decided .mrow .m2 b { color: var(--ink-2); }
 
-/* the briefing: what every layout shares */
+/* the briefing */
 .letter { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow-y: auto; scrollbar-width: thin; container-type: inline-size; }
-.letter.va > *, .letter.vb > * { max-width: 1080px; }
-.letter-head { flex: none; padding: 20px 28px 0; }
 .letter-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 10px; font-size: 14.5px; color: var(--mute); min-height: 30px; }
 .letter-tools { margin-left: auto; display: flex; gap: 8px; }
 .letter-tools .pop { width: 330px; }
-.letter-head h2 { font: 600 25px/1.2 var(--display); letter-spacing: -0.01em; margin-top: 12px; text-wrap: balance; }
-.situation { font: 400 20px/1.35 var(--serif); color: var(--ink-2); margin-top: 6px; max-width: 34em; }
-.letter-body { flex: none; padding: 20px 28px 22px; }
-.brief { display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 14px 14px; }
-.brief dt { color: var(--mute); font-size: 14.5px; padding-top: 1px; }
-.brief dd { color: var(--ink-2); max-width: 40em; }
 .timeline { border-left: 2px solid var(--line); margin: 5px 0 0 5px; }
 .timeline li { position: relative; padding: 0 0 16px 22px; }
 .timeline li:last-child { padding-bottom: 0; }
@@ -238,41 +246,18 @@ body.page-inbox .stage { padding-bottom: 24px; }
 .timeline time { display: block; font-size: 14px; color: var(--dim); }
 .timeline p { color: var(--ink-2); font-size: 16px; line-height: 1.45; max-width: 38em; margin-top: 1px; }
 .timeline li:last-child p { color: var(--ink); font-weight: 600; }
-/* what it needs from you: the one blue panel on the page */
-.move { flex: none; margin: 0 16px 16px; padding: 16px 20px 18px; border: 1px solid var(--you-line); border-radius: 12px; background: var(--you-wash); display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: 14px 28px; align-items: start; }
-@container (max-width: 640px) { .move { grid-template-columns: minmax(0, 1fr); } }
-.move-label { grid-column: 1 / -1; font-size: 14px; font-weight: 700; color: var(--you); margin-bottom: -6px; }
+.move-label { font-size: 14px; font-weight: 700; color: var(--you); }
+.btn .mark { width: 16px; height: 16px; }
 .question { font: 400 20px/1.3 var(--serif); text-wrap: balance; color: var(--ink); }
-.options { margin-top: 12px; display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 7px 12px; align-items: baseline; }
-.options dt { font-weight: 600; font-size: 15px; padding: 0 9px; border: 1px solid var(--you-line); border-radius: 7px; background: var(--surface); justify-self: start; }
-.options dd { color: var(--ink-2); font-size: 15px; }
 .rec { color: var(--you); font-weight: 600; font-size: 14px; font-style: normal; margin-left: 8px; white-space: nowrap; }
-.move-do { display: grid; gap: 10px; align-self: end; }
 .holds { color: var(--ink-2); font-size: 14.5px; }
 .holds b { color: var(--ink); font-weight: 600; }
-.btn .mark { width: 16px; height: 16px; }
-.move-do .btn { justify-content: center; height: 40px; }
-.move-do .link { justify-self: center; font-size: 14.5px; color: var(--mute); }
-.move.answered { border-color: var(--line); background: var(--sunk); }
-.move.answered .move-label { color: var(--mute); }
-.move.answered .holds { margin-top: 8px; }
 .letter.none { justify-content: center; align-items: center; text-align: center; padding: 28px; }
 .mail.empty { grid-template-columns: minmax(0, 1fr); }
 .calm .i { width: 34px; height: 34px; color: var(--ok); stroke-width: 1.5; }
 .calm-h { font: 600 22px/1.2 var(--display); margin: 10px 0 6px; }
 
-/* PROTOTYPE layout B: the question first, the background after */
-.letter.vb .letter-head { padding-bottom: 14px; }
-.letter.vb .letter-head h2 { font-size: 19px; margin-top: 10px; }
-.letter.vb .letter-head h2 span { font-weight: 400; color: var(--dim); margin-left: 10px; font-size: 15px; }
-.letter.vb .move { margin-bottom: 0; padding: 20px 24px 22px; }
-.letter.vb .question { font-size: 27px; line-height: 1.22; }
-.letter.vb .options { margin-top: 16px; }
-.why { padding: 24px 28px 28px; }
-.why-label { font-size: 14px; font-weight: 700; color: var(--mute); }
-.why .situation { margin: 6px 0 18px; }
-
-/* PROTOTYPE layout C: the story down the left, the ask standing beside it */
+/* the briefing: the story down the left, the ask standing beside it */
 .letter.vc { overflow: hidden; }
 .vc-grid { display: grid; grid-template-columns: minmax(0, 1fr) 460px; height: 100%; min-height: 0; }
 .vc-story { overflow-y: auto; scrollbar-width: thin; padding: 20px 36px 32px 28px; min-width: 0; }
@@ -300,15 +285,6 @@ body.page-inbox .stage { padding-bottom: 24px; }
   .vc-ask { border-left: 0; border-top: 1px solid var(--you-line); }
 }
 @container (max-width: 820px) { .letter.vc .vc-grid { overflow: visible; } }
-
-/* PROTOTYPE: the pill that switches layouts. Not part of the design being judged: it floats
-   over the sidebar's empty foot and takes no room from the page. */
-.proto { position: fixed; left: 12px; bottom: 76px; z-index: 70; width: 248px; display: flex; align-items: center; gap: 4px; padding: 5px; border-radius: 999px; background: var(--ink); color: var(--page); box-shadow: var(--float); font-size: 14.5px; white-space: nowrap; }
-.proto-name { flex: 1; min-width: 0; text-align: center; overflow: hidden; text-overflow: ellipsis; }
-.proto-name b { font-weight: 700; margin-right: 7px; }
-.proto button { flex: none; width: 30px; height: 30px; border-radius: 50%; border: 0; background: color-mix(in srgb, var(--page) 14%, transparent); color: inherit; cursor: pointer; display: grid; place-items: center; }
-.proto button:hover { background: color-mix(in srgb, var(--page) 26%, transparent); }
-@media (max-width: 900px) { .proto { left: 50%; bottom: 14px; transform: translateX(-50%); } }
 
 /* ---------------------------------------------------------------- lanes */
 .lanes { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
@@ -523,7 +499,6 @@ dialog.sheet::backdrop { background: rgba(4, 6, 10, .55); }
   .vc-grid { height: auto; }
   .vc-story, .vc-ask { overflow: visible; }
   .letter.none { min-height: 240px; }
-  .move { grid-template-columns: minmax(0, 1fr); }
   .lanes, .cols { grid-template-columns: 1fr; }
   .feature { grid-template-columns: minmax(0, 1fr) 132px; }
   .feature .count, .feature .hint { display: none; }
@@ -541,9 +516,6 @@ dialog.sheet::backdrop { background: rgba(4, 6, 10, .55); }
   .top-col .btn:first-of-type + h1 { margin-right: auto; }
   .rows > li { grid-template-columns: 8px minmax(0, 1fr); }
   .rows > li > :nth-child(n+3) { grid-column: 2; }
-  .letter-head, .letter-body { padding-left: 20px; padding-right: 20px; }
-  .brief { grid-template-columns: minmax(0, 1fr); gap: 2px; }
-  .brief dd { margin-bottom: 12px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .side { transition: none; }
@@ -594,6 +566,7 @@ const ICON = {
   broken: svg('<path d="M12 4 2.8 19.5h18.4L12 4Z"/><path d="M12 10v4.5M12 17.2v.3"/>'),
   snooze: svg('<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.2 2"/>'),
   thread: svg('<path d="M5 5h14a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-7l-4.5 3.5V16H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1Z"/>'),
+  chevron: svg('<path d="m6 9 6 6 6-6"/>'),
   left: svg('<path d="m14 6-6 6 6 6"/>'),
   right: svg('<path d="m10 6 6 6-6 6"/>'),
   flask: svg('<path d="M10 3v6l-5 9a2 2 0 0 0 1.8 3h10.4a2 2 0 0 0 1.8-3l-5-9V3M8.5 3h7M7.5 15h9"/>'),
@@ -612,7 +585,7 @@ let fault = null;    // why the snapshot couldn't be read: "server", "missing", 
 const PAGES = [["overview", "Overview"], ["inbox", "Inbox"], ["queue", "Queue"], ["activity", "Activity"], ["usage", "Usage"], ["settings", "Settings"]];
 const UNBUILT = ["overview", "queue"];   // as they were before the split, until the Inbox is agreed
 const sampleName = new URLSearchParams(location.search).get("sample");
-const ui = { page: "overview", repo: "", view: "list", pr: null, ask: null, hold: null, variant: "A", sel: null, pop: null, nav: false, rail: false };
+const ui = { page: "overview", repo: "", view: "list", pr: null, ask: null, hold: null, sel: null, pop: null, nav: false, rail: false };
 
 function recall(k) { try { return localStorage.getItem("qr." + k); } catch { return null; } }
 function remember(k, v) { try { localStorage.setItem("qr." + k, v); } catch { /* a private window */ } }
@@ -623,19 +596,17 @@ function readAddress() {
   const q = new URLSearchParams(location.search);
   ui.page = PAGES.some((p) => p[0] === q.get("page")) ? q.get("page") : "overview";
   ui.ask = q.get("ask");
-  ui.variant = ["B", "C"].includes(q.get("variant")) ? q.get("variant") : "A";
   ui.repo = q.has("repo") ? q.get("repo") : recall("repo") || "";
   ui.view = (q.get("view") || recall("view")) === "pyramid" ? "pyramid" : "list";
   const m = /^(.+):(\d+)$/.exec(q.get("pr") || "");
   ui.pr = m ? { repo: m[1], n: Number(m[2]) } : null;
 }
 function href(over = {}) {
-  const s = { page: ui.page, repo: ui.repo, view: ui.view, pr: ui.pr, ask: ui.ask, variant: ui.variant, sample: sampleName, ...over };
+  const s = { page: ui.page, repo: ui.repo, view: ui.view, pr: ui.pr, ask: ui.ask, sample: sampleName, ...over };
   const q = new URLSearchParams();
   if (s.sample) q.set("sample", s.sample);
   if (s.page !== "overview") q.set("page", s.page);
   if (s.page === "inbox" && s.ask) q.set("ask", s.ask);
-  if (s.page === "inbox" && s.variant !== "A") q.set("variant", s.variant);
   if (s.repo) q.set("repo", s.repo);
   if (s.view === "pyramid") q.set("view", "pyramid");
   if (s.pr) q.set("pr", `${s.pr.repo}:${s.pr.n}`);
@@ -705,6 +676,8 @@ const ACTOR = { claude: ["Claude", "claude"], sol: ["ChatGPT", "chatgpt"], chatg
 const key = (i) => `${i.repo}#${i.n}`;
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 const scoped = (xs) => (ui.repo ? xs.filter((x) => x.repo === ui.repo) : xs);
+// A repository's mark on an Inbox row: its first letter on a plain tile. Colour is kept for state.
+const repoMark = (name) => `<span class="rlogo" aria-hidden="true">${esc((name || "?")[0].toUpperCase())}</span><span class="rname">${esc(name)}</span>`;
 const repoTag = (name) => (ui.repo ? "" : `<span class="tag">${esc(name)}</span>`);
 const prLink = (repo, n, text) => `<button class="link" data-act="pr" data-repo="${esc(repo)}" data-n="${n}">${text}</button>`;
 
@@ -779,9 +752,8 @@ function notices() {
 // The runner lists them in the order they're worth taking. One you haven't opened is marked
 // unread. The picked one is open on the right as a briefing that still makes sense a week later.
 // Under the waiting ones: the snoozed (out of the list until a time you chose; they still hold
-// their work up) and the answered (until the runner has acted, so "handled" and "still held" can
-// be told apart).
-const VARIANTS = [["A", "Background first"], ["B", "Question first"], ["C", "Story beside the ask"]];
+// their work up). At the foot, folding: the ones you've decided, until the runner is through with
+// them, so "handled" and "still held" can be told apart.
 const KIND_ICON = { stuck: ICON.stuck, decision: ICON.decision, merge: ICON.merge, broken: ICON.broken };
 
 // Read and snoozed are kept in this browser while the page is a prototype. The real ones go
@@ -810,8 +782,10 @@ function pickAsk() {
   if (!every.some((a) => a.id === ui.ask)) ui.ask = open.length ? open[0].id : null;
   return every.find((a) => a.id === ui.ask) || null;
 }
+// The lane whose job is on this ask's work, if one is.
+const laneOn = (a) => (snap.lanes || []).find((l) => l.state === "working" && l.job && l.job.repo === a.repo && (l.job.ref === a.ref || (a.pr && l.job.pr === a.pr)));
 function kindTag(a) {
-  if (a.answered) return `<span class="kind-tag quiet">${ICON.check}Answered</span>`;
+  if (a.answered) return laneOn(a) ? `<span class="kind-tag run"><i class="pulse"></i>Working</span>` : `<span class="kind-tag quiet">${ICON.check}Runner's turn</span>`;
   if (snoozedUntil(a)) return `<span class="kind-tag quiet">${ICON.snooze}Snoozed</span>`;
   return `<span class="kind-tag${a.kind === "broken" ? " broken" : ""}">${KIND_ICON[a.kind] || ""}${esc(askWords(a)[0])}</span>`;
 }
@@ -822,17 +796,17 @@ function inbox() {
   if (cur && !cur.answered && !snoozedUntil(cur) && !isRead(cur) && ui.hold !== cur.id) setRead(cur, true);
   const { all, open, snoozed, answered } = inboxLists();
   const blind = (snap.sources || []).find((s) => s.id === "github" && !s.ok);
-  // An answered one says it in a sentence: what you said, when, and that it's the runner's turn.
-  const done = (a) => `<li><button class="mrow quiet done" data-act="ask" data-id="${esc(a.id)}" aria-current="${a === cur}">
-      <span class="m2">${ICON.check}<b>${esc(a.subject)}</b><span>${esc(a.ref)}</span></span>
-      <span class="m3" title="You answered ${esc(stamp(a.answered.at))}">You said "${esc(a.answered.said)}" ${esc(ago(a.answered.at))} ago. ${esc(a.answered.next)}</span></button></li>`;
+  // A decided one says it in a sentence: what you said, and what the runner is doing with it.
+  const doing = (a) => {
+    const l = laneOn(a);
+    return l ? `${l.name} is ${kind(l.job.kind)[0].toLowerCase()} ${l.job.ref}, ${ago(l.job.started_at)} in.` : a.answered.next;
+  };
   const row = (a) => {
-    if (a.answered) return done(a);
     const zz = snoozedUntil(a), quiet = !!(a.answered || zz), unread = !quiet && !isRead(a);
-    const line = a.answered ? a.answered.next : zz ? `Back ${stamp(zz)}` : a.situation || a.question;
+    const line = a.answered ? `You said "${a.answered.said}". ${doing(a)}` : zz ? `Back ${stamp(zz)}` : a.situation || a.question;
     const when = a.answered ? a.answered.at : a.since;
-    return `<li><button class="mrow${quiet ? " quiet" : ""}${unread ? " unread" : ""}" data-act="ask" data-id="${esc(a.id)}" aria-current="${a === cur}">
-      <span class="m1">${kindTag(a)}${repoTag(a.repo)}
+    return `<li><button class="mrow${zz ? " quiet" : ""}${unread ? " unread" : ""}" data-act="ask" data-id="${esc(a.id)}" aria-current="${a === cur}">
+      <span class="m1">${repoMark(a.repo)}${kindTag(a)}
         <span class="ma" title="${a.answered ? "You answered" : "Waiting since"} ${esc(stamp(when))}">${esc(ago(when))}</span></span>
       <span class="m2">${unread ? `<i class="dot" title="Unread"></i>` : ""}<b>${esc(a.subject)}</b><span>${esc(a.ref)}</span></span>
       <span class="m3">${esc(line)}</span></button></li>`;
@@ -840,13 +814,18 @@ function inbox() {
   const oldest = open.reduce((m, a) => (!m || ms(a.since) < ms(m.since) ? a : m), null);
   const unread = open.filter((a) => !isRead(a)).length;
   const count = open.length ? `<b>${open.length} waiting on you</b><span>${unread ? `${unread} unread, ` : ""}oldest ${esc(ago(oldest.since))}</span>` : `<b>Nothing waiting</b>`;
+  const folded = recall("decided") === "folded";
+  const working = answered.filter(laneOn).length;
+  const decided = answered.length ? `<div class="decided">
+      <button class="decided-head" data-act="decided" aria-expanded="${!folded}">${ICON.chevron}<b>Decided</b>
+        <span class="n">${working ? `<i class="pulse" title="${working} being worked on"></i>` : ""}${answered.length}</span></button>
+      ${folded ? "" : `<ol aria-label="Decided">${answered.map(row).join("")}</ol>`}</div>` : "";
   const list = `<div class="mail-list"><p class="mail-count">${count}</p>
     <ol class="mail-rows" data-scroll="asks" aria-label="Waiting on you">${open.map(row).join("")}
-      ${snoozed.length ? `<li class="mail-sep">Snoozed. Still holding ${snoozed.length === 1 ? "its" : "their"} work up.</li>${snoozed.map(row).join("")}` : ""}
-      ${answered.length ? `<li class="mail-sep">You answered ${answered.length === 1 ? "this" : "these"}. It's the runner's turn.</li>${answered.map(row).join("")}` : ""}</ol></div>`;
+      ${snoozed.length ? `<li class="mail-sep">Snoozed. Still holding ${snoozed.length === 1 ? "its" : "their"} work up.</li>${snoozed.map(row).join("")}` : ""}</ol>${decided}</div>`;
 
   let right;
-  if (cur) right = { A: letterA, B: letterB, C: letterC }[ui.variant](cur);
+  if (cur) right = letter(cur);
   else {
     const calm = blind ? ["Nothing seen that waits on you", "GitHub can't be read, so something may be missing."]
       : ui.repo && all.length ? [`Nothing in ${esc(ui.repo)} waits on you`, `${plural(all.length, "thing waits", "things wait")} in another repository. <button class="link" data-act="repo" data-repo="">Show all repositories</button>`]
@@ -855,10 +834,10 @@ function inbox() {
     right = `<div class="letter none"><div class="calm">${ICON.done}<p class="calm-h">${calm[0]}</p><p class="mute">${calm[1]}</p></div></div>`;
   }
   const none = !open.length && !snoozed.length && !answered.length;   // nothing to list: the calm takes the whole card
-  return `<section class="card mail${none ? " empty" : ""}" aria-label="Inbox">${none ? "" : list}${right}</section>${protoBar()}`;
+  return `<section class="card mail${none ? " empty" : ""}" aria-label="Inbox">${none ? "" : list}${right}</section>`;
 }
 
-// ---- what every layout of the briefing shares
+// ---- the briefing's parts
 function tools(a) {
   if (a.answered) return "";
   const id = esc(a.id);
@@ -885,46 +864,9 @@ const historyLink = (a) => (a.pr ? prLink(a.repo, a.pr, "PR history") : "");
 // `timeline` is each step with its time; a snapshot with only the older `story` still reads.
 const steps = (a) => ((a.timeline || []).length ? a.timeline : (a.story || []).map((text) => ({ text })));
 const storyList = (a) => `<ol class="timeline">${steps(a).map((e) => `<li>${e.at ? `<time datetime="${esc(e.at)}">${esc(stamp(e.at))}</time>` : ""}<p>${esc(e.text)}</p></li>`).join("")}</ol>`;
-const brief = (a) => `<dl class="brief">
-    ${a.about ? `<dt>What it is</dt><dd>${esc(a.about)}</dd>` : ""}
-    ${a.because ? `<dt>${esc(askWords(a)[1])}</dt><dd>${esc(a.because)}</dd>` : ""}
-    ${steps(a).length ? `<dt>So far</dt><dd>${storyList(a)}</dd>` : ""}
-  </dl>`;
-function movePanel(a) {
-  const done = a.answered;
-  if (done) return `<footer class="move answered"><p class="move-label">You answered ${esc(stamp(done.at))}</p>
-      <div><p class="question">${esc(done.said)}</p><p class="holds">${esc(done.next)}</p></div>
-      <div class="move-do">${goBtn(a, "", "See where you answered")}${historyLink(a)}</div></footer>`;
-  const options = (a.options || []).length ? `<dl class="options">${a.options.map((o) =>
-    `<dt>${esc(o.say)}</dt><dd>${esc(o.means)}${o.recommended ? '<span class="rec">Recommended</span>' : ""}</dd>`).join("")}</dl>` : "";
-  return `<footer class="move"><p class="move-label">What it needs from you</p>
-      <div><p class="question">${esc(a.question)}</p>${options}</div>
-      <div class="move-do"><p class="holds">${holdsText(a)}</p>${goBtn(a, "go")}${historyLink(a)}</div></footer>`;
-}
-
-// ---- PROTOTYPE layout A, background first: what it is, what's wrong, the story, then the ask.
-function letterA(a) {
-  return `<article class="letter va" data-scroll="ask">
-    <header class="letter-head">${metaLine(a)}<h2>${esc(a.subject)}</h2><p class="situation">${esc(a.situation || "")}</p></header>
-    <div class="letter-body">${brief(a)}</div>
-    ${movePanel(a)}
-  </article>`;
-}
-
-// ---- PROTOTYPE layout B, question first: the ask leads, in full; the background is under it
-// for when the question alone isn't enough.
-function letterB(a) {
-  return `<article class="letter vb" data-scroll="ask">
-    <header class="letter-head">${metaLine(a)}<h2>${esc(a.subject)}<span>${esc(a.ref)}</span></h2></header>
-    ${movePanel(a)}
-    <section class="why"><p class="why-label">Why it's with you</p>
-      <p class="situation">${esc(a.situation || "")}</p>${brief(a)}</section>
-  </article>`;
-}
-
-// ---- PROTOTYPE layout C, the story beside the ask: the situation is the headline and the story
-// reads down the left as a timeline; the ask stands beside it the whole way, never scrolled off.
-function letterC(a) {
+// ---- the briefing: the situation is the headline and the story reads down the left as a
+// timeline; the ask stands beside it the whole way, never scrolled off.
+function letter(a) {
   const done = a.answered;
   const options = (a.options || []).length ? `<ol class="vc-opts">${a.options.map((o) =>
     `<li><b>${esc(o.say)}</b>${o.recommended ? '<em class="rec">Recommended</em>' : ""}<span>${esc(o.means)}</span></li>`).join("")}</ol>` : "";
@@ -940,20 +882,6 @@ function letterC(a) {
       ${a.because ? `<section class="vc-sec"><h3>${esc(askWords(a)[1])}</h3><p>${esc(a.because)}</p></section>` : ""}
       ${steps(a).length ? `<section class="vc-sec"><h3>So far</h3>${storyList(a)}</section>` : ""}
     </div>${ask}</div></article>`;
-}
-
-// ---- PROTOTYPE: the layout switcher. Sample data only, so it can never reach the real page.
-function protoBar() {
-  if (!snap.sample) return "";
-  const [k, name] = VARIANTS.find((v) => v[0] === ui.variant);
-  return `<div class="proto" role="group" aria-label="Prototype: the briefing's layout" title="Prototype: the briefing's layout">
-    <button data-act="variant" data-by="-1" aria-label="Previous layout" title="Left arrow key">${ICON.left}</button>
-    <span class="proto-name"><b>${k}</b>${esc(name)}</span>
-    <button data-act="variant" data-by="1" aria-label="Next layout" title="Right arrow key">${ICON.right}</button></div>`;
-}
-function turnVariant(by) {
-  const at = VARIANTS.findIndex((v) => v[0] === ui.variant);
-  ui.variant = VARIANTS[(at + by + VARIANTS.length) % VARIANTS.length][0];
 }
 
 // ------------------------------------------------------------------ lanes
@@ -1411,7 +1339,7 @@ document.addEventListener("click", (e) => {
     }
     case "snooze": setSnooze(d.id, d.until); ui.pop = null; if (ui.ask === d.id) ui.ask = null; break;
     case "wake": setSnooze(d.id, null); break;
-    case "variant": turnVariant(Number(d.by)); break;
+    case "decided": remember("decided", recall("decided") === "folded" ? "open" : "folded"); break;
     case "view": ui.view = d.view; remember("view", d.view); break;
     case "stop": ui.pop = null; send([{ lane: d.lane, stop: d.how || null }]); return;
     case "all": {
@@ -1440,8 +1368,6 @@ document.addEventListener("click", (e) => {
 document.addEventListener("keydown", (e) => {
   if (ui.page !== "inbox" || !snap || ui.pop || ui.pr || e.ctrlKey || e.metaKey || e.altKey) return;
   if (e.target.closest("input, textarea, select")) return;
-  const turn = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
-  if (turn && snap.sample) { e.preventDefault(); turnVariant(turn); address(); draw(); return; }   // PROTOTYPE
   const step = e.key === "ArrowDown" ? 1 : e.key === "ArrowUp" ? -1 : 0;
   if (!step) return;
   const every = inboxOrder();

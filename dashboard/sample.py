@@ -29,6 +29,7 @@ DEFAULT = "busy"
 # Takes of the page before this one, kept while its look is being agreed: `serve.py` serves the
 # ones in `dashboard/earlier/` in sample mode, and the sidebar's sample menu links them.
 EARLIER = [
+    {"href": "/earlier/take-7.html", "label": "Take 7", "note": "Briefing layouts A, B and C, the rows before T3's shape"},
     {"href": "/earlier/take-6.html", "label": "Take 6", "note": "The Inbox with icons, read, snooze and three briefing layouts, 1440px wide"},
     {"href": "/earlier/take-5.html", "label": "Take 5", "note": "The Inbox as its own page, before Stefan's notes on it"},
     {"href": "/earlier/take-4.html", "label": "Take 4", "note": "One page: Needs you as a box on top, the lanes, then the work"},
@@ -141,6 +142,19 @@ def build(name: str = DEFAULT, base: datetime | None = None, control: dict | Non
         # greyed under the open ones, so an answer that is still held can be told from one
         # that's handled. They aren't counted as waiting on him.
         "answered": [
+            {
+                "id": "ask-212", "kind": "decision", "repo": LD, "ref": "#212", "pr": None,
+                "subject": "Archive view for old callers", "since": ago(70),
+                "situation": "The build stopped at how old a caller must be to count as old.",
+                "about": "A view of callers who haven't called for a while, kept out of the main callers list.",
+                "because": "The issue says \"old callers\" without saying how old. A decision thread couldn't settle it.",
+                "story": ["Today: the build started", "It stopped at the archive's cut-off", "You answered after 12 months"],
+                "question": "After how long without a call does a caller move to the archive?",
+                "holds_up": [],
+                "go": {"label": "Answer in T3", "where": "t3", "url": T3 + "130f3d30-2a6c-4260-9c8e-941810cb97e1"},
+                "answered": {"at": ago(38), "said": "after 12 months",
+                             "next": "The runner carries on with the build, using your answer."},
+            },
             {
                 "id": "ask-209", "kind": "stuck", "repo": LD, "ref": "PR #209", "pr": None,
                 "subject": "Voicemail transcripts on the call page", "since": ago(26 * 60),
@@ -275,6 +289,12 @@ _TIMELINES = {
         (2, "The build stopped at the recipient list: the issue names the Client's owner in one place and everyone "
             "on the account in another."),
         (1, "A decision thread couldn't settle it from the issue, so it came to you."),
+    ],
+    "ask-212": [
+        (80, "Claude started building #212."),
+        (72, "The build stopped at the archive's cut-off: the issue says \"old callers\" without saying how old."),
+        (70, "A decision thread couldn't settle it from the issue, so it came to you."),
+        (38, "You answered: after 12 months."),
     ],
     "ask-209": [
         (3 * DAY, "Claude built it and opened PR #209."),

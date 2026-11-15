@@ -68,7 +68,8 @@ grill settled the split instead:
 - **The Inbox keeps all four kinds:** decision, stuck, merge, and broken only when it stops a
   lane; a health warning that stops nothing stays a dot on the right.
 - **Dev before prod is its own effort** (ticket 19), not the dashboard's.
-- **An answered ask stays greyed in the list until the runner acts on it** (mechanics).
+- **An ask Stefan has decided moves to a Decided group at the foot of the list**, which folds to
+  one line, tagged "Runner's turn" until a lane takes it up and "Working" while one does.
 - **Prototyped one page at a time, judged by eye:** the Inbox first (built, on sample data; take
   4 is `dashboard/earlier/take-4.html`), then the Overview (three cards: the Inbox in counts,
   what each lane is doing with its Stop button, a progress bar per feature with the next
@@ -78,6 +79,13 @@ grill settled the split instead:
   whether features or tickets can be reordered from the page, which would be a new control.
 
 ## Comments
+
+2026-11-15, Stefan's third round (take 7, kept as `dashboard/earlier/take-7.html`): **layout C
+is settled**, so A, B and the layout pill are gone. A row now reads like a thread in T3's
+sidebar: the repository's mark and name on top with the tag, then the title and the
+situation. Decided asks sit in their own folding group at the foot, "Working" with a pulse
+while a lane is on them. The repository's mark is its first letter on a plain tile for now:
+the snapshot carries no favicon. The research pass on rows was dropped: T3 is the reference.
 
 2026-11-15, Stefan's second round of notes on the Inbox (that page is `dashboard/earlier/take-6.html`),
 taken up: the layout pill floats over the sidebar's foot and takes no room; the Inbox takes all
