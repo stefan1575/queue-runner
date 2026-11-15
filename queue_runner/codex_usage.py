@@ -8,8 +8,8 @@ The answer's `rateLimitsByLimitId.codex` (else `rateLimits`) has the plan and it
 epoch seconds), and `rateLimitResetCredits.availableCount` the reset credits left (T3's
 `codexResetCreditsToContract`). Redeeming one is T3's: the runner only counts them.
 
-It answers in about a second. Starting the app server refreshes Codex's shared model list
-(`~/.codex/models_cache.json`) as any plain Codex start does (a Sol review's too).
+It answers in about a second. Starting the app server rewrites Codex's shared model list
+(`~/.codex/models_cache.json`, seen 2026-11-16); T3's own Codex check writes it again.
 """
 import datetime
 import glob

@@ -909,7 +909,8 @@ python3 -m dashboard    # http://queue.localhost:5289/ is the runner's; http://l
   replaced Codex's rollouts (which carry no credits) as the snapshot's ChatGPT read: the app
   server started for one call (Codex on PATH, else the Codex app's copy), `initialize`,
   `initialized`, the read, about a second, 20 at most; Codex reads its own login. Starting it
-  refreshes Codex's shared `~/.codex/models_cache.json`, as any plain Codex start does. A plan
+  rewrites Codex's shared `~/.codex/models_cache.json` (seen 2026-11-16; T3's own check writes it
+  again). A plan
   says "2 resets left" on its line, and nothing when it has none. **Redeeming one isn't on the
   page:** it spends the credit, so it stays Stefan's, in T3.
 - **A stopped repo on the page** (ticket 37): each row of the Build order card has Stop or Resume
