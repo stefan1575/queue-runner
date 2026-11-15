@@ -443,6 +443,21 @@ class PartialReadTest(AskCase):
         self.assertEqual([w.number for w in got.items], [152])
         self.assertEqual(reader.stale()['first'][0], None)
 
+    def test_a_deleted_issue_is_the_asks_own_state_not_a_failing_read(self):
+        from queue_runner.github import GhError
+        self.job('stop', 152, 'filed', sha=H2, stop='no-push', reason='nothing pushed',
+                 link='https://github.com/owner/first/issues/30')
+
+        def gone(repo, number):
+            raise GhError('gh api repos/owner/first/issues/113/dependencies/blocking failed '
+                          '(1): gh: Not Found (HTTP 404)')
+        self.gh.blocking = gone
+        reader = self.reader()
+        got = reader.read()
+        self.assertEqual([w.number for w in got.items], [152])
+        self.assertTrue(got.errors)   # said
+        self.assertEqual(reader.stale(), {})   # and GitHub isn't red for it every pass
+
     def test_an_answered_ask_that_fails_part_way_keeps_its_last_read_too(self):
         stop = self.job('stop', 152, 'answered', sha=H2, stop='no-push', reason='nothing pushed',
                         link='https://github.com/owner/first/issues/30', answer='replied')

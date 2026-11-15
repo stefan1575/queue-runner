@@ -73,6 +73,12 @@ class Inbox:
     unfilled: frozenset = frozenset()
 
 
+def gone(e: Exception) -> bool:
+    """Whether GitHub said the thing isn't there (HTTP 404, a deleted issue): the item's own
+    state, said, not a read that failed."""
+    return '(HTTP 404)' in str(e)
+
+
 def key(w: Waiting) -> tuple:
     """Which ask an item is, from one read to the next."""
     return (w.kind, w.repo, w.number, getattr(w.job, 'id', None))
@@ -257,7 +263,8 @@ class _Reader:
             return self._fill(w, answered)
         except Exception as e:
             self.errors.append(f"{w.repo}#{w.number}: couldn't read it ({type(e).__name__}: {e})")
-            self.unfilled.add(key(w))
+            if not gone(e):   # GitHub failing, not the item: the last good read's is kept
+                self.unfilled.add(key(w))
             return w
 
     def _fill(self, w: Waiting, answered: bool) -> Waiting:
@@ -386,8 +393,9 @@ class Reader:
                     mine = [last.get(key(w), w) if key(w) in got.unfilled else w for w in mine]
                     done = [last.get(key(w), w) if key(w) in got.unfilled else w for w in done]
                     self._good[repo.name] = (now, mine, done)
-                    if mine_errors:   # part-way: what failed is the last good read's, said
-                        self._stale[repo.name] = (self._whole.get(repo.name), mine_errors[0])
+                    partial = [e for e in mine_errors if not gone(e)]
+                    if partial:   # part-way: what failed is the last good read's, said
+                        self._stale[repo.name] = (self._whole.get(repo.name), partial[0])
                     else:
                         self._whole[repo.name] = now
                         self._stale.pop(repo.name, None)

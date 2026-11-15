@@ -941,7 +941,9 @@ python3 -m dashboard    # http://queue.localhost:5289/ is the runner's; http://l
   line (`asks.stale_github`). **Part-way** (one ask's PR, issue, dependencies or comments
   failing, `_Reader.fill`): that ask is the last good read's (`inbox.key`, `Inbox.unfilled`;
   listed bare only if there's none), the others this read's, and the source says so the same
-  way, with the time of the repo's last whole read. **Templates, no AI** (`asks.render`): `about` is the first prose
+  way, with the time of the repo's last whole read. GitHub saying a thing isn't there (HTTP
+  404, a deleted issue: `inbox.gone`) is the ask's own state: said, the ask listed as the job
+  log has it, and not stale. **Templates, no AI** (`asks.render`): `about` is the first prose
   (markdown stripped) under the closed issue's "What to build" or "Summary", else its first
   paragraph, else the PR's, clipped to 300 characters; `because` the stop's reason plus the
   Important findings still open ("Open now: F3, ..."), an approach note's first paragraph after
