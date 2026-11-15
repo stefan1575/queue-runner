@@ -98,6 +98,6 @@ Take 9 stays in `dashboard/index.html` as it is, proposed and not agreed. `featu
 is there for the Queue page to use.
 
 2026-11-15, later: **the Queue page goes first, and the grill waits** (Stefan). The grill was
-started ahead of the Queue page and he stopped it. His order: "Queue, Inbox, then Overview,
+started ahead of the Queue page and was parked unanswered. His order: "Queue, Inbox, then Overview,
 because Overview represents the data where it's from, like it's dripping down." He isn't sure
 the Overview should be a page of its own at all; the Queue page's variants show that option.

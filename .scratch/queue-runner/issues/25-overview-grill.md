@@ -11,7 +11,7 @@ it's way far off on what I want, or I don't actually know what I want. Think how
 it." He asked whether it deserves a grill of its own.
 
 **Parked until the Queue page is judged** (Stefan, 2026-11-15). A thread started this grill
-before the Queue page and he stopped it: the questions were about a page whose sources he
+before the Queue page and it was parked unanswered: the questions were about a page whose sources he
 hadn't seen yet. His order is Queue, Inbox (agreed), then Overview, and seeing the Queue will
 answer some of what's below. Run it when the Overview's turn comes, if it's still needed.
 
