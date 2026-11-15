@@ -31,6 +31,13 @@ class FakeGitHub:
     def open_issues(self, repo):
         return list(self.issues)
 
+    def work_issues(self, repo):
+        """The dashboard's read of open issues (`work_list`: github.WorkIssue); a call named in
+        `fail` (FakeGitHubForReviews) raises."""
+        if 'work_issues' in getattr(self, 'fail', ()):
+            raise RuntimeError('gh failed (HTTP 503)')
+        return list(getattr(self, 'work_list', []))
+
     def blocking(self, repo, number):
         """The open issues this one blocks by GitHub's dependencies: `blocks`, number -> [Issue]."""
         return list(getattr(self, 'blocks', {}).get(number, []))

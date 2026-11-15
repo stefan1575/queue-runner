@@ -121,6 +121,12 @@ class Facts:
     inbox: object | None = None
     releases: list = field(default_factory=list)
     inbox_stale: dict = field(default_factory=dict)
+    # The work (ticket 32): the last read of each repo (`work.Reader.last()`: name -> RepoRead,
+    # None before one), the repos it couldn't read since (`stale`), and the jobs a usage limit
+    # cut off, in the order they resume (`JobLog.limited_jobs`).
+    work: dict | None = None
+    work_stale: dict = field(default_factory=dict)
+    limited: list = field(default_factory=list)
 
 
 def _iso(t: datetime.datetime | None) -> str | None:
@@ -148,6 +154,9 @@ def build(facts: Facts) -> dict:
     snap.update(_work(facts))
     from .asks import stale_github
     stale_github(snap['sources'], facts.inbox_stale)   # the Inbox from an older read, said
+    if facts.work_stale:
+        from .work import stale_github as work_stale
+        work_stale(snap['sources'], facts.work_stale)   # ... and the work lists
     return snap
 
 
@@ -166,17 +175,30 @@ def _repo_stopped(facts: Facts, name: str) -> dict | None:
 
 def _work(facts: Facts) -> dict:
     """The work lists: the Inbox's asks (`asks.py`, ticket 31); the features, issues, PRs and
-    activity are ticket 32's, empty until then."""
+    activity (`work.py`, ticket 32)."""
     from .asks import render
+    from .work import lists
     asks, answered = render(facts.inbox, facts.jobs, facts.releases, facts.repos)
-    return {'asks': asks, 'answered': answered, 'features': [], 'issues': [], 'prs': [],
-            'activity': []}
+    return {'asks': asks, 'answered': answered,
+            **lists(_view(facts), asks, facts.releases, facts.inbox)}
+
+
+def _view(facts: Facts):
+    """What the work lists are written from (`work.View`), or None before the first read."""
+    from .work import View
+    if facts.work is None:
+        return None
+    off = frozenset(r.name for r in facts.repos if _repo_stopped(facts, r.name) is not None)
+    return View(reads=facts.work, jobs=facts.jobs, repos=facts.repos, off=off,
+                limited=facts.limited,
+                lane_jobs={'claude': _open_job(facts, CLAUDE_KINDS),
+                           'sol': _open_job(facts, SOL_KINDS)})
 
 
 def _queue(facts: Facts, lane: str) -> tuple[list[dict], str]:
-    """A lane's queue, in the order it takes them up, and what to say when it's empty (ticket 32
-    fills it)."""
-    return [], "The runner doesn't list its queue yet."
+    """A lane's queue, in the order it takes them up, and what to say when it's empty."""
+    from .work import queue
+    return queue(_view(facts), lane)
 
 
 def _model(model: str) -> str:

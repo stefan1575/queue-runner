@@ -65,42 +65,54 @@ class Merger:
     def why_not(self, repo, n: int, h: str, checks: bool = True) -> str | None:
         """The pre-merge re-check, read afresh: why the PR doesn't merge at H now, or None.
         Without `checks`, its checks aren't looked at (live.py: would it merge once they pass?)."""
+        return next((why for _, why in self.steps(repo, n, h, checks) if why), None)
+
+    def steps(self, repo, n: int, h: str, checks: bool = True):
+        """The re-check, step by step, in its order: (label, why it fails, or None), read as it
+        goes (a generator: `why_not` stops at the first that fails). A PR no longer open at H
+        ends it there; the dashboard shows the rest (ticket 32)."""
         h7 = h[:7]
         pr = self.github.pull(repo, n)
         if pr.state != 'open':
-            return f'it is {pr.state}'
+            yield 'Open', f'it is {pr.state}'
+            return
         if pr.head_sha != h:
-            return f'the head moved from {h7} to {pr.head_sha[:7]}: Sol reviews that first'
-        if pr.draft:
-            return 'it is a draft'
-        if job := self.jobs.writer(repo.name, pr.branch):
-            return f'a {job.kind} job is writing to {pr.branch}'
+            yield f'Still at {h7}', (f'the head moved from {h7} to {pr.head_sha[:7]}: Sol '
+                                     'reviews that first')
+            return
+        yield 'Not a draft', 'it is a draft' if pr.draft else None
+        job = self.jobs.writer(repo.name, pr.branch)
+        yield 'No job writing to it', f'a {job.kind} job is writing to {pr.branch}' if job else None
         # Stefan may merge while a live run is open: his merge goes in the next batch.
-        if not repo.stefan_merges and (
-                live := next((j for j in self.jobs.live(repo.name) if j.open), None)):
-            return (f'the live run {live.id} is bringing {repo.base} live: merges wait for it, '
-                    'so its batch stays the one it was given')
-        if why := held(self.jobs, repo, n):
-            return why
-        if (failed := sum(j.outcome == 'failed' for j in self.jobs.on('merge', repo.name, n, h))) \
-                >= MAX_FAILED:
-            return f'{failed} merges failed on {h7}: left until a new head or --release'
+        if not repo.stefan_merges:
+            live = next((j for j in self.jobs.live(repo.name) if j.open), None)
+            yield 'No live run open', (
+                f'the live run {live.id} is bringing {repo.base} live: merges wait for it, so '
+                'its batch stays the one it was given') if live else None
+        yield 'Not held for you', held(self.jobs, repo, n)
+        failed = sum(j.outcome == 'failed' for j in self.jobs.on('merge', repo.name, n, h))
+        yield 'No failed merges', (f'{failed} merges failed on {h7}: left until a new head or '
+                                   '--release') if failed >= MAX_FAILED else None
         comments = self.github.issue_comments(repo, n)
-        if not (last := newest_on(comments, h, 'clean')):
-            return f'its newest review comment is not a clean review of {h7}'
-        checks = self.github.checks(repo, h) if checks else None
-        if checks and checks.state != 'passed':
-            more = ', '.join(checks.failed or checks.pending)
-            return f'checks on {h7} are {checks.state}' + (f' ({more})' if more else '')
-        if pr.mergeable is False:
-            return f'it conflicts with {pr.base}'
-        if said := said_since(comments + self.github.review_replies(repo, n), last['at']):
+        last = newest_on(comments, h, 'clean')
+        yield f'Clean on {h7}', None if last else \
+            f'its newest review comment is not a clean review of {h7}'
+        if checks:
+            got = self.github.checks(repo, h)
+            more = ', '.join(got.failed or got.pending)
+            yield f'Checks passed on {h7}', None if got.state == 'passed' else \
+                f'checks on {h7} are {got.state}' + (f' ({more})' if more else '')
+        yield 'No conflict', f'it conflicts with {pr.base}' if pr.mergeable is False else None
+        if last:
+            said = said_since(comments + self.github.review_replies(repo, n), last['at'])
             who = ', '.join(dict.fromkeys(c.author for c in said))
-            return (f'{len(said)} repl{"y" if len(said) == 1 else "ies"} since the clean review '
-                    f'({who}): Stefan reads {"it" if len(said) == 1 else "them"} first')
-        if threads := self.github.open_threads(repo, n):
-            return f'{threads} unresolved review thread{"s" * (threads != 1)}'
-        return None
+            yield 'Nothing said since the review', (
+                f'{len(said)} repl{"y" if len(said) == 1 else "ies"} since the clean review '
+                f'({who}): Stefan reads {"it" if len(said) == 1 else "them"} first'
+            ) if said else None
+        threads = self.github.open_threads(repo, n)
+        yield 'No unresolved review thread', (
+            f'{threads} unresolved review thread{"s" * (threads != 1)}') if threads else None
 
     # --- merging --------------------------------------------------------------------------
 

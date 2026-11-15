@@ -199,3 +199,43 @@ class MergeCallsTest(unittest.TestCase):
         self.assertEqual(GhCli(run=gh).merge(REPO, 4, 'b' * 40), 'm' * 40)
         self.assertEqual(gh.calls[0][:3], ['api', '-X', 'PUT'])
         self.assertEqual(gh.inputs, [{'sha': 'b' * 40, 'merge_method': 'merge'}])
+
+
+class WorkIssuesTest(unittest.TestCase):
+    """The snapshot's work lists (ticket 32): a repo's open issues with their labels, parent,
+    sub-issues and blockers, in one paged GraphQL query."""
+
+    def test_open_issues_with_labels_parent_sub_issues_and_blockers(self):
+        node = lambda n, **kw: {'number': n, 'title': f'T{n}', 'body': kw.get('body', ''),
+                                'url': f'https://github.com/owner/demo/issues/{n}',
+                                'labels': {'nodes': [{'name': x} for x in kw.get('labels', ())]},
+                                'parent': kw.get('parent'),
+                                'subIssues': {'nodes': kw.get('subs', [])},
+                                'blockedBy': {'nodes': kw.get('blocked', [])}}
+        here = {'nameWithOwner': 'owner/demo'}
+        page = {'data': {'repository': {'issues': {
+            'pageInfo': {'hasNextPage': False, 'endCursor': None},
+            'nodes': [
+                node(1, labels=['spec'], subs=[
+                    {'number': 2, 'title': 'T2', 'state': 'CLOSED', 'repository': here,
+                     'url': 'https://github.com/owner/demo/issues/2'},
+                    {'number': 4, 'title': 'T4', 'state': 'OPEN', 'repository': here,
+                     'url': 'https://github.com/owner/demo/issues/4'}]),
+                node(4, labels=['ready-for-agent'], parent={'number': 1}, body='Blocked by: #9',
+                     blocked=[{'number': 2, 'state': 'CLOSED', 'repository': here},
+                              {'number': 7, 'state': 'OPEN',
+                               'repository': {'nameWithOwner': 'other/x'}}]),
+            ]}}}}
+        gh = FakeGh({'graphql': page})
+        got = GhCli(run=gh).work_issues(REPO)
+        self.assertEqual([i.number for i in got], [1, 4])
+        spec, four = got
+        self.assertEqual(spec.labels, ('spec',))
+        self.assertIsNone(spec.parent)
+        self.assertEqual([(s.number, s.state, s.title) for s in spec.sub_issues],
+                         [(2, 'closed', 'T2'), (4, 'open', 'T4')])
+        self.assertEqual(four.parent, 1)
+        self.assertEqual(four.body, 'Blocked by: #9')
+        self.assertEqual(four.blocked_by, (('owner/demo', 2, 'closed'), ('other/x', 7, 'open')))
+        self.assertEqual(four.url, 'https://github.com/owner/demo/issues/4')
+        self.assertIn('--paginate', gh.calls[0])

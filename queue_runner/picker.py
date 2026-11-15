@@ -71,7 +71,7 @@ def _unblocked(repo: Repo, github, issue: Issue) -> bool:
                for where, n in blockers(issue.body, repo.github))
 
 
-def _in_flight(repo: Repo, github) -> set[int]:
+def in_flight(repo: Repo, github) -> set[int]:
     """Issues something is already building: a `claude/*-<issue>` branch, or an open PR on one or
     with a closing keyword for the issue in this repo. PRs GitHub links to an issue (by keyword or
     by hand) are counted on the issue itself (`open_linked_pulls`)."""
@@ -91,11 +91,16 @@ def pick(repo: Repo, github, held=frozenset()) -> BuildJob | None:
     """The lowest-numbered open `ready-for-agent` issue that's unblocked and not already being
     built. A spec or map with open sub-issues isn't built itself; its children are. `held` are
     issues the runner's own job log holds (a build open, failed or waiting on them)."""
-    taken = _in_flight(repo, github) | set(held)
+    return next(pickable(repo, github, held), None)
+
+
+def pickable(repo: Repo, github, held=frozenset()):
+    """Every build `pick` could take, in the order it takes them: the dashboard's queue (ticket
+    32). A generator, so `pick` reads no further than its first."""
+    taken = in_flight(repo, github) | set(held)
     for issue in sorted(github.ready_issues(repo), key=lambda i: i.number):
         if issue.number in taken or issue.open_linked_pulls or issue.open_sub_issues:
             continue
         if _unblocked(repo, github, issue):
-            return BuildJob(repo=repo, issue=issue, base=f'origin/{repo.base}',
-                            branch=f'claude/{slug(issue.title)}-{issue.number}')
-    return None
+            yield BuildJob(repo=repo, issue=issue, base=f'origin/{repo.base}',
+                           branch=f'claude/{slug(issue.title)}-{issue.number}')

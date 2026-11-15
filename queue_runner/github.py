@@ -16,6 +16,23 @@ class Issue:
 
 
 @dataclass(frozen=True)
+class WorkIssue:
+    """An issue as the dashboard's work lists read it (ticket 32): its labels, the issue it's a
+    sub-issue of, its own sub-issues (open and closed) and GitHub's native blockers, each as
+    (owner/name, number, open or closed)."""
+    number: int
+    title: str
+    body: str = ''
+    url: str = ''
+    state: str = 'open'
+    labels: tuple = ()
+    parent: int | None = None
+    sub_issues: tuple = ()      # WorkIssue, with number, title, url, state and `repo`
+    blocked_by: tuple = ()
+    repo: str = ''              # owner/name: a sub-issue may be in another repo
+
+
+@dataclass(frozen=True)
 class PullRequest:
     number: int
     branch: str
@@ -92,6 +109,19 @@ query($owner: String!, $name: String!, $endCursor: String) {
 }'''
 
 
+_WORK_ISSUES = '''
+query($owner: String!, $name: String!, $endCursor: String) {
+  repository(owner: $owner, name: $name) {
+    issues(first: 50, after: $endCursor, states: OPEN) {
+      pageInfo { hasNextPage endCursor }
+      nodes { number title body url labels(first: 20) { nodes { name } } parent { number }
+        subIssues(first: 50) { nodes { number title url state repository { nameWithOwner } } }
+        blockedBy(first: 20) { nodes { number state repository { nameWithOwner } } } }
+    }
+  }
+}'''
+
+
 _THREADS = '''
 query($owner: String!, $name: String!, $number: Int!, $endCursor: String) {
   repository(owner: $owner, name: $name) {
@@ -144,6 +174,32 @@ class GhCli:
                                open_blockers=deps.get('blocked_by', 0),
                                open_sub_issues=subs.get('total', 0) - subs.get('completed', 0),
                                open_linked_pulls=linked.get(i['number'], 0)))
+        return found
+
+    def work_issues(self, repo) -> list[WorkIssue]:
+        """Every open issue (not PR) with its labels, parent, sub-issues and native blockers:
+        one paged GraphQL query (the dashboard's work lists, ticket 32)."""
+        owner, name = repo.github.split('/')
+        pages = json.loads(self._run(['api', 'graphql', '--paginate', '--slurp',
+                                      '-f', f'query={_WORK_ISSUES}', '-f', f'owner={owner}',
+                                      '-f', f'name={name}']))
+        here = repo.github
+        found = []
+        for page in pages:
+            for i in page['data']['repository']['issues']['nodes']:
+                subs = tuple(WorkIssue(number=s['number'], title=s['title'], url=s.get('url') or '',
+                                       state=s['state'].lower(),
+                                       repo=(s.get('repository') or {}).get('nameWithOwner', here))
+                             for s in (i.get('subIssues') or {}).get('nodes') or ())
+                blocked = tuple(((b.get('repository') or {}).get('nameWithOwner', here),
+                                 b['number'], b['state'].lower())
+                                for b in (i.get('blockedBy') or {}).get('nodes') or ())
+                found.append(WorkIssue(
+                    number=i['number'], title=i['title'], body=i.get('body') or '',
+                    url=i.get('url') or '', labels=tuple(x['name'] for x in
+                                                         (i.get('labels') or {}).get('nodes') or ()),
+                    parent=(i.get('parent') or {}).get('number'), sub_issues=subs,
+                    blocked_by=blocked, repo=here))
         return found
 
     def issue_state(self, github: str, number: int) -> str:
