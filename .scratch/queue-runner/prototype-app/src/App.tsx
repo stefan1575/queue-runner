@@ -21,15 +21,17 @@ import { StoreProvider, useStore } from "./store";
 function TopBar({ title, onMenu, usageOpen, toggleUsage }: { title: string; onMenu: () => void; usageOpen: boolean; toggleUsage: () => void }) {
   const { live } = useStore();
   return (
-    <header className="sticky top-0 z-30 flex h-14 items-center gap-3 border-b border-line bg-page/90 px-4 backdrop-blur md:px-6">
+    <header className="sticky top-0 z-30 border-b border-line bg-page/90 px-4 backdrop-blur md:px-6">
+      <div className="mx-auto flex h-14 max-w-[1180px] items-center gap-3 min-[1600px]:mr-[max(344px,calc((100%-1180px)/2))]">
       <button type="button" onClick={onMenu} className="-ml-1 rounded-lg p-1.5 hover:bg-sunk md:hidden" aria-label="Open menu"><Menu className="size-5" /></button>
-      <h1 className="text-[19px] font-semibold tracking-[-0.01em]">{title}</h1>
+      <h1 className="text-[20px] font-semibold tracking-[-0.01em]">{title}</h1>
       <div className="ml-auto flex items-center gap-2">
         <UpdatedAgo updatedAt={live.updatedAt} active={live.active} />
         <StopAll />
-        <button type="button" onClick={toggleUsage} aria-pressed={usageOpen} className={cn("inline-flex h-9 items-center gap-1.5 rounded-lg border border-line px-3 text-[14px] font-medium hover:bg-sunk min-[1600px]:hidden", usageOpen && "bg-sunk")}>
+        <button type="button" onClick={toggleUsage} aria-pressed={usageOpen} className={cn("inline-flex h-9 items-center gap-1.5 rounded-lg border border-line px-3 text-[15px] font-medium hover:bg-sunk min-[1600px]:hidden", usageOpen && "bg-sunk")}>
           <Gauge className="size-4" />Usage
         </button>
+      </div>
       </div>
     </header>
   );
@@ -40,7 +42,7 @@ function UpdatedAgo({ updatedAt, active }: { updatedAt: number; active: boolean 
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, []);
   const ago = Math.max(0, Math.round((now - updatedAt) / 1000));
   return (
-    <span className={cn("hidden text-[13.5px] tabular-nums lg:inline", active ? "text-mute" : "text-faint")} title="Refreshes when you focus this tab, then every 10 s while it stays focused">
+    <span className={cn("hidden text-[14.5px] tabular-nums lg:inline", active ? "text-mute" : "text-faint")} title="Refreshes when you focus this tab, then every 10 s while it stays focused">
       {active ? `Updated ${ago < 2 ? "now" : `${ago}s ago`}` : "Paused in background"}
     </span>
   );
@@ -64,16 +66,16 @@ function StopAll() {
     setOpen(false);
     toast(how === "resume" ? "Both lanes resumed" : how === "now" ? "Both lanes stopped" : "Both lanes stop after their current job");
   };
-  if (stopped) return <button type="button" onClick={() => apply("resume")} className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-ink px-3 text-[14px] font-medium text-page"><Play className="size-3.5" />Resume all</button>;
+  if (stopped) return <button type="button" onClick={() => apply("resume")} className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-ink px-3 text-[15px] font-medium text-page"><Play className="size-3.5" />Resume all</button>;
   return (
     <Popover.Root open={open} onOpenChange={setOpen}>
-      <Popover.Trigger className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-line px-3 text-[14px] font-medium hover:bg-sunk data-[state=open]:bg-sunk"><CirclePause className="size-4" /><span className="hidden sm:inline">Stop all</span></Popover.Trigger>
+      <Popover.Trigger className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-line bg-surface px-3 text-[15px] font-semibold shadow-sm hover:border-faint hover:bg-sunk data-[state=open]:bg-sunk"><CirclePause className="size-4" /><span className="hidden sm:inline">Stop all</span></Popover.Trigger>
       <Popover.Portal>
         <Popover.Content align="end" sideOffset={4} className="z-50 w-60 rounded-lg border border-line bg-surface p-1 shadow-lg">
           {([["after", "After current jobs", "Both lanes finish, then start nothing"], ["now", "Now", "Cuts off both running jobs"]] as const).map(([k, t, s]) => (
             <button key={k} type="button" onClick={() => apply(k)} className="block w-full rounded-md px-2.5 py-1.5 text-left hover:bg-sunk">
-              <span className={cn("block text-[14.5px] font-medium", k === "now" && "text-bad")}>{t}</span>
-              <span className="block text-[13.5px] text-mute">{s}</span>
+              <span className={cn("block text-[15.5px] font-medium", k === "now" && "text-bad")}>{t}</span>
+              <span className="block text-[14.5px] text-mute">{s}</span>
             </button>
           ))}
         </Popover.Content>
@@ -87,7 +89,7 @@ function Banner() {
   const r = world.runner;
   const msg = r.process !== "running" ? r.note : !r.github.ok ? `GitHub unreadable. ${r.github.note}` : null;
   if (!msg) return null;
-  return <div className={cn("rounded-xl border px-4 py-3 text-[14.5px]", r.process === "stopped" ? "border-bad/30 bg-bad-soft text-bad" : "border-warn/30 bg-warn-soft text-warn")}><b className="font-semibold">{r.process === "stopped" ? "The runner isn't running. " : ""}</b>{msg}</div>;
+  return <div className={cn("rounded-xl border px-4 py-3 text-[15.5px]", r.process === "stopped" ? "border-bad/30 bg-bad-soft text-bad" : "border-warn/30 bg-warn-soft text-warn")}><b className="font-semibold">{r.process === "stopped" ? "The runner isn't running. " : ""}</b>{msg}</div>;
 }
 
 function Dashboard() {
@@ -125,7 +127,7 @@ function Main() {
       <div className="flex min-w-0 flex-1 flex-col">
         <TopBar title={page.label} onMenu={() => setMenu(true)} usageOpen={usage} toggleUsage={() => setUsage(!usage)} />
         <main id="main" className={cn("flex-1 px-4 py-5 md:px-6", world.runner.process === "stopped" && "[&_section]:opacity-80")}>
-          <div className="space-y-4 min-[1600px]:mr-[344px]">
+          <div className="mx-auto max-w-[1180px] space-y-4 min-[1600px]:mr-[max(344px,calc((100%-1180px)/2))]">
           <Banner />
           {page.path === "/" && <Dashboard />}
           {page.path === "/activity" && <ActivityPage />}

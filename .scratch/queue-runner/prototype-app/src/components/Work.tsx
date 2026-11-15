@@ -61,7 +61,7 @@ export function Work() {
         <div className="flex rounded-md bg-sunk p-0.5" role="group" aria-label="View">
           {(["list", "board", "graph"] as View[]).map((v) => (
             <button key={v} type="button" aria-pressed={view === v} onClick={() => navigate(null, { view: v === "list" ? null : v }, true)}
-              className={cn("rounded px-2.5 py-0.5 text-[13.5px] font-medium capitalize", view === v ? "bg-surface text-ink shadow-sm" : "text-mute hover:text-ink")}>{v}</button>
+              className={cn("rounded px-2.5 py-0.5 text-[14.5px] font-medium capitalize", view === v ? "bg-surface text-ink shadow-sm" : "text-mute hover:text-ink")}>{v}</button>
           ))}
         </div>
       }
@@ -85,7 +85,7 @@ function Features({ m }: { m: Model }) {
   if (!rows.length) return null;
   return (
     <div className="border-b border-line-2 px-3 py-2">
-      <table className="w-full text-[14px]">
+      <table className="w-full text-[15px]">
         <tbody>
           {rows.map((r) => (
             <tr key={r.f.id} className="h-8">
@@ -128,9 +128,9 @@ const GROUPS: [string, IssueState[]][] = [
 function List({ m }: { m: Model }) {
   return (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[620px] table-fixed text-[14px]">
+      <table className="w-full min-w-[620px] table-fixed text-[15px]">
         <thead>
-          <tr className="h-8 border-b border-line-2 text-left text-[13px] text-faint">
+          <tr className="h-8 border-b border-line-2 text-left text-[14px] text-faint">
             <th className="w-9 pl-3 font-medium">#</th>
             <th className="font-medium">Item</th>
             <th className="w-36 font-medium">Feature</th>
@@ -144,7 +144,7 @@ function List({ m }: { m: Model }) {
           if (!list.length) return null;
           return (
             <tbody key={label}>
-              <tr><td colSpan={6} className="bg-page/60 px-3 pb-0.5 pt-2 text-[13px] font-medium text-mute">{label} <span className="text-faint">{list.length}</span></td></tr>
+              <tr><td colSpan={6} className="bg-page/60 px-3 pb-0.5 pt-2 text-[14px] font-medium text-mute">{label} <span className="text-faint">{list.length}</span></td></tr>
               {list.map((i, k) => <ListRow key={key(i)} i={i} pos={states[0] === "ready" ? k + 1 : undefined} m={m} />)}
             </tbody>
           );
@@ -197,7 +197,7 @@ function Board({ m }: { m: Model }) {
           const list = m.issues.filter((i) => states.includes(i.state)).sort(m.order);
           return (
             <div key={label} className="rounded-md bg-sunk/70 p-1.5">
-              <p className="flex justify-between px-1 pb-1.5 text-[13.5px] font-semibold">{label}<span className="font-normal text-mute">{list.length}</span></p>
+              <p className="flex justify-between px-1 pb-1.5 text-[14.5px] font-semibold">{label}<span className="font-normal text-mute">{list.length}</span></p>
               <div className="space-y-1.5">
                 {list.map((i) => {
                   const f = m.featureOf(i);
@@ -205,8 +205,8 @@ function Board({ m }: { m: Model }) {
                   return (
                     <button key={key(i)} type="button" onClick={() => i.pr && openPr(i.repo, i.pr)}
                       className="block w-full rounded border border-line bg-surface px-2 py-1.5 text-left hover:border-faint" style={{ borderLeft: `3px solid ${m.color(f)}` }}>
-                      <span className="line-clamp-2 text-[14px] font-medium leading-snug">{i.title}</span>
-                      <span className="mt-0.5 flex gap-1.5 text-[13px] text-mute">
+                      <span className="line-clamp-2 text-[15px] font-medium leading-snug">{i.title}</span>
+                      <span className="mt-0.5 flex gap-1.5 text-[14px] text-mute">
                         {m.showRepo && <span className="font-medium text-ink-2">{i.repo}</span>}
                         <span>#{i.n}</span>
                         {i.pr && <span>PR #{i.pr}</span>}
@@ -290,12 +290,12 @@ function Graph({ m }: { m: Model }) {
   return (
     <div className="p-3">
       {groups.length === 0 ? (
-        <p className="text-[14px] text-mute">Nothing here waits on anything.</p>
+        <p className="text-[15px] text-mute">Nothing here waits on anything.</p>
       ) : (
         <div className="flex flex-wrap gap-x-8 gap-y-5">
           {groups.map((g, gi) => (
             <div key={gi} className="max-w-full overflow-x-auto">
-              <p className="mb-1.5 flex items-center gap-1.5 text-[13.5px] font-medium text-ink-2">
+              <p className="mb-1.5 flex items-center gap-1.5 text-[14.5px] font-medium text-ink-2">
                 <span className="inline-block size-2 rounded-sm" style={{ background: m.color(g.feature) }} />
                 {g.feature?.title ?? "Linked work"}
                 <span className="font-normal text-faint">{g.open} open</span>
@@ -321,8 +321,8 @@ function Graph({ m }: { m: Model }) {
                       style={{ left: p.x, top: p.y, width: NW, height: NH, borderLeft: `3px solid ${m.color(f)}` }}
                       title={`${i.title}${i.reason ? ` · ${i.reason}` : ""}${i.pr ? " · double-click for PR history" : ""}`}
                     >
-                      <span className={cn("truncate text-[13.5px] font-medium leading-tight", i.state === "done" && "text-mute line-through")}>{i.title}</span>
-                      <span className="flex items-center gap-1 text-[12.5px] text-mute">
+                      <span className={cn("truncate text-[14.5px] font-medium leading-tight", i.state === "done" && "text-mute line-through")}>{i.title}</span>
+                      <span className="flex items-center gap-1 text-[13.5px] text-mute">
                         <span>#{i.n}</span>
                         <Chip tone={tone} className="h-4 px-1 text-[10.5px]">{label}</Chip>
                         {u > 0 && <span className={cn("ml-auto", u >= 2 && i.state === "ready" ? "font-semibold text-ok" : "")}>unblocks {u}</span>}
@@ -336,7 +336,7 @@ function Graph({ m }: { m: Model }) {
         </div>
       )}
       {loose.length > 0 && (
-        <p className="mt-3 border-t border-line-2 pt-2 text-[13.5px] text-mute">
+        <p className="mt-3 border-t border-line-2 pt-2 text-[14.5px] text-mute">
           No dependencies: {loose.map((i, n) => <span key={key(i)}>{n > 0 && ", "}<span className="text-ink-2">#{i.n} {i.title}</span></span>)}
         </p>
       )}

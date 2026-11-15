@@ -40,7 +40,7 @@ export function ActivityPage() {
       <div className="flex flex-wrap gap-1.5" role="group" aria-label="Show">
         {FILTERS.map(([label], i) => (
           <button key={label} type="button" aria-pressed={f === i} onClick={() => setF(i)}
-            className={cn("h-9 rounded-full border px-3.5 text-[14px] font-medium", f === i ? "border-ink bg-ink text-page" : "border-line bg-surface text-ink-2 hover:border-faint")}>{label}</button>
+            className={cn("h-9 rounded-full border px-3.5 text-[15px] font-medium", f === i ? "border-ink bg-ink text-page" : "border-line bg-surface text-ink-2 hover:border-faint")}>{label}</button>
         ))}
       </div>
       {days.length === 0 && <p className="text-mute">Nothing of this kind in the log.</p>}

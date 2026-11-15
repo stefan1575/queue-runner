@@ -46,8 +46,8 @@ function LaneRow({ which, unit }: { which: "claude" | "sol"; unit: string }) {
     <section className="relative min-w-0 overflow-hidden rounded-lg border border-line bg-surface" aria-label={`${PROVIDER[p].name} lane`}>
       <span className={cn("absolute inset-y-0 left-0 w-[3px]", lane.status === "working" || lane.status === "stopping" ? bar : "bg-line")} />
       <div className="flex h-11 items-center gap-2 border-b border-line-2 pl-3.5 pr-2">
-        <ProviderName p={p} className="text-[15.5px]" />
-        <span className="text-[13px] text-faint">{PROVIDER[p].model}</span>
+        <ProviderName p={p} className="text-[16.5px]" />
+        <span className="text-[14px] text-faint">{PROVIDER[p].model}</span>
         <Chip tone={tone} className="ml-1">{stale ? "Last known · " : ""}{label}{lane.until ? ` until ${lane.until}` : ""}</Chip>
         <div className="ml-auto"><StopMenu which={which} lane={lane} unit={unit} setWorld={setWorld} /></div>
       </div>
@@ -57,9 +57,9 @@ function LaneRow({ which, unit }: { which: "claude" | "sol"; unit: string }) {
             {Icon ? <Icon className={cn("size-3.5", color)} /> : <Dot className="bg-faint" />}
           </span>
           <div className="min-w-0 flex-1">
-            <p className="truncate text-[15px] font-medium" title={lane.headline}>{lane.headline}</p>
+            <p className="truncate text-[16px] font-medium" title={lane.headline}>{lane.headline}</p>
             {lane.job && (
-              <p className="flex flex-wrap items-center gap-x-1.5 text-[13.5px] text-mute">
+              <p className="flex flex-wrap items-center gap-x-1.5 text-[14.5px] text-mute">
                 <span>{KIND_WORD[lane.job.kind]}</span>·<span>{lane.job.repo}</span>
                 {lane.job.sha && <Sha>{lane.job.sha}</Sha>}·<span className="tabular-nums">{lane.job.minutes} min</span>
                 {lane.job.pr && <button type="button" onClick={() => openPr(lane.job!.repo, lane.job!.pr!)} className="font-medium text-ink hover:underline">PR history</button>}
@@ -68,10 +68,10 @@ function LaneRow({ which, unit }: { which: "claude" | "sol"; unit: string }) {
             )}
           </div>
         </div>
-        <p className="truncate text-[13.5px] text-mute" title={lane.next}><span className="text-faint">Next </span>{lane.next}</p>
+        <p className="truncate text-[14.5px] text-mute" title={lane.next}><span className="text-faint">Next </span>{lane.next}</p>
         <div className="flex flex-wrap gap-1">
           {lane.gates.map((g) => (
-            <span key={g.label} title={g.note} className={cn("inline-flex h-6 items-center gap-1 rounded px-1.5 text-[13px]", g.ok ? "bg-sunk text-mute" : "bg-sunk font-semibold text-ink")}>
+            <span key={g.label} title={g.note} className={cn("inline-flex h-6 items-center gap-1 rounded px-1.5 text-[14px]", g.ok ? "bg-sunk text-mute" : "bg-sunk font-semibold text-ink")}>
               {g.ok ? <Check className="size-3" /> : <X className="size-3" />}
               {!g.ok && g.label === "Not stopped" ? g.note : g.label}
               {!g.ok && g.note && g.label !== "Not stopped" && <span className="font-normal">: {g.note}</span>}
@@ -99,8 +99,8 @@ function StopMenu({ which, lane, unit, setWorld }: { which: "claude" | "sol"; la
   const can = lane.status === "working";
   return (
     <Popover.Root open={open} onOpenChange={setOpen}>
-      <Popover.Trigger className="inline-flex h-8 items-center gap-1 rounded-md px-2 text-[14px] font-medium text-mute hover:bg-sunk hover:text-ink data-[state=open]:bg-sunk">
-        <CirclePause className="size-3.5" />Stop
+      <Popover.Trigger className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-line bg-surface px-3 text-[15px] font-semibold text-ink shadow-sm hover:border-faint hover:bg-sunk data-[state=open]:bg-sunk">
+        <CirclePause className="size-4" />Stop
       </Popover.Trigger>
       <Popover.Portal>
         <Popover.Content align="end" sideOffset={4} className="z-50 w-64 rounded-lg border border-line bg-surface p-1 shadow-lg">
@@ -121,8 +121,8 @@ function StopMenu({ which, lane, unit, setWorld }: { which: "claude" | "sol"; la
 function MenuItem({ title, sub, onClick, danger, disabled }: { title: string; sub: string; onClick: () => void; danger?: boolean; disabled?: boolean }) {
   return (
     <button type="button" disabled={disabled} onClick={onClick} className="block w-full rounded-md px-2.5 py-1.5 text-left hover:bg-sunk disabled:opacity-45 disabled:hover:bg-transparent">
-      <span className={cn("block text-[14.5px] font-medium", danger && "text-bad")}>{title}</span>
-      <span className="block text-[13.5px] text-mute">{sub}</span>
+      <span className={cn("block text-[15.5px] font-medium", danger && "text-bad")}>{title}</span>
+      <span className="block text-[14.5px] text-mute">{sub}</span>
     </button>
   );
 }

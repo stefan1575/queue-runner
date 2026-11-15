@@ -22,18 +22,18 @@ export function UsagePage() {
           <UsageBar label="Weekly" used={claude.week.used} resets={claude.week.resets} reserve={world.runner.reserve} showReset />
           {claude.scoped?.map((s) => <UsageBar key={s.label} label={`Weekly · ${s.label}`} used={s.used} resets={s.resets} showReset />)}
         </div>
-        <p className="mt-3 text-[14px] text-mute">The runner keeps {world.runner.reserve}% of the week for you until 24 hours before it resets ({claude.releaseAt}). Read at {claude.readAt}.</p>
+        <p className="mt-3 text-[15px] text-mute">The runner keeps {world.runner.reserve}% of the week for you until 24 hours before it resets ({claude.releaseAt}). Read at {claude.readAt}.</p>
       </Section>
       <Section title={<ProviderName p="chatgpt" />}>
         <div className="space-y-2.5">
           <UsageBar label="Session" used={chatgpt.five.used} resets={chatgpt.five.resets} showReset />
           <UsageBar label="Weekly" used={chatgpt.week.used} resets={chatgpt.week.resets} showReset />
         </div>
-        <p className="mt-3 text-[14px] text-mute">Sol's reviews aren't held back by usage; when ChatGPT runs out, the next review waits for its reset. Read at {chatgpt.readAt}.</p>
+        <p className="mt-3 text-[15px] text-mute">Sol's reviews aren't held back by usage; when ChatGPT runs out, the next review waits for its reset. Read at {chatgpt.readAt}.</p>
       </Section>
       <Section title="What a Claude job is expected to cost" className="xl:col-span-2" flush>
-        <table className="w-full text-[14.5px]">
-          <thead className="text-left text-[13.5px] text-mute">
+        <table className="w-full text-[15.5px]">
+          <thead className="text-left text-[14.5px] text-mute">
             <tr className="border-b border-line-2"><th className="px-4 py-2 font-medium">Job</th><th className="px-4 py-2 text-right font-medium">Of the session</th><th className="px-4 py-2 text-right font-medium">Of the week</th><th className="px-4 py-2 font-medium">From</th></tr>
           </thead>
           <tbody>
@@ -47,7 +47,7 @@ export function UsagePage() {
             ))}
           </tbody>
         </table>
-        <p className="border-t border-line-2 px-4 py-3 text-[14px] text-mute">A job starts only if the session has room for its cost and the week still leaves your share.</p>
+        <p className="border-t border-line-2 px-4 py-3 text-[15px] text-mute">A job starts only if the session has room for its cost and the week still leaves your share.</p>
       </Section>
     </div>
   );
