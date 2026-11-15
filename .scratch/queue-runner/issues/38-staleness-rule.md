@@ -81,7 +81,7 @@ tokens with 50 to 5 requests left, and the runner can't count the requests left.
 
 **Read where the size is.** `limits.last_call` reads the transcript T3's database points to: the
 last real assistant record's `requestRef` names an `api-request` record whose `timestamp` is the
-request's start. The real stop's fixture predates `requestRef` and reads as unknown (cold). The new
+request's start. The real stop's fixture has no request records, so its age reads as unknown (cold). The new
 fixture `tests/fixtures/claude/transcript-requests.jsonl` is hand-made in the shape of a real
 Claude Code 2.1.319 transcript. A limit stop's end record also keeps `last_request`, so
 `--once --dry-run` can say the choice.
