@@ -528,8 +528,9 @@ and ticket 36's keys in the same record are kept). The runner starts a thread fo
 click, never by itself.
 
 - **Opening** (`AskThreads.next`, `open`): the Claude lane, after a limited job and before any
-  decision, takes the oldest request whose stop is still `filed`, in a repo it works, with the
-  PR open, and starts `Queue runner ask: <repo>#<n>` in the repo's T3 project with no worktree,
+  decision, takes the oldest request whose stop is still `filed` and not released
+  (`JobLog.released_ids`: a release leaves a stop's outcome `filed`), in a repo it works, with
+  the PR open, and starts `Queue runner ask: <repo>#<n>` in the repo's T3 project with no worktree,
   **without waiting** (`T3Cli.launch`: `t3 thread start --json` prints `{threadId, projectId,
   runId}`, read in `server.asar` 2026-11-15), then reads its link with `thread show`. Gated as a
   decision; it teaches the learned costs nothing (`measured` records only passes that made a

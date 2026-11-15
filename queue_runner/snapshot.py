@@ -120,6 +120,7 @@ class Facts:
     # then (inbox.Reader.stale).
     inbox: object | None = None
     releases: list = field(default_factory=list)
+    released: frozenset = frozenset()   # the jobs a release settled (`JobLog.released_ids`)
     inbox_stale: dict = field(default_factory=dict)
     # The work (ticket 32): the last read of each repo (`work.Reader.last()`: name -> RepoRead,
     # None before one), the repos it couldn't read since (`stale`), and the jobs a usage limit
@@ -191,7 +192,8 @@ def _decide(facts: Facts, asks: list, answered: list) -> None:
     from .ask_threads import mark, waits_text
     job, wait = _open_job(facts, CLAUDE_KINDS), facts.claude_wait
     mark(asks, answered, facts.jobs, facts.switch.opened,
-         lambda repo: waits_text(facts.switch, repo, job, wait.reason if wait else None))
+         lambda repo: waits_text(facts.switch, repo, job, wait.reason if wait else None),
+         released=facts.released)
 
 
 def _marks(facts: Facts, id: str) -> dict:
@@ -601,7 +603,8 @@ class Snapshots:
         """The Sol lane's last Inbox read (ticket 31) and work read (ticket 32), the releases
         their timelines tell, and the jobs a limit cut off. `--snapshot` has no runner: it gives
         `readers`, read once."""
-        found = {'releases': log.releases(), 'limited': log.limited_jobs()}
+        found = {'releases': log.releases(), 'limited': log.limited_jobs(),
+                 'released': frozenset(log.released_ids())}
         inbox = self.readers.get('inbox') or getattr(self.runner, 'inbox', None)
         if inbox is not None:
             found.update(inbox=inbox.last(), inbox_stale=inbox.stale())

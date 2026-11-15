@@ -215,6 +215,12 @@ class JobLog:
     def jobs(self) -> list[Job]:
         return self._fold()[0]
 
+    def released_ids(self) -> set[str]:
+        """The ids of the jobs a `--release` settled: each job on that issue or PR started
+        before it. What reads the log's history to act on it, or to say where work stands,
+        leaves them out."""
+        return self._fold()[2]
+
     def releases(self) -> list[tuple[str, int, str]]:
         """Each `--release`, oldest first: (repo, issue or PR, when)."""
         return [(e['repo'], e['issue'], e['at']) for e in self._events()
