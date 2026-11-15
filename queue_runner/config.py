@@ -41,7 +41,10 @@ class Config:
     state_dir: str
     log_dir: str
     claude_provider: str = 'claudeAgent'     # T3 provider instance for Claude jobs
-    claude_model: str = 'claude-opus-5-5'    # T3 has no flag for reasoning effort
+    claude_model: str = 'claude-opus-5-5'
+    # The effort every Claude job runs at (ticket 39, `effort.py`): T3's CLI has no flag for it,
+    # so a job gets it from its T3 project's default model when that is this model at this effort.
+    claude_effort: str = 'high'
     poll_seconds: int = 300                  # continuous mode: the pause after an idle pass
     runs_dir: str = ''        # a review's run folder: brief, inputs, reply, would-be comment
     checkouts_dir: str = ''   # Sol's detached checkout of the PR's head, removed after
@@ -102,6 +105,16 @@ def _merge(entry: dict) -> str:
     return merge
 
 
+EFFORTS = ('low', 'medium', 'high', 'xhigh', 'max')   # Claude Code's effort levels
+
+
+def _effort(claude: dict) -> str:
+    effort = claude.get('effort', 'high')
+    if effort not in EFFORTS:
+        raise ValueError(f"[claude] effort must be one of {', '.join(EFFORTS)}, not {effort!r}")
+    return effort
+
+
 def load_config(path: str = DEFAULT_CONFIG) -> Config:
     with open(path, 'rb') as f:
         raw = tomllib.load(f)
@@ -119,6 +132,7 @@ def load_config(path: str = DEFAULT_CONFIG) -> Config:
     return Config(repos=repos, state_dir=state_dir, log_dir=_path(raw['log_dir']),
                   claude_provider=claude.get('provider', 'claudeAgent'),
                   claude_model=claude.get('model', 'claude-opus-5-5'),
+                  claude_effort=_effort(claude),
                   poll_seconds=int(raw.get('poll_seconds', 300)),
                   runs_dir=_path(raw.get('runs_dir') or os.path.join(home, 'runs')),
                   checkouts_dir=_path(raw.get('checkouts_dir') or os.path.join(home, 'checkouts')),

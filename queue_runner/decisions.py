@@ -195,9 +195,11 @@ def _template() -> Template:
 
 
 class Decider:
-    def __init__(self, config, *, github, t3, jobs, say, stopper):
+    def __init__(self, config, *, github, t3, jobs, say, stopper, effort=None):
         self.config, self.github, self.t3, self.jobs = config, github, t3, jobs
         self.say, self.stopper = say, stopper
+        from .effort import Effort   # ticket 39: how its thread starts, its effort read back
+        self.effort = effort or Effort(config)
 
     def next_case(self) -> Case | None:
         from .config import working   # a repo Stefan stopped gets no decision (ticket 37)
@@ -402,8 +404,7 @@ class Decider:
         try:
             brief = self.brief(case)
             result = self.t3.start(repo.path, brief, title=job.title,
-                                   provider=self.config.claude_provider,
-                                   model=self.config.claude_model)
+                                   **self.effort.flags(repo))
         except Exception as e:   # T3 down, or the brief couldn't be built: the next pass
             self.jobs.ended(job.id, exit_code=None, outcome=NOT_STARTED,
                             error=f'{type(e).__name__}: {e}')
@@ -427,7 +428,8 @@ class Decider:
             except T3Error:
                 pass
         ran = {} if result is None else dict(
-            thread_id=result.thread_id, run_id=result.run_id, status=result.status)
+            thread_id=result.thread_id, run_id=result.run_id, status=result.status,
+            **self.effort.used(repo.name, case.name, result.thread_id, result.run_id))
         code = None if result is None else result.exit_code
         text = answer.text
 

@@ -124,6 +124,7 @@ class Job:
     applied: list = field(default_factory=list)   # live: the migrations its thread applied
     prs: list = field(default_factory=list)       # live: the PRs merged in its batch
     cause: str | None = None       # a fix: `conflict` for a conflict round (ticket 15), else None
+    effort: str | None = None      # a Claude job: the effort its run used, read back (ticket 39)
 
     @property
     def open(self) -> bool:
@@ -132,7 +133,7 @@ class Job:
 
 _END_FIELDS = ('thread_id', 'link', 'run_id', 'exit_code', 'status', 'outcome', 'commits', 'pr',
                'worktree', 'error', 'verdict', 'signals', 'run_dir', 'resume_at', 'head',
-               'reason', 'answer', 'context', 'applied', 'prs')
+               'reason', 'answer', 'context', 'applied', 'prs', 'effort')
 
 
 class JobLog:

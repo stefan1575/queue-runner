@@ -47,7 +47,8 @@ whose tickets are local markdown: Local tickets, below, `merge = "stefan"` for o
 merges himself: Stefan merges, below), in priority order (Stefan's build order on the dashboard
 wins: The build order, below); the runner's `state_dir` and `log_dir` (`~/.queue-runner/`, outside every served repo);
 `runs_dir`, `checkouts_dir` and `deps_dir` for reviews; `poll_seconds`, the pause after a pass that started
-nothing; `[claude]`, the T3 provider instance and model for Claude jobs; and `[sol]`,
+nothing; `[claude]`, the T3 provider instance, model and `effort` (default `high`) for Claude
+jobs (The effort, below); and `[sol]`,
 `codex-sol.sh` and the Git bash that runs it. `--config <path>` reads another one.
 
 ## Running unattended
@@ -364,7 +365,9 @@ any other name is refused with exit 2).
 **The job log** is `<state_dir>/jobs.jsonl` (`state.py`): `start`, `end` and `release` events, one
 JSON object per line, each synced to disk as it's written. A last line torn by a crash is
 ignored and cut off by the next write; a bad line anywhere else is an error. An end record has the thread id and link, run id, T3's exit code and
-status, the branch's commits, the PR found by branch, the worktree path and any error.
+status, the branch's commits, the PR found by branch, the worktree path, `effort` (the effort
+the run used, read back: The effort, below; on every Claude job's end, decisions and live runs
+too) and any error.
 Outcomes: `done` (exit 0, a PR found), `done-no-pr`, `failed` (exit 1), `waiting` (exit 2),
 `continued` (it was waiting, and a decision's answer went to its thread as a later job),
 `usage-limit` (exit 1 on a Claude usage limit: Usage limits, above),
@@ -1040,8 +1043,9 @@ bug with a failing test; CI still gates the merge.
   failed, interrupted, cancelled). It also exits 1 with nothing on stdout when T3 itself fails
   (server down, unknown project): `T3Error`. Source: `finishRun` and `ThreadNeedsInputError` in
   the app's `resources/server.asar` (`apps/server/dist/binCli-*.mjs`).
-- **No reasoning-effort flag.** CLI threads get T3's default effort for the model. T3 sets
-  effort through session options; only `ultrathink` goes into the prompt (`Ultrathink:`).
+- **No reasoning-effort flag.** T3 sets effort through the thread's model selection (its
+  `options`, `{id: "effort", value}`); only `ultrathink` goes into the prompt (`Ultrathink:`).
+  How the runner gets `high` anyway is The effort, below.
 - **Worktrees are made by T3**: `--worktree <base ref> --branch <name>` runs
   `git worktree add -b <name>` from the base ref, under `~/.t3/worktrees/<project folder>/<branch
   with / as ->`. T3 doesn't fetch first, so the runner fetches `origin/<base>`. A leftover local
@@ -1081,6 +1085,57 @@ bug with a failing test; CI still gates the merge.
   output_tokens` (Claude Code's `<synthetic>` limit message has zeros and is skipped). Checked on
   the real stop: 108,633 tokens.
 
+## The effort
+
+`effort.py` (ticket 39; Stefan, 2026-11-15: "keep it at high by default", until his Claude Max
+plan ends). Every Claude job (build, fix or conflict round, decision, live run) is meant to run
+at `[claude] effort` (`high`).
+
+- **What T3 does** (read 2026-11-15 in `resources/server.asar`, `apps/server/dist/`):
+  `threadStartCommand` (`binCli-*.mjs`) calls MCP's `t3_thread_launch` with
+  `modelSelection: {instanceId, model}` and no options when `--provider` and `--model` are given,
+  and with no `modelSelection` when they aren't. `t3_thread_launch` (`server-*.mjs`) takes the
+  given selection as it is; with none, the project's default (`resolveProjectSettings` then
+  `resolveNewThreadModelSelection`), options and all, swapped for the fallback model while the
+  default's provider is out of usage. A selection with no effort option compiles to the model's
+  default (`compileClaudeModelSelection`: Opus 5.5's is medium, `model-manifest.json`).
+- **Where a project's default lives:** T3's settings are folded (`projectSettingsFolded: true` in
+  `~/.t3/userdata/settings.json`), so launch reads only that file's
+  `projectSettingsOverrides[<project id>].defaultModelSelection`, else its global
+  `defaultModelSelection` (`resolveProjectOverrides`, `ManagedEndpointRuntime-*.mjs`). The
+  project row's `default_model_selection_json` (`projection_projects`, what MCP's
+  `t3_project_update` writes; personal-ops has Opus 5.5 at high there) is not read once folded.
+  T3's Settings page with a project chosen, New threads, Model ("Model for new threads in this
+  project.") writes the override (client `ProjectDefaultsSettings-*.js`).
+- **Checked live on 2026-11-15** in the "queue-runner sandbox" project, Haiku threads, reading
+  each run's `modelSelection` in `orchestration_v2_projection_runs` and its Claude transcript:
+  A, `--provider claudeAgent --model claude-haiku-5-5`: the run's selection has no options, and
+  the transcript's API request had `output_config.effort: "medium"`, its assistant record
+  `effort: "medium"`. Then the sandbox's project row was set to Haiku at high with
+  `t3_project_update` (it still is). B, no `--model`: refused, "Pass modelSelection: the project
+  has no default model.", so the row isn't read. C, `--model` again: medium, as A. The override
+  itself wasn't set live: no T3 tool writes it, and editing `settings.json` changes T3's global
+  settings. That step is code-read; each job's read-back confirms it.
+- **So the runner** (`Effort.flags`) starts a repo's job with no `--provider`/`--model` only when
+  its T3 project's default, read as launch reads it (`T3Files.project_default`), is the config's
+  provider, model and effort and no fallback model is set (one would start it on another
+  model); else with `--model` as before, at the model's default. It says which, per repo, at
+  start and again whenever it changes, with the step when it isn't set. A continued job (`t3
+  thread send`) keeps its thread's selection.
+- **Read back** (`T3Files.run_effort`, into the end record's `effort`): the `effort` on the
+  thread's Claude transcript's assistant records since the run started (Claude Code's own record
+  of what it sent; `<synthetic>` ones skipped), else the effort option on T3's run record, else
+  null. Anything but the config's effort is said once per repo (`<repo>: <job> ran at effort
+  medium, not high`), and an unreadable one too; it's said again only when it changes. Only
+  `main` reads T3's files (`effort.T3Files`, read-only); a `Runner` without an `Effort` (tests,
+  `live_merge.py`) starts with `--model` and records no effort.
+- **Stefan's step, once per served project** (game-backdrop, leads-dashboard, queue-runner; none
+  is set on 2026-11-15, so all three run at medium until then): in T3, Settings, choose the
+  project, New threads, Model: Claude Opus 5.5, Reasoning: High, and leave its fallback model
+  unset. The runner's start line then says `<repo>: its T3 project's default model is
+  claude-opus-5-5 at effort high; its Claude jobs start on it (no --model)`. If it still says
+  "it has no default model", the change went to the project row, which launch doesn't read.
+
 ## Live check
 
 ```
@@ -1090,7 +1145,8 @@ python3 scripts/live_sandbox.py
 This runs one real build job, a small Haiku thread, through `Runner.run_build` on a hand-made
 issue ("Add a line to README") in the sandbox. The sandbox is `~/.queue-runner/sandbox/repo`: T3
 project "queue-runner sandbox", with a bare `../origin.git` as its `origin` and no GitHub. Its
-job log and runner log stay in `~/.queue-runner/sandbox/`. Before running it again, delete the
+job log and runner log stay in `~/.queue-runner/sandbox/`. It says how the sandbox's jobs start
+(The effort, above) and its record has the `effort` read back. Before running it again, delete the
 `claude/add-a-line-to-1` branch locally and in `origin.git`, or the job is held as
 `branch-exists`.
 
@@ -1154,6 +1210,10 @@ SQLite holding the real stop's rows, the transcript, the auto-resume warning) an
 `LimitRecoveryTest` in `tests/test_run.py` and a fix round's in `tests/test_fix.py` (fixed clocks,
 `FakeLimits` in `fakes.py`; every test that runs `main` passes it, and a `t3_settings` path, so
 none reads T3's real database or settings).
+The effort: `tests/test_effort.py` (`[claude] effort`; `T3Files` on a temp `settings.json`,
+SQLite and transcript folder; the start flags, end records and log lines through a real build,
+decision, continued job, fix round and live run with `FakeFiles`; the start line through `main`
+with a `T3Store` on the temp files).
 Local tickets: `tests/test_tickets.py` (both status forms, blocker lines, a sandbox git repo
 with three tickets in a blocker chain) and `LocalTicketsDryRunTest` in `tests/test_cli.py`.
 Live steps: `tests/test_live.py` (the answer block, the batch from `FakeLiveGit`, about to land,
@@ -1262,6 +1322,8 @@ temp folder.
   take work from.
 - `queue_runner/limits.py` and `templates/restart.md`: usage-limit stops: T3's record of the
   reset, the transcript's context, when and how a job resumes, the auto-resume warning.
+- `queue_runner/effort.py`: the effort Claude jobs run at: the start flags from the T3 project's
+  default, and the effort a run used, read back (ticket 39).
 - `queue_runner/lock.py`: `runner.lock` and `sol.lock`.
 - `queue_runner/wake.py`: the wake tasks: `Waker.sync` and the `schtasks` adapter.
 - `queue_runner/restart.py`: restarting on its own new code after main moves (ticket 14).

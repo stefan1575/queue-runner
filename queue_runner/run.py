@@ -71,7 +71,7 @@ def _when(stamp: str) -> datetime.datetime:
 class Runner:
     def __init__(self, config: Config, *, github, t3, git, out, log_line, sol=None,
                  toaster=None, gate=None, limits=None, now=None, waker=None, self_update=None,
-                 deps=None):
+                 deps=None, effort=None):
         self.config, self.github, self.t3, self.git = config, github, t3, git
         # restart.SelfUpdate: the runner's own checkout, restarted on when its base moves
         # (continuous mode, and only when the runner serves its own repo)
@@ -84,6 +84,10 @@ class Runner:
         # limits.T3Store, where T3 keeps a usage-limit stop's reset; None reads only what the
         # thread said (tests, the live checks).
         self.limits = limits
+        # effort.Effort (ticket 39): how a job's thread is started, and the effort its run used
+        # read back into its end record; with no T3 files (tests), --model as before.
+        from .effort import Effort
+        self.effort = effort or Effort(config)
         self.now = now or (lambda: datetime.datetime.now(datetime.timezone.utc))
         self.gate = gate   # gate.Gate; None starts every Claude job (tests, the live checks)
         self.gate_until: datetime.datetime | None = None
@@ -92,6 +96,8 @@ class Runner:
         self.jobs = JobLog(os.path.join(config.state_dir, 'jobs.jsonl'))
         self.repos = {r.name: r for r in config.repos}
         self._say_lock = threading.Lock()
+        if self.effort.say is None:
+            self.effort.say = self.say
         self.toaster = toaster or NoToaster()
         self.reviewer = Reviewer(config, github=github, git=git, sol=sol, jobs=self.jobs,
                                  say=self.say, toaster=self.toaster,
@@ -100,12 +106,13 @@ class Runner:
         stopper = Stopper(config, github=github, jobs=self.jobs, say=self.say,
                           toaster=self.toaster)
         self.decider = Decider(config, github=github, t3=t3, jobs=self.jobs, say=self.say,
-                               stopper=stopper)
+                               stopper=stopper, effort=self.effort)
         self.live = LiveSteps(config, github=github, git=git, t3=t3, jobs=self.jobs,
                               say=self.say, stopper=stopper,
                               merger=Merger(config, github=github, git=git, jobs=self.jobs,
                                             say=self.say),
-                              limit=self._limit, find_thread=self._find_thread, now=self.now)
+                              limit=self._limit, find_thread=self._find_thread, now=self.now,
+                              effort=self.effort)
         self._last_why: dict[tuple[str, int], str | None] = {}
         # For the dashboard's snapshot (`snapshot.py`, continuous mode): the Claude lane's wait as
         # its last pass left it (a snapshot.Wait, or None), the titles of the issues and PRs the
@@ -399,10 +406,8 @@ class Runner:
         """Runs the job's thread in a new T3 worktree on `branch` from `base`, and records how
         it ended."""
         try:
-            result = self.t3.start(repo.path, brief, title=job.title,
-                                   provider=self.config.claude_provider,
-                                   model=self.config.claude_model, worktree=base,
-                                   branch=branch)
+            result = self.t3.start(repo.path, brief, title=job.title, worktree=base,
+                                   branch=branch, **self.effort.flags(repo))
         except T3Error as e:
             try:
                 thread = self._find_thread(job)
@@ -524,7 +529,8 @@ class Runner:
                    'head-unknown' if head is None else 'pushed' if pushed else 'no-push')
         self.jobs.ended(job.id, exit_code=exit_code, outcome=outcome, thread_id=thread_id,
                         link=link, run_id=run_id, status=status, commits=commits, pr=pr,
-                        worktree=worktree, error=error, head=head, **(limit or {}))
+                        worktree=worktree, error=error, head=head, **(limit or {}),
+                        **self.effort.used(job.repo, self._name(job), thread_id, run_id))
         moved = (f', head {job.sha[:7]} -> {head[:7]}, {len(commits)} commits' if pushed else
                  f', head still {job.sha[:7]}' if head else ', head unknown')
         self.say(f'{self._name(job)} ended: {outcome} (exit {exit_code}{moved}) '
@@ -561,7 +567,8 @@ class Runner:
             outcome = 'waiting' if exit_code == 2 else USAGE_LIMIT if limit else 'failed'
         self.jobs.ended(job.id, exit_code=exit_code, outcome=outcome, thread_id=thread_id,
                         link=link, run_id=run_id, status=status, commits=commits, pr=pr,
-                        worktree=worktree, error=error, **(limit or {}))
+                        worktree=worktree, error=error, **(limit or {}),
+                        **self.effort.used(job.repo, self._name(job), thread_id, run_id))
         pr_note = f', PR #{pr["number"]}' if pr else ''
         self.say(f'{self._name(job)} ended: {outcome} (exit {exit_code}, {len(commits)} commits'
                  f'{pr_note}) {link or thread_id}')
