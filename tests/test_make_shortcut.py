@@ -42,8 +42,10 @@ class MakeShortcutTest(unittest.TestCase):
         runner = read_link(self.dir / "links" / "Queue runner.lnk")
         dashboard = read_link(self.dir / "links" / "Queue runner dashboard.lnk")
         for link in (runner, dashboard):
-            self.assertEqual(Path(link["target"]), self.pythonw)
-            self.assertEqual(Path(link["dir"]), REPO)
+            # The same file, not the same spelling: Windows may hand back a temp folder's long
+            # name where tempfile gave its short one (`RUNNER~1` on GitHub's runners).
+            self.assertTrue(os.path.samefile(link["target"], self.pythonw), link["target"])
+            self.assertTrue(os.path.samefile(link["dir"], REPO), link["dir"])
         self.assertEqual((runner["args"], dashboard["args"]), ("-m queue_runner", "-m dashboard"))
         self.assertEqual(list(self.startup.iterdir()), [])   # the Startup folder only with --startup
 
