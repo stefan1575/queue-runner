@@ -121,6 +121,7 @@ class Reviewer:
                                toaster=toaster) if poster is None else None
         self._last_why: dict[tuple[str, int], str | None] = {}
         self._said_paused = None
+        self.titles: dict[tuple[str, int], str] = {}   # the PRs it reviewed (the snapshot's)
 
     # --- a pass ---------------------------------------------------------------------------
 
@@ -238,6 +239,7 @@ class Reviewer:
 
     def review(self, repo: Repo, pr: PullRequest) -> str:
         n, h = pr.number, pr.head_sha
+        self.titles[(repo.name, n)] = pr.title
         earlier = read_reviews(self.github.issue_comments(repo, n))
         rnd = next_round(earlier)
         job = self.jobs.started(kind='review', repo=repo.name, issue=n, branch=pr.branch,

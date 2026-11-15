@@ -23,6 +23,7 @@ python3 -m queue_runner --pause | --resume    # Stefan's knob: start no Claude j
 python3 -m queue_runner --reserve PERCENT     # the share of the week kept for Stefan (default 5)
 python3 -m queue_runner --stop                # stop the running runner
 python3 -m queue_runner --inbox               # everything waiting on Stefan: PRs ready to merge, needs-info stops, threads waiting for his answer
+python3 -m queue_runner --snapshot            # print the dashboard's snapshot from the state now (reads usage once; no lock, writes nothing)
 ```
 
 **`--once`, the bare command and `--review` start real Claude builds, fix rounds and decision
@@ -635,8 +636,28 @@ python3 -m dashboard --sample    # sample data, no runner needed; ?sample=<state
 
 - **Two files are the whole contract,** both in the state folder (`--state-dir`, default
   `~/.queue-runner/state`). `snapshot.json`: the runner writes it whole, the page reads it.
-  `control.json`: the page writes it whole, the runner reads it. **The runner writes neither yet**
-  (ticket 18's remaining boxes), so today only `--sample` shows anything.
+  `control.json`: the page writes it whole, the runner reads it. **The runner writes
+  `snapshot.json`** (ticket 28, below); it reads no `control.json` yet (ticket 30).
+- **The runner's snapshot** (`queue_runner/snapshot.py`, ticket 28; spec
+  `.scratch/queue-runner/dashboard-live.md`). In continuous mode only (`--once` writes none):
+  `Publisher` writes it whole (a temp file, then `os.replace`) after every pass of either lane,
+  and every `write_every` (30) seconds from its own thread, so it goes on while a lane is
+  blocked in a job. A write that fails is logged once (`The dashboard snapshot was not
+  written ...`, then `... is written again`) and never stops a lane. `build(Facts)` is pure, one
+  small function per part; `Snapshots` gathers the facts: the job log (each lane's open job),
+  `gate.json` (paused: the Claude lane `stopped`, `stopped.at` gate.json's mtime; `stopping` while
+  a job still runs), the learned costs (`CostBook.learned`), the Claude lane's wait as its last
+  pass left it (`Runner.claude_wait`: the gate's verdict text or a limit's resume), Sol's resume
+  (`JobLog.sol_resume_at`), and the titles the passes read (`Runner.titles`). **Sources** are the
+  last real call of each kind: the CLI wraps GitHub and T3 in `Calls.watch` and the gate's usage
+  reader in a `Watch`, so every call the passes make is recorded (a failing one keeps its last
+  good time). **GitHub is never read for the snapshot.** Only the publisher's own 30-second writes
+  read afresh: Claude's usage and ChatGPT's (`sol.latest_limits`, the newest `rate_limits` in
+  Codex's rollouts, the account's) at most every 5 minutes (`READ_EVERY`), and an open Claude job's
+  thread in T3 until found. Empty until tickets 31 and 32: `asks`, `answered`, `features`,
+  `issues`, `prs`, `activity` and each lane's `queue` (`_work` and `_queue`, where those tickets
+  plug in). `stop_now` is unavailable until ticket 30. `--snapshot` prints one built the same way
+  with no runner in memory (its pid and start from runner.pid, a limit's wait from the job log).
 - **The snapshot's shape is what `dashboard/sample.py` builds** (version 1): `written_at` and
   `write_every` (a snapshot older than three times that, or 90 seconds, means the runner has
   gone quiet: the page says so, greys the health readings and takes the controls away),
@@ -954,7 +975,14 @@ task XML, `Schtasks` on canned calls, `wall_sleep`, a second start, waiting for 
 with a fake kill); every test that runs `main` continuously passes a waker, so none touches the
 real Task Scheduler.
 The dashboard: `tests/test_dashboard.py` (control requests, the server on a free port, every
-sample state, and that the page loads nothing from outside itself).
+sample state, and that the page loads nothing from outside itself). The runner's snapshot:
+`tests/test_snapshot.py` (`build` from plain facts with a fixed clock, `Calls`, `Watch`,
+`Publisher`, `Snapshots` on a temp state folder, and the contract: the real snapshot holds the
+sample's keys at the top, in a lane, its job, a plan, a window and a source) and
+`tests/test_snapshot_runner.py` (through `main`: written while a build blocks the lane, after a
+run, paused, none with `--once`, `--snapshot` with the lock held; `main`'s `sol_usage` and
+`snapshot_every` keep it off Codex's real rollouts and fast). `sol.latest_limits` is in
+`tests/test_sol.py`.
 `tests/test_git.py` runs `GitCli` on a real local repo in a
 temp folder.
 
@@ -1003,6 +1031,8 @@ temp folder.
 - `queue_runner/lock.py`: `runner.lock` and `sol.lock`.
 - `queue_runner/wake.py`: the wake tasks: `Waker.sync` and the `schtasks` adapter.
 - `queue_runner/restart.py`: restarting on its own new code after main moves (ticket 14).
+- `queue_runner/snapshot.py`: the dashboard's `snapshot.json`: the facts, `build()`, the
+  sources' last calls, the usage readings and the publisher (ticket 28).
 - `queue_runner/cli.py`: the command line.
 - `dashboard/`: the dashboard, apart from the runner: `index.html` (the page), `serve.py` (its
   server and the control file), `sample.py` (the snapshot's shape, in every state), `earlier/`

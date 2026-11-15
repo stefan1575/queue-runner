@@ -5,7 +5,7 @@ import tempfile
 import unittest
 
 from queue_runner.ledger import SolFailed
-from queue_runner.sol import SolCli, SolOutOfUsage, usage_back
+from queue_runner.sol import LimitWindow, SolCli, SolOutOfUsage, latest_limits, usage_back
 
 
 class FakeRun:
@@ -112,6 +112,54 @@ class SolCliTest(unittest.TestCase):
         with self.assertRaises(SolFailed) as e:
             self.review(run)
         self.assertIn('75 minutes', str(e.exception))
+
+
+class LatestLimitsTest(unittest.TestCase):
+    """ChatGPT's plan windows for the dashboard: the newest `rate_limits` any Codex session wrote
+    (the plan is the account's, so Stefan's own sessions count as Sol's do)."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.sessions = os.path.join(tmp.name, 'sessions')
+
+    def rollout(self, day, name, records, mtime):
+        import json
+        folder = os.path.join(self.sessions, '2026', '11', day)
+        os.makedirs(folder, exist_ok=True)
+        path = os.path.join(folder, f'rollout-{name}.jsonl')
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(''.join(json.dumps(r) + '\n' for r in records))
+        os.utime(path, (mtime, mtime))
+
+    @staticmethod
+    def limits(at, primary, secondary, plan='plus'):
+        return {'timestamp': at, 'type': 'event_msg', 'payload': {'type': 'token_count', 'rate_limits': {
+            'limit_id': 'codex', 'primary': primary, 'secondary': secondary, 'plan_type': plan}}}
+
+    def test_the_newest_record_with_windows_in_the_newest_session(self):
+        reset = int(datetime.datetime(2026, 11, 15, 22, 0, tzinfo=datetime.timezone.utc).timestamp())
+        self.rollout('14', 'old', [self.limits('2026-11-14T09:00:00Z', {'used_percent': 5.0, 'window_minutes': 300, 'resets_at': 1}, None)], 1000)
+        self.rollout('15', 'new', [
+            self.limits('2026-11-15T11:30:00Z', {'used_percent': 88.0, 'window_minutes': 300, 'resets_at': reset},
+                        {'used_percent': 21.0, 'window_minutes': 10080, 'resets_at': reset + 600}),
+            self.limits('2026-11-15T11:38:00Z', {'used_percent': 93.0, 'window_minutes': 300, 'resets_at': reset},
+                        {'used_percent': 22.0, 'window_minutes': 10080, 'resets_at': reset + 600}),
+            # a premium limit's record names no windows: it isn't the plan's usage
+            self.limits('2026-11-15T11:42:00Z', None, None, plan=None),
+        ], 2000)
+        at, limits = latest_limits(self.sessions)
+        self.assertEqual(at, datetime.datetime(2026, 11, 15, 11, 38, tzinfo=datetime.timezone.utc))
+        self.assertEqual(limits.plan, 'plus')
+        self.assertEqual(limits.windows, (
+            LimitWindow(300, 93.0, datetime.datetime.fromtimestamp(reset, datetime.timezone.utc)),
+            LimitWindow(10080, 22.0, datetime.datetime.fromtimestamp(reset + 600, datetime.timezone.utc))))
+
+    def test_no_session_with_windows_is_an_error_that_says_so(self):
+        self.rollout('15', 'bare', [self.limits('2026-11-15T11:42:00Z', None, None)], 2000)
+        with self.assertRaises(LookupError) as e:
+            latest_limits(self.sessions)
+        self.assertIn('No Codex session', str(e.exception))
 
 
 class UsageBackTest(unittest.TestCase):

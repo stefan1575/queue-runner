@@ -105,6 +105,12 @@ class Runner:
                                             say=self.say),
                               limit=self._limit, find_thread=self._find_thread, now=self.now)
         self._last_why: dict[tuple[str, int], str | None] = {}
+        # For the dashboard's snapshot (`snapshot.py`, continuous mode): the Claude lane's wait as
+        # its last pass left it (a snapshot.Wait, or None), the titles of the issues and PRs the
+        # passes started jobs on, and the publisher the loop writes it with (None: no snapshot).
+        self.claude_wait = None
+        self.titles: dict[tuple[str, int], str] =             self.reviewer.titles if self.reviewer is not None else {}
+        self.publisher = None
 
     def say(self, line: str) -> None:
         with self._say_lock:   # both lanes say things
@@ -115,7 +121,12 @@ class Runner:
 
     def run_pass(self) -> str:
         job = self.plan()
-        return job() if callable(job) else job
+        if not callable(job):
+            from .snapshot import Wait
+            self.claude_wait = Wait(self.gate_until, self._last_gate or '')                 if job == GATED else None
+            return job
+        self.claude_wait = None
+        return job()
 
     def plan(self):
         """Settles, then chooses this pass's Claude job: a callable that runs it, or BUSY, IDLE
@@ -269,6 +280,10 @@ class Runner:
                             thread.latest_run_id)
         return busy
 
+    def find_thread(self, job: Job) -> Thread | None:
+        """The T3 thread of a job, by its id or else its title (the snapshot's link)."""
+        return self._find_thread(job)
+
     def _find_thread(self, job: Job) -> Thread | None:
         if job.thread_id:
             return self.t3.show(job.thread_id)[0]
@@ -289,6 +304,7 @@ class Runner:
         """STARTED once a thread ran (or may still be running); IDLE if none was started, so
         the loop pauses before trying again."""
         repo, n = build.repo, build.issue.number
+        self.titles[(repo.name, n)] = build.issue.title
         self.git.fetch(repo.path, repo.base)
         job = self.jobs.started(kind='build', repo=repo.name, issue=n, branch=build.branch,
                                 title=job_title(repo, n))
@@ -369,6 +385,7 @@ class Runner:
         which it pushes to the PR's. With no review, a conflict round: it merges the base in.
         IDLE if none was started."""
         n, h = pr.number, pr.head_sha
+        self.titles[(repo.name, n)] = pr.title
         try:
             _, fetched = self.git.fetch_pr(repo.path, n, pr.base)
         except Exception as e:
@@ -605,10 +622,15 @@ class Runner:
                 self.say("T3's server is up")
             return
 
+    def _publish(self) -> None:
+        if self.publisher is not None:
+            self.publisher.publish()   # never raises: a failed write is said once
+
     def _sol_lane(self, stop: threading.Event) -> None:
         while not stop.is_set():
             did = self._sol_pass()
             self._wake()
+            self._publish()
             if did != STARTED:
                 end = time.time() + self.config.poll_seconds
                 while not stop.is_set() and (left := end - time.time()) > 0:
@@ -645,6 +667,8 @@ class Runner:
         the Sol lane finish its pass, updates the checkout and returns RESTART, with the new
         commit in `restart_sha`; if git won't update it, both lanes carry on."""
         stop = threading.Event()
+        if self.publisher is not None:
+            self.publisher.start()
         sol = self._start_sol_lane(stop)
         try:
             while True:
@@ -655,6 +679,7 @@ class Runner:
                     did = IDLE
                 self._claude_waits = self.gate_until
                 self._wake()
+                self._publish()
                 if self._update_due():
                     self.say("The runner's own code moved: restarting on the new code once the "
                              'Sol lane ends its pass')
@@ -670,3 +695,5 @@ class Runner:
         finally:
             stop.set()
             sol.join(timeout=5)
+            if self.publisher is not None:
+                self.publisher.stop()

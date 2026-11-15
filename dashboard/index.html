@@ -1002,7 +1002,7 @@ function notices() {
   const out = [];
   if (fault === "server") out.push(`<p class="notice"><b>This page lost its own server.</b> What's below is as it was at ${esc(clock(snap.written_at))}. Start it again with <code>python3 -m dashboard</code>.</p>`);
   else if (isStale()) out.push(`<p class="notice"><b>The runner hasn't written since ${esc(clock(snap.written_at))}, ${esc(ago(snap.written_at))} ago.</b> Everything here is as it was then. ${esc(snap.start_hint || "")}</p>`);
-  for (const s of snap.sources || []) if (!s.ok && s.affects) out.push(`<p class="notice"><b>${esc(s.name)}: ${esc(s.note)}</b>, last good ${esc(clock(s.checked_at))}. ${esc(s.affects)}</p>`);
+  for (const s of snap.sources || []) if (!s.ok && s.affects) out.push(`<p class="notice"><b>${esc(s.name)}: ${esc(s.note)}</b>, ${s.checked_at ? `last good ${esc(clock(s.checked_at))}` : "never answered"}. ${esc(s.affects)}</p>`);
   return out.join("");
 }
 
@@ -1700,10 +1700,10 @@ function meter(w, full) {
     <span class="bar" role="img" aria-label="${esc(w.label)}: ${known ? used + "% used" : "unknown"}">
       ${known ? `<i class="fill" style="width:${Math.min(used, 100)}%"></i>` : ""}${w.reserve ? `<i class="kept" style="width:${w.reserve}%" title="${w.reserve}% kept for you"></i>` : ""}</span>
     <span class="pct">${known ? used + "%" : "?"}</span>
-    <span class="when">resets ${esc(stamp(w.resets_at))}${full && !w.gates ? `. ${esc(w.note || "Not used by the runner.")}` : ""}</span></div>`;
+    <span class="when">${w.resets_at ? `resets ${esc(stamp(w.resets_at))}` : "not started"}${full && !w.gates ? `. ${esc(w.note || "Not used by the runner.")}` : ""}</span></div>`;
 }
 const plan = (p, full) => `<div class="plan">
-    <p class="plan-name">${who(p.provider, p.name)}<span class="dim small">${p.plan ? esc(p.plan) + ", " : ""}read ${esc(clock(p.read_at))}</span></p>
+    <p class="plan-name">${who(p.provider, p.name)}<span class="dim small">${p.plan ? esc(p.plan) + ", " : ""}${p.read_at ? `read ${esc(clock(p.read_at))}` : "not read yet"}</span></p>
     ${p.error ? `<p class="plan-note bad">${esc(p.error)}</p>` : ""}
     ${(p.windows || []).map((w) => meter(w, full)).join("")}
     ${(p.windows || []).filter((w) => w.reserve).map((w) => `<p class="plan-note">${w.reserve}% of the week is kept for you.</p>`).join("")}
@@ -1719,7 +1719,7 @@ function status() {
   const one = (x) => `<span class="${x.ok || down ? "" : "no"}" title="${esc(x.name)}: ${esc(x.note || "")}"><i class="dot ${down ? "" : x.ok ? "ok" : "bad"}"></i>${esc(x.short || x.name)}</span>`;
   return `<a class="card status${down ? " down" : ""}" href="${esc(href({ page: "settings", pr: null }))}" data-act="page" data-page="settings" title="Connections are in Settings">
     <span class="h-top"><i class="dot ${down ? "bad" : "ok"}"></i><b>${down ? "Runner silent" : "Runner running"}</b></span>
-    <span class="h-when">since ${esc(stamp(down ? snap.written_at : snap.runner.started_at))}</span>
+    ${(down ? snap.written_at : (snap.runner || {}).started_at) ? `<span class="h-when">since ${esc(stamp(down ? snap.written_at : snap.runner.started_at))}</span>` : ""}
     <span class="h-groups">${groups.map(([label, xs]) => `<span class="h-label">${label}</span><span class="h-row">${xs.map(one).join("")}</span>`).join("")}</span>
     ${!down && bad.length ? `<span class="h-bad">${bad.map((x) => `${esc(x.name)}: ${esc(x.note)}`).join(". ")}</span>` : ""}</a>`;
 }
@@ -1787,8 +1787,8 @@ function settings() {
       <table class="plain"><tbody>${roles.map((x) => { const l = lanesBy.get(x.lane) || {}; return `<tr><td class="strong" style="width:150px">${esc(x.job)}</td><td class="mute">${esc(x.what)}</td><td style="width:170px">${who(l.provider, l.name || x.lane)}</td></tr>`; }).join("")}</tbody></table></section>` : ""}
     <section class="card"><header class="card-head"><h2>Connections</h2></header>
       <ul class="rows">
-        <li><i class="dot ${stale ? "bad" : "ok"}"></i><span class="strong">Runner</span><span class="${stale ? "no" : "mute"}">${stale ? `Silent since ${esc(clock(snap.written_at))}` : `Up since ${esc(clock(r.started_at))}, process ${esc(r.pid)}, on commit <span class="sha">${esc(r.commit)}</span>`}</span><span class="dim small">wrote ${esc(clock(snap.written_at))}</span></li>
-        ${(snap.sources || []).map((s) => `<li><i class="dot ${stale ? "" : s.ok ? "ok" : "bad"}"></i><span class="strong">${esc(s.name)}</span><span class="${s.ok ? "mute" : "no"}">${esc(s.note || (s.ok ? "ok" : "failing"))}${!s.ok && s.affects ? `. ${esc(s.affects)}` : ""}</span><span class="dim small">${s.ok ? "checked" : "last good"} ${esc(clock(s.checked_at))}</span></li>`).join("")}
+        <li><i class="dot ${stale ? "bad" : "ok"}"></i><span class="strong">Runner</span><span class="${stale ? "no" : "mute"}">${stale ? `Silent since ${esc(clock(snap.written_at))}` : `Up${r.started_at ? ` since ${esc(clock(r.started_at))}` : ""}, process ${esc(r.pid ?? "unknown")}, on commit <span class="sha">${esc(r.commit)}</span>`}</span><span class="dim small">wrote ${esc(clock(snap.written_at))}</span></li>
+        ${(snap.sources || []).map((s) => `<li><i class="dot ${stale ? "" : s.ok ? "ok" : "bad"}"></i><span class="strong">${esc(s.name)}</span><span class="${s.ok ? "mute" : "no"}">${esc(s.note || (s.ok ? "ok" : "failing"))}${!s.ok && s.affects ? `. ${esc(s.affects)}` : ""}</span><span class="dim small">${s.checked_at ? `${s.ok ? "checked" : "last good"} ${esc(clock(s.checked_at))}` : s.ok ? "" : "never answered"}</span></li>`).join("")}
       </ul></section>`;
 }
 

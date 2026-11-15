@@ -15,10 +15,13 @@
     python -m queue_runner --stop             # stop the running runner (its pid in runner.pid)
     python -m queue_runner --inbox            # everything waiting on Stefan: PRs ready to
                                               # merge, needs-info stops, threads waiting
+    python -m queue_runner --snapshot         # print the dashboard's snapshot from the state
+                                              # now (reads usage once; no lock, writes nothing)
 """
 import argparse
 import contextlib
 import datetime
+import json
 import os
 import re
 import sys
@@ -362,6 +365,51 @@ def _review(config, github, git, sol, value, out, log_line, toaster=None, deps=N
     return 0
 
 
+def _commit() -> str | None:
+    """The commit this runner's code is on (the snapshot's `runner.commit`)."""
+    import subprocess
+    try:
+        p = subprocess.run(['git', '-C', os.path.dirname(DEFAULT_CONFIG), 'rev-parse', '--short',
+                            'HEAD'], capture_output=True, text=True, timeout=10,
+                           creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return p.stdout.strip() or None if p.returncode == 0 else None
+
+
+def _utc_now():
+    return datetime.datetime.now(datetime.timezone.utc)
+
+
+def _snapshot(config, gate, sol_usage, clock, out) -> int:
+    """`--snapshot`: one snapshot from the state now, printed. It reads Claude's usage once and
+    Codex's newest rollout, takes no lock, and starts, posts, records and writes nothing. The
+    runner's pid and start are runner.pid's, if one is there."""
+    from .snapshot import Calls, RunnerInfo, Snapshots, Watch
+    calls = Calls(clock)
+    pid = started = None
+    with contextlib.suppress(OSError, ValueError):
+        with open(_pid_file(config), encoding='utf-8') as f:
+            pid = int(f.read().strip())
+        started = datetime.datetime.fromtimestamp(os.path.getmtime(_pid_file(config)),
+                                                  datetime.timezone.utc)
+    snaps = Snapshots(config, calls=calls, clock=clock, info=RunnerInfo(pid, started, _commit()),
+                      claude=Watch(gate.reader.read, calls, 'claude_usage', clock),
+                      sol=Watch(sol_usage, calls, 'sol_usage', clock, timed=True))
+    print(json.dumps(snaps.build(fresh=True), indent=1, ensure_ascii=False), file=out)
+    return 0
+
+
+def _publisher(config, runner, calls, claude, sol_usage, clock, log_line, every):
+    """The running runner's snapshot (`snapshot.py`): written by both lanes and its own thread."""
+    from .snapshot import Publisher, RunnerInfo, Snapshots, Watch
+    snaps = Snapshots(config, calls=calls, clock=clock, runner=runner, claude=claude,
+                      sol=Watch(sol_usage, calls, 'sol_usage', clock, timed=True),
+                      info=RunnerInfo(os.getpid(), clock(), _commit()))
+    return Publisher(os.path.join(config.state_dir, 'snapshot.json'), snaps.build, log_line,
+                     every=every)
+
+
 def _pid_file(config) -> str:
     return os.path.join(config.state_dir, 'runner.pid')
 
@@ -430,7 +478,8 @@ def _relauncher(config, toaster, log_line):
 
 def main(argv=None, github=None, out=None, t3=None, git=None, sleep=None,
          sol=None, toaster=None, usage=None, clock=None, limits=None,
-         t3_settings=None, waker=None, kill=_kill, self_update=None, relaunch=None) -> int:
+         t3_settings=None, waker=None, kill=_kill, self_update=None, relaunch=None,
+         sol_usage=None, snapshot_every=None) -> int:
     out = out or sys.stdout   # None under pythonw: print() then prints nothing
     sleep = sleep or wall_sleep
     parser = argparse.ArgumentParser(prog='queue_runner')
@@ -451,6 +500,9 @@ def main(argv=None, github=None, out=None, t3=None, git=None, sleep=None,
     parser.add_argument('--inbox', action='store_true',
                         help='list everything waiting on Stefan: PRs ready to merge, '
                              'needs-info stops, threads waiting for an answer')
+    parser.add_argument('--snapshot', action='store_true',
+                        help="print the dashboard's snapshot built from the state now (no lock; "
+                             'starts, posts and records nothing)')
     parser.add_argument('--config', default=DEFAULT_CONFIG)
     args = parser.parse_args(argv)
     if args.dry_run and not args.once:
@@ -482,6 +534,11 @@ def main(argv=None, github=None, out=None, t3=None, git=None, sleep=None,
     if args.gate:
         _print_gate(gate, out)
         return 0
+    if sol_usage is None:
+        from .sol import latest_limits as sol_usage
+    snap_clock = clock or _utc_now
+    if args.snapshot:
+        return _snapshot(config, gate, sol_usage, snap_clock, out)
 
     if github is None:
         from .github import GhCli
@@ -521,9 +578,19 @@ def main(argv=None, github=None, out=None, t3=None, git=None, sleep=None,
         waker = Waker(Schtasks(), say=lambda line: runner.say(line), now=clock)
     if self_update is None and not args.once:
         self_update = _self_update(config, log_line)
+    calls = None
+    if not args.once:   # the dashboard's sources: the last real call of each kind
+        from .snapshot import Calls, Watch
+        calls = Calls(snap_clock)
+        github, t3 = calls.watch(github, 'github'), calls.watch(t3, 't3')
+        gate.reader = Watch(gate.reader.read, calls, 'claude_usage', snap_clock)
     runner = Runner(config, github=github, t3=t3, git=git, out=out, log_line=log_line, sol=sol,
                     toaster=toaster, gate=gate, limits=limits, now=clock, waker=waker,
                     self_update=self_update, deps=deps)
+    if calls is not None:   # continuous mode only: --once writes no snapshot
+        from .snapshot import WRITE_EVERY
+        runner.publisher = _publisher(config, runner, calls, gate.reader, sol_usage, snap_clock,
+                                      log_line, snapshot_every or WRITE_EVERY)
     if warning := auto_resume_warning(*([t3_settings] if t3_settings else [])):
         runner.say(f'Warning: {warning}')
     restart = None

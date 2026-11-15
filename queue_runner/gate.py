@@ -170,17 +170,24 @@ class CostBook:
             rec['error'] = error
         append_record(self.path, rec)
 
+    def _spent(self, kind: str, window: str) -> list[float]:
+        return [r['spent'][window] for r in read_records(self.path)
+                if r.get('kind') == kind and r.get('spent')
+                and r['spent'].get(window) is not None]
+
     def expected(self, kind: str) -> Cost:
         """Raises ValueError if usage.jsonl has a bad line (other than a torn last one)."""
-        spent = [r['spent'] for r in read_records(self.path)
-                 if r.get('kind') == kind and r.get('spent')]
         default = self.default(kind)
 
         def learned(window, fallback):
-            got = [s[window] for s in spent if s.get(window) is not None]
+            got = self._spent(kind, window)
             return max(got[-RECENT:]) if len(got) >= SAMPLES else fallback
         return Cost(learned('five_hour', default.five_hour),
                     learned('seven_day', default.seven_day))
+
+    def learned(self, kind: str) -> bool:
+        """Whether `expected(kind)` is learned in both windows, not the cautious default."""
+        return all(len(self._spent(kind, w)) >= SAMPLES for w in ('five_hour', 'seven_day'))
 
 
 class Gate:
