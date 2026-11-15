@@ -206,6 +206,40 @@ class InboxTest(Harness):
                          ('stuck', 'PR #12', 'Red widget', 'A red widget.'))
 
 
+class WorkTest(Harness):
+    """The Sol lane reads the work after each pass too (ticket 32), each GitHub call once for
+    the Inbox and the work together, and the snapshot writes its lists from that read."""
+
+    def test_a_sol_pass_reads_the_work_and_the_snapshot_writes_the_queues_from_it(self):
+        from queue_runner.snapshot import Calls, RunnerInfo, Snapshots
+        from tests.fakes import FakeGitHubForReviews, full_pr
+
+        class Counting(FakeGitHubForReviews):
+            def __init__(self, *a, **kw):
+                super().__init__(*a, **kw)
+                self.calls = []
+
+            def open_pulls(self, repo):
+                self.calls.append('open_pulls')
+                return super().open_pulls(repo)
+        config = load_config(self.config)
+        gh = Counting(prs=[full_pr(12, 'claude/red-widget-4', 'b' * 40, title='Red widget')],
+                      issues=[issue(5, 'Blue widget')])
+        gh.work_list = []
+        runner = Runner(config, github=gh, t3=FakeT3(), git=FakeGit(), out=io.StringIO(),
+                        log_line=lambda line: None)
+        snaps = Snapshots(config, calls=Calls(lambda: datetime.datetime.now(UTC)), claude=None,
+                          sol=None, info=RunnerInfo(1, None, None),
+                          clock=lambda: datetime.datetime.now(UTC), runner=runner)
+        runner.publisher = RecordingPublisher()
+        runner._sol_pass()
+        self.assertEqual(gh.calls, ['open_pulls'])   # once for the Inbox and the work
+        gh.prs.clear()
+        snap = snaps.build()
+        self.assertEqual([q['ref'] for q in lane(snap, 'sol')['queue']], ['PR #12'])
+        self.assertEqual([q['ref'] for q in lane(snap, 'claude')['queue']], ['#5'])
+
+
 class SnapshotFlagTest(Harness):
     def test_it_prints_one_snapshot_from_the_real_state_and_takes_no_lock(self):
         log = JobLog(os.path.join(self.state, 'jobs.jsonl'))

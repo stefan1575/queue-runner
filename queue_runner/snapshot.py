@@ -523,9 +523,11 @@ class Snapshots:
     are the usage `Watch`es. Nothing here reads GitHub."""
 
     def __init__(self, config, *, calls: Calls, claude: Watch | None, sol: Watch | None,
-                 info: RunnerInfo, clock, runner=None):
+                 info: RunnerInfo, clock, runner=None, readers=None):
         self.config, self.calls, self.claude, self.sol = config, calls, claude, sol
         self.info, self.clock, self.runner = info, clock, runner
+        # With no runner (`--snapshot`): the Inbox's and the work's readers, each read once.
+        self.readers = dict(readers or {})
         self._threads: dict[str, str] = {}
         self._lock = threading.Lock()
 
@@ -574,12 +576,17 @@ class Snapshots:
             **self._inbox(log))
 
     def _inbox(self, log) -> dict:
-        """The Sol lane's last Inbox read (ticket 31), and the releases its timelines tell."""
-        reader = getattr(self.runner, 'inbox', None)
-        if reader is None:
-            return {}
-        return {'inbox': reader.last(), 'inbox_stale': reader.stale(),
-                'releases': log.releases()}
+        """The Sol lane's last Inbox read (ticket 31) and work read (ticket 32), the releases
+        their timelines tell, and the jobs a limit cut off. `--snapshot` has no runner: it gives
+        `readers`, read once."""
+        found = {'releases': log.releases(), 'limited': log.limited_jobs()}
+        inbox = self.readers.get('inbox') or getattr(self.runner, 'inbox', None)
+        if inbox is not None:
+            found.update(inbox=inbox.last(), inbox_stale=inbox.stale())
+        work = self.readers.get('work') or getattr(self.runner, 'work', None)
+        if work is not None:
+            found.update(work=work.last(), work_stale=work.stale())
+        return found
 
     def _find_threads(self, jobs) -> None:
         if self.runner is None:

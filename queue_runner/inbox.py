@@ -339,8 +339,9 @@ class Reader:
         self._reviews: dict = {}
         self._stale: dict[str, tuple] = {}    # repo: (last good read or None, the error)
 
-    def read(self) -> Inbox:
-        got = collect(self.config, self.github, self.jobs)
+    def read(self, github=None) -> Inbox:
+        """With `github`, the pass's shared reads (`work.Memo`), else its own GitHub."""
+        got = collect(self.config, github if github is not None else self.github, self.jobs)
         now = self.clock()
         with self._lock:
             items, answered = [], []

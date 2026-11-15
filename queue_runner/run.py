@@ -118,6 +118,9 @@ class Runner:
         # a snapshot is published, and kept for it (`inbox.Reader`).
         from .inbox import Reader
         self.inbox = Reader(config, github, self.jobs, clock=self.now)
+        # The work (ticket 32): the queues, issues, features and PRs, read with the Inbox.
+        from .work import Reader as WorkReader
+        self.work = WorkReader(config, github, git, self.jobs, clock=self.now)
         # What each lane last said about its switch (`control.py`), so it's said once.
         self._said_switch: dict[str, str | None] = {}
         # The build order (ticket 33): what was last said about it, and a lock, as both lanes
@@ -669,14 +672,18 @@ class Runner:
             self._read_inbox()
 
     def _read_inbox(self) -> None:
-        """The Inbox for the snapshot, read from GitHub here in the Sol lane (never for the
-        snapshot itself). A repo GitHub can't be read keeps its last asks (`inbox.Reader`)."""
+        """The Inbox and the work for the snapshot, read from GitHub here in the Sol lane (never
+        for the snapshot itself), each GitHub call once for both (`work.Memo`). A repo GitHub
+        can't be read keeps its last asks and lists (`inbox.Reader`, `work.Reader`)."""
         if self.publisher is None:
             return
-        try:
-            self.inbox.read()
-        except Exception:
-            self.log_line('reading the Inbox failed:\n' + traceback.format_exc())
+        from .work import Memo
+        github = Memo(self.github)
+        for name, reader in (('the Inbox', self.inbox), ('the work', self.work)):
+            try:
+                reader.read(github)
+            except Exception:
+                self.log_line(f'reading {name} failed:\n' + traceback.format_exc())
 
     def wake_times(self) -> list[datetime.datetime]:
         """The times the lanes wait for now: the Claude lane's gate or limit, Sol's resume. A lane

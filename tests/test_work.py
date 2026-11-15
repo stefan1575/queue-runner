@@ -363,5 +363,33 @@ class HistoryTest(WorkCase):
         self.assertEqual(len(self.snap()['activity']), 200)
 
 
+class GitHubDownTest(WorkCase):
+    def test_the_last_lists_stay_and_the_github_source_says_since_when(self):
+        self.gh.prs = [full_pr(6, 'claude/blue-4', H2, title='Blue')]
+        times = iter([NOW, NOW + datetime.timedelta(minutes=5)])
+        reader = self.reader(clock=lambda: next(times))
+        reader.read()
+        self.gh.fail.add('work_issues')
+        reader.read()
+        snap = self.snap(reader, calls={'github': snapshot.Call(NOW, True, None, NOW)})
+        self.assertEqual(refs(lane(snap, 'sol')['queue']), [('review', 'PR #6')])
+        src = next(s for s in snap['sources'] if s['id'] == 'github')
+        self.assertFalse(src['ok'])
+        self.assertEqual(datetime.datetime.fromisoformat(src['checked_at']), NOW)
+        self.assertIn('HTTP 503', src['note'])
+        self.assertEqual(src['affects'], 'The queues, issues and PRs are as GitHub last showed '
+                                         'them for first: some may have changed since.')
+
+    def test_a_repo_never_read_has_no_lists_and_says_so(self):
+        self.gh.fail.add('work_issues')
+        reader = self.reader()
+        reader.read()
+        snap = self.snap(reader)
+        self.assertEqual(lane(snap, 'claude')['queue'], [])
+        src = next(s for s in snap['sources'] if s['id'] == 'github')
+        self.assertIsNone(src['checked_at'])
+        self.assertFalse(src['ok'])
+
+
 if __name__ == '__main__':
     unittest.main()

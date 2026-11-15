@@ -781,4 +781,20 @@ def _activity(story, v: View, titles: dict, releases) -> list[dict]:
 
 def stale_github(sources: list[dict], stale: dict) -> None:
     """When a repo's work couldn't be read, its lists are the last good read's: the GitHub source
-    says so (as `asks.stale_github` does for the Inbox)."""
+    says so, since when and what it affects (as `asks.stale_github` does for the Inbox, whose
+    line this one joins)."""
+    src = next((s for s in sources if s['id'] == 'github'), None)
+    if not stale or src is None:
+        return
+    names = ', '.join(sorted(stale))
+    whens = [when for when, _ in stale.values() if when is not None]
+    error = next((e for _, e in stale.values() if e), '')
+    text = (f'The queues, issues and PRs are as GitHub last showed them for {names}: some may '
+            'have changed since.')
+    earlier = None if src['ok'] else src
+    at = min(whens).astimezone().isoformat(timespec='seconds')         if len(whens) == len(stale) else None
+    if earlier is not None:   # the Inbox's line was there first: both are said, the older time
+        at = min(filter(None, (at, earlier['checked_at'])), default=None)             if at and earlier['checked_at'] else None
+    src.update(ok=False, note=earlier['note'] if earlier else _sentence(
+        error.split(': ', 1)[-1]) or "Couldn't be read", checked_at=at,
+        affects=f'{earlier["affects"]} {text}' if earlier and earlier.get('affects') else text)
