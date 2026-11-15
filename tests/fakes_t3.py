@@ -1,5 +1,5 @@
 """In-memory T3 and git for tests: no T3 server, no git."""
-from queue_runner.t3 import RunResult, T3Error, Thread
+from queue_runner.t3 import Launched, RunResult, T3Error, Thread
 
 
 def decision_reply(action, version=1, prose='I read the sources.', **fields) -> str:
@@ -20,6 +20,8 @@ class FakeT3:
         self.sends = []
         self.threads: dict[str, Thread] = {}
         self.messages: dict[str, list] = {}   # thread id -> its last messages (Message)
+        self.launches = []        # threads started without waiting (ticket 35's ask threads)
+        self.launch_error = None  # a T3Error the next launch raises
 
     def add(self, thread_id, title, status, created_at='2099-01-01T00:00:00.000Z', **extra):
         self.threads[thread_id] = Thread(
@@ -50,6 +52,17 @@ class FakeT3:
         reply = outcome[2] if len(outcome) > 2 else ('Done.' if code == 0 else None)
         return RunResult(exit_code=code, thread_id=thread_id, run_id=f'run:{thread_id}:1',
                          status=status, reply=reply, error='It broke.' if code == 1 else None)
+
+    def launch(self, project, message, *, title, provider=None, model=None):
+        """A thread started without waiting: it's running, with no reply yet."""
+        self.launches.append(dict(project=project, message=message, title=title,
+                                  provider=provider, model=model))
+        if self.launch_error is not None:
+            error, self.launch_error = self.launch_error, None
+            raise error
+        thread_id = f'mcp:a{len(self.launches)}'
+        self.add(thread_id, title, 'running')
+        return Launched(thread_id=thread_id, run_id=f'run:{thread_id}:1')
 
     def send(self, thread_id, message):
         """A message to an existing thread: the next outcome is how its new run ends."""

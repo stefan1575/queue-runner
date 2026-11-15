@@ -72,8 +72,9 @@ def _snooze_until(value: object) -> str | None:
 
 def apply_control(control: dict, body: object, now: str, asks: set | None = None) -> dict:
     """The control file after one request: `{"lane", "stop"}`, `{"repo", "stop"}` (ticket 37),
-    `{"repo_order"}`, or an ask's `{"ask", "read"}` and `{"ask", "snooze_until"}` (ticket 36),
-    kept under `asks.<id>` beside that object's other keys. With `asks`, the ids the snapshot
+    `{"repo_order"}`, or an ask's `{"ask", "read"}` and `{"ask", "snooze_until"}` (ticket 36) and
+    `{"ask", "open": true}` (ticket 35: decide that ask in a T3 thread), kept under `asks.<id>`
+    beside that object's other keys. With `asks`, the ids the snapshot
     lists now, entries for any other ask are dropped."""
     if not isinstance(body, dict):
         raise Refused("a JSON object is expected")
@@ -114,9 +115,18 @@ def apply_control(control: dict, body: object, now: str, asks: set | None = None
             marks.setdefault(ask, {})["read"] = body["read"]
         else:
             marks.setdefault(ask, {})["snooze_until"] = _snooze_until(body["snooze_until"])
+    elif keys == {"ask", "open"}:   # ticket 35: the runner starts a thread to decide it in, once
+        ask = body["ask"]
+        if not isinstance(ask, str) or not ASK.match(ask):
+            raise Refused("ask must be an ask's id")
+        if body["open"] is not True:
+            raise Refused("open must be true")
+        record = marks.setdefault(ask, {})
+        if not isinstance(record.get("open"), dict):   # asked again: the first time stands
+            record["open"] = {"at": now}
     else:
-        raise Refused('send {"lane", "stop"}, {"repo", "stop"}, {"repo_order"}, {"ask", "read"} '
-                      'or {"ask", "snooze_until"}')
+        raise Refused('send {"lane", "stop"}, {"repo", "stop"}, {"repo_order"}, {"ask", "read"}, '
+                      '{"ask", "snooze_until"} or {"ask", "open": true}')
     if asks is not None:   # an ask that's gone takes its entry with it
         marks = {k: v for k, v in marks.items() if k in asks}
     return {"version": 1, "written_at": now, "lanes": lanes, "repo_order": order, "repos": repos,

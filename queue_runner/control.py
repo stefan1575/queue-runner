@@ -25,6 +25,9 @@ from either lane (a job already running on it finishes), taken up at the start o
 (`stopped_repos`). A name that isn't served is ignored; an entry the page couldn't have written
 makes the file unreadable, as a lane's does.
 
+`asks.<id>.open` (ticket 35, `{"at"}`) asks the runner to start a T3 thread to decide that ask in
+(`ask_threads.py`), read as `Switch.opened`; one the page couldn't have written is ignored.
+
 **The older code's pause** was `gate.json`'s `paused`. With `paused: true` there and no entry for
 the Claude lane here, the Claude lane is stopped (since gate.json was written); an entry, either
 way, wins. `ask` carries such a pause over into this file and drops it from gate.json, which then
@@ -62,6 +65,7 @@ class Switch:
     error: str | None = None
     order: object = None   # `repo_order` as written (None: not there); `ordered` judges it
     repos: dict = field(default_factory=dict)   # repo name: Stop, as written (ticket 37)
+    opened: dict = field(default_factory=dict)  # ask id: when Stefan asked to open it (ticket 35)
     asks: dict = field(default_factory=dict)    # ask id: its entry, a dict (ticket 36)
 
     def stop(self, lane: str) -> Stop:
@@ -160,7 +164,20 @@ def read(state_dir: str) -> Switch:
     marks = raw.get('asks') if isinstance(raw.get('asks'), dict) else {}
     return Switch(lanes, written if isinstance(written, str) else None,
                   order=raw.get('repo_order'), repos=repos,
-                  asks={k: v for k, v in marks.items() if isinstance(v, dict)})
+                  asks={k: v for k, v in marks.items() if isinstance(v, dict)},
+                  opened=_opened(raw))
+
+
+def _opened(raw: dict) -> dict:
+    """Each ask Stefan asked to open in a T3 thread (`asks.<id>.open.at`), and when."""
+    asks = raw.get('asks')
+    found = {}
+    for id, record in (asks.items() if isinstance(asks, dict) else ()):
+        at = _when(record.get('open', {}).get('at')) if isinstance(record, dict) and isinstance(
+            record.get('open'), dict) else None
+        if at is not None:
+            found[id] = at
+    return found
 
 
 def ordered(repos: list, order) -> tuple[list, str | None]:

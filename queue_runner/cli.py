@@ -213,6 +213,7 @@ def _dry_run(config, github, git, out, log_line, t3=None, gate=None) -> int:
             print(f'dry run: {line}', file=out)
         set_stopped(config, control.stopped_repos(repos, switch)[0])
     if not _dry_run_limited(config, out, log_line) and \
+            not _dry_run_ask(config, github, t3, switch, out, log_line) and \
             not _dry_run_decision(config, github, t3, out, log_line) and \
             not _dry_run_live(config, github, git, t3, out, log_line) and \
             not _dry_run_fix(config, github, git, out, log_line):
@@ -240,6 +241,33 @@ def _dry_run_stops(config, github, out) -> None:
                       file=out)
             if why := held(jobs, repo, pr.number):
                 print(f'  {repo.name}#{pr.number}: {why}', file=out)
+
+
+def _dry_run_ask(config, github, t3, switch, out, log_line) -> bool:
+    """Prints the ask thread Stefan asked for that the Claude lane would open first (ticket 35),
+    with its brief."""
+    from .ask_threads import AskThreads
+    from .decisions import Decider
+    from .stops import Stopper
+    if switch.error is not None:
+        return False
+    jobs = _jobs(config)
+    decider = Decider(config, github=github, t3=t3, jobs=jobs, say=lambda line: None,
+                      stopper=Stopper(config, github=github, jobs=jobs, say=lambda line: None))
+    asking = AskThreads(config, github=github, t3=t3, jobs=jobs, say=lambda line: None,
+                        decider=decider)
+    found = asking.next(switch)
+    if found is None:
+        return False
+    repo, stop, pr = found
+    log_line(f'dry run: would open an ask thread on {repo.name}#{pr.number}')
+    print(f'Would open a T3 thread for Stefan to decide {repo.name}#{pr.number} in (dry run: '
+          'nothing started)', file=out)
+    print('  brief:', file=out)
+    print('-' * 72, file=out)
+    print(asking.brief(repo, stop, pr), file=out)
+    print('-' * 72, file=out)
+    return True
 
 
 def _dry_run_decision(config, github, t3, out, log_line) -> bool:

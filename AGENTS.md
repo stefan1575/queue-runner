@@ -15,7 +15,7 @@ before). Commit after every completed step, with a message that says what change
 ```
 python3 -m queue_runner                       # run: both lanes, pass after pass (unattended: see Running unattended)
 python3 -m queue_runner --once                # one pass of each lane: at most one Claude job (a decision, a fix round or a build), merges, at most one Sol review
-python3 -m queue_runner --once --dry-run      # print the next Claude job's brief (a job cut off by a usage limit first, then a decision, then a fix round), list the stops it would file, what Sol would review and what would merge
+python3 -m queue_runner --once --dry-run      # print the next Claude job's brief (a job cut off by a usage limit first, then an ask thread Stefan asked for, then a decision, then a fix round), list the stops it would file, what Sol would review and what would merge
 python3 -m queue_runner --release NAME#N      # let the picker take a held issue again (a PR: retry its failed reviews, merges and fix round; let a stopped PR go)
 python3 -m queue_runner --review NAME#N       # Sol reviews that PR's head now, if adoption says it needs one
 python3 -m queue_runner --gate                # Claude's usage now, and whether a build, fix or decision would start
@@ -349,7 +349,11 @@ any other name is refused with exit 2).
    recorded again. One that's running again, or that T3 can't read, also makes the pass start
    nothing: if its thread is gone for good, `--release` the issue. A decision left open was cut
    off with its runner: `not-started`, so it's decided again.
-2. **A decision** (`decisions.py`; Decision threads, below), before any fix round or build: the
+2. **An ask thread** (`ask_threads.py`; Deciding an ask in T3, below): first each open ask
+   thread's newest reply is read and a readable answer acted on; then, before any decision, a
+   thread Stefan asked for from the Inbox is opened (not waited on). A job a limit cut off still
+   comes first.
+   **A decision** (`decisions.py`; Decision threads, below), before any fix round or build: the
    first case the fixed flow doesn't cover.
 3. **Live steps** (`live.py`; Live steps, below): a repo's merges since its last live run, once no
    other merge is about to land.
@@ -497,6 +501,55 @@ job decided on: the review, the stop, or the build or fix; `question`): the outc
 taken, `reason` the text acted on, `link` the thread (an approach note: the note's comment),
 `error` why an answer couldn't be read; `not-started` when T3 started no thread, so the next pass
 tries again.
+
+## Deciding an ask in T3
+
+`ask_threads.py` and `templates/ask.md` (ticket 35; spec `.scratch/queue-runner/dashboard-live.md`).
+On a stopped PR's ask (a stop of kind `review`, `approach-note`, `no-push`, `conflict`,
+`failed-check` or `decision`; not a live run's), the Inbox offers **Decide in T3**: the page writes
+`{"ask": <id>, "open": true}` (`control.json`'s `asks.<id>.open`, `{"at"}`; the first time stands,
+and ticket 36's keys in the same record are kept). The runner starts a thread for it only on that
+click, never by itself.
+
+- **Opening** (`AskThreads.next`, `open`): the Claude lane, after a limited job and before any
+  decision, takes the oldest request whose stop is still `filed`, in a repo it works, with the
+  PR open, and starts `Queue runner ask: <repo>#<n>` in the repo's T3 project with no worktree,
+  **without waiting** (`T3Cli.launch`: `t3 thread start --json` prints `{threadId, projectId,
+  runId}`, read in `server.asar` 2026-11-15), then reads its link with `thread show`. Gated as a
+  decision; it teaches the learned costs nothing (`measured` records only passes that made a
+  Claude job of a gated kind). A stopped Claude lane or repo keeps the request and starts nothing
+  until Resume. **Once per ask:** an `ask` job (`about` the stop, `sha` its H, `question`
+  `reply`) ends `opened` with the thread's `thread_id`, `run_id` and `link`; T3 failing ends it
+  `not-started`, and the next pass tries again. A link T3 didn't give at the start is recorded
+  when the thread is next read.
+- **The brief** is the ask as the Inbox writes it (`asks.ask`, from the PR read now), the PR's open
+  findings and classes (`Decider._pr_part`) and the earlier threads; it tells the thread to set the
+  case out with a recommendation, talk it through, change nothing, and only once Stefan has
+  decided end with a `queue-runner-decision` block: the `reply` question's `fix` (`add`),
+  `carry-on`, `hold` or `stop` (`question`).
+- **Reading the answer** (`read_answers`, each Claude pass after the lane's switch, before
+  choosing): each opened thread's newest message (`thread show --messages 1`). Nothing happens
+  while it runs, when Stefan spoke last, or with no block yet; a block it can't act on is said once
+  and waits for another. A readable one ends the stop `answered` with `answer` `thread`, then a
+  `decision` job (`question` `reply`, `about` the stop, `sha` the PR's head now, `link` the
+  thread) is acted on by `Decider.act`, exactly as a decision thread on Stefan's reply: `fix`
+  orders one more round on H (`Fixer.order`), `hold` holds, `stop` files a `decision` stop.
+- **An answer on GitHub meanwhile still counts:** a stop no longer `filed` (his reply, a closed
+  issue, a release) or already decided is that answer's, and the thread's later block is never
+  acted on; once the thread's answer is recorded, the stop isn't `filed`, so a later reply
+  answers nothing. Decided once either way.
+- **The snapshot** (`ask_threads.mark`): every ask has `decide` and `also`. `decide` is null for an
+  ask that can't be opened, else `{state, at, note}`: `offered`; `asked` (the runner read the
+  request: `note` says when it starts, `waits_text`: when the Claude lane or the repo is resumed,
+  once Claude's current job ends, once the gate opens, or on the lane's next pass; or that T3
+  couldn't start it); `open` (`go` is the thread, "Decide in T3", and `also` the needs-info issue).
+  An ask answered in its thread moves to `answered` with `said` "In T3: <the decision's text>",
+  `go` the thread and `also` the issue; its timeline says "You opened a thread in T3 to decide
+  it." and "You decided in T3."
+- **The page** (`answerAt` in `dashboard/index.html`): offered, a Decide in T3 button beside the
+  needs-info link; asked, the button greyed with "You asked at ... The runner hasn't read it yet."
+  until `control_read_at` reaches it, then `decide.note`; open, the thread's link and the issue's.
+- `--once --dry-run` prints the ask thread it would open, with its brief.
 
 ## Live steps
 
@@ -705,7 +758,8 @@ stop and links the issue (`<!-- queue-runner stop kind=K sha=H issue=I -->`; `le
 keeps it, like the reviews, from counting as a reply), then a toast. An issue that can't be filed
 makes the stop `failed`, and the next pass files it; a failed PR comment or toast is said and
 left. **Stop job records** (kind `stop`, `issue` = the PR): `stop` (the kind), `sha` H, `link`
-the issue, `reason`; outcomes `filed`, `answered` (with `answer`: `issue-closed` or `replied`) and
+the issue, `reason`; outcomes `filed`, `answered` (with `answer`: `issue-closed`, `replied`, or `thread` when
+Stefan decided it in its ask thread: Deciding an ask in T3, above) and
 `failed`.
 
 **Left alone until Stefan answers:** while a stop is `filed`, the PR gets no review (even on a new
@@ -828,9 +882,10 @@ python3 -m dashboard    # http://queue.localhost:5289/ is the runner's; http://l
   are ISO strings; the page formats them. `sample.STATES` names every state the page has to show.
 - **Control** (`serve.apply_control`): `POST /control` takes `{"lane", "stop"}` (`"after-job"`,
   `"now"` or null to carry on), `{"repo", "stop"}` (`"after-job"` or null: Stopping one repo,
-  above), `{"repo_order": [...]}`, or an ask's `{"ask", "read"}` (true or false) and `{"ask",
-  "snooze_until"}` (an ISO time with its offset, kept in this PC's, or null), and anything else
-  is refused; each write keeps what the others wrote. The page shows a request as asked until
+  above), `{"repo_order": [...]}`, an ask's `{"ask", "read"}` (true or false) and `{"ask",
+  "snooze_until"}` (an ISO time with its offset, kept in this PC's, or null), or `{"ask": <id>,
+  "open": true}` (`asks.<id>.open`: Deciding an ask in T3, above), and anything else is refused;
+  each write keeps what the others wrote. The page shows a request as asked until
   `control_read_at` reaches its time.
 - **A stopped repo on the page** (ticket 37): each row of the Build order card has Stop or Resume
   and says "Stopped since ..." (or "Asked to stop/resume: the runner hasn't read it yet"); its
@@ -848,7 +903,9 @@ python3 -m dashboard    # http://queue.localhost:5289/ is the runner's; http://l
   `because` (the specifics), `timeline` (what has happened, oldest first: each step's `at` and
   a whole sentence as `text`; Stefan found fragments too short to read), `question`, `options`,
   `holds_up` and `go` (where it's answered: `label`, `url`, and `where`, `t3` or `github`, which
-  picks the mark on the button). The runner lists asks in the order they're worth taking.
+  picks the mark on the button), `decide` and `also` (whether it can be decided in a T3 thread
+  and where that stands, and the other place to answer it: Deciding an ask in T3, above). The
+  runner lists asks in the order they're worth taking.
 - **The Inbox's asks** (ticket 31; `inbox.py` and `asks.py`). **One collection:**
   `inbox.collect` reads the job log and GitHub for what waits on Stefan (`ready` PRs, open
   `stop`s, `build`s a decision left to him, waiting `thread`s, and `answered` stops), each with
@@ -1277,6 +1334,11 @@ Running unattended: `tests/test_wake.py` (`Waker` against `FakeScheduler` in `fa
 task XML, `Schtasks` on canned calls, `wall_sleep`, a second start, waiting for T3, `--stop`
 with a fake kill); every test that runs `main` continuously passes a waker, so none touches the
 real Task Scheduler.
+Deciding an ask in T3: `tests/test_ask_threads.py` (the page's request, the record kept by
+`--pause`/`--resume`, `T3Cli.launch` on canned output, then the decision tests' stopped PR #20
+through the real `Runner` with `FakeT3.launch`: opened once on his click, gated, kept while a lane
+or repo is stopped, its answer read and acted on, a GitHub answer winning, the snapshot's `decide`
+and `also` held to the sample, and `--once --dry-run`).
 The dashboard: `tests/test_dashboard.py` (control requests, the server on a free port with both
 addresses' `Host` and `Origin`, every sample state, that the page loads nothing from outside
 itself, and `python -m dashboard` started twice on one free port: the start line, exit 3).
@@ -1341,6 +1403,8 @@ temp folder.
 - `queue_runner/state.py`: the job log.
 - `queue_runner/run.py`: the two lanes, a build job, a fix round's thread, a continued job and
   the loop.
+- `queue_runner/ask_threads.py` and `templates/ask.md`: an ask decided in a T3 thread Stefan
+  opens from the Inbox: opening it, reading its answer, and the ask's `decide` in the snapshot.
 - `queue_runner/decisions.py` and `templates/decision.md`: decision threads: the cases, the
   brief, the answer and acting on it.
 - `queue_runner/fix.py`, `templates/fix.md` and `templates/conflict.md`: which PRs get a fix

@@ -190,7 +190,11 @@ class Story:
                 add(j.started_at, j, self._stop(j))
             if j.outcome == 'answered':
                 add(j.ended_at, j, f'You closed needs-info issue #{number_of(j.link)}.'
-                    if j.answer == 'issue-closed' and j.link else 'You replied.')
+                    if j.answer == 'issue-closed' and j.link else 'You decided in T3.'
+                    if j.answer == 'thread' else 'You replied.')
+        for j in self.on('ask', repo, n):   # a thread Stefan opened to decide in (ticket 35)
+            if j.outcome == 'opened':
+                add(j.ended_at or j.started_at, j, 'You opened a thread in T3 to decide it.')
         for r_repo, r_n, at in self.releases:
             if (r_repo, r_n) == (repo, n):
                 add(at, None, f'You released it (--release {repo}#{n}), so the runner took it '
@@ -495,7 +499,7 @@ def _next(story, w) -> str:
     from .inbox import acting
     s, n = w.job, w.number
     after = acting(story.jobs, s)
-    if s.answer == 'replied':
+    if s.answer in ('replied', 'thread'):   # a reply, or decided in its T3 thread (35)
         d = next((j for j in after if j.kind == 'decision'), None)
         if d is None:
             return 'The runner reads your reply on its next pass: a decision on it comes first.'

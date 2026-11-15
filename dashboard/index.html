@@ -1145,6 +1145,22 @@ function goBtn(a, cls, label) {
   const where = a.go.where || (/github\.com/.test(a.go.url) ? "github" : "t3");
   return `<a class="btn ${cls}" href="${esc(a.go.url)}" target="_blank" rel="noreferrer">${{ github: MARK.github, t3: ICON.thread }[where] || ""}${esc(label || a.go.label)}${ICON.out}</a>`;
 }
+// Decide in T3 (ticket 35): an ask the runner can open a thread for offers one. Asked, it says so
+// until the runner has read it, then when it starts; open, `go` is the thread and `also` the
+// needs-info issue, the other place to answer.
+function answerAt(a) {
+  const d = a.decide;
+  if (!d) return goBtn(a, "go");
+  if (d.state === "open") return `${goBtn(a, "go")}${a.also ? `<a class="btn" href="${esc(a.also.url)}" target="_blank" rel="noreferrer">${MARK.github}${esc(a.also.label)}${ICON.out}</a>` : ""}`;
+  const want = ((ctl.asks || {})[a.id] || {}).open;
+  const unread = want && want.at && !wasRead(want.at);
+  if (d.state === "asked" || unread) {
+    const note = unread ? `You asked at ${clock(want.at)}. The runner hasn't read it yet.` : d.note;
+    return `<button class="btn go" disabled>${ICON.thread}Decide in T3</button><p class="holds">${esc(note || "")}</p>${goBtn(a, "")}`;
+  }
+  if (frozen()) return goBtn(a, "go");
+  return `<button class="btn go" data-act="decide" data-id="${esc(a.id)}" title="The runner opens a thread in T3, briefed with this ask, to talk it through and decide in">${ICON.thread}Decide in T3</button>${goBtn(a, "")}`;
+}
 const holdsText = (a) => ((a.holds_up || []).length ? `Until then <b>${a.holds_up.map(esc).join("</b> and <b>")}</b> can't start.` : "It holds nothing else up.");
 const historyLink = (a) => (a.pr ? prLink(a.repo, a.pr, "PR history") : "");
 // `timeline` is each step with its time; a snapshot with only the older `story` still reads.
@@ -1160,7 +1176,7 @@ function letter(a) {
     ? `<aside class="vc-ask answered"><p class="move-label">You answered</p><p class="question">${esc(done.said)}</p>
         <p class="holds">${esc(stamp(done.at))}. ${esc(done.next)}</p>${goBtn(a, "", "See where you answered")}<p class="vc-foot">${historyLink(a)}</p></aside>`
     : `<aside class="vc-ask"><p class="move-label">What it needs from you</p><p class="question">${esc(a.question)}</p>${options}
-        <p class="holds">${holdsText(a)}</p>${goBtn(a, "go")}<p class="vc-foot">${historyLink(a)}</p></aside>`;
+        <p class="holds">${holdsText(a)}</p>${answerAt(a)}<p class="vc-foot">${historyLink(a)}</p></aside>`;
   return `<article class="letter vc"><div class="vc-grid">
     <div class="vc-story" data-scroll="ask">${metaLine(a)}
       <h2>${esc(a.situation || a.subject)}</h2><p class="vc-sub"><b>${esc(a.subject)}</b></p>
@@ -1967,6 +1983,7 @@ document.addEventListener("click", (e) => {
     case "variant": turnVariant(Number(d.by)); break;   // PROTOTYPE
     case "stop": ui.pop = null; send([{ lane: d.lane, stop: d.how || null }]); return;
     case "repostop": send([{ repo: d.repo, stop: d.how || null }]); return;   // one repository (ticket 37)
+    case "decide": send([{ ask: d.id, open: true }]); return;   // a T3 thread for this ask (ticket 35)
     case "all": {
       const how = d.how || null;
       ui.pop = null;
