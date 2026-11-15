@@ -11,7 +11,7 @@ python3 -m queue_runner --once --dry-run      # print the next Claude job's brie
 python3 -m queue_runner --release NAME#N      # let the picker take a held issue again (a PR: retry its failed reviews, merges and fix round; let a stopped PR go)
 python3 -m queue_runner --review NAME#N       # Sol reviews that PR's head now, if adoption says it needs one
 python3 -m queue_runner --gate                # Claude's usage now, and whether a build, fix or decision would start
-python3 -m queue_runner --pause | --resume    # Stefan's knob: start no Claude job, or start them again
+python3 -m queue_runner --pause | --resume [LANE]   # stop a lane after its job, or let it carry on (claude, sol, all): the dashboard's Stop and Resume
 python3 -m queue_runner --reserve PERCENT     # the share of the week kept for Stefan (default 5)
 python3 -m queue_runner --stop                # stop the running runner
 python3 -m queue_runner --inbox               # everything waiting on Stefan: PRs ready to merge, needs-info stops, threads waiting for his answer

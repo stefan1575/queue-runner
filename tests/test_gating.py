@@ -91,10 +91,10 @@ path = "{self.dir}"
     def test_pause_and_resume_work_between_passes(self):
         code, out = self.run_main(['--pause'], FakeUsage())
         self.assertEqual(code, 0)
-        self.assertIn('Paused', out)
+        self.assertIn('stopped by Stefan', out)
         self.run_main(['--once'], FakeUsage(usage(0, 0)))
         self.assertEqual(self.t3.starts, [])
-        self.assertIn('paused by Stefan', self.runner_log())
+        self.assertIn('stopped by Stefan', self.runner_log())
         self.run_main(['--resume'], FakeUsage())
         self.run_main(['--once'], FakeUsage(usage(0, 0)))
         self.assertEqual(len(self.t3.starts), 1)
