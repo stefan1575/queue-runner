@@ -614,9 +614,9 @@ threads that need Stefan, so the runner toasts instead.
 `dashboard/` (ticket 18; Stefan, 2026-11-15). **Three pages do three jobs** (Stefan, 2026-11-15,
 after four takes that put everything on one page): **Overview** is the first glance, **Inbox** is
 what waits on him ("Needs you" before; the name is his), **Queue** is the work. Activity, Usage
-and Settings follow. **Only the Inbox is rebuilt so far:** Overview still shows the two lanes and
-Queue the work list and pyramid, as they were, each marked "Not rebuilt yet"; they're prototyped
-one at a time, Overview next, then Queue (ticket 18, Decisions). Its frame is the one Stefan asked
+and Settings follow. **Only the Inbox is being rebuilt, and it isn't agreed yet:** Overview still
+shows the two lanes and Queue the work list and pyramid, as they were, each marked "Not rebuilt
+yet"; both are pinned until the Inbox is agreed (tickets 20 and 21). Its frame is the one Stefan asked
 for in the prototype rounds: a sidebar for getting around (the repository switcher and the
 pages), one centred column, and the machine's readings floating on the right, in his order:
 usage, the build order, then the runner's status. **It is its own process and depends on nothing:** no build step, no
@@ -635,7 +635,8 @@ python3 -m dashboard --sample    # sample data, no runner needed; ?sample=<state
 - **The snapshot's shape is what `dashboard/sample.py` builds** (version 1): `written_at` and
   `write_every` (a snapshot older than three times that, or 90 seconds, means the runner has
   gone quiet: the page says so, greys the health readings and takes the controls away),
-  `control_read_at`, `sources` (health; `short` is the name beside its dot), `repos` in build
+  `control_read_at`, `sources` (health; `short` is the name beside its dot, `group` sorts them
+  on the page: `provider`, `local` or `external`), `repos` in build
   order, `asks` (below), `answered` (asks Stefan has answered that the runner hasn't acted on
   yet: an ask plus `answered`: `at`, `said`, `next`; not counted as waiting on him), `lanes` (each with its `queue`, what it takes up next, in order, across
   repositories; `queue_empty` says why there's none), `usage`, `features`, `issues` (with `pick`, the order ready work is
@@ -654,8 +655,8 @@ python3 -m dashboard --sample    # sample data, no runner needed; ?sample=<state
   through), `decision` (a product decision is his), `merge` (ready, his to merge) or `broken`
   (something failed). Then `situation` (it in one sentence), `about` (what the work is),
   `because` (the specifics), `story` (what has happened, in order), `question`, `options`,
-  `holds_up` and `go` (where it's answered). The runner lists asks in the order they're worth
-  taking.
+  `holds_up` and `go` (where it's answered: `label`, `url`, and `where`, `t3` or `github`, which
+  picks the mark on the button). The runner lists asks in the order they're worth taking.
 - **How it looks** is explained at the top of `dashboard/index.html`. **The Inbox reads like a
   mail client:** the list down the left for the page's whole height, a row per ask (kind,
   subject, situation, how long it has waited) in the runner's order, with the sidebar's Inbox
@@ -663,8 +664,30 @@ python3 -m dashboard --sample    # sample data, no runner needed; ?sample=<state
   specifics, the story so far), ending in the one blue panel: what it needs from him, the
   options, what it holds up and the link it's answered at. An answered ask stays greyed at the
   foot of the list until the runner has acted on it, so "handled" and "still held" can be told
-  apart. The arrow keys walk the list. A lane has one Stop button, which asks which stop is
-  meant while a job runs.
+  apart. The up and down arrow keys walk the list. Each kind has its own icon. The Inbox's
+  column is wider than the other pages' (1440px against 1120px), and under 2000px its right
+  panel steps aside behind the Usage button. A lane has one Stop button, which asks which stop
+  is meant while a job runs.
+- **Read and snoozed** (Stefan, 2026-11-15: "like an IRL inbox"): an ask he hasn't opened is
+  unread (a dot, bold); opening it reads it, and Mark unread puts it back. Snooze takes an ask
+  out of the list and the count until a time he picks (3 hours, tomorrow 9:00, next Monday
+  9:00); it sits under "Snoozed", still holding its work up, and Bring it back now undoes it.
+  **Both live in the browser's localStorage while the page is a prototype**, so Firefox and
+  Chrome disagree; the real ones go through `control.json` (not built), so every browser agrees
+  and the runner can hold a snoozed ask's toast.
+- **PROTOTYPE, to be folded in: three layouts of the briefing** (`?variant=A|B|C`, the bar at
+  the foot of the Inbox, or the left and right arrow keys; sample data only): A, background
+  first (what it is, what's wrong, the story, then the ask); B, question first (the ask leads,
+  the background under it); C, the story beside the ask (the situation as the headline, a
+  timeline down the left, the ask standing on the right). Once Stefan picks, fold the winner
+  into `letter()`, and move the other two, the bar and `turnVariant` to a `prototype/inbox-briefing`
+  branch, out of main.
+- **A point in time is written whole** (Stefan, 2026-11-15): `stamp()` gives "November 15, 2026
+  Sunday 1:14pm", for when an ask began waiting, a usage window's reset, the runner's start and
+  a snooze's end. A list row keeps the short age ("2 h") with the whole time on hover. Choosing
+  the format is pinned (ticket 22).
+- **The runner's status lists its sources by group,** in his order: Providers (Claude, ChatGPT),
+  Local (T3 Code, Stop now), External (GitHub).
   Nothing on the page moves by itself (Stefan). Colour is state only: blue is Stefan's, amber
   is working, green is done or healthy, red is broken; a usage bar turns amber from 85% and red
   at the limit, and its blue end is the share kept for him; Claude's clay and OpenAI's black or

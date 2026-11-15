@@ -79,6 +79,15 @@ grill settled the split instead:
 
 ## Comments
 
+2026-11-15, Stefan's notes on the Inbox page (take 5, kept as `dashboard/earlier/take-5.html`),
+taken up the same day: the Inbox's column is wider than the other pages'; each kind of ask has
+its icon and the button carries the mark of where it's answered; read and unread, and snooze
+(both in the browser for now); every point in time written whole ("November 15, 2026 Sunday
+1:14pm"); the runner's sources grouped as providers, local and external. **Open, his to pick:**
+which of three layouts of the briefing reads best (`?variant=A|B|C`). **This session is the
+Inbox only:** the Overview and the Queue are pinned as tickets 20 and 21, the date format's
+options as ticket 22.
+
 2026-11-15: the page was rebuilt a second time, joining the two before it: the prototype
 rounds' frame (above) around what the audit settled (questions shown open, links out, stop
 after or now, build order, the pyramid, one HTML file). The first rebuild is kept as

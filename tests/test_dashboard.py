@@ -105,6 +105,7 @@ class SampleTest(unittest.TestCase):
                             "asks", "answered", "lanes", "usage", "features", "issues", "prs", "activity", "costs", "roles", "knob"):
                     self.assertIn(key, s)
                 self.assertEqual(s["sample"]["state"], name)
+                self.assertLessEqual({x["group"] for x in s["sources"]}, {"provider", "local", "external"})
                 keys = {f"{i['repo']}#{i['n']}" for i in s["issues"]}
                 for i in s["issues"]:
                     self.assertLessEqual(set(i["blocked_by"]), keys, i["title"])
@@ -114,6 +115,7 @@ class SampleTest(unittest.TestCase):
                 self.assertFalse({a["id"] for a in s["asks"]} & {a["id"] for a in s["answered"]})
                 for a in s["asks"] + s["answered"]:
                     self.assertTrue(a["go"]["url"].startswith("https://"), a["id"])
+                    self.assertIn(a["go"]["where"], ("t3", "github"), a["id"])
                     self.assertIn(a["kind"], ("stuck", "decision", "merge", "broken"), a["id"])
                     for key in ("situation", "about", "because", "story", "question"):
                         self.assertTrue(a[key], f"{a['id']} {key}")   # each can be picked up cold
@@ -212,7 +214,7 @@ class HttpTest(unittest.TestCase):
         self.assertEqual(self.call("GET", "/config.toml")[0], 404)
 
     def test_an_earlier_take_of_the_page_is_served_with_sample_data_only(self):
-        for take in ("take-1", "take-2", "take-3", "take-4"):
+        for take in ("take-1", "take-2", "take-3", "take-4", "take-5"):
             status, kind, body = self.call("GET", f"/earlier/{take}.html")
             self.assertEqual((status, kind), (200, "text/html; charset=utf-8"))
             self.assertIn(b"<title>Queue runner</title>", body)

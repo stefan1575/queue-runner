@@ -29,6 +29,7 @@ DEFAULT = "busy"
 # Takes of the page before this one, kept while its look is being agreed: `serve.py` serves the
 # ones in `dashboard/earlier/` in sample mode, and the sidebar's sample menu links them.
 EARLIER = [
+    {"href": "/earlier/take-5.html", "label": "Take 5", "note": "The Inbox as its own page, before Stefan's notes on it"},
     {"href": "/earlier/take-4.html", "label": "Take 4", "note": "One page: Needs you as a box on top, the lanes, then the work"},
     {"href": "/earlier/take-3.html", "label": "Take 3", "note": "Lanes on top, a tab per ask, status first on the right"},
     {"href": "/earlier/take-2.html", "label": "Take 2", "note": "The asks listed beside the open one, lanes below, health in the sidebar"},
@@ -61,12 +62,13 @@ def build(name: str = DEFAULT, base: datetime | None = None, control: dict | Non
         "runner": {"pid": 18244, "started_at": ago(399), "commit": "66a5ea1"},
         "start_hint": "Double-click Queue runner.lnk in ~/.queue-runner, or run pythonw -m queue_runner in the repo.",
         "sources": [
-            # `short` is the name beside its dot in the sidebar
-            {"id": "github", "name": "GitHub", "short": "GitHub", "ok": True, "note": "gh as stefan1575", "checked_at": ago(1)},
-            {"id": "t3", "name": "T3 Code", "short": "T3 Code", "ok": True, "note": "server up", "checked_at": ago(1)},
-            {"id": "claude_usage", "name": "Claude usage", "short": "Claude", "ok": True, "note": "read", "checked_at": ago(1)},
-            {"id": "sol_usage", "name": "ChatGPT usage", "short": "ChatGPT", "ok": True, "note": "read", "checked_at": ago(9)},
-            {"id": "t3_interrupt", "name": "Stop now for Claude", "short": "Stop now", "ok": True,
+            # `short` is the name beside its dot; `group` sorts them on the page: "provider",
+            # "local" (on this PC) or "external"
+            {"id": "github", "group": "external", "name": "GitHub", "short": "GitHub", "ok": True, "note": "gh as stefan1575", "checked_at": ago(1)},
+            {"id": "t3", "group": "local", "name": "T3 Code", "short": "T3 Code", "ok": True, "note": "server up", "checked_at": ago(1)},
+            {"id": "claude_usage", "group": "provider", "name": "Claude usage", "short": "Claude", "ok": True, "note": "read", "checked_at": ago(1)},
+            {"id": "sol_usage", "group": "provider", "name": "ChatGPT usage", "short": "ChatGPT", "ok": True, "note": "read", "checked_at": ago(9)},
+            {"id": "t3_interrupt", "group": "local", "name": "Stop now for Claude", "short": "Stop now", "ok": True,
              "note": "T3 accepts the interrupt", "checked_at": ago(399)},
         ],
         "repos": [
@@ -77,7 +79,8 @@ def build(name: str = DEFAULT, base: datetime | None = None, control: dict | Non
         # `stuck` (the runner tried and couldn't get it through), `decision` (a product decision
         # is his), `merge` (ready, his to merge) or `broken` (something failed). `situation` says
         # it in a sentence, `about` what the work is, `because` the specifics, `story` what has
-        # happened, in order; then `question`, `options` and where it's answered (`go`).
+        # happened, in order; then `question`, `options` and where it's answered (`go`, whose
+        # `where` is "t3" or "github": it picks the mark on the button).
         # `why` is read by the earlier takes only, and goes when they do.
         "asks": [
             {
@@ -96,7 +99,7 @@ def build(name: str = DEFAULT, base: datetime | None = None, control: dict | Non
                     {"say": "hold", "means": "Leave the PR until you release it"},
                 ],
                 "holds_up": ["#216 Ring-to audit page"],
-                "go": {"label": "Decide in T3", "url": T3 + "0481ebdf-41e8-4253-b3a1-3be2d40a80b2"},
+                "go": {"label": "Decide in T3", "where": "t3", "url": T3 + "0481ebdf-41e8-4253-b3a1-3be2d40a80b2"},
                 "why": [
                     "Review 3 raised I-4 again: the ring-to check reads the Client's owner from before the move.",
                     "The decision thread's approach note recommends rework: read the owner from the call's routing row, not from the Client.",
@@ -111,7 +114,7 @@ def build(name: str = DEFAULT, base: datetime | None = None, control: dict | Non
                 "story": ["Thu: built, PR #207 opened", "Review 1: one problem, fixed", "Today: review 2 clean"],
                 "question": "Merge it when you've looked. Its live steps follow your merge.",
                 "holds_up": [],
-                "go": {"label": "Open PR to merge", "url": GH[LD] + "/pull/207"},
+                "go": {"label": "Open PR to merge", "where": "github", "url": GH[LD] + "/pull/207"},
                 "why": ["Clean on a0d5f6f after review 2. Checks passed, no conflict, nothing said since."],
             },
             {
@@ -124,7 +127,7 @@ def build(name: str = DEFAULT, base: datetime | None = None, control: dict | Non
                 "story": ["Today: the build started", "It stopped before writing the form's required fields"],
                 "question": "Must every Client fill in the onboarding form before they go live?",
                 "holds_up": ["#215 SEO questions on the form", "#223 Welcome email after the form"],
-                "go": {"label": "Answer in T3", "url": T3 + "0d6566e9-86a3-4e0f-a64a-e0443d93d0fe"},
+                "go": {"label": "Answer in T3", "where": "t3", "url": T3 + "0d6566e9-86a3-4e0f-a64a-e0443d93d0fe"},
                 "why": [
                     "The build stopped before writing the form's required fields.",
                     "A decision thread couldn't answer it from the issue.",
@@ -146,7 +149,7 @@ def build(name: str = DEFAULT, base: datetime | None = None, control: dict | Non
                           "Today: you answered fix on"],
                 "question": "Rework the approach, patch this case too, or hold it?",
                 "holds_up": [],
-                "go": {"label": "Open the needs-info issue", "url": GH[LD] + "/issues/221"},
+                "go": {"label": "Open the needs-info issue", "where": "github", "url": GH[LD] + "/issues/221"},
                 "answered": {"at": ago(7), "said": "fix on",
                              "next": "The runner reads your reply on its next pass and queues one more fix round."},
             },
@@ -396,7 +399,7 @@ def _vary(snap: dict, name: str, ago, ahead) -> None:
              "story": ["Yesterday: you merged PR #198", "Today: deployed, migration 1 of 2 applied", "Migration 2 failed"],
              "question": "What should happen to the second migration?",
              "holds_up": ["Every later live run in leads-dashboard"],
-             "go": {"label": "Decide in T3", "url": T3 + "136ab19d-14d7-4f6a-a235-4e1ac0ebb043"},
+             "go": {"label": "Decide in T3", "where": "t3", "url": T3 + "136ab19d-14d7-4f6a-a235-4e1ac0ebb043"},
              "why": ["Deployed; 1 of 2 migrations applied.", "20261114_number_owner.sql failed: column \"owner_id\" already exists."]},
             {"id": "ask-qr4", "kind": "stuck", "repo": QR, "ref": "PR #4", "pr": 4, "subject": "Wake tasks survive DST", "since": ago(3),
              "situation": "The tests failed for a reason the change doesn't explain.",
@@ -404,7 +407,7 @@ def _vary(snap: dict, name: str, ago, ahead) -> None:
              "because": "test_wake.py timed out once in CI and passes locally. A decision thread couldn't tell a flake from a fault.",
              "story": ["Today: built, PR #4 opened", "Review 1 clean", "The tests timed out on Windows"],
              "question": "Run the tests again, or look first?", "holds_up": [],
-             "go": {"label": "Decide in T3", "url": T3 + "89d3ed68-05f2-418f-afd8-9b4a28709ddc"},
+             "go": {"label": "Decide in T3", "where": "t3", "url": T3 + "89d3ed68-05f2-418f-afd8-9b4a28709ddc"},
              "why": ["test_wake.py timed out once in CI and passes locally."]},
             {"id": "ask-ops", "kind": "decision", "repo": LD, "ref": "#231", "pr": None, "subject": "Monthly report email", "since": ago(1),
              "situation": "The issue names two different recipients.",
@@ -412,7 +415,7 @@ def _vary(snap: dict, name: str, ago, ahead) -> None:
              "because": "It says the Client's owner in one place and everyone on the account in another. The build stopped before writing the recipient list.",
              "story": ["Today: the build started", "It stopped at the recipient list"],
              "question": "Who receives the monthly report: the Client's owner, or everyone on the account?", "holds_up": [],
-             "go": {"label": "Answer in T3", "url": T3 + "5823cce7-a3a7-4ac6-9f2b-5883404d9828"},
+             "go": {"label": "Answer in T3", "where": "t3", "url": T3 + "5823cce7-a3a7-4ac6-9f2b-5883404d9828"},
              "why": ["The issue names both in different places."]},
         ]
     elif name == "reserve":
