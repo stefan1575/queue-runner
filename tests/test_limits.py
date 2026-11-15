@@ -30,11 +30,55 @@ class ResumeTimeTest(unittest.TestCase):
         self.assertEqual(limits.resume_at(STOPPED, None),
                          datetime.datetime(2026, 11, 8, 12, 49, 13, tzinfo=UTC))
 
-    def test_continues_in_place_only_at_about_50k_tokens_or_less(self):
-        self.assertTrue(limits.in_place(50_000))
-        self.assertTrue(limits.in_place(12_000))
-        self.assertFalse(limits.in_place(50_001))
-        self.assertFalse(limits.in_place(None))   # unknown: fresh
+
+
+class ResumeChoiceTest(unittest.TestCase):
+    """In place or fresh (ticket 38): warm continues at any size; cold continues only below
+    120k tokens; an unknown age or size is cold and large."""
+    NOW = datetime.datetime(2026, 11, 15, 12, 0, tzinfo=UTC)
+
+    def choose(self, minutes_ago, tokens):
+        last = None if minutes_ago is None else self.NOW - datetime.timedelta(minutes=minutes_ago)
+        return limits.resume_choice(last, tokens, self.NOW)
+
+    def test_warm_continues_in_place_at_any_size(self):
+        self.assertTrue(self.choose(54, 900_000).in_place)
+        self.assertTrue(self.choose(0, 300_000).in_place)
+
+    def test_warm_means_the_last_request_started_less_than_55_minutes_ago(self):
+        self.assertFalse(self.choose(55, 300_000).in_place)
+
+    def test_cold_continues_in_place_below_120k_tokens(self):
+        self.assertTrue(self.choose(55, 119_999).in_place)
+        self.assertTrue(self.choose(300, 50_000).in_place)
+
+    def test_cold_at_or_above_120k_tokens_starts_fresh(self):
+        self.assertFalse(self.choose(55, 120_000).in_place)
+        self.assertFalse(self.choose(300, 250_000).in_place)
+
+    def test_an_unknown_age_is_cold(self):
+        self.assertTrue(self.choose(None, 60_000).in_place)
+        self.assertFalse(self.choose(None, 200_000).in_place)
+
+    def test_an_unknown_size_is_large(self):
+        self.assertTrue(self.choose(10, None).in_place)   # warm: any size
+        self.assertFalse(self.choose(90, None).in_place)
+
+    def test_it_says_why_with_the_age_and_size(self):
+        c = self.choose(190, 180_000)
+        self.assertEqual((c.how, c.idle_minutes, c.context), ('fresh', 190, 180_000))
+        self.assertEqual(c.why, 'cold (its last request started 3 h 10 min ago) and 180,000 '
+                                'tokens, at least 120,000: a fresh thread is cheaper')
+        self.assertEqual(self.choose(12, 180_000).why,
+                         'warm (its last request started 12 min ago): continuing it in place '
+                         'is cheaper at any size')
+        self.assertEqual(self.choose(None, None).why,
+                         'cold (when its last request started is unknown) and its size '
+                         'unknown: a fresh thread')
+        self.assertEqual(self.choose(70, 40_000).record(), {
+            'how': 'in-place', 'why': self.choose(70, 40_000).why,
+            'last_request': '2026-11-15T10:50:00+00:00', 'idle_minutes': 70,
+            'context': 40_000})
 
 
 class TranscriptTest(unittest.TestCase):
@@ -44,12 +88,24 @@ class TranscriptTest(unittest.TestCase):
         path = os.path.join(FIXTURES, 'claude', 'transcript-limit-stop.jsonl')
         self.assertEqual(limits.context_tokens(path), 108_633)
 
+    def test_the_last_real_calls_request_start_and_context(self):
+        # Its api-request record (by requestRef) started it; the request a limit refused after
+        # it got only Claude Code's synthetic message, which doesn't count.
+        path = os.path.join(FIXTURES, 'claude', 'transcript-requests.jsonl')
+        self.assertEqual(limits.last_call(path), limits.LastCall(
+            datetime.datetime(2026, 11, 10, 13, 2, 41, 120000, tzinfo=UTC), 209_676))
+
+    def test_a_call_with_no_request_record_has_an_unknown_start(self):
+        path = os.path.join(FIXTURES, 'claude', 'transcript-limit-stop.jsonl')
+        self.assertEqual(limits.last_call(path), limits.LastCall(None, 108_633))
+
     def test_a_missing_or_empty_transcript_is_unknown(self):
         with tempfile.TemporaryDirectory() as d:
             empty = os.path.join(d, 'x.jsonl')
             open(empty, 'w').close()
             self.assertIsNone(limits.context_tokens(empty))
             self.assertIsNone(limits.context_tokens(os.path.join(d, 'none.jsonl')))
+            self.assertEqual(limits.last_call(empty), limits.LastCall(None, None))
 
 
 def make_store(d: str) -> str:
@@ -105,10 +161,14 @@ class T3StoreTest(unittest.TestCase):
     def test_a_claude_threads_context_from_its_transcript(self):
         self.assertEqual(self.store.context_tokens(THREAD), 108_633)
 
+    def test_a_claude_threads_last_call_from_its_transcript(self):
+        self.assertEqual(self.store.last_call(THREAD), limits.LastCall(None, 108_633))
+
     def test_an_unreadable_database_says_nothing(self):
         store = limits.T3Store(os.path.join(self.dir, 'none.sqlite'), self.dir)
         self.assertEqual(store.limit_reset(THREAD, RUN), (False, None))
         self.assertIsNone(store.context_tokens(THREAD))
+        self.assertEqual(store.last_call(THREAD), limits.LastCall(None, None))
 
 
 class LimitStopTest(unittest.TestCase):

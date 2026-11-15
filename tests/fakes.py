@@ -222,12 +222,15 @@ class FakeUsage:
 class FakeLimits:
     """Plays T3's database for limit recovery: `resets` maps a thread id to the reset T3 stored
     for its runs' limit stop (None: a stop with no reset), `failures` a thread id to another
-    failure class T3 recorded, `contexts` a thread id to its context in tokens. Tests never read
-    the real database."""
+    failure class T3 recorded, `contexts` a thread id to its context in tokens, `starts` a thread
+    id to when its last real request started (`default_start` for any other thread). Tests
+    never read the real database or a real transcript."""
 
-    def __init__(self, resets=None, contexts=None, failures=None):
+    def __init__(self, resets=None, contexts=None, failures=None, starts=None,
+                 default_start=None):
         self.resets, self.contexts = dict(resets or {}), dict(contexts or {})
-        self.failures = dict(failures or {})
+        self.failures, self.starts = dict(failures or {}), dict(starts or {})
+        self.default_start = default_start
 
     def run_failure(self, thread_id, run_id):
         if thread_id in self.resets:
@@ -240,6 +243,11 @@ class FakeLimits:
 
     def context_tokens(self, thread_id):
         return self.contexts.get(thread_id)
+
+    def last_call(self, thread_id):
+        from queue_runner.limits import LastCall
+        return LastCall(self.starts.get(thread_id, self.default_start),
+                        self.contexts.get(thread_id))
 
 
 class FakeScheduler:

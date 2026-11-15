@@ -221,7 +221,7 @@ class FixTest(unittest.TestCase):
         from tests.fakes import FakeLimits
         stop = datetime.datetime(2026, 11, 8, 7, 34, tzinfo=datetime.timezone.utc)
         r = self.blocking(pushes=H3, outcomes=[(1, 'failed'), (0, 'completed')])
-        r.limits = FakeLimits(resets={'mcp:t1': None}, contexts={'mcp:t1': 90_000})
+        r.limits = FakeLimits(resets={'mcp:t1': None}, contexts={'mcp:t1': 150_000})
         r.now = lambda: stop
         self.t3.messages['mcp:t1'] = [Message('assistant', 'Fixing F1 next.')]
         r.run_pass()
@@ -237,10 +237,11 @@ class FixTest(unittest.TestCase):
         self.assertEqual((fresh['worktree'], fresh['branch'], fresh['title']),
                          (H3, WORK, 'Queue runner fix: first#20'))
         self.assertIn('F1', fresh['message'])   # the fix brief, from review 1 of H2
-        self.assertIn('## Picking up after a usage limit', fresh['message'])
+        self.assertIn('## Picking up from an earlier thread', fresh['message'])
         self.assertIn('Fixing F1 next.', fresh['message'])
         again = self.fixes(r)[1]
         self.assertEqual((again.about, again.sha, again.round), (old.id, H2, 1))
+        self.assertEqual(again.resume['how'], 'fresh')
 
     def test_a_round_waiting_for_an_answer_is_the_prs_one_writer(self):
         r = self.blocking(outcomes=[(2, 'waiting')])

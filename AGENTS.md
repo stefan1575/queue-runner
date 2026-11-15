@@ -179,23 +179,40 @@ same limit) is started on it.
   count, in the run's error or the run's own last assistant message, never an earlier run's
   ("You've hit your weekly limit · resets ...", "Claude API rate limit reached").
 - **When:** 10 minutes after the reset T3 stored for the stop; 5h05m from the stop if it stored
-  none. The end record has `resume_at` and `context` (the thread's tokens, or null). Until then
+  none. The end record has `resume_at`, `context` (the thread's tokens, or null) and
+  `last_request` (when its last real request started, or null). Until then
   the Claude lane starts nothing (`gated`, said once: the limit is the whole account's); the Sol
   lane goes on. Then the usage gate checks the job as usual.
-- **In place or fresh:** `context` of about 50k tokens or less (`IN_PLACE_MAX`) continues the
-  old thread, as a continued job (`t3 thread send`, the message `limits.RESUME_MESSAGE`).
-  Anything bigger, or unknown, starts a fresh thread: the job's own brief rebuilt from its
-  sources (the issue; for a fix, the fix brief from the same review of H), plus
-  `templates/restart.md` (the old thread's link, where it starts, what it left uncommitted, its
-  last 3 messages). T3 can't make a worktree on a branch that exists, and makes it at the same
+- **In place or fresh** (ticket 38; `limits.resume_choice`, the one rule every caller uses: a
+  limit's recovery and a decision's `retry` or `answer`). It reads only what it can measure, at
+  the moment the job resumes: when the thread's last real request started and its context.
+  - **Warm** (that request started under 55 minutes ago, `WARM_FOR`): continue in place, any
+    size. Claude Code's subscription cache lasts an hour from a request's start; 55 minutes is
+    the research's margin under it.
+  - **Cold and under 120k tokens** (`COLD_FRESH_MIN`): continue in place.
+  - **Cold and 120k or more:** a fresh thread. 120k is the research's cold break-even
+    (`C* = F + o*E / (w + (n-1)*r)`: 93.6k for leads-dashboard's 50k starts, 113.6k for
+    queue-runner's 70k, with 25k of rereading and 5k of extra output) rounded up toward
+    continuing, since what a fresh thread loses isn't priced. The arithmetic and where its
+    evidence is thin are beside the constant in `limits.py`.
+  - **Unknown** age (no request record names the last call) is cold; unknown size is large.
+  In place is a continued job (`t3 thread send`; after a limit the message is
+  `limits.RESUME_MESSAGE`). Fresh is the job's own brief rebuilt from its sources (the issue;
+  for a fix, the fix brief from the same review of H), plus `templates/restart.md` (how the old
+  thread stopped and why it isn't continued, its link, where it starts, what it left
+  uncommitted, its last 3 messages). The new job's start record has `resume` (`how`
+  `in-place` or `fresh`, `why`, `last_request`, `idle_minutes`, `context`), and the log line
+  says the same (`Continuing ... in place: warm (...)`, `Restarting ... fresh after the usage
+  limit (cold (...) and N tokens ...)`). The stop's own log line says what would be chosen at
+  its resume time; the recovery chooses again when it runs. T3 can't make a worktree on a branch that exists, and makes it at the same
   folder (`~/.t3/worktrees/<project>/<branch>`), so `GitCli.free_branch` keeps the branch's tip
   under `refs/queue-runner/limit/<branch>` and anything uncommitted (untracked files too) as a
   `git stash create` commit under `.../<branch>-uncommitted`, removes the old worktree and
   deletes the branch; T3 then makes the same branch again at that tip, in that folder
   (`--worktree <tip> --branch <same>`). For a fix that's the round's own local branch
   `claude/fix-pr<n>-<H7>`; it still pushes to the PR's.
-- **The new job** has the old job's kind, issue, branch, title, H and round, and `about` the old
-  job: that's what marks it recovered. One that never reached a thread (`not-started`,
+- **The new job** has the old job's kind, issue, branch, title, H and round, `about` the old
+  job (that's what marks it recovered) and `resume`. One that never reached a thread (`not-started`,
   `not-sent`) doesn't count, so the next pass tries again. A fresh restart whose brief or branch
   can't be made (the old worktree won't go, the review isn't in the log) ends `restart-failed`:
   it isn't tried again, the old job stays the PR's writer, and Stefan gets a toast, until
@@ -417,7 +434,8 @@ head. A blocking review on H gets its ordinary fix round first.
 
 **A continued job** (a decision's `retry` or `answer`): a new build or fix job of the same issue,
 branch, title and H, whose start record carries the earlier job's `thread_id` and `about` (its
-id). The runner sends the message with `t3 thread send --wait --json`, and records the end as for
+id), and `resume`: whether the earlier thread is continued in place or a fresh thread starts
+(Usage limits, In place or fresh; the same rule). In place, the runner sends the message with `t3 thread send --wait --json`, and records the end as for
 any job of its kind; a dead runner's settle finds the thread by its id. A message that never
 reached a run (T3 failed and the thread isn't running) ends the new job `not-sent` (it counts for
 nothing; the issue stays held), puts a waiting job back to `waiting`, and the decision
@@ -456,7 +474,14 @@ decision after it that says `fix` or `carry-on`; another stop's answer doesn't c
 written for that review even if the head has moved since. A reply not yet decided on holds the PR
 too, and one reply that answers several stops is decided once (`stops.undecided_replies`).
 
-**Acting:** `retry` and `answer` continue the earlier thread (above); `close` comments and closes
+**Acting:** `retry` and `answer` pick up the earlier job (A continued job, above): in its thread
+while that's warm or cold and under 120k tokens, else in a fresh thread on the same branch
+(`limits.resume_choice`; Usage limits, In place or fresh). A fresh thread's brief starts with
+`## Direction first`: how the earlier thread stopped, for an `answer` the question it asked (its
+last message, quoted), and the decision's message; then the job's own brief and
+`templates/restart.md`. A waiting job picked up fresh ends `continued` too. A fresh start whose
+brief or branch can't be made ends `restart-failed` and toasts, as after a limit; the decision
+stands, so it isn't decided again until `--release`. `close` comments and closes
 the issue as not planned; `fix`, `carry-on` and `hold` are read from the decision's record. A
 stop goes where Stefan answers it: on a PR, the `needs-info` issue (kind `decision`, or
 `approach-note`); on a build, a comment on its issue, which the build holds until `--release`; on
@@ -1079,7 +1104,12 @@ bug with a failing test; CI still gates the merge.
   `~/.claude/projects/<folder>/<session id>.jsonl`, and the context is its last real assistant
   record's `usage`: `input_tokens + cache_creation_input_tokens + cache_read_input_tokens +
   output_tokens` (Claude Code's `<synthetic>` limit message has zeros and is skipped). Checked on
-  the real stop: 108,633 tokens.
+  the real stop: 108,633 tokens. **When that call's request started** (ticket 38,
+  `limits.last_call`): the assistant record's `requestRef` names an `api-request` record (`id`,
+  `timestamp`: the request's start, which the cache's hour counts from) in the same transcript;
+  no such record (older Claude Code; the real stop's fixture has none) reads as unknown.
+  `tests/fixtures/claude/transcript-requests.jsonl` is hand-made in the shape of a real
+  2.1.319 transcript.
 
 ## Live check
 
@@ -1149,11 +1179,15 @@ The usage gate: `tests/test_usage.py` (the real response, the login, never the t
 `tests/test_gate.py` (`decide()` with a fixed clock, the knob, learned costs) and
 `tests/test_gating.py` (the run loop and the knob through `main`, `FakeUsage` in `fakes.py`; every
 test that runs `main` passes one, so none reads the real endpoint).
-Limit recovery: `tests/test_limits.py` (the resume time, in place or fresh, `T3Store` on a temp
+Limit recovery: `tests/test_limits.py` (the resume time, in place or fresh (`resume_choice` with
+a fixed clock), the last call's request start, `T3Store` on a temp
 SQLite holding the real stop's rows, the transcript, the auto-resume warning) and
 `LimitRecoveryTest` in `tests/test_run.py` and a fix round's in `tests/test_fix.py` (fixed clocks,
-`FakeLimits` in `fakes.py`; every test that runs `main` passes it, and a `t3_settings` path, so
-none reads T3's real database or settings).
+`FakeLimits` in `fakes.py`, whose `starts` and `default_start` give a thread's last request
+start; every test that runs `main` passes it, and a `t3_settings` path, so none reads T3's real
+database or settings). A decision's `retry` and `answer` in place or fresh: the `cold` tests in
+`tests/test_decisions.py` (its `Runner` gets a `FakeLimits` whose threads are warm unless a test
+says otherwise).
 Local tickets: `tests/test_tickets.py` (both status forms, blocker lines, a sandbox git repo
 with three tickets in a blocker chain) and `LocalTicketsDryRunTest` in `tests/test_cli.py`.
 Live steps: `tests/test_live.py` (the answer block, the batch from `FakeLiveGit`, about to land,
@@ -1261,7 +1295,9 @@ temp folder.
   (`set_build_order`) and the stopped repos (`set_stopped`), and `working`, the repos the lanes
   take work from.
 - `queue_runner/limits.py` and `templates/restart.md`: usage-limit stops: T3's record of the
-  reset, the transcript's context, when and how a job resumes, the auto-resume warning.
+  reset, the transcript's last call (its context and its request's start), when a job resumes,
+  in place or fresh for any job picking up an earlier thread (`resume_choice`), the auto-resume
+  warning.
 - `queue_runner/lock.py`: `runner.lock` and `sol.lock`.
 - `queue_runner/wake.py`: the wake tasks: `Waker.sync` and the `schtasks` adapter.
 - `queue_runner/restart.py`: restarting on its own new code after main moves (ticket 14).
