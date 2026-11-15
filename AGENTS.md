@@ -262,10 +262,18 @@ on; `"now"` is read as `"after-job"` until ticket 34.
 - **Read** (`control.read`, never raises) at the start of each lane's pass: the Claude lane after
   settling (`Runner.plan`, a pass that ends `stopped`), the Sol lane before it files a stop,
   merges or reviews anything (`Runner._sol_pass`), so a stopped Sol lane does none of them.
-  `--once` obeys too; `--review` is Stefan's own and doesn't ask. The log says once
+  `--once` obeys too; `--review` is Stefan's own and doesn't ask (but merges nothing after,
+  below). The log says once
   `The Claude lane is stopped by Stefan: it starts no job (Resume on the dashboard, or python3
   -m queue_runner --resume)` (the reviewing lane's: `... --resume sol`), and `... runs again:
   Stefan resumed it` when it changes.
+- **Asked again between jobs, in both lanes,** so a Stop asked while a job runs lets it finish
+  and starts nothing after it, in that pass too: the Sol lane before its merge pass, before
+  each merge in it (`Merger.merge_pass(halted=...)`), before each repo's stops and before its
+  review (`Reviewer.lane_stopped`); a review that ends after the Stop posts, and its merge or
+  stop waits for Resume (`Reviewer.stopped_now`, as for a stopped repo); the Claude lane before
+  a decision's retry or answer (`Runner.continue_job`): the decision ends `not-started` and the
+  earlier job stays as it was, so the case is decided again after Resume.
 - **Unreadable** (not JSON, not an object, a lane's entry without a `stop` the page could have
   written): neither lane starts anything until it's fixed, said once; any Stop or Resume on the
   page, or `--pause`/`--resume`, writes it afresh (keeping what they can read, as the page does).

@@ -474,7 +474,7 @@ class Decider:
                    f"{text}\n\nCarry on, and end as the job's brief says.")
         if continue_thread(case.about, message) == 'idle':   # never reached the thread
             self.jobs.ended(job.id, exit_code=code, outcome=NOT_STARTED, link=link,
-                            reason=text or None, error='sending to the earlier thread failed')
+                            reason=text or None, error='the earlier job was not continued')
             return 'idle'
         return 'started'
 

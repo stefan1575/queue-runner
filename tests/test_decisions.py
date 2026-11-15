@@ -400,6 +400,32 @@ class DecisionTest(unittest.TestCase):
         self.assertEqual([j.outcome for j in self.jobs('build')],
                          ['continued', 'not-sent', 'done-no-pr'])
 
+    def test_a_stop_asked_during_the_decision_thread_holds_its_retry_until_resume(self):
+        # Stefan stops the Claude lane while the decision thread runs (ticket 30; review 1's
+        # F1): the decision finishes, the retry it chose is a job after it, so it waits.
+        self.build((1, 'failed'),
+                   (0, 'completed', decision_reply('retry', add='Install deps first.')),
+                   (0, 'completed', decision_reply('retry', add='Install deps first.')),
+                   (0, 'completed'))
+        control = os.path.join(self.config.state_dir, 'control.json')
+        t3_start = self.t3.start
+
+        def start(*args, **kwargs):
+            with open(control, 'w', encoding='utf-8') as f:
+                f.write('{"lanes": {"claude": {"stop": "after-job", "at": "2026-11-16T00:00:00Z"}}}')
+            self.t3.start = t3_start
+            return t3_start(*args, **kwargs)
+        self.t3.start = start
+        self.assertEqual(self.r.run_pass(), 'idle')
+        self.assertEqual(self.t3.sends, [])
+        self.assertEqual([j.outcome for j in self.jobs('build')], ['failed'])
+        self.assertEqual(self.jobs('decision')[0].outcome, 'not-started')
+        self.assertTrue(any('Claude lane is stopped by Stefan' in line for line in self.said))
+        self.assertEqual(self.r.run_pass(), 'stopped')   # still stopped: nothing at all
+        os.remove(control)   # Resume: the case is decided again, and the retry goes on
+        self.assertEqual(self.r.run_pass(), 'started')
+        self.assertEqual([s['thread_id'] for s in self.t3.sends], ['mcp:t1'])
+
     def test_a_waiting_build_answered_by_a_decision_continues_and_the_old_job_is_done(self):
         self.build((2, 'waiting'), (0, 'completed', decision_reply('answer', text='Use blue.')),
                    (0, 'completed'))

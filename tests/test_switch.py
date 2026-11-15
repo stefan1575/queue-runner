@@ -419,5 +419,104 @@ class SolLaneTest(Harness):
         self.assertEqual(self.t3.starts, [])
 
 
+class SolStopsAfterItsJobTest(unittest.TestCase):
+    """A Stop asked of the reviewing lane while it works: the review or merge running finishes,
+    and nothing starts after it in the same pass (ticket 30; review 1's F1)."""
+
+    def setUp(self):
+        from queue_runner.config import Config, Repo
+        from tests.fakes import FakeGitHubForReviews, full_pr
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.dir = tmp.name
+        self.state = os.path.join(self.dir, 'state')
+        os.makedirs(self.state)
+        self.repo = Repo(name='test', github='owner/test', path=self.dir)
+        self.config = Config(repos=[self.repo], state_dir=self.state, log_dir=self.dir,
+                             runs_dir=os.path.join(self.dir, 'runs'),
+                             checkouts_dir=os.path.join(self.dir, 'checkouts'))
+        test = self
+
+        class StopMidMerge(FakeGitHubForReviews):
+            stop_on_merge = False
+
+            def merge(self, repo, number, sha):
+                if self.stop_on_merge:
+                    test.stop_sol()
+                return super().merge(repo, number, sha)
+        self.gh = StopMidMerge(prs=[full_pr(30, 'claude/a-1', '3' * 40)])
+        self.full_pr = full_pr
+
+    def stop_sol(self):
+        with open(os.path.join(self.state, 'control.json'), 'w', encoding='utf-8') as f:
+            json.dump({'lanes': {'sol': {'stop': 'after-job', 'at': '2026-11-16T00:00:00Z'}}}, f)
+
+    def runner(self, sol):
+        from queue_runner.run import Runner
+        from tests.test_live import FakeLiveGit
+        git = FakeLiveGit()
+        git.heads = {p.number: p.head_sha for p in self.gh.prs}
+        return Runner(self.config, github=self.gh, t3=FakeT3([]), git=git, out=io.StringIO(),
+                      log_line=lambda _: None, sol=sol)
+
+    def reviews(self, runner):
+        return [(j.issue, j.outcome) for j in runner.jobs.jobs() if j.kind == 'review']
+
+    def merges(self):
+        return [p[1] for p in self.gh.posts if p[0] == 'merge']
+
+    def test_a_stop_during_a_review_lets_it_post_and_merges_nothing_after(self):
+        from tests.test_ledger import reply
+        test = self
+
+        class StopMidReview(FakeSol):
+            def review(self, *args, **kwargs):
+                test.stop_sol()
+                return super().review(*args, **kwargs)
+        runner = self.runner(StopMidReview([reply()]))
+        runner._sol_pass()
+        self.assertEqual(self.reviews(runner), [(30, 'clean')])
+        self.assertEqual(self.merges(), [])
+        os.remove(os.path.join(self.state, 'control.json'))   # Resume: the next pass merges it
+        runner._sol_pass()
+        self.assertEqual(self.merges(), [30])
+
+    def test_a_stop_during_a_review_that_stops_files_nothing_after(self):
+        from tests.test_ledger import important, reply
+        test = self
+
+        class StopMidReview(FakeSol):
+            def review(self, *args, **kwargs):
+                test.stop_sol()
+                return super().review(*args, **kwargs)
+        # Review 1 (on another head) raised F1; review 2 raises F2 in its class: a stop.
+        from tests.test_ledger import review1
+        self.gh.comments[30] = review1([important('F1')])
+        runner = self.runner(StopMidReview([reply(findings=[important('F2')], earlier=[
+            {'id': 'F1', 'status': 'open'}])]))
+        filed = []   # the stop pass checks PR 30 before the review: only after it counts
+        runner.reviewer.stopper.check = lambda *a: filed.append(a) if os.path.exists(
+            os.path.join(self.state, 'control.json')) else None
+        runner._sol_pass()
+        self.assertEqual(self.reviews(runner), [(30, 'stop')])
+        self.assertEqual(filed, [])
+
+    def test_a_stop_during_one_merge_starts_no_other_merge_or_review_after_it(self):
+        from tests.test_ledger import reply
+        self.gh.prs = [self.full_pr(30, 'claude/a-1', '3' * 40),
+                       self.full_pr(31, 'claude/b-2', '4' * 40)]
+        runner = self.runner(FakeSol([reply(), reply()]))
+        runner.reviewer.merger = False
+        runner._sol_pass()
+        runner._sol_pass()
+        self.assertEqual(self.reviews(runner), [(30, 'clean'), (31, 'clean')])
+        self.gh.prs.append(self.full_pr(32, 'claude/c-3', '5' * 40))
+        runner = self.runner(FakeSol([reply()]))
+        self.gh.stop_on_merge = True
+        runner._sol_pass()
+        self.assertEqual(self.merges(), [30])
+        self.assertEqual(self.reviews(runner), [(30, 'clean'), (31, 'clean')])
+
+
 if __name__ == '__main__':
     unittest.main()

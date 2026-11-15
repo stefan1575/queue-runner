@@ -445,7 +445,11 @@ class Runner:
         sending `message` to its thread, or in a fresh thread, as `limits.resume_choice` decides
         from how long ago its last request started and its context. In place, the new job
         carries the thread in its start record so a dead runner's settle finds it. The earlier
-        job, if it was waiting, ends `continued`."""
+        job, if it was waiting, ends `continued`. A Stop asked of the Claude lane since the pass
+        began (during a decision's thread, ticket 30) starts nothing: IDLE, and the earlier job
+        stays as it is, so the case is taken up again after Resume."""
+        if self.held('claude'):
+            return IDLE
         choice = self._resume_choice(old)
         if not choice.in_place:
             return self._restart(old, choice, None if limit else message)
