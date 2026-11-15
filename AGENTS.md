@@ -615,8 +615,9 @@ threads that need Stefan, so the runner toasts instead.
 after four takes that put everything on one page): **Overview** is the first glance, **Inbox** is
 what waits on him ("Needs you" before; the name is his), **Queue** is the work. Activity, Usage
 and Settings follow. **The Inbox is agreed** (Stefan, 2026-11-15, after takes 5 to 7, kept in
-`dashboard/earlier/`). Overview still shows the two lanes and Queue the work list and pyramid,
-as they were, each marked "Not rebuilt yet"; they're next, as tickets 20 and 21. Its frame is the one Stefan asked
+`dashboard/earlier/`). **The Overview is prototyped and not agreed yet** (ticket 20: three cards,
+below; Stefan judges it by eye, so expect more takes). Queue still shows the work list and
+pyramid as they were, marked "Not rebuilt yet"; it's next, as ticket 21. Its frame is the one Stefan asked
 for in the prototype rounds: a sidebar for getting around (the repository switcher and the
 pages), one centred column, and the machine's readings floating on the right, in his order:
 usage, the build order, then the runner's status. **It is its own process and depends on nothing:** no build step, no
@@ -639,8 +640,11 @@ python3 -m dashboard --sample    # sample data, no runner needed; ?sample=<state
   on the page: `provider`, `local` or `external`), `repos` in build
   order, `asks` (below), `answered` (asks Stefan has answered that the runner hasn't acted on
   yet: an ask plus `answered`: `at`, `said`, `next`; not counted as waiting on him), `lanes` (each with its `queue`, what it takes up next, in order, across
-  repositories; `queue_empty` says why there's none), `usage`, `features`, `issues` (with `pick`, the order ready work is
-  built in), `prs` (each with its timeline by head), `activity` (what happened, newest first),
+  repositories, a job a limit cut off first; `queue_empty` says why there's none), `usage`, `features` (in build order: the repos'
+  order, then the feature whose first open ticket has the lowest number), `issues` (with `pick`, the order ready work is
+  built in, and `state`: `done` only once it's live, `merged` while it's merged and its live
+  steps haven't run, `review` and `fixing` in a PR, `building`, `you`, `ready`, `blocked`,
+  `not-ready`), `prs` (each with its timeline by head), `activity` (what happened, newest first),
   `costs` (what the gate expects each kind of Claude job to take), `roles` (which lane does each
   kind of job) and `knob` (`gate.json`). A lane and a plan name their `provider` (`claude`,
   `chatgpt`), which picks the mark beside the name; the reviewing lane's id stays `sol`. Times
@@ -677,6 +681,28 @@ python3 -m dashboard --sample    # sample data, no runner needed; ?sample=<state
   aside behind the Usage button. A decided ask's line says what he said and what the runner
   is doing with it ("You said "fix on". Claude is fixing PR #209, 4 min in."). A lane has one
   Stop button, which asks which stop is meant while a job runs.
+- **The Overview only summarises, in three cards read top to bottom** (ticket 20, proposed;
+  `overview()` in `dashboard/index.html`). **Inbox** (`plate()`): blue while something waits.
+  The count in the Inbox's own words ("3 waiting on you", unread, oldest), a row per kind with
+  a cell per ask (Stuck, Your decision, Ready to merge, Broken; a kind's row opens the Inbox at
+  its first ask), and "First in line": the ask the runner lists first, its situation in a
+  sentence, which opens that ask. With nothing waiting the card is plain and says so.
+  **Running now** (`running()`, `lane()`, `stopButton()`): a line per lane: what it's doing and
+  for how long, or why it isn't, its Stop button, and **the one thing it takes up next** with
+  "then N more" opening the Queue. A lane's whole queue belongs to the Queue page (ticket 21);
+  its old markup is in `dashboard/earlier/take-8.html`. **Progress** (`progress()`): the first
+  three features with open work, in the snapshot's order, each with its bar, the one ticket
+  that says where it stands (what waits on him first, which opens that ask; else the next
+  ready one; else what's moving) and "N of M done". A line under them counts the features and
+  the featureless tickets it doesn't show. Each card's head opens its page; Running now has no
+  page of its own.
+- **A feature's bar is `featureBar(feature)`**, made to be reused under each feature on the
+  Queue page: a cell per ticket, named on hover, in `SEGMENTS`' order: done (live), merged but
+  not live, in a PR, building, waiting on him, ready, blocked (`not-ready` counts as blocked).
+  Colour is the state's family and a hatched cell is the earlier step in it: green solid is
+  done and green hatched merged, amber solid is in a PR and amber hatched building, blue is
+  his, an outline is ready, a faint cell blocked. `--run-fill` is the amber for a cell (the
+  text amber is too dark to fill with in light mode).
 - **Read and snoozed** (Stefan, 2026-11-15: "like an IRL inbox"): an ask he hasn't opened is
   unread (a dot, bold); opening it reads it, and Mark unread puts it back. Snooze takes an ask
   out of the list and the count until a time he picks (3 hours, tomorrow 9:00, next Monday
@@ -704,7 +730,11 @@ python3 -m dashboard --sample    # sample data, no runner needed; ?sample=<state
 - **Earlier takes, while the look is being agreed:** `dashboard/earlier/take-N.html` is the page
   as it was before a rework, served at `/earlier/take-N.html` with `--sample` only and linked
   from the sidebar's sample menu (`sample.EARLIER`). Before reworking the page again, copy it
-  there as the next take. Delete the folder, its route and its test once Stefan agrees the page.
+  there as the next take (take 8 is the page before the Overview was built), add it to
+  `sample.EARLIER` and to the route's test. Delete the folder, its route and its test once
+  Stefan agrees the page.
+- **A dashboard started before a change to `sample.py` keeps serving the old sample** (the page
+  itself is read afresh on every request). Stop it and start it again, or use `--port`.
 - The earlier React prototype is `.scratch/queue-runner/prototype-app/` (history only).
 
 ## Sol, as a script sees it

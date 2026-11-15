@@ -29,6 +29,7 @@ DEFAULT = "busy"
 # Takes of the page before this one, kept while its look is being agreed: `serve.py` serves the
 # ones in `dashboard/earlier/` in sample mode, and the sidebar's sample menu links them.
 EARLIER = [
+    {"href": "/earlier/take-8.html", "label": "Take 8", "note": "The Inbox as agreed, the Overview still the two lanes"},
     {"href": "/earlier/take-7.html", "label": "Take 7", "note": "Briefing layouts A, B and C, the rows before T3's shape"},
     {"href": "/earlier/take-6.html", "label": "Take 6", "note": "The Inbox with icons, read, snooze and three briefing layouts, 1440px wide"},
     {"href": "/earlier/take-5.html", "label": "Take 5", "note": "The Inbox as its own page, before Stefan's notes on it"},
@@ -224,6 +225,7 @@ def build(name: str = DEFAULT, base: datetime | None = None, control: dict | Non
             {"job": "Live steps", "what": "After a merge, makes it live", "lane": "claude"},
             {"job": "Review", "what": "Reviews each PR head", "lane": "sol"},
         ],
+        # In build order (`_order`, below): the page shows them as they come.
         "features": [
             {"id": f"{LD}#225", "repo": LD, "n": 225, "title": "Analytics"},
             {"id": f"{LD}#149", "repo": LD, "n": 149, "title": "Ring-to numbers"},
@@ -243,6 +245,7 @@ def build(name: str = DEFAULT, base: datetime | None = None, control: dict | Non
     else:
         _obey(snap, control or {}, now)
     _number(snap)
+    _order(snap)
     _queue(snap)
     # The page lists them in the sidebar; the runner's file has no such key.
     snap["sample"] = {"state": name, "states": STATES, "earlier": EARLIER}
@@ -310,6 +313,9 @@ def _issues() -> list[dict]:
     def i(repo, n, title, state, feature=None, pr=None, blocked_by=(), note=None):
         return {"repo": repo, "n": n, "title": title, "state": state, "feature": feature and f"{repo}#{feature}",
                 "pr": pr, "blocked_by": [f"{repo}#{b}" for b in blocked_by], "note": note, "pick": None}
+    # `state` is where a ticket stands. Done means live: `done` once its live steps ran, `merged`
+    # while it's merged and they haven't. Then `review` and `fixing` (in a PR), `building`, `you`
+    # (it waits on Stefan), `ready`, `blocked` and `not-ready`.
     return [
         i(LD, 226, "Store call events", "ready", 225),
         i(LD, 227, "Daily rollup of events", "blocked", 225, blocked_by=[226]),
@@ -317,14 +323,19 @@ def _issues() -> list[dict]:
         i(LD, 229, "Lead source report", "blocked", 225, blocked_by=[227, 196]),
         i(LD, 230, "Export analytics as CSV", "blocked", 225, blocked_by=[228]),
         i(LD, 196, "Lead source on every call", "done", 225),
+        i(LD, 151, "Save a Client's ring-to number", "done", 149),
+        i(LD, 188, "Ring-to number in the call log", "merged", 149, pr=203,
+          note="Merged; its live steps wait for the review of PR #210"),
         i(LD, 191, "A Client's Twilio number on their page", "you", 149, pr=207, note="PR #207 is ready for you to merge"),
         i(LD, 150, "Ring-to number per Client", "you", 149, pr=152, note="PR #152 waits for your decision"),
         i(LD, 216, "Ring-to audit page", "blocked", 149, blocked_by=[150]),
         i(LD, 214, "Client onboarding form", "you", 220, note="Its build waits for your answer"),
         i(LD, 215, "SEO questions on the form", "blocked", 220, blocked_by=[214]),
         i(LD, 223, "Welcome email after the form", "blocked", 220, blocked_by=[214]),
+        i(LD, 193, "Caller notes on the caller's page", "done", 200),
         i(LD, 205, "Callers list: filter by tag", "review", 200, pr=210, note="Sol is reviewing PR #210"),
         i(LD, 212, "Archive view for old callers", "building", 200, note="Claude is building it"),
+        i(LD, 213, "Callers list: sort by last call", "ready", 200),
         i(LD, 218, "Export calls as CSV", "not-ready", 200, note="Not marked ready-for-agent"),
         i(LD, 199, "Unassigned: assign several at once", "fixing", pr=204, note="Its fix round on PR #204 is next"),
         i(LD, 211, "Domain health check", "ready"),
@@ -437,6 +448,7 @@ def _activity(prs: list[dict], ago) -> list[dict]:
     rows += [
         e(35, "claude", "Started building #212", "Archive view for old callers", repo=LD, ref="#212"),
         e(52, "claude", "The build of #214 stopped with a question", "A decision thread couldn't answer it", "you", repo=LD, ref="#214"),
+        e(95, "you", "Merged PR #203", "Ring-to number in the call log; its live steps are still to run", repo=LD, ref="PR #203"),
         e(399, "runner", "Runner started", "On commit 66a5ea1, after its own PR #2 merged"),
         e(402, "runner", "Merged PR #2", "Clean on its head, checks passed", "ok", repo=QR, ref="PR #2"),
         e(day + 95, "claude", "Went live: PR #198 and PR #201", "2 migrations applied, 1 function deployed", "ok", repo=LD, ref="PR #201"),
@@ -540,15 +552,28 @@ def _obey(snap: dict, control: dict, now: datetime) -> None:
         snap["repos"].sort(key=lambda r: order.index(r["name"]))
 
 
+def _order(snap: dict) -> None:
+    """Features in build order: the repos' order, then the feature whose first open ticket has the
+    lowest number (the runner builds lowest number first). One with nothing open goes last."""
+    rank = {r["name"]: k for k, r in enumerate(snap["repos"])}
+
+    def first_open(f: dict) -> float:
+        return min((i["n"] for i in snap["issues"] if i["feature"] == f["id"] and i["state"] != "done"), default=float("inf"))
+    snap["features"].sort(key=lambda f: (first_open(f) == float("inf"), rank[f["repo"]], first_open(f)))
+
+
 def _queue(snap: dict) -> None:
-    """Each lane's own queue, in the order it takes them up: Claude's fix rounds, then its builds
-    in pick order; the reviews waiting for Sol. `next` is read by the earlier takes only."""
-    job = _lane(snap, "claude")["job"] or {}
+    """Each lane's own queue, in the order it takes them up: a job a limit cut off, Claude's fix
+    rounds, then its builds in pick order; the reviews waiting for Sol. `next` is read by the
+    earlier takes only."""
+    claude = _lane(snap, "claude")
+    job = claude["job"] or {}
+    held = [{"kind": job["kind"], "repo": job["repo"], "ref": job["ref"], "title": job["title"]}] if job and claude["state"] == "waiting" else []
     fixes = [{"kind": "fix", "repo": i["repo"], "ref": f"PR #{i['pr']}", "title": i["title"]}
              for i in snap["issues"] if i["state"] == "fixing" and f"PR #{i['pr']}" != job.get("ref")]
     builds = [{"kind": "build", "repo": i["repo"], "ref": f"#{i['n']}", "title": i["title"]}
               for i in sorted((i for i in snap["issues"] if i["pick"]), key=lambda i: i["pick"])]
-    _lane(snap, "claude")["queue"] = fixes + builds
+    claude["queue"] = held + fixes + builds
     _lane(snap, "sol").update(queue=[], queue_empty="Nothing is waiting for review.")
 
 
