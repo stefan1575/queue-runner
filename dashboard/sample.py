@@ -29,6 +29,7 @@ DEFAULT = "busy"
 # Takes of the page before this one, kept while its look is being agreed: `serve.py` serves the
 # ones in `dashboard/earlier/` in sample mode, and the sidebar's sample menu links them.
 EARLIER = [
+    {"href": "/earlier/take-6.html", "label": "Take 6", "note": "The Inbox with icons, read, snooze and three briefing layouts, 1440px wide"},
     {"href": "/earlier/take-5.html", "label": "Take 5", "note": "The Inbox as its own page, before Stefan's notes on it"},
     {"href": "/earlier/take-4.html", "label": "Take 4", "note": "One page: Needs you as a box on top, the lanes, then the work"},
     {"href": "/earlier/take-3.html", "label": "Take 3", "note": "Lanes on top, a tab per ask, status first on the right"},
@@ -78,8 +79,9 @@ def build(name: str = DEFAULT, base: datetime | None = None, control: dict | Non
         # An ask is written to be picked up cold, a week later. `kind` is why it came to Stefan:
         # `stuck` (the runner tried and couldn't get it through), `decision` (a product decision
         # is his), `merge` (ready, his to merge) or `broken` (something failed). `situation` says
-        # it in a sentence, `about` what the work is, `because` the specifics, `story` what has
-        # happened, in order; then `question`, `options` and where it's answered (`go`, whose
+        # it in a sentence, `about` what the work is, `because` the specifics, `timeline` what has
+        # happened, in order, each step with its time and a whole sentence (`_TIMELINES`, added
+        # below; `story` is the same in fragments, read by the earlier takes only); then `question`, `options` and where it's answered (`go`, whose
         # `where` is "t3" or "github": it picks the mark on the button).
         # `why` is read by the earlier takes only, and goes when they do.
         "asks": [
@@ -220,6 +222,8 @@ def build(name: str = DEFAULT, base: datetime | None = None, control: dict | Non
     }
     snap["activity"] = _activity(snap["prs"], ago)
     _vary(snap, name, ago, ahead)
+    for ask in snap["asks"] + snap["answered"]:
+        ask["timeline"] = [{"at": ago(minutes), "text": text} for minutes, text in _TIMELINES[ask["id"]]]
     if name == "dead":
         snap["written_at"] = (now - timedelta(minutes=42)).isoformat(timespec="seconds")
     else:
@@ -229,6 +233,57 @@ def build(name: str = DEFAULT, base: datetime | None = None, control: dict | Non
     # The page lists them in the sidebar; the runner's file has no such key.
     snap["sample"] = {"state": name, "states": STATES, "earlier": EARLIER}
     return snap
+
+
+DAY = 24 * 60
+# What has happened to each ask, oldest first: minutes ago, and the step in a whole sentence.
+_TIMELINES = {
+    "ask-152": [
+        (4 * DAY + 328, "Claude built it and opened PR #152, in 5 commits."),
+        (4 * DAY + 300, "Review 1 found two problems: the number was saved without being normalised, and the owner check "
+                        "read the Client from before a move. A fix round fixed both."),
+        (4 * DAY + 249, "Review 2 found one problem: a migration added a required column with no default. A fix round fixed it."),
+        (140, "Review 3 found the owner problem again, in a new place: when a Client is reassigned during a call."),
+        (129, "A decision thread wrote an approach note. It recommends rework: read the owner from the call's routing row."),
+        (128, "The runner stopped the PR and brought it to you."),
+    ],
+    "ask-207": [
+        (3 * DAY + 610, "Claude built it and opened PR #207, in 4 commits."),
+        (3 * DAY + 590, "Review 1 found one problem: the number showed before the Client's Twilio account was verified."),
+        (3 * DAY + 570, "A fix round pushed the fix."),
+        (48, "Review 2 came back clean, and the checks passed."),
+        (40, "The runner marked it ready for you to merge."),
+    ],
+    "ask-214": [
+        (30, "Claude started building #214."),
+        (14, "The build stopped before writing the form's required fields: the issue doesn't say whether the form is required."),
+        (12, "A decision thread couldn't settle it from the issue, so it came to you."),
+    ],
+    "ask-live": [
+        (DAY + 130, "You merged PR #198."),
+        (9, "The live steps deployed it and applied the first of its 2 migrations."),
+        (6, "The second migration failed: column \"owner_id\" already exists. The live run stopped there and came to you."),
+    ],
+    "ask-qr4": [
+        (70, "Claude built it and opened PR #4, in 2 commits."),
+        (28, "Review 1 came back clean."),
+        (5, "The tests timed out on Windows, in test_wake.py. They pass locally."),
+        (3, "A decision thread couldn't tell a flake from a fault, so it came to you."),
+    ],
+    "ask-ops": [
+        (9, "Claude started building #231."),
+        (2, "The build stopped at the recipient list: the issue names the Client's owner in one place and everyone "
+            "on the account in another."),
+        (1, "A decision thread couldn't settle it from the issue, so it came to you."),
+    ],
+    "ask-209": [
+        (3 * DAY, "Claude built it and opened PR #209."),
+        (2 * DAY, "Reviews 1 and 2 found problems, and fix rounds fixed them."),
+        (26 * 60 + 20, "Review 3 was still blocking: a third place fetches the transcript on every page load."),
+        (26 * 60, "The runner stopped the PR and brought it to you, with an approach note."),
+        (7, "You answered: fix on."),
+    ],
+}
 
 
 def _issues() -> list[dict]:

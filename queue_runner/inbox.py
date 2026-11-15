@@ -1,4 +1,5 @@
-"""Everything waiting on Stefan, in one place (ticket 17: `python -m queue_runner --needs-me`).
+"""Everything waiting on Stefan, in one place (ticket 17: `python -m queue_runner --inbox`; the
+dashboard's Inbox page shows the same things).
 
 Three kinds, read from the job log and GitHub; nothing is posted, started or recorded:
 

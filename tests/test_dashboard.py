@@ -116,6 +116,9 @@ class SampleTest(unittest.TestCase):
                 for a in s["asks"] + s["answered"]:
                     self.assertTrue(a["go"]["url"].startswith("https://"), a["id"])
                     self.assertIn(a["go"]["where"], ("t3", "github"), a["id"])
+                    times = [datetime.fromisoformat(e["at"]) for e in a["timeline"]]
+                    self.assertEqual(times, sorted(times), a["id"])   # the story is told oldest first
+                    self.assertTrue(times and all(e["text"].endswith(".") for e in a["timeline"]), a["id"])
                     self.assertIn(a["kind"], ("stuck", "decision", "merge", "broken"), a["id"])
                     for key in ("situation", "about", "because", "story", "question"):
                         self.assertTrue(a[key], f"{a['id']} {key}")   # each can be picked up cold
@@ -214,7 +217,7 @@ class HttpTest(unittest.TestCase):
         self.assertEqual(self.call("GET", "/config.toml")[0], 404)
 
     def test_an_earlier_take_of_the_page_is_served_with_sample_data_only(self):
-        for take in ("take-1", "take-2", "take-3", "take-4", "take-5"):
+        for take in ("take-1", "take-2", "take-3", "take-4", "take-5", "take-6"):
             status, kind, body = self.call("GET", f"/earlier/{take}.html")
             self.assertEqual((status, kind), (200, "text/html; charset=utf-8"))
             self.assertIn(b"<title>Queue runner</title>", body)

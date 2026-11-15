@@ -1,4 +1,4 @@
-"""`--needs-me` (ticket 17): PRs ready for Stefan to merge, needs-info stops and threads waiting
+"""`--inbox` (ticket 17): PRs ready for Stefan to merge, needs-info stops and threads waiting
 for his answer, in one list; "nothing" when there's nothing. Read only."""
 import io
 import os
@@ -38,9 +38,9 @@ path = "{self.dir}"
         self.gh = FakeGitHubForReviews(prs=[full_pr(20, 'claude/red-5', H2, title='Red'),
                                             full_pr(21, 'claude/blue-6', H3, title='Blue')])
 
-    def needs_me(self):
+    def inbox(self):
         out = io.StringIO()
-        code = main(['--needs-me', '--config', self.config], github=self.gh, out=out,
+        code = main(['--inbox', '--config', self.config], github=self.gh, out=out,
                     usage=FakeUsage())
         self.assertEqual(code, 0)
         return out.getvalue()
@@ -70,7 +70,7 @@ path = "{self.dir}"
         self.gh.posts.clear()
 
     def test_says_nothing_when_nothing_waits(self):
-        self.assertEqual(self.needs_me().strip(), 'Nothing waits on you.')
+        self.assertEqual(self.inbox().strip(), 'Nothing waits on you.')
         self.assertEqual(self.gh.posts, [])
 
     def test_lists_all_three_kinds(self):
@@ -86,7 +86,7 @@ path = "{self.dir}"
         failed = self.job('build', 8, 'failed', repo='second', branch='claude/y-8')
         self.job('decision', 8, 'stop', repo='second', about=failed.id, question='failed',
                  reason='Retry with the new key?')
-        out = self.needs_me()
+        out = self.inbox()
         self.assertIn('Ready for you to merge:\n  first#20 at '
                       f'{H2[:7]}: Red (https://github.com/owner/first/pull/20)', out)
         self.assertNotIn('first#21 at', out)
@@ -105,11 +105,11 @@ path = "{self.dir}"
         self.job('decision', 8, 'stop', repo='second', about=failed.id, question='failed',
                  reason='Retry?')
         self.jobs.released('second', 8)
-        self.assertEqual(self.needs_me().strip(), 'Nothing waits on you.')
+        self.assertEqual(self.inbox().strip(), 'Nothing waits on you.')
 
     def test_a_github_failure_is_said(self):
         self.gh.fail.add('pull')   # open_pulls reads each PR afresh
-        out = self.needs_me()
+        out = self.inbox()
         self.assertIn("first: couldn't read its PRs", out)
         self.assertIn('Nothing waits on you in what could be read.', out)
 

@@ -79,6 +79,15 @@ grill settled the split instead:
 
 ## Comments
 
+2026-11-15, Stefan's second round of notes on the Inbox (that page is `dashboard/earlier/take-6.html`),
+taken up: the layout pill floats over the sidebar's foot and takes no room; the Inbox takes all
+the width; an answered ask's row is a tick and one sentence; each step of the story so far has
+its time and a whole sentence (`timeline`); the reserve's line under Claude's usage has no date.
+`--needs-me` is now `--inbox` (`queue_runner/inbox.py`). **Still open, his:** the briefing's
+layout, A, B or C; and how a list row should look to be read at a glance (title, icon, the
+one-line situation, the unread dot), which he wants a research pass on before it's settled.
+A share of Fable's week and of ChatGPT's kept for him is pinned as ticket 23.
+
 2026-11-15, Stefan's notes on the Inbox page (take 5, kept as `dashboard/earlier/take-5.html`),
 taken up the same day: the Inbox's column is wider than the other pages'; each kind of ask has
 its icon and the button carries the mark of where it's answered; read and unread, and snooze

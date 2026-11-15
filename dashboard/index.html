@@ -16,14 +16,14 @@
   - Three pages do three jobs. Overview is the first glance. Inbox is what waits on you. Queue is
     the work. (Overview and Queue aren't rebuilt yet: they hold the lanes and the work list as
     they were, until the Inbox is agreed.)
-  - The Inbox reads like a mail client, and is wider than the other pages: the list down the
+  - The Inbox reads like a mail client, and takes all the width there is: the list down the
     left, a row per ask (why it's yours, with its own icon, what it is, the situation in a
     sentence), unread ones marked, and the picked one open on the right as a briefing that
     still makes sense a week later. An ask can be snoozed out of the list for a while; one
     you've answered stays greyed at the foot until the runner acts on it.
   - PROTOTYPE, with sample data only: three layouts of the briefing, ?variant=A|B|C, switched
-    from the bar at the foot of the Inbox (or the left and right arrow keys). The one Stefan
-    picks stays; the other two and the bar go.
+    from the pill floating over the sidebar's foot (or the left and right arrow keys). It takes
+    no room from the page. The one Stefan picks stays; the other two and the pill go.
   - A point in time is written whole, as he asked: November 15, 2026 Sunday 1:14pm.
   - Nothing moves by itself.
   - Colour is state and nothing else: blue is yours, amber is working, green is done or healthy,
@@ -182,10 +182,9 @@ main > * + * { margin-top: 16px; }
 .notice b { font-weight: 600; }
 
 /* ---------------------------------------------------------------- inbox */
-body.page-inbox .top-col, body.page-inbox main { max-width: 1440px; }
+body.page-inbox .top-col, body.page-inbox main { max-width: none; }
 body.page-inbox .stage { padding-bottom: 24px; }
-body.has-proto { --proto: 52px; }
-.mail { display: grid; grid-template-columns: 400px minmax(0, 1fr); height: calc(100vh - 108px - var(--proto, 0px)); min-height: 560px; overflow: hidden; }
+.mail { display: grid; grid-template-columns: 440px minmax(0, 1fr); height: calc(100vh - 108px); min-height: 560px; overflow: hidden; }
 .mail-list { border-right: 1px solid var(--line-soft); display: flex; flex-direction: column; min-height: 0; background: var(--sunk); }
 .mail-count { flex: none; display: flex; align-items: baseline; gap: 10px; height: 52px; padding: 16px 20px 0; border-bottom: 1px solid var(--line-soft); }
 .mail-count b { font: 600 17px/1.2 var(--display); }
@@ -214,9 +213,13 @@ body.has-proto { --proto: 52px; }
 .mrow.quiet .m3 { color: var(--dim); }
 .mrow.quiet[aria-current="true"] { box-shadow: inset 0 0 0 1px var(--line); }
 .mrow.quiet[aria-current="true"]::before { background: var(--dim); }
+.mrow.done .m2 { margin-top: 0; }
+.mrow.done .m2 .i { width: 16px; height: 16px; color: var(--ok); stroke-width: 2.2; vertical-align: -3px; margin-right: 7px; display: inline; }
+.mrow.done .m3 { -webkit-line-clamp: 3; margin-top: 3px; }
 
 /* the briefing: what every layout shares */
 .letter { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow-y: auto; scrollbar-width: thin; container-type: inline-size; }
+.letter.va > *, .letter.vb > * { max-width: 1080px; }
 .letter-head { flex: none; padding: 20px 28px 0; }
 .letter-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 10px; font-size: 14.5px; color: var(--mute); min-height: 30px; }
 .letter-tools { margin-left: auto; display: flex; gap: 8px; }
@@ -227,11 +230,14 @@ body.has-proto { --proto: 52px; }
 .brief { display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 14px 14px; }
 .brief dt { color: var(--mute); font-size: 14.5px; padding-top: 1px; }
 .brief dd { color: var(--ink-2); max-width: 40em; }
-.trail { font-size: 15px; line-height: 1.45; padding-top: 1px; }
-.trail li { padding-left: 15px; position: relative; color: var(--mute); }
-.trail li::before { content: ""; position: absolute; left: 1px; top: .58em; width: 5px; height: 5px; border-radius: 50%; background: var(--dim); }
-.trail li:last-child { color: var(--ink); }
-.trail li:last-child::before { background: var(--you); }
+.timeline { border-left: 2px solid var(--line); margin: 5px 0 0 5px; }
+.timeline li { position: relative; padding: 0 0 16px 22px; }
+.timeline li:last-child { padding-bottom: 0; }
+.timeline li::before { content: ""; position: absolute; left: -7px; top: 5px; width: 8px; height: 8px; border-radius: 50%; background: var(--surface); border: 2px solid var(--dim); }
+.timeline li:last-child::before { background: var(--you); border-color: var(--you); }
+.timeline time { display: block; font-size: 14px; color: var(--dim); }
+.timeline p { color: var(--ink-2); font-size: 16px; line-height: 1.45; max-width: 38em; margin-top: 1px; }
+.timeline li:last-child p { color: var(--ink); font-weight: 600; }
 /* what it needs from you: the one blue panel on the page */
 .move { flex: none; margin: 0 16px 16px; padding: 16px 20px 18px; border: 1px solid var(--you-line); border-radius: 12px; background: var(--you-wash); display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: 14px 28px; align-items: start; }
 @container (max-width: 640px) { .move { grid-template-columns: minmax(0, 1fr); } }
@@ -268,19 +274,14 @@ body.has-proto { --proto: 52px; }
 
 /* PROTOTYPE layout C: the story down the left, the ask standing beside it */
 .letter.vc { overflow: hidden; }
-.vc-grid { display: grid; grid-template-columns: minmax(0, 1fr) 380px; height: 100%; min-height: 0; }
+.vc-grid { display: grid; grid-template-columns: minmax(0, 1fr) 460px; height: 100%; min-height: 0; }
 .vc-story { overflow-y: auto; scrollbar-width: thin; padding: 20px 36px 32px 28px; min-width: 0; }
 .vc-story h2 { font: 400 29px/1.22 var(--serif); margin-top: 18px; text-wrap: balance; max-width: 21em; }
 .vc-sub { margin-top: 8px; color: var(--mute); }
 .vc-sub b { color: var(--ink); font-weight: 600; }
 .vc-sec { margin-top: 24px; max-width: 37em; }
 .vc-sec h3 { font-size: 14px; font-weight: 700; color: var(--mute); margin-bottom: 5px; }
-.vc-sec p { color: var(--ink-2); font-size: 17px; line-height: 1.5; }
-.timeline { border-left: 2px solid var(--line); margin: 8px 0 0 5px; }
-.timeline li { position: relative; padding: 0 0 12px 20px; color: var(--mute); }
-.timeline li::before { content: ""; position: absolute; left: -7px; top: 6px; width: 8px; height: 8px; border-radius: 50%; background: var(--surface); border: 2px solid var(--dim); }
-.timeline li:last-child { color: var(--ink); font-weight: 600; padding-bottom: 0; }
-.timeline li:last-child::before { background: var(--you); border-color: var(--you); }
+.vc-sec > p { color: var(--ink-2); font-size: 17px; line-height: 1.5; }
 .vc-ask { border-left: 1px solid var(--you-line); background: var(--you-wash); padding: 22px 22px 20px; display: flex; flex-direction: column; overflow-y: auto; scrollbar-width: thin; min-width: 0; }
 .vc-ask .move-label { margin: 0; }
 .vc-ask .question { font-size: 23px; margin-top: 10px; }
@@ -300,13 +301,14 @@ body.has-proto { --proto: 52px; }
 }
 @container (max-width: 820px) { .letter.vc .vc-grid { overflow: visible; } }
 
-/* PROTOTYPE: the bar that switches layouts. Not part of the design being judged. */
-.proto { position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 70; display: flex; align-items: center; gap: 6px; padding: 5px 6px 5px 16px; border-radius: 999px; background: var(--ink); color: var(--page); box-shadow: var(--float); font-size: 14.5px; white-space: nowrap; }
-.proto-q { opacity: .7; margin-right: 6px; }
-.proto-name { min-width: 214px; text-align: center; }
-.proto-name b { font-weight: 700; margin-right: 8px; }
-.proto button { width: 32px; height: 32px; border-radius: 50%; border: 0; background: color-mix(in srgb, var(--page) 14%, transparent); color: inherit; cursor: pointer; display: grid; place-items: center; }
+/* PROTOTYPE: the pill that switches layouts. Not part of the design being judged: it floats
+   over the sidebar's empty foot and takes no room from the page. */
+.proto { position: fixed; left: 12px; bottom: 76px; z-index: 70; width: 248px; display: flex; align-items: center; gap: 4px; padding: 5px; border-radius: 999px; background: var(--ink); color: var(--page); box-shadow: var(--float); font-size: 14.5px; white-space: nowrap; }
+.proto-name { flex: 1; min-width: 0; text-align: center; overflow: hidden; text-overflow: ellipsis; }
+.proto-name b { font-weight: 700; margin-right: 7px; }
+.proto button { flex: none; width: 30px; height: 30px; border-radius: 50%; border: 0; background: color-mix(in srgb, var(--page) 14%, transparent); color: inherit; cursor: pointer; display: grid; place-items: center; }
 .proto button:hover { background: color-mix(in srgb, var(--page) 26%, transparent); }
+@media (max-width: 900px) { .proto { left: 50%; bottom: 14px; transform: translateX(-50%); } }
 
 /* ---------------------------------------------------------------- lanes */
 .lanes { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
@@ -820,7 +822,12 @@ function inbox() {
   if (cur && !cur.answered && !snoozedUntil(cur) && !isRead(cur) && ui.hold !== cur.id) setRead(cur, true);
   const { all, open, snoozed, answered } = inboxLists();
   const blind = (snap.sources || []).find((s) => s.id === "github" && !s.ok);
+  // An answered one says it in a sentence: what you said, when, and that it's the runner's turn.
+  const done = (a) => `<li><button class="mrow quiet done" data-act="ask" data-id="${esc(a.id)}" aria-current="${a === cur}">
+      <span class="m2">${ICON.check}<b>${esc(a.subject)}</b><span>${esc(a.ref)}</span></span>
+      <span class="m3" title="You answered ${esc(stamp(a.answered.at))}">You said "${esc(a.answered.said)}" ${esc(ago(a.answered.at))} ago. ${esc(a.answered.next)}</span></button></li>`;
   const row = (a) => {
+    if (a.answered) return done(a);
     const zz = snoozedUntil(a), quiet = !!(a.answered || zz), unread = !quiet && !isRead(a);
     const line = a.answered ? a.answered.next : zz ? `Back ${stamp(zz)}` : a.situation || a.question;
     const when = a.answered ? a.answered.at : a.since;
@@ -836,7 +843,7 @@ function inbox() {
   const list = `<div class="mail-list"><p class="mail-count">${count}</p>
     <ol class="mail-rows" data-scroll="asks" aria-label="Waiting on you">${open.map(row).join("")}
       ${snoozed.length ? `<li class="mail-sep">Snoozed. Still holding ${snoozed.length === 1 ? "its" : "their"} work up.</li>${snoozed.map(row).join("")}` : ""}
-      ${answered.length ? `<li class="mail-sep">Answered. The runner takes ${answered.length === 1 ? "this" : "these"} up next.</li>${answered.map(row).join("")}` : ""}</ol></div>`;
+      ${answered.length ? `<li class="mail-sep">You answered ${answered.length === 1 ? "this" : "these"}. It's the runner's turn.</li>${answered.map(row).join("")}` : ""}</ol></div>`;
 
   let right;
   if (cur) right = { A: letterA, B: letterB, C: letterC }[ui.variant](cur);
@@ -875,10 +882,13 @@ function goBtn(a, cls, label) {
 }
 const holdsText = (a) => ((a.holds_up || []).length ? `Until then <b>${a.holds_up.map(esc).join("</b> and <b>")}</b> can't start.` : "It holds nothing else up.");
 const historyLink = (a) => (a.pr ? prLink(a.repo, a.pr, "PR history") : "");
+// `timeline` is each step with its time; a snapshot with only the older `story` still reads.
+const steps = (a) => ((a.timeline || []).length ? a.timeline : (a.story || []).map((text) => ({ text })));
+const storyList = (a) => `<ol class="timeline">${steps(a).map((e) => `<li>${e.at ? `<time datetime="${esc(e.at)}">${esc(stamp(e.at))}</time>` : ""}<p>${esc(e.text)}</p></li>`).join("")}</ol>`;
 const brief = (a) => `<dl class="brief">
     ${a.about ? `<dt>What it is</dt><dd>${esc(a.about)}</dd>` : ""}
     ${a.because ? `<dt>${esc(askWords(a)[1])}</dt><dd>${esc(a.because)}</dd>` : ""}
-    ${(a.story || []).length ? `<dt>So far</dt><dd><ol class="trail">${a.story.map((s) => `<li>${esc(s)}</li>`).join("")}</ol></dd>` : ""}
+    ${steps(a).length ? `<dt>So far</dt><dd>${storyList(a)}</dd>` : ""}
   </dl>`;
 function movePanel(a) {
   const done = a.answered;
@@ -928,7 +938,7 @@ function letterC(a) {
       <h2>${esc(a.situation || a.subject)}</h2><p class="vc-sub"><b>${esc(a.subject)}</b></p>
       ${a.about ? `<section class="vc-sec"><h3>What it is</h3><p>${esc(a.about)}</p></section>` : ""}
       ${a.because ? `<section class="vc-sec"><h3>${esc(askWords(a)[1])}</h3><p>${esc(a.because)}</p></section>` : ""}
-      ${(a.story || []).length ? `<section class="vc-sec"><h3>So far</h3><ol class="timeline">${a.story.map((s) => `<li>${esc(s)}</li>`).join("")}</ol></section>` : ""}
+      ${steps(a).length ? `<section class="vc-sec"><h3>So far</h3>${storyList(a)}</section>` : ""}
     </div>${ask}</div></article>`;
 }
 
@@ -936,7 +946,7 @@ function letterC(a) {
 function protoBar() {
   if (!snap.sample) return "";
   const [k, name] = VARIANTS.find((v) => v[0] === ui.variant);
-  return `<div class="proto" role="group" aria-label="Prototype: the briefing's layout"><span class="proto-q">Briefing layout</span>
+  return `<div class="proto" role="group" aria-label="Prototype: the briefing's layout" title="Prototype: the briefing's layout">
     <button data-act="variant" data-by="-1" aria-label="Previous layout" title="Left arrow key">${ICON.left}</button>
     <span class="proto-name"><b>${k}</b>${esc(name)}</span>
     <button data-act="variant" data-by="1" aria-label="Next layout" title="Right arrow key">${ICON.right}</button></div>`;
@@ -1179,7 +1189,7 @@ const plan = (p, full) => `<div class="plan">
     <p class="plan-name">${who(p.provider, p.name)}<span class="dim small">${p.plan ? esc(p.plan) + ", " : ""}read ${esc(clock(p.read_at))}</span></p>
     ${p.error ? `<p class="plan-note bad">${esc(p.error)}</p>` : ""}
     ${(p.windows || []).map((w) => meter(w, full)).join("")}
-    ${(p.windows || []).filter((w) => w.reserve).map((w) => `<p class="plan-note">${w.reserve}% of the week is kept for you until ${esc(stamp(w.reserve_opens_at))}.</p>`).join("")}
+    ${(p.windows || []).filter((w) => w.reserve).map((w) => `<p class="plan-note">${w.reserve}% of the week is kept for you.</p>`).join("")}
   </div>`;
 
 // Is it up, and is everything it leans on up. One line while all is well.
@@ -1318,7 +1328,6 @@ function draw() {
   document.body.classList.toggle("nav-open", ui.nav);
   document.body.classList.toggle("rail-open", ui.rail);
   document.body.classList.toggle("page-inbox", ui.page === "inbox");
-  document.body.classList.toggle("has-proto", ui.page === "inbox" && !!(snap && snap.sample));
   if (snap && ui.repo && !(snap.repos || []).some((r) => r.name === ui.repo)) ui.repo = "";
   put("side", side());
   put("top", topBar());

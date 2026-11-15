@@ -14,7 +14,7 @@ python3 -m queue_runner --gate                # Claude's usage now, and whether 
 python3 -m queue_runner --pause | --resume    # Stefan's knob: start no Claude job, or start them again
 python3 -m queue_runner --reserve PERCENT     # the share of the week kept for Stefan (default 5)
 python3 -m queue_runner --stop                # stop the running runner
-python3 -m queue_runner --needs-me            # everything waiting on Stefan: PRs ready to merge, needs-info stops, threads waiting for his answer
+python3 -m queue_runner --inbox               # everything waiting on Stefan: PRs ready to merge, needs-info stops, threads waiting for his answer
 ```
 
 Its dashboard is a separate small process (`dashboard/`; AGENTS.md, The dashboard):

@@ -22,7 +22,7 @@ python3 -m queue_runner --gate                # Claude's usage now, and whether 
 python3 -m queue_runner --pause | --resume    # Stefan's knob: start no Claude job, or start them again
 python3 -m queue_runner --reserve PERCENT     # the share of the week kept for Stefan (default 5)
 python3 -m queue_runner --stop                # stop the running runner
-python3 -m queue_runner --needs-me            # everything waiting on Stefan: PRs ready to merge, needs-info stops, threads waiting for his answer
+python3 -m queue_runner --inbox               # everything waiting on Stefan: PRs ready to merge, needs-info stops, threads waiting for his answer
 ```
 
 **`--once`, the bare command and `--review` start real Claude builds, fix rounds and decision
@@ -442,7 +442,7 @@ since 2026-11-10) isn't merged by the runner; `merge = "runner"` (the default) i
   unmerged, it's `unmarked` and the label goes (so a reopened PR isn't left ready). The live steps then read the merge from git as for any merge (a
   merge commit or a squash's `(#N)`; **a rebase merge names no PR**, so its commits wait for the
   next PR's batch).
-- **`--needs-me`** (`needs_me.py`, read only): the PRs ready to merge (the re-check passes now,
+- **`--inbox`** (`inbox.py`, read only; `--needs-me` until 2026-11-15): the PRs ready to merge (the re-check passes now,
   as the merge pass reads it), the `needs-info` stops filed and not answered or released,
   the builds a decision left to Stefan (until `--release`), and the threads waiting for his
   answer (a decision's `stop` on a waiting job), with their links; `Nothing waits on you.` when
@@ -654,7 +654,8 @@ python3 -m dashboard --sample    # sample data, no runner needed; ?sample=<state
   context gone). `kind` says why it came to him: `stuck` (the runner tried and couldn't get it
   through), `decision` (a product decision is his), `merge` (ready, his to merge) or `broken`
   (something failed). Then `situation` (it in one sentence), `about` (what the work is),
-  `because` (the specifics), `story` (what has happened, in order), `question`, `options`,
+  `because` (the specifics), `timeline` (what has happened, oldest first: each step's `at` and
+  a whole sentence as `text`; Stefan found fragments too short to read), `question`, `options`,
   `holds_up` and `go` (where it's answered: `label`, `url`, and `where`, `t3` or `github`, which
   picks the mark on the button). The runner lists asks in the order they're worth taking.
 - **How it looks** is explained at the top of `dashboard/index.html`. **The Inbox reads like a
@@ -664,9 +665,11 @@ python3 -m dashboard --sample    # sample data, no runner needed; ?sample=<state
   specifics, the story so far), ending in the one blue panel: what it needs from him, the
   options, what it holds up and the link it's answered at. An answered ask stays greyed at the
   foot of the list until the runner has acted on it, so "handled" and "still held" can be told
-  apart. The up and down arrow keys walk the list. Each kind has its own icon. The Inbox's
-  column is wider than the other pages' (1440px against 1120px), and under 2000px its right
-  panel steps aside behind the Usage button. A lane has one Stop button, which asks which stop
+  apart. The up and down arrow keys walk the list. Each kind has its own icon. The Inbox
+  takes all the width there is (Stefan, 2026-11-15; the other pages keep their 1120px column),
+  its briefing keeps a readable measure inside that, and under 2000px its right panel steps
+  aside behind the Usage button. An answered ask's row is a tick and a sentence ("You said
+  "fix on" 7 min ago. The runner..."), with no tags: he read the tags there as noise. A lane has one Stop button, which asks which stop
   is meant while a job runs.
 - **Read and snoozed** (Stefan, 2026-11-15: "like an IRL inbox"): an ask he hasn't opened is
   unread (a dot, bold); opening it reads it, and Mark unread puts it back. Snooze takes an ask
@@ -675,12 +678,13 @@ python3 -m dashboard --sample    # sample data, no runner needed; ?sample=<state
   **Both live in the browser's localStorage while the page is a prototype**, so Firefox and
   Chrome disagree; the real ones go through `control.json` (not built), so every browser agrees
   and the runner can hold a snoozed ask's toast.
-- **PROTOTYPE, to be folded in: three layouts of the briefing** (`?variant=A|B|C`, the bar at
-  the foot of the Inbox, or the left and right arrow keys; sample data only): A, background
+- **PROTOTYPE, to be folded in: three layouts of the briefing** (`?variant=A|B|C`, the pill
+  floating over the sidebar's foot, where it takes no room from the page, or the left and right
+  arrow keys; sample data only): A, background
   first (what it is, what's wrong, the story, then the ask); B, question first (the ask leads,
   the background under it); C, the story beside the ask (the situation as the headline, a
   timeline down the left, the ask standing on the right). Once Stefan picks, fold the winner
-  into `letter()`, and move the other two, the bar and `turnVariant` to a `prototype/inbox-briefing`
+  into the briefing, and move the other two, the pill and `turnVariant` to a `prototype/inbox-briefing`
   branch, out of main.
 - **A point in time is written whole** (Stefan, 2026-11-15): `stamp()` gives "November 15, 2026
   Sunday 1:14pm", for when an ask began waiting, a usage window's reset, the runner's start and
@@ -881,8 +885,8 @@ Live steps: `tests/test_live.py` (the answer block, the batch from `FakeLiveGit`
 each outcome and its stop, a restart through the real `Runner`); `GitCli`'s first-parent log and
 changed files in `tests/test_git.py`.
 Stefan merges: `StefanMergesTest` in `tests/test_merge.py` (marked once, unmarked on a new head
-or a stop, his merge noticed once, a closed PR, a failed label) and `tests/test_needs_me.py`
-(`--needs-me` through `main`, and the `merge` setting).
+or a stop, his merge noticed once, a closed PR, a failed label) and `tests/test_inbox.py`
+(`--inbox` through `main`, and the `merge` setting).
 Serving itself: `tests/test_restart.py` (`SelfUpdate` on a real checkout with a bare origin,
 `relaunch` with a fake process and toaster, the loop through `main`).
 Running unattended: `tests/test_wake.py` (`Waker` against `FakeScheduler` in `fakes.py`, the
@@ -921,7 +925,7 @@ temp folder.
   land, the brief, the answer and its stops.
 - `queue_runner/merge.py`: the pre-merge re-check, the expected-head merge and the worktrees
   removed after; in a repo Stefan merges, the `ready-for-stefan` mark and noticing his merge.
-- `queue_runner/needs_me.py`: `--needs-me`, everything waiting on Stefan. A fix round's local branch name (`fix_branch`) is `fix.py`'s.
+- `queue_runner/inbox.py`: `--inbox`, everything waiting on Stefan. A fix round's local branch name (`fix_branch`) is `fix.py`'s.
 - `queue_runner/review.py` and `templates/review.md`: the Sol lane: adoption, the brief, a review.
 - `queue_runner/ledger.py`: earlier reviews from a PR's comments, and `decide()`.
 - `queue_runner/stops.py`: stops for Stefan: which, the `needs-info` issue, the PR comment, the
