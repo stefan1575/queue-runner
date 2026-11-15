@@ -809,7 +809,8 @@ python3 -m dashboard    # http://queue.localhost:5289/ is the runner's; http://l
   gone quiet: the page says so, greys the health readings and takes the controls away),
   `control_read_at`, `sources` (health; `short` is the name beside its dot, `group` sorts them
   on the page: `provider`, `local` or `external`), `repos` in build
-  order (each with `stopped`, `{"at"}` or null: ticket 37), `asks` (below), `answered` (asks Stefan has answered that the runner hasn't acted on
+  order (each with `stopped`, `{"at"}` or null: ticket 37), `asks` (below; each with `read` and
+  `snoozed_until`: Read and snoozed, below), `answered` (asks Stefan has answered that the runner hasn't acted on
   yet: an ask plus `answered`: `at`, `said`, `next`; not counted as waiting on him), `lanes` (each with its `queue`, what it takes up next, in order, across
   repositories, a job a limit cut off first, and for the reviewing lane the PRs waiting for their review; `queue_empty` says why there's none), `usage`, `features` (in build order: the repos'
   order, then the feature whose first open ticket has the lowest number, a finished one last; each with `tickets`, its
@@ -824,8 +825,10 @@ python3 -m dashboard    # http://queue.localhost:5289/ is the runner's; http://l
   are ISO strings; the page formats them. `sample.STATES` names every state the page has to show.
 - **Control** (`serve.apply_control`): `POST /control` takes `{"lane", "stop"}` (`"after-job"`,
   `"now"` or null to carry on), `{"repo", "stop"}` (`"after-job"` or null: Stopping one repo,
-  above) or `{"repo_order": [...]}`, and anything else is refused; each write keeps what the
-  others wrote. The page shows a request as asked until `control_read_at` reaches its time.
+  above), `{"repo_order": [...]}`, or an ask's `{"ask", "read"}` (true or false) and `{"ask",
+  "snooze_until"}` (an ISO time with its offset, kept in this PC's, or null), and anything else
+  is refused; each write keeps what the others wrote. The page shows a request as asked until
+  `control_read_at` reaches its time.
 - **A stopped repo on the page** (ticket 37): each row of the Build order card has Stop or Resume
   and says "Stopped since ..." (or "Asked to stop/resume: the runner hasn't read it yet"); its
   work reads as stopped wherever it's listed: a dashed "Stopped" tag beside its name on Inbox rows
@@ -977,9 +980,21 @@ python3 -m dashboard    # http://queue.localhost:5289/ is the runner's; http://l
   out of the list and the count until a time he picks (3 hours, tomorrow 9:00, next Monday
   9:00); it sits in the Snoozed group, still holding its work up, and its row's Unsnooze
   button (or the briefing's) undoes it. Choosing the snooze times in Settings is pinned (ticket 24).
-  **Both live in the browser's localStorage while the page is a prototype**, so Firefox and
-  Chrome disagree; the real ones go through `control.json` (not built), so every browser agrees
-  and the runner can hold a snoozed ask's toast.
+  **Both are kept with the runner** (ticket 36), so every browser agrees: the page asks
+  `{"ask", "read"}` and `{"ask", "snooze_until"}` (Control, above), kept in `control.json` as
+  `asks.<id>` with `read` and `snooze_until` beside that object's other keys (ticket 35's
+  `open`); the runner reads them (`Switch.asks`, leniently: an entry it can't use is left out
+  and never stops a lane) and the snapshot's asks and answered asks carry `read` (false with no
+  entry) and `snoozed_until`, null once its time has passed (`snapshot._marks`). A snoozed ask
+  stays in `asks`, so it still holds its work up; the page leaves it out of the count. Until
+  `control_read_at` reaches the page's last write, its entry stands in for the snapshot's
+  (`mark()` in `index.html`), so a click shows at once. **An ask that's gone takes its entry
+  with it:** each write drops the entries of asks the snapshot no longer lists (asks or
+  answered; `App.ask_ids`, every sample state's on the sample addresses; no snapshot to go by
+  drops nothing). An ask is keyed by its id only: a stop, review or head that comes back is a
+  new job and a new id, so it's unread again. The sample's pretend runner reads its own control
+  file's `asks` like the rest (`_obey`). The folded groups stay in the browser. The runner
+  holding a snoozed ask's toast isn't built.
 - **A point in time is written whole** (Stefan, 2026-11-15): `stamp()` gives "November 15, 2026
   Sunday 1:14pm", for when an ask began waiting, a usage window's reset, the runner's start and
   a snooze's end. A list row keeps the short age ("2 h") with the whole time on hover. Choosing
@@ -1205,6 +1220,9 @@ real Task Scheduler.
 The dashboard: `tests/test_dashboard.py` (control requests, the server on a free port with both
 addresses' `Host` and `Origin`, every sample state, that the page loads nothing from outside
 itself, and `python -m dashboard` started twice on one free port: the start line, exit 3).
+Read and snoozed: `tests/test_read_snoozed.py` (control.json's `asks` read and kept by
+`control.py`, and the snapshot's `read` and `snoozed_until` from `snapshot.build` on the Inbox's
+fixtures); the requests, dropping gone asks and the sample's pretend runner in `test_dashboard.py`.
 The logon shortcuts: `tests/test_make_shortcut.py` (real `.lnk` files in temp folders, read back
 through WScript.Shell).
 The runner's snapshot:
@@ -1290,7 +1308,8 @@ temp folder.
   (`usage.jsonl`).
 - `queue_runner/control.py`: each lane's switch: reading `control.json` (and gate.json's older
   pause), writing it for `--pause` and `--resume`, and what the runner says (ticket 30); the
-  build order, `ordered` (ticket 33); each repo's stop, `stopped_repos` (ticket 37).
+  build order, `ordered` (ticket 33); each repo's stop, `stopped_repos` (ticket 37); each ask's
+  entry, `Switch.asks`, read only (ticket 36).
 - `queue_runner/config.py`: the served repos and the runner's folders; the build order
   (`set_build_order`) and the stopped repos (`set_stopped`), and `working`, the repos the lanes
   take work from.
