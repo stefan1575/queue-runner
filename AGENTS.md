@@ -462,7 +462,11 @@ id), and `resume`: whether the earlier thread is continued in place or a fresh t
 any job of its kind; a dead runner's settle finds the thread by its id. A message that never
 reached a run (T3 failed and the thread isn't running) ends the new job `not-sent` (it counts for
 nothing; the issue stays held), puts a waiting job back to `waiting`, and the decision
-`not-started`, so the case is decided again.
+`not-started`, so the case is decided again. **A fresh thread T3 never started** (it failed
+before one existed, or a dead runner's settle finds none) is the same (`Runner._uncontinue`):
+the new job ends `not-started`, which holds the issue still (a build with `about` doesn't free
+it) and is no newer job to the decisions (`Decider.cases` passes over `not-started` and
+`not-sent`), the waiting job is `waiting` again, and the case is decided again.
 
 ## Decision threads
 

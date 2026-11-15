@@ -204,7 +204,9 @@ class JobLog:
                 job = replace(jobs[e['job']], ended_at=e['at'],
                               **{k: e[k] for k in _END_FIELDS if k in e})
                 jobs[job.id] = job
-                if job.kind == 'build' and job.outcome == NOT_STARTED:
+                # A fresh build that never started holds nothing; one picking up an earlier
+                # build (`about`) leaves the issue held, as that build holds it.
+                if job.kind == 'build' and job.outcome == NOT_STARTED and not job.about:
                     held[(job.repo, job.issue)] = False
             elif kind == 'release':
                 held[(e['repo'], e['issue'])] = False

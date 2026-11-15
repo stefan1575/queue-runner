@@ -378,6 +378,61 @@ class DecisionTest(unittest.TestCase):
         self.assertEqual((first.outcome, second.outcome), ('continued', 'done-no-pr'))
         self.assertEqual(self.r.jobs.waiting_jobs(), [])
 
+    def fresh_start_fails(self, first, decision):
+        """A cold, big build thread that ended `first`, a decision that picks it up, and T3
+        failing before the fresh thread for it exists (review 1's F4)."""
+        from dataclasses import replace
+        self.cold(150_000)
+        self.build(first, (0, 'completed', decision), T3Error('Server unavailable before launch'))
+        # The old thread was made before the new job: settling can't take it for the new one's.
+        self.t3.threads['mcp:t1'] = replace(self.t3.threads['mcp:t1'],
+                                            created_at='2026-01-01T00:00:00Z')
+        self.assertEqual(self.r.run_pass(), 'idle')
+        self.assertEqual(self.jobs('build')[-1].outcome, 'not-started')
+        self.assertEqual(self.jobs('decision')[-1].outcome, 'not-started')
+
+    def test_a_fresh_answer_that_never_starts_leaves_the_waiting_case_to_decide_again(self):
+        self.fresh_start_fails((2, 'waiting'), decision_reply('answer', text='Use blue.'))
+        first = self.jobs('build')[0]
+        self.assertEqual(first.outcome, 'waiting')   # as it was: never continued
+        case = self.r.decider.next_case()
+        self.assertIsNotNone(case)
+        self.assertEqual((case.question, case.about.id), ('waiting', first.id))
+        self.assertEqual(self.r.jobs.held_issues('first'), {4})   # the picker leaves it alone
+        self.assertEqual([j.id for j in self.r.jobs.waiting_jobs()], [first.id])
+        self.t3.outcomes = [(0, 'completed', decision_reply('answer', text='Use blue.')),
+                            (0, 'completed')]
+        self.assertEqual(self.r.run_pass(), 'started')
+        self.assertEqual([j.outcome for j in self.jobs('build')],
+                         ['continued', 'not-started', 'done-no-pr'])
+
+    def test_a_fresh_retry_that_never_starts_leaves_the_failed_case_to_decide_again(self):
+        self.fresh_start_fails((1, 'failed'), decision_reply('retry', add='Again.'))
+        first = self.jobs('build')[0]
+        self.assertEqual(first.outcome, 'failed')
+        case = self.r.decider.next_case()
+        self.assertEqual((case.question, case.about.id), ('failed', first.id))
+        self.assertEqual(self.r.jobs.held_issues('first'), {4})
+
+    def test_a_fresh_answer_cut_off_with_its_runner_before_t3_started_is_decided_again(self):
+        # The runner died after marking the waiting job continued and before T3 made the fresh
+        # thread: the next runner's settle finds no thread for the new job.
+        from dataclasses import replace
+        self.cold(150_000)
+        self.build((2, 'waiting'))
+        self.t3.threads['mcp:t1'] = replace(self.t3.threads['mcp:t1'],
+                                            created_at='2026-01-01T00:00:00Z')
+        first = self.jobs('build')[0]
+        self.r.jobs.ended(first.id, exit_code=2, outcome='continued')
+        self.r.jobs.started(kind='build', repo='first', issue=4, branch=first.branch,
+                            title=first.title, about=first.id)
+        self.t3.outcomes = [(0, 'completed', decision_reply('answer', text='Use blue.')),
+                            (0, 'completed')]
+        self.assertEqual(self.r.run_pass(), 'started')
+        self.assertEqual([j.outcome for j in self.jobs('build')],
+                         ['continued', 'not-started', 'done-no-pr'])
+        self.assertEqual([d.outcome for d in self.jobs('decision')], ['answer'])
+
     def test_a_cold_thread_under_120k_tokens_retried_carries_on_in_place(self):
         self.cold(119_000)
         self.build((1, 'failed'),
