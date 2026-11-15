@@ -122,6 +122,7 @@ export interface PR {
 }
 
 export interface DigestRow {
+  day: string; // always shown: the log never assumes you remember when you last looked
   at: string;
   actor: TEvent["actor"];
   repo: RepoId;
@@ -139,6 +140,8 @@ export interface Window {
 export interface Meter {
   five: Window;
   week: Window;
+  // Model-scoped weekly limits the account has (e.g. "Fable"), only when the usage response has them.
+  scoped?: (Window & { label: string })[];
   readAt: string;
   error?: string;
 }

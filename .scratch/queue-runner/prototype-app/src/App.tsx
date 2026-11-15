@@ -1,36 +1,35 @@
-// PROTOTYPE (throwaway): the queue runner's main view on fake data. Nothing here reads or writes the
-// runner, GitHub or T3. One page: Needs you, the two lanes, the work; usage and connections on the right.
+// PROTOTYPE (throwaway): the queue runner's dashboard on fake data. Nothing here reads or writes the
+// runner, GitHub or T3. A sidebar (repo switcher, pages, health), the page, and usage floating right.
+import * as Dialog from "@radix-ui/react-dialog";
 import * as Popover from "@radix-ui/react-popover";
-import { CirclePause, Play } from "lucide-react";
+import { CirclePause, Gauge, Menu, Play, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Toaster, toast } from "sonner";
 import { Lanes } from "./components/Lanes";
 import { NeedsList } from "./components/NeedsList";
-import { PrototypeBar } from "./components/PrototypeBar";
-import { Rail } from "./components/Rail";
-import { RepoPicker } from "./components/RepoPicker";
+import { PAGES, Sidebar } from "./components/Sidebar";
+import { UsageCard } from "./components/UsageCard";
 import { Work } from "./components/Work";
-import { Chip, Dot } from "./components/ui";
 import { cn } from "./lib/cn";
+import { useUrl } from "./lib/router";
+import { ActivityPage } from "./pages/Activity";
 import { PrDrawer } from "./pages/PrDetail";
+import { SettingsPage } from "./pages/Settings";
+import { UsagePage } from "./pages/Usage";
 import { StoreProvider, useStore } from "./store";
 
-function TopBar() {
-  const { world, live } = useStore();
-  const r = world.runner;
-  const [tone, word] = r.process === "running" ? (["ok", "Running"] as const) : r.process === "stopped" ? (["bad", "Not running"] as const) : (["warn", r.process === "starting" ? "Starting" : "Restarting"] as const);
+function TopBar({ title, onMenu, usageOpen, toggleUsage }: { title: string; onMenu: () => void; usageOpen: boolean; toggleUsage: () => void }) {
+  const { live } = useStore();
   return (
-    <header className="sticky top-0 z-30 flex h-11 items-center gap-2 border-b border-line bg-surface/90 px-3 backdrop-blur md:px-4">
-      <span className="flex size-6 items-center justify-center rounded-md bg-accent text-white dark:text-page" aria-hidden>
-        <svg viewBox="0 0 32 32" className="size-4"><path d="M8 11h16M8 16h11M8 21h7" stroke="currentColor" strokeWidth="3" strokeLinecap="round" fill="none" /></svg>
-      </span>
-      <span className="hidden text-[13.5px] font-semibold sm:inline">Queue runner</span>
-      <span className="text-line">/</span>
-      <RepoPicker />
+    <header className="sticky top-0 z-30 flex h-14 items-center gap-3 border-b border-line bg-page/90 px-4 backdrop-blur md:px-6">
+      <button type="button" onClick={onMenu} className="-ml-1 rounded-lg p-1.5 hover:bg-sunk md:hidden" aria-label="Open menu"><Menu className="size-5" /></button>
+      <h1 className="text-[19px] font-semibold tracking-[-0.01em]">{title}</h1>
       <div className="ml-auto flex items-center gap-2">
-        <Chip tone={tone} title={r.note}><Dot className="bg-current" live={r.process === "running"} />{word}<span className="hidden font-normal opacity-75 sm:inline">{r.process === "stopped" ? ` · last seen ${r.lastSeen}` : ` · since ${r.since}`}</span></Chip>
         <UpdatedAgo updatedAt={live.updatedAt} active={live.active} />
         <StopAll />
+        <button type="button" onClick={toggleUsage} aria-pressed={usageOpen} className={cn("inline-flex h-9 items-center gap-1.5 rounded-lg border border-line px-3 text-[14px] font-medium hover:bg-sunk min-[1600px]:hidden", usageOpen && "bg-sunk")}>
+          <Gauge className="size-4" />Usage
+        </button>
       </div>
     </header>
   );
@@ -41,7 +40,7 @@ function UpdatedAgo({ updatedAt, active }: { updatedAt: number; active: boolean 
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, []);
   const ago = Math.max(0, Math.round((now - updatedAt) / 1000));
   return (
-    <span className={cn("hidden text-[12px] tabular-nums md:inline", active ? "text-mute" : "text-faint")} title="Refreshes when you focus this tab, then every 10 s while it stays focused">
+    <span className={cn("hidden text-[13.5px] tabular-nums lg:inline", active ? "text-mute" : "text-faint")} title="Refreshes when you focus this tab, then every 10 s while it stays focused">
       {active ? `Updated ${ago < 2 ? "now" : `${ago}s ago`}` : "Paused in background"}
     </span>
   );
@@ -65,16 +64,16 @@ function StopAll() {
     setOpen(false);
     toast(how === "resume" ? "Both lanes resumed" : how === "now" ? "Both lanes stopped" : "Both lanes stop after their current job");
   };
-  if (stopped) return <button type="button" onClick={() => apply("resume")} className="inline-flex h-7 items-center gap-1 rounded-md bg-accent px-2.5 text-[12.5px] font-medium text-white dark:text-page"><Play className="size-3.5" />Resume all</button>;
+  if (stopped) return <button type="button" onClick={() => apply("resume")} className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-ink px-3 text-[14px] font-medium text-page"><Play className="size-3.5" />Resume all</button>;
   return (
     <Popover.Root open={open} onOpenChange={setOpen}>
-      <Popover.Trigger className="inline-flex h-7 items-center gap-1 rounded-md border border-line px-2 text-[12.5px] font-medium hover:bg-sunk data-[state=open]:bg-sunk"><CirclePause className="size-3.5" /><span className="hidden sm:inline">Stop all</span></Popover.Trigger>
+      <Popover.Trigger className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-line px-3 text-[14px] font-medium hover:bg-sunk data-[state=open]:bg-sunk"><CirclePause className="size-4" /><span className="hidden sm:inline">Stop all</span></Popover.Trigger>
       <Popover.Portal>
         <Popover.Content align="end" sideOffset={4} className="z-50 w-60 rounded-lg border border-line bg-surface p-1 shadow-lg">
           {([["after", "After current jobs", "Both lanes finish, then start nothing"], ["now", "Now", "Cuts off both running jobs"]] as const).map(([k, t, s]) => (
             <button key={k} type="button" onClick={() => apply(k)} className="block w-full rounded-md px-2.5 py-1.5 text-left hover:bg-sunk">
-              <span className={cn("block text-[13px] font-medium", k === "now" && "text-bad")}>{t}</span>
-              <span className="block text-[12px] text-mute">{s}</span>
+              <span className={cn("block text-[14.5px] font-medium", k === "now" && "text-bad")}>{t}</span>
+              <span className="block text-[13.5px] text-mute">{s}</span>
             </button>
           ))}
         </Popover.Content>
@@ -88,24 +87,57 @@ function Banner() {
   const r = world.runner;
   const msg = r.process !== "running" ? r.note : !r.github.ok ? `GitHub unreadable. ${r.github.note}` : null;
   if (!msg) return null;
-  return <div className={cn("rounded-lg border px-3 py-2 text-[12.5px]", r.process === "stopped" ? "border-bad/30 bg-bad-soft text-bad" : "border-warn/30 bg-warn-soft text-warn")}><b className="font-semibold">{r.process === "stopped" ? "The runner isn't running. " : ""}</b>{msg}</div>;
+  return <div className={cn("rounded-xl border px-4 py-3 text-[14.5px]", r.process === "stopped" ? "border-bad/30 bg-bad-soft text-bad" : "border-warn/30 bg-warn-soft text-warn")}><b className="font-semibold">{r.process === "stopped" ? "The runner isn't running. " : ""}</b>{msg}</div>;
+}
+
+function Dashboard() {
+  return (
+    <div className="space-y-4">
+      <NeedsList />
+      <Lanes />
+      <Work />
+    </div>
+  );
 }
 
 function Main() {
   const { world } = useStore();
+  const { path } = useUrl();
+  const [menu, setMenu] = useState(false);
+  const [usage, setUsage] = useState(false);
   useEffect(() => { document.title = `${world.asks.length ? `(${world.asks.length}) ` : ""}Queue runner`; }, [world.asks.length]);
+  const page = PAGES.find((p) => p.path === path) ?? PAGES[0];
+
   return (
-    <div className="flex min-h-full flex-col">
-      <TopBar />
-      <div className={cn("grid flex-1 grid-cols-[minmax(0,1fr)] gap-2 p-2 pb-20 md:p-3 md:pb-20 lg:grid-cols-[minmax(0,1fr)_300px] xl:grid-cols-[minmax(0,1fr)_330px]", world.runner.process === "stopped" && "[&_section]:opacity-80")}>
-        <div className="min-w-0 space-y-2">
+    <div className="flex min-h-full">
+      <nav aria-label="Sidebar" className="sticky top-0 hidden h-screen w-[280px] shrink-0 border-r border-line bg-side md:block"><Sidebar /></nav>
+      <Dialog.Root open={menu} onOpenChange={setMenu}>
+        <Dialog.Portal>
+          <Dialog.Overlay className="fixed inset-0 z-40 bg-black/30" />
+          <Dialog.Content aria-describedby={undefined} className="sheet-in-left fixed inset-y-0 left-0 z-50 w-[min(300px,86vw)] bg-side shadow-2xl">
+            <Dialog.Title className="sr-only">Menu</Dialog.Title>
+            <Dialog.Close className="absolute right-2 top-2 z-10 rounded-md p-1.5 text-faint hover:bg-sunk" aria-label="Close menu"><X className="size-4" /></Dialog.Close>
+            <Sidebar onNavigate={() => setMenu(false)} />
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
+
+      <div className="flex min-w-0 flex-1 flex-col">
+        <TopBar title={page.label} onMenu={() => setMenu(true)} usageOpen={usage} toggleUsage={() => setUsage(!usage)} />
+        <main id="main" className={cn("flex-1 px-4 py-5 md:px-6", world.runner.process === "stopped" && "[&_section]:opacity-80")}>
+          <div className="space-y-4 min-[1600px]:mr-[344px]">
           <Banner />
-          <NeedsList />
-          <Lanes />
-          <Work />
-        </div>
-        <aside className="min-w-0 lg:sticky lg:top-[52px] lg:max-h-[calc(100vh-60px)] lg:self-start lg:overflow-y-auto"><Rail /></aside>
+          {page.path === "/" && <Dashboard />}
+          {page.path === "/activity" && <ActivityPage />}
+          {page.path === "/usage" && <UsagePage />}
+          {page.path === "/settings" && <SettingsPage />}
+          </div>
+        </main>
       </div>
+
+      {/* Wide windows: always in view on the right. Narrower: opened from the top bar. */}
+      {page.path !== "/usage" && <UsageCard className="fixed right-6 top-[76px] z-20 hidden min-[1600px]:block" />}
+      {usage && <UsageCard onClose={() => setUsage(false)} className="fixed right-4 top-[64px] z-40 max-w-[calc(100vw-32px)] min-[1600px]:hidden" />}
       <PrDrawer />
     </div>
   );
@@ -115,8 +147,7 @@ export function App() {
   return (
     <StoreProvider>
       <Main />
-      <PrototypeBar />
-      <Toaster position="bottom-right" toastOptions={{ style: { fontFamily: "var(--font-sans)", fontSize: 13 } }} />
+      <Toaster position="bottom-right" toastOptions={{ style: { fontFamily: "var(--font-sans)", fontSize: 14 } }} />
     </StoreProvider>
   );
 }

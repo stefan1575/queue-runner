@@ -47,18 +47,18 @@ function Body({ pr }: { pr: PR }) {
       <div className="sticky top-0 z-10 border-b border-line bg-surface px-4 py-3">
         <div className="flex items-start gap-3">
           <div className="min-w-0 flex-1">
-            <p className="text-[12px] text-mute">{pr.repo} · PR #{pr.n} · closes #{pr.issue}</p>
-            <Dialog.Title className="truncate text-[15px] font-semibold">{pr.title}</Dialog.Title>
+            <p className="text-[13.5px] text-mute">{pr.repo} · PR #{pr.n} · closes #{pr.issue}</p>
+            <Dialog.Title className="truncate text-[16.5px] font-semibold">{pr.title}</Dialog.Title>
           </div>
           <Dialog.Close className="rounded p-1 text-faint hover:bg-sunk hover:text-ink" aria-label="Close"><X className="size-4" /></Dialog.Close>
         </div>
-        <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[12px]">
+        <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[13.5px]">
           {pr.held ? <Chip tone="you">Held</Chip> : <Chip>{pr.gate ?? pr.phase.replace("-", " ")}</Chip>}
           {pr.live && <Chip tone={pr.live === "live" ? "ok" : pr.live === "needs-attention" ? "you" : "info"}>{pr.live === "pending" ? "live steps after merge" : pr.live === "needs-attention" ? "live needs you" : pr.live}</Chip>}
           <span className="text-mute">head <Sha className="text-ink-2">{pr.head}</Sha></span>
-          <span className="truncate font-mono text-[11.5px] text-faint">{pr.branch}</span>
+          <span className="truncate font-mono text-[13px] text-faint">{pr.branch}</span>
         </div>
-        <p className={cn("mt-2 rounded-md px-2.5 py-1.5 text-[12.5px]", pr.held ? "bg-you-soft text-ink" : "bg-sunk text-ink-2")}>
+        <p className={cn("mt-2 rounded-md px-2.5 py-1.5 text-[14px]", pr.held ? "bg-you-soft text-ink" : "bg-sunk text-ink-2")}>
           {pr.held && <b className="font-semibold text-you">{pr.held}. </b>}{pr.next}
         </p>
       </div>
@@ -76,8 +76,8 @@ function Body({ pr }: { pr: PR }) {
                 <span className={cn("relative z-10 flex size-[19px] items-center justify-center rounded-full border", current ? "border-ink bg-ink text-surface" : "border-line bg-surface text-faint")}>
                   <GitCommitHorizontal className="size-3" />
                 </span>
-                <Sha className={cn("text-[12px]", current && "font-semibold text-ink")}>{g.sha}</Sha>
-                <span className="text-[11.5px] text-faint">{merged ? "merge commit" : `head ${heads.indexOf(g.sha) + 1}${current ? " · current" : ""}`}</span>
+                <Sha className={cn("text-[13.5px]", current && "font-semibold text-ink")}>{g.sha}</Sha>
+                <span className="text-[13px] text-faint">{merged ? "merge commit" : `head ${heads.indexOf(g.sha) + 1}${current ? " · current" : ""}`}</span>
               </div>
               <ul className="ml-[27px] mt-1 space-y-1">{g.events.map((e, i) => <Event key={i} e={e} />)}</ul>
             </li>
@@ -94,19 +94,19 @@ function Event({ e }: { e: TEvent }) {
   const text = e.tone === "bad" ? "text-bad" : e.tone === "ok" ? "text-ok" : e.tone === "you" ? "text-you" : e.tone === "warn" ? "text-warn" : "text-ink";
   return (
     <li className="rounded-md border border-line-2 px-2.5 py-1.5">
-      <div className="flex items-center gap-1.5 text-[12.5px]">
+      <div className="flex items-center gap-1.5 text-[14px]">
         <span className={cn("size-1.5 rounded-full", dot, e.running && "live-dot")} />
         <span className="text-mute">{name}</span>
         {Icon && <Icon className="size-3 text-faint" />}
         <span className={cn("min-w-0 truncate font-medium", text)}>{e.title}</span>
-        <span className="ml-auto shrink-0 text-[11.5px] text-faint">{e.at}</span>
+        <span className="ml-auto shrink-0 text-[13px] text-faint">{e.at}</span>
       </div>
-      {e.detail && <p className="mt-0.5 text-[12px] text-mute">{e.detail}</p>}
+      {e.detail && <p className="mt-0.5 text-[13.5px] text-mute">{e.detail}</p>}
       {e.findings && (
         <ul className="mt-1 space-y-0.5">
           {e.findings.map((f) => (
-            <li key={f.id} className="flex items-baseline gap-1.5 text-[12px]">
-              <code className="font-mono text-[11px] font-semibold">{f.id}</code>
+            <li key={f.id} className="flex items-baseline gap-1.5 text-[13.5px]">
+              <code className="font-mono text-[12.5px] font-semibold">{f.id}</code>
               <span className="min-w-0 flex-1 truncate text-ink-2" title={`${f.text}${f.where ? ` (${f.where})` : ""}`}>{f.text}</span>
               <Chip tone={f.status === "open" ? "bad" : f.status === "fixed" ? "ok" : "info"} className="h-4 px-1 text-[10.5px]">{f.status}</Chip>
             </li>
@@ -127,7 +127,7 @@ function Gate({ pr, merge }: { pr: PR; merge: "stefan" | "runner" }) {
     ["No job writing to it", true],
   ];
   return (
-    <div className="flex flex-wrap gap-x-3 gap-y-1 border-b border-line-2 px-4 py-2 text-[12px]">
+    <div className="flex flex-wrap gap-x-3 gap-y-1 border-b border-line-2 px-4 py-2 text-[13.5px]">
       <span className="font-medium">{merge === "stefan" ? "You merge when:" : "Runner merges when:"}</span>
       {items.map(([t, ok]) => (
         <span key={t} className={cn("inline-flex items-center gap-1", ok ? "text-mute" : "font-medium text-warn")}>
