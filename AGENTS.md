@@ -488,7 +488,7 @@ pass says `merged`, the live run says `live` (the log, and a **Live.** comment o
 ## Stefan merges
 
 `merge.py` (ticket 17). A repo whose `config.toml` entry says `merge = "stefan"` (leads-dashboard,
-since 2026-11-10) isn't merged by the runner; `merge = "runner"` (the default) is.
+since 2026-11-10; game-backdrop, since 2026-11-15) isn't merged by the runner; `merge = "runner"` (the default) is.
 
 - **Ready:** where the merge pass would merge (the same re-check, A Sol pass, step 3, except an
   open live run doesn't hold it: his merge goes in the next batch), it labels the PR
