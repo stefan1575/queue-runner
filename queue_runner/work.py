@@ -469,7 +469,6 @@ def _issues(v: View, asks, prs: dict, cq: list) -> list[dict]:
              enumerate((e for e in cq if e['kind'] == 'build'), 1)}
     asked = {(a['repo'], a['ref']) for a in asks} | {(a['repo'], f'PR #{a["pr"]}')
                                                     for a in asks if a.get('pr')}
-    held = {}   # repo: issues the job log holds
     out = []
     for r in v.repos:
         read = v.reads.get(r.name)
