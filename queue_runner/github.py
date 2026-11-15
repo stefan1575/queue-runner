@@ -202,6 +202,14 @@ class GhCli:
         i = self._get(f'repos/{github}/issues/{number}')
         return Issue(number=i['number'], title=i['title'], body=i.get('body') or '')
 
+    def blocking(self, repo, number) -> list[Issue]:
+        """The open issues this one blocks, by GitHub's native dependencies (what an ask holds
+        up: `inbox.py`)."""
+        return [Issue(number=i['number'], title=i['title'], body=i.get('body') or '',
+                      url=i.get('html_url') or '')
+                for i in self._all(f'repos/{repo.github}/issues/{number}/dependencies/blocking'
+                                   '?per_page=100') if i.get('state') == 'open']
+
     def branches(self, repo, prefix) -> list[str]:
         refs = self._all(f'repos/{repo.github}/git/matching-refs/heads/{prefix}')
         return [r['ref'].removeprefix('refs/heads/') for r in refs]

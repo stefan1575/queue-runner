@@ -7,12 +7,13 @@ import unittest
 
 from queue_runner.cli import main
 from queue_runner.config import DEFAULT_CONFIG, load_config
+from queue_runner.github import Issue
 from queue_runner.state import JobLog
 from tests.fakes import FakeGitHubForReviews, FakeUsage, full_pr
 from tests.test_ledger import H2, H3
 
 
-class NeedsMeTest(unittest.TestCase):
+class InboxCase(unittest.TestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
@@ -36,7 +37,9 @@ path = "{self.dir}"
 '''.replace('\\', '/'))
         self.jobs = JobLog(os.path.join(self.dir, 'state', 'jobs.jsonl'))
         self.gh = FakeGitHubForReviews(prs=[full_pr(20, 'claude/red-5', H2, title='Red'),
-                                            full_pr(21, 'claude/blue-6', H3, title='Blue')])
+                                            full_pr(21, 'claude/blue-6', H3, title='Blue')],
+                                       issue_bodies={('owner/second', 7): Issue(7, 'Colours', ''),
+                                                     ('owner/second', 8): Issue(8, 'Keys', '')})
 
     def inbox(self):
         out = io.StringIO()
@@ -69,6 +72,7 @@ path = "{self.dir}"
                  merger=False).review(config.repos[0], self.gh.pull(config.repos[0], n))
         self.gh.posts.clear()
 
+class NeedsMeTest(InboxCase):
     def test_says_nothing_when_nothing_waits(self):
         self.assertEqual(self.inbox().strip(), 'Nothing waits on you.')
         self.assertEqual(self.gh.posts, [])
@@ -133,3 +137,31 @@ class MergeConfigTest(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class CollectTest(InboxCase):
+    """`inbox.collect` is the one collection: `--inbox` prints it and the snapshot's asks are built
+    from it (ticket 31)."""
+
+    def collect(self):
+        from queue_runner import inbox
+        return inbox.collect(load_config(self.config), self.gh, self.jobs)
+
+    def test_inbox_prints_what_the_collection_holds(self):
+        from queue_runner import inbox
+        self.review_clean(20)
+        self.job('stop', 21, 'filed', sha=H3, stop='conflict', reason='it conflicts with main',
+                 link='https://github.com/owner/first/issues/30')
+        build = self.job('build', 7, 'waiting', repo='second', branch='claude/x-7',
+                         link='https://t3/thread/7')
+        self.job('decision', 7, 'stop', repo='second', about=build.id, question='waiting',
+                 reason='Which colour?')
+        failed = self.job('build', 8, 'failed', repo='second', branch='claude/y-8')
+        self.job('decision', 8, 'stop', repo='second', about=failed.id, question='failed',
+                 reason='Retry?')
+        got = self.collect()
+        self.assertEqual([(w.kind, w.repo, w.number) for w in got.items],
+                         [('ready', 'first', 20), ('stop', 'first', 21), ('build', 'second', 8),
+                          ('thread', 'second', 7)])
+        self.assertEqual(inbox.text(got) + '\n', self.inbox())   # printed
+        self.assertEqual(self.gh.posts, [])

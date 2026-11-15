@@ -174,6 +174,38 @@ class EveryPassTest(Harness):
         self.assertIn('sol-lane', pub.events)     # the reviewing lane's
 
 
+class InboxTest(Harness):
+    """The Sol lane reads the Inbox after each pass (ticket 31), and the snapshot writes its asks
+    from that read: never from GitHub itself."""
+
+    def test_a_sol_pass_reads_the_inbox_and_the_snapshot_writes_its_asks(self):
+        from queue_runner.snapshot import Calls, RunnerInfo, Snapshots
+        from tests.fakes import FakeGitHubForReviews, full_pr
+        config = load_config(self.config)
+        gh = FakeGitHubForReviews(prs=[full_pr(12, 'claude/red-widget-4', 'b' * 40,
+                                               title='Red widget', body='Closes #4')],
+                                  open_issue_list=[issue(4, 'Red widget', 'A red widget.')])
+        gh.states[30] = 'open'   # the stop's needs-info issue
+        runner = Runner(config, github=gh, t3=FakeT3(), git=FakeGit(), out=io.StringIO(),
+                        log_line=lambda line: None)   # no Sol: the lane's pass reviews nothing
+        stop = runner.jobs.started(kind='stop', repo='first', issue=12,
+                                   branch='claude/red-widget-4', title='t', sha='b' * 40,
+                                   stop='no-push')
+        runner.jobs.ended(stop.id, exit_code=None, outcome='filed', reason='nothing pushed',
+                          link='https://github.com/owner/first/issues/30')
+        snaps = Snapshots(config, calls=Calls(lambda: datetime.datetime.now(UTC)), claude=None,
+                          sol=None, info=RunnerInfo(1, None, None),
+                          clock=lambda: datetime.datetime.now(UTC), runner=runner)
+        runner._sol_pass()
+        self.assertEqual(snaps.build()['asks'], [])   # no snapshot published: nothing read
+        runner.publisher = RecordingPublisher()
+        runner._sol_pass()
+        gh.prs.clear()   # what GitHub says now is the next pass's
+        [ask] = snaps.build()['asks']
+        self.assertEqual((ask['kind'], ask['ref'], ask['subject'], ask['about']),
+                         ('stuck', 'PR #12', 'Red widget', 'A red widget.'))
+
+
 class SnapshotFlagTest(Harness):
     def test_it_prints_one_snapshot_from_the_real_state_and_takes_no_lock(self):
         log = JobLog(os.path.join(self.state, 'jobs.jsonl'))

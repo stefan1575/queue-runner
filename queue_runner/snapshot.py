@@ -109,6 +109,12 @@ class Facts:
     claude_usage: Reading | None = None
     sol_usage: Reading | None = None
     costs: dict = field(default_factory=dict)     # kind: (gate.Cost, learned or the default)
+    # The Inbox (ticket 31): the Sol lane's last collection (inbox.Inbox, None before one), the
+    # releases in the job log as (repo, n, at), and the repos it couldn't read GitHub for since
+    # then (inbox.Reader.stale).
+    inbox: object | None = None
+    releases: list = field(default_factory=list)
+    inbox_stale: dict = field(default_factory=dict)
 
 
 def _iso(t: datetime.datetime | None) -> str | None:
@@ -132,6 +138,8 @@ def build(facts: Facts) -> dict:
         'roles': [dict(r) for r in ROLES],
     }
     snap.update(_work(facts))
+    from .asks import stale_github
+    stale_github(snap['sources'], facts.inbox_stale)   # the Inbox from an older read, said
     return snap
 
 
@@ -141,9 +149,12 @@ def _repos(facts: Facts) -> list[dict]:
 
 
 def _work(facts: Facts) -> dict:
-    """The work lists. Empty for now: the Inbox's asks are ticket 31's, the features, issues, PRs
-    and activity ticket 32's, each built here from facts those tickets add."""
-    return {'asks': [], 'answered': [], 'features': [], 'issues': [], 'prs': [], 'activity': []}
+    """The work lists: the Inbox's asks (`asks.py`, ticket 31); the features, issues, PRs and
+    activity are ticket 32's, empty until then."""
+    from .asks import render
+    asks, answered = render(facts.inbox, facts.jobs, facts.releases, facts.repos)
+    return {'asks': asks, 'answered': answered, 'features': [], 'issues': [], 'prs': [],
+            'activity': []}
 
 
 def _queue(facts: Facts, lane: str) -> tuple[list[dict], str]:
@@ -517,7 +528,16 @@ class Snapshots:
             titles=dict(runner.titles) if runner is not None else {},
             threads=threads, runner=self.info, calls=self.calls.all(),
             claude_usage=self.claude.reading() if self.claude else None,
-            sol_usage=self.sol.reading() if self.sol else None, costs=costs)
+            sol_usage=self.sol.reading() if self.sol else None, costs=costs,
+            **self._inbox(log))
+
+    def _inbox(self, log) -> dict:
+        """The Sol lane's last Inbox read (ticket 31), and the releases its timelines tell."""
+        reader = getattr(self.runner, 'inbox', None)
+        if reader is None:
+            return {}
+        return {'inbox': reader.last(), 'inbox_stale': reader.stale(),
+                'releases': log.releases()}
 
     def _find_threads(self, jobs) -> None:
         if self.runner is None:

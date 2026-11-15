@@ -112,6 +112,10 @@ class Runner:
         self.titles: dict[tuple[str, int], str] = (
             self.reviewer.titles if self.reviewer is not None else {})
         self.publisher = None
+        # The Inbox (ticket 31): what waits on Stefan, read by the Sol lane after each pass while
+        # a snapshot is published, and kept for it (`inbox.Reader`).
+        from .inbox import Reader
+        self.inbox = Reader(config, github, self.jobs, clock=self.now)
 
     def say(self, line: str) -> None:
         with self._say_lock:   # both lanes say things
@@ -589,6 +593,18 @@ class Runner:
         except Exception:
             self.log_line('Sol pass failed:\n' + traceback.format_exc())
             return IDLE
+        finally:
+            self._read_inbox()
+
+    def _read_inbox(self) -> None:
+        """The Inbox for the snapshot, read from GitHub here in the Sol lane (never for the
+        snapshot itself). A repo GitHub can't be read keeps its last asks (`inbox.Reader`)."""
+        if self.publisher is None:
+            return
+        try:
+            self.inbox.read()
+        except Exception:
+            self.log_line('reading the Inbox failed:\n' + traceback.format_exc())
 
     def wake_times(self) -> list[datetime.datetime]:
         """The times the lanes wait for now: the Claude lane's gate or limit, Sol's resume."""

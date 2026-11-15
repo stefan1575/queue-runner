@@ -309,9 +309,13 @@ class StefanMergesTest(unittest.TestCase):
         self.assertEqual(self.outcomes(), [])
 
     def test_a_reply_after_the_mark_takes_it_off_and_the_inbox_drops_it(self):
-        from queue_runner.inbox import ready_prs
+        from queue_runner.inbox import collect
+
+        def ready():
+            return [w for w in collect(self.config, self.gh, self.jobs).items
+                    if w.kind == 'ready']
         self.reviewer().review_pass()
-        self.assertEqual(len(ready_prs(self.config, self.gh, self.jobs)[0]), 1)
+        self.assertEqual(len(ready()), 1)
         self.gh.comments[20].append(Comment('michael', LATER, 'Wait, this breaks the export.'))
         self.gh.now[20] = {'labels': (READY,)}
         m = self.merger()
@@ -319,7 +323,7 @@ class StefanMergesTest(unittest.TestCase):
         m.merge_pass()
         self.assertEqual(self.outcomes('ready'), ['marked', 'unmarked'])
         self.assertEqual(self.labels()[-1], ('unlabel', 20, READY))
-        self.assertEqual(ready_prs(self.config, self.gh, self.jobs)[0], [])
+        self.assertEqual(ready(), [])
         self.assertEqual(len(self.toaster.toasts), 1)
 
     def test_a_label_that_fails_is_tried_again_next_pass(self):

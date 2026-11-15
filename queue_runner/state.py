@@ -209,6 +209,11 @@ class JobLog:
     def jobs(self) -> list[Job]:
         return self._fold()[0]
 
+    def releases(self) -> list[tuple[str, int, str]]:
+        """Each `--release`, oldest first: (repo, issue or PR, when)."""
+        return [(e['repo'], e['issue'], e['at']) for e in self._events()
+                if e['event'] == 'release']
+
     def open_jobs(self) -> list[Job]:
         return [j for j in self.jobs() if j.open]
 

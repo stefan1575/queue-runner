@@ -28,6 +28,13 @@ class FakeGitHub:
     def issue_comments(self, repo, number):
         return list(self.comments.get(number, []))
 
+    def open_issues(self, repo):
+        return list(self.issues)
+
+    def blocking(self, repo, number):
+        """The open issues this one blocks by GitHub's dependencies: `blocks`, number -> [Issue]."""
+        return list(getattr(self, 'blocks', {}).get(number, []))
+
 
 def issue(number, title='A ticket', body='', open_blockers=0, open_sub_issues=0,
           open_linked_pulls=0):

@@ -48,6 +48,14 @@ class GhCliTest(unittest.TestCase):
              'target_url': 'C'},
             {'body': 'New body'}])
 
+    def test_blocking_lists_the_open_issues_an_issue_blocks_by_githubs_dependencies(self):
+        gh = FakeGh({'repos/owner/demo/issues/115/dependencies/blocking?per_page=100': [
+            {'number': 116, 'title': 'Recipients', 'body': 'b', 'state': 'open',
+             'html_url': 'https://github.com/owner/demo/issues/116'},
+            {'number': 117, 'title': 'Done', 'body': None, 'state': 'closed'}]})
+        self.assertEqual(GhCli(run=gh).blocking(REPO, 115), [
+            Issue(116, 'Recipients', 'b', url='https://github.com/owner/demo/issues/116')])
+
     def test_ready_issues_skip_pull_requests_and_count_open_blockers_and_sub_issues(self):
         gh = FakeGh({'repos/owner/demo/issues?state=open&labels=ready-for-agent&per_page=100': [
             {'number': 7, 'title': 'T', 'body': None,
