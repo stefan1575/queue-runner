@@ -5,7 +5,7 @@ later from where it stopped.
 
 **Blocked by:** 30
 
-**Status:** ready-for-agent
+**Status:** needs-triage
 
 Spec: `../dashboard-live.md`; ticket 18's Decisions (Stop after this job, and Stop now).
 
@@ -27,3 +27,6 @@ Spec: `../dashboard-live.md`; ticket 18's Decisions (Stop after this job, and St
       (`scripts/live_sandbox.py`'s project), never on a served repo.
 
 ## Comments
+
+2026-11-15: **pinned by Stefan** ("Stop now can be pinned for now"). Stop after this job (ticket
+30) is the stop there is. The page shows no Stop now while a lane's `stop_now` is unavailable.
