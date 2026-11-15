@@ -833,6 +833,7 @@ const who = (provider, name) => `<span class="who ${MARK[provider] ? esc(provide
 let snap = null;     // the runner's snapshot, as last read
 let ctl = {};        // control.json, as last read
 let fault = null;    // why the snapshot couldn't be read: "server", "missing", "unreadable"
+let faultStart = ""; // with "missing": how to start the runner, as the server says it
 const PAGES = [["overview", "Overview"], ["inbox", "Inbox"], ["queue", "Queue"], ["activity", "Activity"], ["usage", "Usage"], ["settings", "Settings"]];
 const UNBUILT = [];   // pages still as they were before the split
 // PROTOTYPE (ticket 21): the Queue page's three arrangements, ?variant=a|b|c
@@ -1849,7 +1850,7 @@ function draw() {
   put("side", side());
   put("top", topBar());
   if (!snap) {
-    const why = fault === "missing" ? ["No snapshot yet", "The runner writes one on every pass. Start the runner and this page fills in by itself."]
+    const why = fault === "missing" ? ["The runner hasn't written a snapshot yet", esc(faultStart || "Start the runner, and this page fills in by itself.")]
       : fault === "unreadable" ? ["The snapshot can't be read", "The file is there but isn't valid. The runner's log says what went wrong."]
       : ["This page can't reach its server", "Start it with <code>python3 -m dashboard</code> in the queue-runner folder."];
     put("main", fault ? `<div class="blank"><h2>${why[0]}</h2><p class="mute">${why[1]}</p></div>` : "");
@@ -1877,7 +1878,7 @@ async function load() {
     ]);
     ctl = c.ok ? await c.json() : {};
     if (s.ok) { snap = await s.json(); fault = null; }
-    else { fault = s.status === 404 ? "missing" : "unreadable"; snap = null; }
+    else { fault = s.status === 404 ? "missing" : "unreadable"; faultStart = fault === "missing" ? ((await s.json().catch(() => ({}))).start || "") : ""; snap = null; }
   } catch { fault = "server"; }
   draw();
 }
