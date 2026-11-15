@@ -342,7 +342,8 @@ def _tickets(its: list[dict]) -> list[str]:
     rest = {_key(i['repo'], i['n']): i for i in its if i['state'] not in _FAR}
     later = []
     while rest:
-        free = [i for i in rest.values() if not any(b in rest for b in i['blocked_by'])] \n            or list(rest.values())
+        free = [i for i in rest.values()
+                if not any(b in rest for b in i['blocked_by'])] or list(rest.values())
         nxt = min(free, key=lambda i: (i['state'] == 'not-ready', i['n']))
         later.append(nxt)
         del rest[_key(nxt['repo'], nxt['n'])]
