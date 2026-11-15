@@ -50,6 +50,21 @@ class Config:
     sol_bash: str = ''        # Git's bash, which runs it
 
 
+def toml_order(config: Config) -> list[Repo]:
+    """The repos in config.toml's order, whatever build order is taken up now."""
+    return list(getattr(config, '_toml_order', config.repos))
+
+
+def set_build_order(config: Config, repos: list[Repo]) -> None:
+    """The one change made to a Config once it's loaded: the order Stefan set on the dashboard
+    (control.json's `repo_order`, ticket 33), which every part that goes through `repos` follows.
+    The list is replaced, never changed in place, so a lane going through the repos when it
+    changes finishes in the order it began."""
+    if not hasattr(config, '_toml_order'):
+        object.__setattr__(config, '_toml_order', list(config.repos))
+    object.__setattr__(config, 'repos', list(repos))
+
+
 def _path(p: str) -> str:
     return os.path.normpath(os.path.expanduser(p))
 

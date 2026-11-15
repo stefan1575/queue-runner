@@ -43,7 +43,8 @@ second runner out: it logs `a second runner started (pid N) and exited at once` 
 `config.toml` names the repos it serves (GitHub repo, local clone, base branch, and
 `review_table` for a repo whose PR bodies keep a `## Review` table, `issues = "local"` for one
 whose tickets are local markdown: Local tickets, below, `merge = "stefan"` for one whose PRs Stefan
-merges himself: Stefan merges, below), in priority order; the runner's `state_dir` and `log_dir` (`~/.queue-runner/`, outside every served repo);
+merges himself: Stefan merges, below), in priority order (Stefan's build order on the dashboard
+wins: The build order, below); the runner's `state_dir` and `log_dir` (`~/.queue-runner/`, outside every served repo);
 `runs_dir`, `checkouts_dir` and `deps_dir` for reviews; `poll_seconds`, the pause after a pass that started
 nothing; `[claude]`, the T3 provider instance and model for Claude jobs; and `[sol]`,
 `codex-sol.sh` and the Git bash that runs it. `--config <path>` reads another one.
@@ -257,6 +258,32 @@ on; `"now"` is read as `"after-job"` until ticket 34.
 - `--gate` prints each lane's switch first (and each kind `waits: the Claude lane is stopped by
   Stefan` while it is); `--once --dry-run` says a stopped lane's line before what it would do
   once resumed.
+
+## The build order
+
+`control.ordered` and `Runner.take_order` (ticket 33). **`control.json`'s `repo_order`**, which
+the dashboard's Build order card writes (`apply_control`), is the order both lanes go through the
+served repos: the first repo with work gets the next job, and the Sol lane files stops, merges
+and reviews in that order.
+
+- **Used only when it names every served repo exactly once.** Missing or `[]` is config.toml's
+  order, said nothing. Anything else (a repo left out, one not served, one twice, not a list of
+  names) is ignored, config.toml's order stands, and the log says once why: `control.json's
+  repo_order is ignored (it leaves out queue-runner): repos are taken in config.toml's order,
+  ...`. It never makes control.json unreadable: the stops stand. A new order is said once:
+  `Repos are taken in Stefan's build order now: ...`.
+- **Taken up at the start of each lane's pass** (`plan`, after settling, and `_sol_pass`), next
+  to the stop, so a job already running goes on; the next pass chooses in the new order.
+  `config.set_build_order` replaces `config.repos` (the one change made to a loaded Config),
+  never changing the list in place, so a lane already going through the repos finishes in the
+  order it began; every part that reads `config.repos` follows. `config.toml_order` keeps
+  config.toml's.
+- **The snapshot** reads control.json once for the stops and the order: its `repos` are in the
+  order the lanes take up next, so the one that first shows a new order is the one whose
+  `control_read_at` is that file's `written_at`. The features and each lane's queue go through
+  `Facts.repos` in that order (ticket 32 fills them).
+- `--once --dry-run` says the order first (`dry run: repos are taken in Stefan's build order:
+  ...`, config.toml's, or why his is ignored) and chooses in it.
 
 ## A Claude pass
 
@@ -691,7 +718,7 @@ python3 -m dashboard    # http://queue.localhost:5289/ is the runner's; http://l
   `~/.queue-runner/state`). `snapshot.json`: the runner writes it whole, the page reads it.
   `control.json`: the page writes it whole, the runner reads it. **The runner writes
   `snapshot.json`** (ticket 28, below) and obeys `control.json`'s stops (ticket 30: Stopping a
-  lane, above); `repo_order` isn't read yet (ticket 33).
+  lane, above) and its `repo_order` (ticket 33: The build order, above).
 - **The runner's snapshot** (`queue_runner/snapshot.py`, ticket 28; spec
   `.scratch/queue-runner/dashboard-live.md`). In continuous mode only (`--once` writes none):
   `Publisher` writes it whole (a temp file, then `os.replace`) after every pass of either lane,
@@ -1083,6 +1110,9 @@ Stopping a lane: `tests/test_switch.py` (today's gate.json pause through the run
 stop through `main` and `Runner.run_once`, the older pause against an entry, `--pause` and
 `--resume`, the same file from the CLI's writer and `serve.App.write_control`, `--gate` and the
 dry run's words, an unreadable control.json, and the wake tasks a stopped lane doesn't set).
+The build order: `tests/test_build_order.py` (two served repos through `main` and the real
+`Runner`: each lane in `repo_order`, the orders that are ignored and said once, a new order
+written mid-job, the dry run, and the snapshot's `repos` and `control_read_at`).
 `tests/test_git.py` runs `GitCli` on a real local repo in a
 temp folder.
 
@@ -1129,7 +1159,8 @@ temp folder.
 - `queue_runner/gate.py`: the usage gate: `decide()`, Stefan's knob (`gate.json`), learned costs
   (`usage.jsonl`).
 - `queue_runner/control.py`: each lane's switch: reading `control.json` (and gate.json's older
-  pause), writing it for `--pause` and `--resume`, and what the runner says (ticket 30).
+  pause), writing it for `--pause` and `--resume`, and what the runner says (ticket 30); the
+  build order, `ordered` (ticket 33).
 - `queue_runner/limits.py` and `templates/restart.md`: usage-limit stops: T3's record of the
   reset, the transcript's context, when and how a job resumes, the auto-resume warning.
 - `queue_runner/lock.py`: `runner.lock` and `sol.lock`.

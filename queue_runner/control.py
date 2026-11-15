@@ -11,6 +11,10 @@ Stop and Resume write it (`dashboard/serve.py`, `apply_control`) and so do `--pa
 (read as "after-job" until ticket 34) or null (it carries on). The runner reads it (`read`) before
 each lane starts a job; an unreadable file starts nothing in either lane until it's fixed.
 
+`repo_order` (ticket 33) is the order both lanes go through the served repos, read at the start
+of each pass (`ordered`): used when it names every served repo exactly once, and otherwise
+ignored (config.toml's order stands) without making the file unreadable.
+
 **The older code's pause** was `gate.json`'s `paused`. With `paused: true` there and no entry for
 the Claude lane here, the Claude lane is stopped (since gate.json was written); an entry, either
 way, wins. `ask` carries such a pause over into this file and drops it from gate.json, which then
@@ -45,6 +49,7 @@ class Switch:
     lanes: dict = field(default_factory=dict)   # lane id: Stop
     written_at: str | None = None
     error: str | None = None
+    order: object = None   # `repo_order` as written (None: not there); `ordered` judges it
 
     def stop(self, lane: str) -> Stop:
         return self.lanes.get(lane) or Stop()
@@ -128,7 +133,29 @@ def read(state_dir: str) -> Switch:
         else:
             lanes[id] = Stop()
     written = raw.get('written_at')
-    return Switch(lanes, written if isinstance(written, str) else None)
+    return Switch(lanes, written if isinstance(written, str) else None,
+                  order=raw.get('repo_order'))
+
+
+def ordered(repos: list, order) -> tuple[list, str | None]:
+    """`repos` (config.toml's order) in `order`, control.json's `repo_order`, when it names each
+    of them exactly once; else `repos` as they are, and why the order was ignored (None when
+    none was set: missing or empty)."""
+    if order is None or order == []:
+        return list(repos), None
+    names = [r.name for r in repos]
+    if not isinstance(order, list) or not all(isinstance(n, str) for n in order):
+        why = 'it is not a list of repo names'
+    elif dupes := sorted({n for n in order if order.count(n) > 1}):
+        why = f'it names {", ".join(dupes)} more than once'
+    elif unknown := [n for n in order if n not in names]:
+        verb = 'is' if len(unknown) == 1 else 'are'
+        why = f'it names {", ".join(unknown)}, which {verb} not served'
+    elif missing := [n for n in names if n not in order]:
+        why = f'it leaves out {", ".join(missing)}'
+    else:
+        return sorted(repos, key=lambda r: order.index(r.name)), None
+    return list(repos), why
 
 
 # --- asking: --pause and --resume --------------------------------------------------------------
@@ -201,6 +228,16 @@ def resume_hint(lane: str) -> str:
 def stopped_text(lane: str) -> str:
     what = 'starts no job' if lane == 'claude' else 'starts no review and merges nothing'
     return f'The {NAMES[lane]} lane is stopped by Stefan: it {what} ({resume_hint(lane)})'
+
+
+def order_text(repos: list, why: str | None) -> str:
+    """What a lane says when it takes up an order: Stefan's (`why` None), or config.toml's
+    because his can't be used."""
+    names = ', '.join(r.name for r in repos)
+    if why is None:
+        return f"Repos are taken in Stefan's build order now: {names}"
+    return (f"control.json's repo_order is ignored ({why}): repos are taken in config.toml's "
+            f'order, {names}. Reorder them on the dashboard to set it afresh')
 
 
 def unreadable_text(switch: Switch) -> str:

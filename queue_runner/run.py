@@ -16,7 +16,7 @@ import traceback
 
 from . import control
 from .brief import build_brief
-from .config import Config, Repo
+from .config import Config, Repo, set_build_order, toml_order
 from .decisions import Decider
 from .fix import Fixer, fix_branch, fix_title
 from .stops import CONFLICT
@@ -120,6 +120,10 @@ class Runner:
         self.inbox = Reader(config, github, self.jobs, clock=self.now)
         # What each lane last said about its switch (`control.py`), so it's said once.
         self._said_switch: dict[str, str | None] = {}
+        # The build order (ticket 33): what was last said about it, and a lock, as both lanes
+        # take it up.
+        self._order_lock = threading.Lock()
+        self._said_order: str | None = None
 
     def say(self, line: str) -> None:
         with self._say_lock:   # both lanes say things
@@ -144,6 +148,7 @@ class Runner:
         self.gate_until = None   # a wait from an earlier pass is that pass's
         if self.settle() == BUSY:
             return BUSY
+        self.take_order()
         if self.held('claude'):
             return STOPPED
         chosen = self.choose()
@@ -235,6 +240,24 @@ class Runner:
             self.say(f'The {control.NAMES[lane]} lane runs again: Stefan resumed it')
         self._said_switch[lane] = text
         return text is not None
+
+    def take_order(self) -> None:
+        """Goes through the repos in Stefan's build order from now (control.json's
+        `repo_order`, read now), or config.toml's when his doesn't name each served repo once.
+        Each lane calls it at the start of its pass, so a job already running goes on; what's
+        said is said once, and again when it changes."""
+        switch = control.read(self.config.state_dir)
+        if switch.error is not None:   # nothing starts until it's fixed: `held` says so
+            return
+        with self._order_lock:
+            repos, why = control.ordered(toml_order(self.config), switch.order)
+            changed = [r.name for r in repos] != [r.name for r in self.config.repos]
+            if changed:
+                set_build_order(self.config, repos)
+            text = control.order_text(repos, why) if why or changed else None
+            if text is not None and text != self._said_order:
+                self.say(text)
+            self._said_order = text if why else None   # an ignored order: said once
 
     def idle_seconds(self) -> float:
         """The pause after a pass that started nothing: `poll_seconds`, or less when the gate
@@ -615,6 +638,7 @@ class Runner:
         try:
             if self.reviewer is None:
                 return IDLE
+            self.take_order()
             if self.held('sol'):   # stopped: no stop filed, no merge, no review
                 return STOPPED
             return self.reviewer.review_pass()

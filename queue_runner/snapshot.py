@@ -21,6 +21,7 @@ import time
 from dataclasses import dataclass, field
 
 from . import control
+from .config import toml_order
 from .gate import RECENT, RESERVE_RELEASE, SAMPLES, Knob
 
 VERSION = 1
@@ -95,7 +96,9 @@ class RunnerInfo:
 class Facts:
     """Everything `build` needs, as plain data. Later tickets add theirs with a default."""
     now: datetime.datetime
-    repos: list = field(default_factory=list)    # config.Repo, in config order
+    # config.Repo in the build order: control.json's repo_order, else config.toml's (ticket 33).
+    # The features and each lane's queue go through the repos in this order too.
+    repos: list = field(default_factory=list)
     jobs: list = field(default_factory=list)     # state.Job, the job log folded
     knob: Knob | None = Knob()                   # gate.json; None: unreadable
     # Each lane's stop (control.json, or gate.json's older pause), as read for this snapshot.
@@ -526,9 +529,11 @@ class Snapshots:
         with self._lock:
             threads = dict(self._threads)
         runner = self.runner
+        switch = control.read(state)   # once: the stops and the build order (ticket 33)
+        repos, _ = control.ordered(toml_order(self.config), switch.order)
         return Facts(
-            now=now, repos=list(self.config.repos), jobs=jobs, knob=knob,
-            switch=control.read(state),
+            now=now, repos=repos, jobs=jobs, knob=knob,
+            switch=switch,
             claude_model=self.config.claude_model,
             claude_wait=runner.claude_wait if runner is not None else self._limit_wait(log, now),
             sol_wait=self._sol_wait(log, now),
