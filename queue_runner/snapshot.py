@@ -214,7 +214,7 @@ def _view(facts: Facts):
         return None
     off = frozenset(r.name for r in facts.repos if _repo_stopped(facts, r.name) is not None)
     return View(reads=facts.work, jobs=facts.jobs, repos=facts.repos, off=off,
-                limited=facts.limited, titles=facts.titles,
+                limited=facts.limited, titles=facts.titles, released=facts.released,
                 lane_jobs={'claude': _open_job(facts, CLAUDE_KINDS),
                            'sol': _open_job(facts, SOL_KINDS)})
 

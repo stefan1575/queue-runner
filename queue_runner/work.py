@@ -259,6 +259,7 @@ class View:
     limited: list = field(default_factory=list)
     lane_jobs: dict = field(default_factory=dict)   # lane id: its open state.Job, or None
     titles: dict = field(default_factory=dict)      # (repo, n): a title the passes read
+    released: frozenset = frozenset()   # the jobs a release settled (`JobLog.released_ids`)
 
 
 def _title(read: RepoRead, n: int) -> str:
@@ -444,9 +445,10 @@ def _issue(repo, n, title, state, feature=None, pr=None, blocked_by=(), note=Non
 
 
 def _held_state(v: View, repo: str, n: int) -> tuple[str, str] | None:
-    """An issue the job log holds for a build: what its newest build left."""
+    """An issue the job log holds for a build: what its newest build left. A build a release
+    settled holds nothing: the picker takes the issue up again."""
     builds = [j for j in v.jobs if j.kind == 'build' and j.repo == repo and j.issue == n
-              and j.outcome not in ('not-started', 'not-sent')]
+              and j.outcome not in ('not-started', 'not-sent') and j.id not in v.released]
     if not builds:
         return None
     j = builds[-1]

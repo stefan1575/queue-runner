@@ -70,6 +70,7 @@ class WorkCase(unittest.TestCase):
             reader = self.reader()
             reader.read()
         kw.setdefault('repos', self.config.repos)
+        kw.setdefault('released', frozenset(self.jobs.released_ids()))
         return snapshot.build(snapshot.Facts(now=NOW, jobs=self.jobs.jobs(), work=reader.last(),
                                              work_stale=reader.stale(), **kw))
 
@@ -199,6 +200,44 @@ class IssuesTest(WorkCase):
         self.job('build', 4, None, branch='claude/four-4')
         got = by_n(self.snap())
         self.assertEqual((got[4]['state'], got[4]['note']), ('building', 'Claude is building it'))
+
+
+class ReleasedBuildTest(WorkCase):
+    """A release settles an issue's builds: it stands as the picker sees it, not as a build
+    before the release left it (review 1's F8)."""
+
+    def test_a_released_failed_build_is_ready_again_and_queued(self):
+        self.gh.work_list = [wi(10, 'Ten')]
+        self.gh.issues = [ready(10, 'Ten')]
+        self.job('build', 10, 'failed', branch='claude/ten-10')
+        self.jobs.released('first', 10)
+        got = self.snap(releases=self.jobs.releases())
+        self.assertEqual(lane(got, 'claude')['queue'][0]['ref'], '#10')
+        self.assertEqual((got['issues'][0]['state'], got['issues'][0]['note']), ('ready', None))
+
+    def test_every_held_outcome_released_stands_as_the_picker_sees_it(self):
+        for outcome in ('failed', 'waiting', 'done-no-pr', 'usage-limit', 'continued', 'done',
+                        'branch-exists', 'restart-failed'):
+            with self.subTest(outcome):
+                self.setUp()
+                self.gh.work_list = [wi(10, 'Ten')]
+                self.gh.issues = [ready(10, 'Ten')]
+                self.job('build', 10, outcome, branch='claude/ten-10')
+                held = self.snap()['issues'][0]['state']
+                self.assertIn(held, ('building', 'you'))
+                self.jobs.released('first', 10)
+                got = self.snap(releases=self.jobs.releases())
+                self.assertEqual(got['issues'][0]['state'], 'ready')
+
+    def test_a_build_after_the_release_holds_it_again(self):
+        self.gh.work_list = [wi(10, 'Ten')]
+        self.gh.issues = [ready(10, 'Ten')]
+        self.job('build', 10, 'failed', branch='claude/ten-10')
+        self.jobs.released('first', 10)
+        self.job('build', 10, 'waiting', branch='claude/ten-10')
+        got = self.snap(releases=self.jobs.releases())
+        self.assertEqual(got['issues'][0]['state'], 'building')
+        self.assertIn('waits for an answer', got['issues'][0]['note'])
 
 
 class FeaturesTest(IssuesTest):

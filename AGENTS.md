@@ -975,7 +975,8 @@ python3 -m dashboard    # http://queue.localhost:5289/ is the runner's; http://l
   run names its branch). An issue with an open PR takes its PR's family (`you` while it's held or
   ready for him, `fixing` while a round is queued or running, else `review`), with the PR's
   status as `note`; then an ask on it is `you`; a build the job log holds says what it left
-  (`building`, or `you` with the `--release` that frees it); then in flight, `not-ready` without
+  (`building`, or `you` with the `--release` that frees it; a build a release settled holds
+  nothing, `View.released`); then in flight, `not-ready` without
   `ready-for-agent`, `ready` if the picker would take it (`pick` its place in the Claude
   queue's builds), else `blocked`. `blocked_by` is GitHub's dependencies and `Blocked by:` lines,
   as `repo#n`. **Features:** each open issue with sub-issues ("Spec:" or "Map:" taken off its
