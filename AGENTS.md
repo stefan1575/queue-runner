@@ -481,7 +481,8 @@ since 2026-11-10) isn't merged by the runner; `merge = "runner"` (the default) i
   as the merge pass reads it), the `needs-info` stops filed and not answered or released,
   the builds a decision left to Stefan (until `--release`), and the threads waiting for his
   answer (a decision's `stop` on a waiting job), with their links; `Nothing waits on you.` when
-  there's nothing. A repo GitHub can't read is said after the list.
+  there's nothing. A repo GitHub can't read is said after the list. It prints `inbox.collect`,
+  the one collection the dashboard's Inbox is written from too (The Inbox's asks, below).
 - `--once --dry-run`'s merge lines say `would mark ready for Stefan at H` (or `ready for Stefan
   at H`) instead of `would merge`.
 
@@ -710,9 +711,9 @@ python3 -m dashboard    # http://queue.localhost:5289/ is the runner's; http://l
   good time). **GitHub is never read for the snapshot.** Only the publisher's own 30-second writes
   read afresh: Claude's usage and ChatGPT's (`sol.latest_limits`, the newest `rate_limits` in
   Codex's rollouts, the account's) at most every 5 minutes (`READ_EVERY`), and an open Claude job's
-  thread in T3 until found. Empty until tickets 31 and 32: `asks`, `answered`, `features`,
-  `issues`, `prs`, `activity` and each lane's `queue` (`_work` and `_queue`, where those tickets
-  plug in). `stop_now` is unavailable until ticket 34. `--snapshot` prints one built the same way
+  thread in T3 until found. `asks` and `answered` are ticket 31's (The Inbox's asks, below).
+  Empty until ticket 32: `features`, `issues`, `prs`, `activity` and each lane's `queue`
+  (`_work` and `_queue`, where it plugs in). `stop_now` is unavailable until ticket 34. `--snapshot` prints one built the same way
   with no runner in memory (its pid and start from runner.pid, a limit's wait from the job log).
 - **The snapshot's shape is what `dashboard/sample.py` builds** (version 1): `written_at` and
   `write_every` (a snapshot older than three times that, or 90 seconds, means the runner has
@@ -745,6 +746,35 @@ python3 -m dashboard    # http://queue.localhost:5289/ is the runner's; http://l
   a whole sentence as `text`; Stefan found fragments too short to read), `question`, `options`,
   `holds_up` and `go` (where it's answered: `label`, `url`, and `where`, `t3` or `github`, which
   picks the mark on the button). The runner lists asks in the order they're worth taking.
+- **The Inbox's asks** (ticket 31; `inbox.py` and `asks.py`). **One collection:**
+  `inbox.collect` reads the job log and GitHub for what waits on Stefan (`ready` PRs, open
+  `stop`s, `build`s a decision left to him, waiting `thread`s, and `answered` stops), each with
+  what its ask is written from: the PR's or issue's title, page and body, the body of the issue
+  a PR closes, what it holds up (GitHub's native dependencies, `GhCli.blocking`, and `Blocked
+  by:` lines: leads-dashboard records its blockers only natively), an Approach note's text and
+  Stefan's words, and each review's `decision.json` from its run folder. `--inbox` prints it;
+  **the Sol lane reads it after every pass while a snapshot is published** (`Runner._read_inbox`,
+  `inbox.Reader`), even while Stefan has stopped that lane (it only reads), and the snapshot
+  writes from that read, never from GitHub. **GitHub down:** a repo it can't read keeps the last
+  good read's asks, and the GitHub source turns red with that read's time and an `affects`
+  line (`asks.stale_github`). **Templates, no AI** (`asks.render`): `about` is the first prose
+  (markdown stripped) under the closed issue's "What to build" or "Summary", else its first
+  paragraph, else the PR's, clipped to 300 characters; `because` the stop's reason plus the
+  Important findings still open ("Open now: F3, ..."), an approach note's first paragraph after
+  it; `timeline` the job log on that PR or issue, oldest first, a whole sentence per step (a
+  build, each review and the kinds of problem it raised, each fix or conflict round, decisions,
+  stops, answers, ready marks, merges, live runs, `--release`s; a tie goes to the job written
+  first). **Kinds:** a review stop, approach note, `no-push` and `conflict` are `stuck`; a
+  failed check and a `live` stop `broken`; a decision's stop on a PR, a build a decision left to
+  him, a waiting thread and `live-todo` `decision`; a ready PR `merge`. Listed broken, stuck,
+  decision, merge, oldest first inside a kind. **Ids** are stable: `stop-<job>`,
+  `decision-<decision job>`, `thread-<job>`, `merge-<repo>-<n>-<head7>`. An approach note
+  offers rework, fix on and hold with its recommendation marked; a PR stop offers a reply, hold
+  or closing the issue; a merge, a waiting thread none. **Answered** (`inbox.finished`): the
+  newest answered stop on an open PR stays until the runner has acted: after a reply, the
+  decision on it ended (and the fix round it ordered); after a closed issue, the next job on the
+  PR ended. `said` is his newest words on the PR or its issue since the stop (`closed #N` for a
+  closed issue); `next` says what the runner does with it.
 - **How it looks** is explained at the top of `dashboard/index.html`. **The Inbox reads like a
   mail client:** the list down the left for the page's whole height, in the runner's order,
   with the sidebar's Inbox entry carrying the count. **A row reads like a thread in T3's
@@ -1043,6 +1073,12 @@ sample's keys at the top, in a lane, its job, a plan, a window and a source) and
 run, paused, none with `--once`, `--snapshot` with the lock held; `main`'s `sol_usage` and
 `snapshot_every` keep it off Codex's real rollouts and fast). `sol.latest_limits` is in
 `tests/test_sol.py`.
+The Inbox's asks: `tests/test_asks.py` (`collect` on a temp job log and `FakeGitHubForReviews`,
+written by `snapshot.build`: each kind's sentences and timeline, the approach note's options,
+holds_up from native dependencies and blocker lines, the order, `answered` until the runner has
+acted, GitHub down through `inbox.Reader`, and a real ask of each kind held to the sample's
+keys); `CollectTest` in `tests/test_inbox.py` (`--inbox` prints the collection);
+`InboxTest` in `tests/test_snapshot_runner.py` (a Sol pass reads it, only with a publisher).
 Stopping a lane: `tests/test_switch.py` (today's gate.json pause through the run loop, each
 stop through `main` and `Runner.run_once`, the older pause against an entry, `--pause` and
 `--resume`, the same file from the CLI's writer and `serve.App.write_control`, `--gate` and the
@@ -1077,7 +1113,9 @@ temp folder.
   land, the brief, the answer and its stops.
 - `queue_runner/merge.py`: the pre-merge re-check, the expected-head merge and the worktrees
   removed after; in a repo Stefan merges, the `ready-for-stefan` mark and noticing his merge.
-- `queue_runner/inbox.py`: `--inbox`, everything waiting on Stefan. A fix round's local branch name (`fix_branch`) is `fix.py`'s.
+- `queue_runner/inbox.py`: `--inbox`, everything waiting on Stefan: `collect`, the one
+  collection, and `Reader`, the Sol lane's last read for the snapshot.
+- `queue_runner/asks.py`: the Inbox's asks written from that collection and the job log. A fix round's local branch name (`fix_branch`) is `fix.py`'s.
 - `queue_runner/review.py` and `templates/review.md`: the Sol lane: adoption, the brief, a review.
 - `queue_runner/ledger.py`: earlier reviews from a PR's comments, and `decide()`.
 - `queue_runner/stops.py`: stops for Stefan: which, the `needs-info` issue, the PR comment, the

@@ -3,7 +3,8 @@
 
 - `build(facts)` is pure: plain data in (`Facts`), the snapshot out. Each part has its own small
   function. The work lists (asks, issues, PRs, activity, each lane's queue) are `_work` and
-  `_queue`, empty until tickets 31 and 32 fill them from facts they add to `Facts`.
+  `_queue`: the asks are `asks.py`'s, from the Sol lane's last Inbox read (ticket 31); the rest
+  stay empty until ticket 32 fills them from facts it adds to `Facts`.
 - `Snapshots` gathers the facts: the job log, `gate.json`, the learned costs, what the runner's
   passes last saw (`Calls`, `Watch`) and the runner's own state. GitHub is read by the passes, never
   for the snapshot; Claude's and ChatGPT's usage are read for it at most every `READ_EVERY`.
