@@ -204,6 +204,19 @@ class RunEffortTest(unittest.TestCase):
                            said(None, at='2026-11-15T12:00:01.000Z', model='<synthetic>'))
         self.assertEqual(self.t3.files().run_effort('t1', 'r2'), 'high')
 
+    def test_the_newest_call_by_its_own_time_across_the_sessions_transcripts(self):
+        # One session's transcript in two project folders (review 1's F7's class): the file
+        # touched last holds the older call.
+        self.t3.run('t1', 'r1', HIGH)
+        self.t3.transcript('s1', said('high', at='2026-11-15T10:05:00.000Z'))
+        other = os.path.join(self.t3.projects, 'C--repo-moved')
+        os.makedirs(other)
+        with open(os.path.join(other, 's1.jsonl'), 'w', encoding='utf-8') as f:
+            f.write(json.dumps(said('medium', at='2026-11-15T10:01:00.000Z')) + '\n')
+        os.utime(os.path.join(self.t3.projects, 'C--repo', 's1.jsonl'), (1000, 1000))
+        os.utime(os.path.join(other, 's1.jsonl'), (2000, 2000))
+        self.assertEqual(self.t3.files().run_effort('t1', 'r1'), 'high')
+
     def test_with_no_transcript_t3s_run_record_says_what_it_asked_for(self):
         self.t3.run('t1', 'r1', HIGH, session=None)
         self.assertEqual(self.t3.files().run_effort('t1', 'r1'), 'high')

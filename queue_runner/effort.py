@@ -47,6 +47,10 @@ def _when(stamp) -> datetime.datetime | None:
         return None
 
 
+def _aware(t: datetime.datetime | None) -> datetime.datetime | None:
+    return t if t is None or t.tzinfo else t.replace(tzinfo=datetime.timezone.utc)
+
+
 def selection_effort(selection: dict | None) -> str | None:
     for option in (selection or {}).get('options') or ():
         if isinstance(option, dict) and option.get('id') == 'effort':
@@ -141,9 +145,20 @@ class T3Files:
         found = glob.glob(os.path.join(glob.escape(self.projects), '*', f'{session}.jsonl'))
         if not found:
             return None
+        # A session's transcript may be in more than one project folder: the last call is the
+        # one recorded last by its own time, whichever file was touched last.
+        calls = [got for path in sorted(found, key=os.path.getmtime, reverse=True)
+                 if (got := self._last_effort(path, since)) is not None]
+        earliest = datetime.datetime.min.replace(tzinfo=datetime.timezone.utc)
+        # Ties (or no times) go to the file touched last, as before.
+        return max(calls, key=lambda c: _aware(c[0]) or earliest)[1] if calls else None
+
+    @staticmethod
+    def _last_effort(path: str, since):
+        """(when, effort) of the transcript's last real call at or after `since`, or None."""
         last = None
         try:
-            with open(max(found, key=os.path.getmtime), encoding='utf-8', errors='replace') as f:
+            with open(path, encoding='utf-8', errors='replace') as f:
                 for line in f:
                     if '"effort"' not in line:
                         continue
@@ -157,7 +172,7 @@ class T3Files:
                     at = _when(record.get('timestamp'))
                     if since is not None and (at is None or at < since):
                         continue
-                    last = record['effort']
+                    last = at, record['effort']
         except OSError:
             return None
         return last

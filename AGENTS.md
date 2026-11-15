@@ -876,7 +876,7 @@ python3 -m dashboard    # http://queue.localhost:5289/ is the runner's; http://l
   reader in a `Watch`, so every call the passes make is recorded (a failing one keeps its last
   good time). **GitHub is never read for the snapshot.** Only the publisher's own 30-second writes
   read afresh: Claude's usage and ChatGPT's (`sol.latest_limits`, the newest `rate_limits` in
-  Codex's rollouts, the account's) at most every 5 minutes (`READ_EVERY`), and an open Claude job's
+  Codex's rollouts by the record's own timestamp, among the 20 files touched last, the account's) at most every 5 minutes (`READ_EVERY`), and an open Claude job's
   thread in T3 until found. `asks` and `answered` are ticket 31's (The Inbox's asks, below);
   `features`, `issues`, `prs`, `activity` and each lane's `queue` ticket 32's (The work lists,
   below). `stop_now` is unavailable until ticket 34. `--snapshot` prints one built the same way

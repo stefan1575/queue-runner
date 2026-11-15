@@ -155,6 +155,16 @@ class LatestLimitsTest(unittest.TestCase):
             LimitWindow(300, 93.0, datetime.datetime.fromtimestamp(reset, datetime.timezone.utc)),
             LimitWindow(10080, 22.0, datetime.datetime.fromtimestamp(reset + 600, datetime.timezone.utc))))
 
+    def test_the_newest_reading_by_its_own_time_across_rollouts_not_the_newest_file(self):
+        # Review 1's F7: a file touched last may hold an older reading than another file.
+        self.rollout('15', 'newer-file-old-reading', [self.limits(
+            '2026-11-15T10:00:00Z', {'used_percent': 10, 'window_minutes': 300}, None)], 2000)
+        self.rollout('15', 'older-file-latest-reading', [self.limits(
+            '2026-11-15T11:00:00Z', {'used_percent': 99, 'window_minutes': 300}, None)], 1000)
+        at, usage = latest_limits(self.sessions)
+        self.assertEqual(at, datetime.datetime(2026, 11, 15, 11, tzinfo=datetime.timezone.utc))
+        self.assertEqual(usage.windows[0].used, 99)
+
     def test_no_session_with_windows_is_an_error_that_says_so(self):
         self.rollout('15', 'bare', [self.limits('2026-11-15T11:42:00Z', None, None)], 2000)
         with self.assertRaises(LookupError) as e:
