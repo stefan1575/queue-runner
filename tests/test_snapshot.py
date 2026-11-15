@@ -242,6 +242,19 @@ class UsageTest(unittest.TestCase):
         self.assertEqual([(w['id'], w['label'], w['used'], when(w['resets_at']), w['gates']) for w in p['windows']],
                          [('five_hour', 'Session', 93.0, FIVE_RESET, True), ('week', 'Weekly', 22.0, WEEK_RESET, True)])
 
+    def test_each_plan_says_how_many_reset_credits_it_has_from_the_same_read(self):
+        claude = snapshot.Reading(Usage(Window(38, FIVE_RESET), Window(46, WEEK_RESET), resets=2), NOW)
+        sol = snapshot.Reading(SolLimits('plus', (SolWindow(300, 9.0, FIVE_RESET),), resets=0), NOW)
+        snap = snapshot.build(facts(claude_usage=claude, sol_usage=sol))
+        self.assertEqual(plan(snap, 'claude')['resets'], {'available': 2})
+        self.assertEqual(plan(snap, 'sol')['resets'], {'available': 0})
+
+    def test_a_plan_with_no_reset_credits_to_give_or_not_read_says_none(self):
+        claude = snapshot.Reading(Usage(Window(38, FIVE_RESET), Window(46, WEEK_RESET)), NOW)
+        snap = snapshot.build(facts(claude_usage=claude))
+        self.assertIsNone(plan(snap, 'claude')['resets'])
+        self.assertIsNone(plan(snap, 'sol')['resets'])
+
 
 class CostsAndRolesTest(unittest.TestCase):
     def test_each_claude_job_kinds_expected_cost_and_where_it_comes_from(self):

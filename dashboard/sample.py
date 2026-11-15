@@ -214,14 +214,17 @@ def build(name: str = DEFAULT, base: datetime | None = None, control: dict | Non
         ],
         "usage": [
             # A model's own weekly window (Fable's here) is listed only when the account has one.
-            {"id": "claude", "provider": "claude", "name": "Claude", "plan": None, "read_at": ago(1), "error": None, "windows": [
+            # `resets`: the reset credits a plan has left (ticket 42), or None when it has none to give.
+            {"id": "claude", "provider": "claude", "name": "Claude", "plan": None, "read_at": ago(1), "error": None,
+             "resets": {"available": 2}, "windows": [
                 {"id": "five_hour", "label": "Session", "used": 38, "resets_at": ahead(60), "gates": True},
                 {"id": "week", "label": "Weekly", "used": 46, "resets_at": ahead(60 * 49.7), "gates": True,
                  "reserve": 5, "reserve_opens_at": ahead(60 * 25.7)},
                 {"id": "week_fable", "label": "Weekly, Fable", "used": 100, "resets_at": ahead(60 * 49.7),
                  "gates": False, "note": "The runner doesn't use Fable."},
             ]},
-            {"id": "sol", "provider": "chatgpt", "name": "ChatGPT", "plan": None, "read_at": ago(9), "error": None, "windows": [
+            {"id": "sol", "provider": "chatgpt", "name": "ChatGPT", "plan": None, "read_at": ago(9), "error": None,
+             "resets": None, "windows": [
                 {"id": "five_hour", "label": "Session", "used": 26, "resets_at": ahead(94), "gates": True},
                 {"id": "week", "label": "Weekly", "used": 6, "resets_at": ahead(60 * 152.9), "gates": True},
             ]},

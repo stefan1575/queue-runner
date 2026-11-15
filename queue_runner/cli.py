@@ -669,7 +669,8 @@ def main(argv=None, github=None, out=None, t3=None, git=None, sleep=None,
         _print_gate(gate, out, config)
         return 0
     if sol_usage is None:
-        from .sol import latest_limits as sol_usage
+        from .codex_usage import CodexUsage   # as T3 reads it (ticket 42)
+        sol_usage = CodexUsage().read
     snap_clock = clock or _utc_now
     if github is None:
         from .github import GhCli

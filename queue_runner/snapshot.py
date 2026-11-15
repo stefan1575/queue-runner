@@ -59,7 +59,7 @@ ROLES = [
 # The sources, in the page's order: (id, group, name, short, what an answer is called).
 SOURCES = [
     ('claude_usage', 'provider', 'Claude usage', 'Claude', 'Read'),
-    ('sol_usage', 'provider', 'ChatGPT usage', 'ChatGPT', "Read from Codex's newest session"),
+    ('sol_usage', 'provider', 'ChatGPT usage', 'ChatGPT', 'Read through Codex'),
     ('t3', 'local', 'T3 Code', 'T3 Code', 'Answered'),
     ('github', 'external', 'GitHub', 'GitHub', 'Answered'),
 ]
@@ -319,11 +319,15 @@ def _sources(facts: Facts) -> list[dict]:
 
 def _plan(id: str, provider: str, name: str, reading: Reading | None, windows,
           plan=None) -> dict:
+    """`resets` (ticket 42): the reset credits the plan has left, from the same read as its
+    windows, or None when it has none to give (or isn't read yet)."""
     good = reading is not None and reading.value is not None
     error = reading.error if reading and reading.error else None if good else 'Not read yet'
+    resets = getattr(reading.value, 'resets', None) if good else None
     return {'id': id, 'provider': provider, 'name': name, 'plan': plan,
             'read_at': _iso(reading.at) if good else None,
-            'error': _sentence(error) if error else None, 'windows': windows}
+            'error': _sentence(error) if error else None, 'windows': windows,
+            'resets': {'available': resets} if resets is not None else None}
 
 
 def _claude_usage(facts: Facts) -> dict:
