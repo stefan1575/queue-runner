@@ -311,7 +311,7 @@ class PrsTest(WorkCase):
                           'Neither lane takes up its work until you resume first.'))
 
 
-class HistoryTest(WorkCase):
+class HistoryCase(WorkCase):
     def setUp(self):
         super().setUp()
         self.gh.prs = [full_pr(5, 'claude/red-3', H2, title='Red', body='Closes #3')]
@@ -328,6 +328,8 @@ class HistoryTest(WorkCase):
                  commits=['3'])
         self.reviewed(5, H2, 'clean', rnd=2)
 
+
+class HistoryTest(HistoryCase):
     def test_a_prs_timeline_by_head_from_the_job_log(self):
         tl = pr_of(self.snap(), 5)['timeline']
         self.assertEqual([(e['actor'], e['kind'], e['sha']) for e in tl],
@@ -389,6 +391,48 @@ class GitHubDownTest(WorkCase):
         src = next(s for s in snap['sources'] if s['id'] == 'github')
         self.assertIsNone(src['checked_at'])
         self.assertFalse(src['ok'])
+
+
+class ContractTest(HistoryCase):
+    """A real issue, feature, PR (its checks and timeline events), queue entry and activity row
+    have the sample's keys: every key each sample has there, and none that no sample has."""
+
+    def keys(self, pick):
+        from dashboard import sample
+        stopped = {'written_at': '2026-11-15T12:00:00+08:00',
+                   'repos': {'leads-dashboard': {'stop': 'after-job', 'at': None}}}
+        samples = [sample.build(name) for name in sample.STATES] + [sample.build(control=stopped)]
+        sets = [set(d) for s in samples for d in pick(s)]
+        return set.intersection(*sets), set.union(*sets)
+
+    def holds(self, real, pick, what):
+        self.assertTrue(real, f'no {what} to hold to the sample')
+        must, may = self.keys(pick)
+        for d in real:
+            self.assertLessEqual(must, set(d), f'{what} lacks keys the sample always has')
+            self.assertLessEqual(set(d), may, f'{what} has keys no sample has')
+
+    def test_the_real_lists_have_the_samples_keys(self):
+        self.gh.work_list = [wi(1, 'Spec: the app', labels=('spec',),
+                                subs=[(3, 'Red', 'open'), (2, 'Two', 'closed')]),
+                             wi(3, 'Red', parent=1), wi(7, 'Seven')]
+        self.gh.issues = [ready(7, 'Seven')]
+        self.gh.prs.append(full_pr(6, 'claude/blue-4', H3, title='Blue'))
+        snap = self.snap()
+        self.holds(snap['issues'], lambda s: s['issues'], 'an issue')
+        self.holds(snap['features'], lambda s: s['features'], 'a feature')
+        self.holds(snap['prs'], lambda s: s['prs'], 'a PR')
+        self.holds([c for p in snap['prs'] for c in p['checks']],
+                   lambda s: [c for p in s['prs'] for c in p['checks']], "a PR's check")
+        self.holds([e for p in snap['prs'] for e in p['timeline']],
+                   lambda s: [e for p in s['prs'] for e in p['timeline']], "a PR's event")
+        self.holds([f for p in snap['prs'] for e in p['timeline'] for f in e['findings']],
+                   lambda s: [f for p in s['prs'] for e in p['timeline'] for f in e['findings']],
+                   'a finding')
+        self.holds([q for l in snap['lanes'] for q in l['queue']],
+                   lambda s: [q for l in s['lanes'] for q in l['queue']], 'a queue entry')
+        self.holds(snap['activity'], lambda s: s['activity'], 'an activity row')
+        json.dumps(snap)
 
 
 if __name__ == '__main__':
