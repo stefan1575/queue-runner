@@ -381,6 +381,85 @@ class GitHubDownTest(AskCase):
         self.assertEqual(reader.stale(), {})
 
 
+class PartialReadTest(AskCase):
+    """GitHub failing part-way through one ask (review 1's F6): that ask is the last good read's,
+    and the Inbox says it's stale; the asks read whole are this read's."""
+
+    def reader(self):
+        times = iter([datetime.datetime(2026, 11, 15, 4, k, tzinfo=datetime.timezone.utc)
+                      for k in (0, 5, 10)])
+        return inbox.Reader(self.config, self.gh, self.jobs, clock=lambda: next(times))
+
+    def test_a_failing_dependency_read_keeps_the_last_ask_and_marks_the_inbox_stale(self):
+        self.job('stop', 152, 'filed', sha=H2, stop='no-push', reason='nothing pushed',
+                 link='https://github.com/owner/first/issues/30')
+        reader = self.reader()
+        before = reader.read()
+        self.assertEqual(before.items[0].title, 'Ring-to number per Client')
+        self.assertEqual(before.items[0].holds_up, ((116, 'Ring-to audit page'),))
+
+        def fail(repo, number):
+            raise RuntimeError('HTTP 503')
+        self.gh.blocking = fail
+        after = reader.read()
+        self.assertTrue(after.errors)
+        self.assertEqual(after.items[0], before.items[0])
+        when, error = reader.stale()['first']
+        self.assertEqual(when, datetime.datetime(2026, 11, 15, 4, 0, tzinfo=datetime.timezone.utc))
+        self.assertIn('HTTP 503', error)
+        del self.gh.blocking   # back: the next read is whole, and fresh
+        reader.read()
+        self.assertEqual(reader.stale(), {})
+
+    def test_only_the_ask_that_failed_is_the_last_reads_the_others_are_this_reads(self):
+        self.job('stop', 152, 'filed', sha=H2, stop='no-push', reason='nothing pushed',
+                 link='https://github.com/owner/first/issues/30')
+        reader = self.reader()
+        reader.read()
+        # Since then: PR #152 renamed, and a new stop on PR #160, which holds nothing up.
+        self.gh.prs = [full_pr(152, 'claude/ring-to-113', H2, title='Ring-to, renamed',
+                               body='Closes #113'),
+                       full_pr(160, 'claude/other-120', H3, title='Other')]
+        self.job('stop', 160, 'filed', sha=H3, stop='no-push', reason='nothing pushed',
+                 branch='claude/other-120', link='https://github.com/owner/first/issues/31')
+
+        def fail(repo, number):
+            raise RuntimeError('HTTP 503')
+        self.gh.blocking = fail   # only #152 closes an issue, so only its read fails
+        got = reader.read()
+        self.assertEqual([(w.number, w.title) for w in got.items],
+                         [(152, 'Ring-to number per Client'), (160, 'Other')])
+        self.assertIn('first', reader.stale())
+
+    def test_with_no_good_read_yet_the_bare_ask_is_listed_and_stale(self):
+        self.job('stop', 152, 'filed', sha=H2, stop='no-push', reason='nothing pushed',
+                 link='https://github.com/owner/first/issues/30')
+
+        def fail(repo, number):
+            raise RuntimeError('HTTP 503')
+        self.gh.blocking = fail
+        reader = self.reader()
+        got = reader.read()
+        self.assertEqual([w.number for w in got.items], [152])
+        self.assertEqual(reader.stale()['first'][0], None)
+
+    def test_an_answered_ask_that_fails_part_way_keeps_its_last_read_too(self):
+        stop = self.job('stop', 152, 'answered', sha=H2, stop='no-push', reason='nothing pushed',
+                        link='https://github.com/owner/first/issues/30', answer='replied')
+        self.gh.comments[152] = [Comment('stefan1575', '2099-01-01T00:00:00Z', 'Fix on, please.')]
+        reader = self.reader()
+        before = reader.read()
+        self.assertEqual([w.job.id for w in before.answered], [stop.id])
+        self.assertEqual(before.answered[0].said, 'Fix on, please.')
+
+        def fail(repo, number):
+            raise RuntimeError('HTTP 503')
+        self.gh.blocking = fail
+        after = reader.read()
+        self.assertEqual(after.answered[0], before.answered[0])
+        self.assertIn('first', reader.stale())
+
+
 class ContractTest(KindsCase):
     """A real ask of each kind has the sample ask's keys, and so do its parts."""
 

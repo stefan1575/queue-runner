@@ -68,17 +68,25 @@ class Inbox:
     errors: list = field(default_factory=list)
     failed: frozenset = frozenset()   # repos GitHub couldn't be read for
     reviews: dict = field(default_factory=dict)   # review job id: its run folder's decision.json
+    # The items GitHub failed on part-way (their `key`s): listed as the job log has them, and
+    # the Reader keeps the last good read's instead.
+    unfilled: frozenset = frozenset()
+
+
+def key(w: Waiting) -> tuple:
+    """Which ask an item is, from one read to the next."""
+    return (w.kind, w.repo, w.number, getattr(w.job, 'id', None))
 
 
 # --- the collection -----------------------------------------------------------------------------
 
 def collect(config, github, jobs) -> Inbox:
     """What waits on Stefan now, in `ORDER`, each kind in its repo's order and then by number."""
-    items, answered, errors, failed = [], [], [], set()
+    items, answered, errors, failed, unfilled = [], [], [], set(), set()
     all_jobs = jobs.jobs()
     for repo in config.repos:
         try:
-            got, done = _repo(config, github, jobs, all_jobs, repo, errors)
+            got, done = _repo(config, github, jobs, all_jobs, repo, errors, unfilled)
         except Exception as e:   # GitHub down: said, and the rest still listed
             errors.append(f"{repo.name}: couldn't read its PRs ({type(e).__name__}: {e})")
             failed.add(repo.name)
@@ -89,7 +97,8 @@ def collect(config, github, jobs) -> Inbox:
     names = {r.name: i for i, r in enumerate(config.repos)}
     items.sort(key=lambda w: (rank[w.kind], names[w.repo], w.number))
     return Inbox(items, answered, errors, frozenset(failed),
-                 reviews(all_jobs, {(w.repo, w.number) for w in items + answered if w.on_pr}))
+                 reviews(all_jobs, {(w.repo, w.number) for w in items + answered if w.on_pr}),
+                 frozenset(unfilled))
 
 
 def reviews(all_jobs, prs) -> dict:
@@ -114,12 +123,12 @@ def _offline(jobs, all_jobs, repo) -> list[Waiting]:
     return _stops(jobs, repo) + _builds(jobs, all_jobs, repo) + _threads(jobs, repo)
 
 
-def _repo(config, github, jobs, all_jobs, repo, errors) -> tuple[list, list]:
+def _repo(config, github, jobs, all_jobs, repo, errors, unfilled=None) -> tuple[list, list]:
     if not repo.github:
         return _offline(jobs, all_jobs, repo), []
     pulls = {p.number: p for p in github.open_pulls(repo)}
     issues = {i.number: i for i in github.open_issues(repo)}
-    reader = _Reader(github, repo, pulls, issues, errors)
+    reader = _Reader(github, repo, pulls, issues, errors, unfilled)
     ready = []
     if repo.stefan_merges:
         merger = Merger(config, github=github, git=None, jobs=jobs, say=lambda line: None)
@@ -226,9 +235,10 @@ class _Reader:
     """Fills a `Waiting` from GitHub: the PR or issue, the issue a PR closes, what it holds up,
     an Approach note and Stefan's words. Each PR's comments are read once."""
 
-    def __init__(self, github, repo, pulls, issues, errors):
+    def __init__(self, github, repo, pulls, issues, errors, unfilled=None):
         self.github, self.repo, self.pulls, self.issues = github, repo, pulls, issues
         self.errors = errors
+        self.unfilled = unfilled if unfilled is not None else set()   # `key`s it failed on
         self._comments = {}
 
     def _issue(self, n: int):
@@ -240,12 +250,14 @@ class _Reader:
         return self._comments[n]
 
     def fill(self, w: Waiting, answered: bool = False) -> Waiting:
-        """The item with what GitHub says about it; one GitHub can't say (a deleted issue)
-        stays listed as the job log has it, and the error is said."""
+        """The item with what GitHub says about it; one GitHub can't say (a deleted issue, or
+        a read failing part-way) stays listed as the job log has it, the error is said, and it's
+        named in `unfilled` (the Reader keeps the last good read's)."""
         try:
             return self._fill(w, answered)
         except Exception as e:
             self.errors.append(f"{w.repo}#{w.number}: couldn't read it ({type(e).__name__}: {e})")
+            self.unfilled.add(key(w))
             return w
 
     def _fill(self, w: Waiting, answered: bool) -> Waiting:
@@ -341,7 +353,8 @@ def report(config, github, jobs) -> str:
 
 class Reader:
     """The Sol lane's last collection, for the snapshot. A repo GitHub couldn't be read keeps
-    what the last good read of it found, and `stale` says since when."""
+    what the last good read of it found, an ask GitHub failed on part-way keeps the last good
+    read of that ask, and `stale` says since when (the repo's last whole read)."""
 
     def __init__(self, config, github, jobs, clock):
         self.config, self.github, self.jobs, self.clock = config, github, jobs, clock
@@ -349,7 +362,8 @@ class Reader:
         self._last: Inbox | None = None
         self._good: dict[str, tuple] = {}     # repo: (when, its items, its answered)
         self._reviews: dict = {}
-        self._stale: dict[str, tuple] = {}    # repo: (last good read or None, the error)
+        self._stale: dict[str, tuple] = {}    # repo: (last whole read or None, the error)
+        self._whole: dict[str, datetime.datetime] = {}   # repo: its last read with no error
 
     def read(self, github=None) -> Inbox:
         """With `github`, the pass's shared reads (`work.Memo`), else its own GitHub."""
@@ -360,13 +374,23 @@ class Reader:
             for repo in self.config.repos:
                 mine = [w for w in got.items if w.repo == repo.name]
                 done = [w for w in got.answered if w.repo == repo.name]
+                mine_errors = [e for e in got.errors if e.startswith((f'{repo.name}:',
+                                                                      f'{repo.name}#'))]
                 if repo.name in got.failed:
-                    when, mine, done = self._good.get(repo.name, (None, mine, done))
-                    error = next((e for e in got.errors if e.startswith(f'{repo.name}:')), '')
-                    self._stale[repo.name] = (when, error)
+                    _, mine, done = self._good.get(repo.name, (None, mine, done))
+                    error = next((e for e in mine_errors if e.startswith(f'{repo.name}:')), '')
+                    self._stale[repo.name] = (self._whole.get(repo.name), error)
                 else:
+                    _, was, was_done = self._good.get(repo.name, (None, [], []))
+                    last = {key(w): w for w in was + was_done}
+                    mine = [last.get(key(w), w) if key(w) in got.unfilled else w for w in mine]
+                    done = [last.get(key(w), w) if key(w) in got.unfilled else w for w in done]
                     self._good[repo.name] = (now, mine, done)
-                    self._stale.pop(repo.name, None)
+                    if mine_errors:   # part-way: what failed is the last good read's, said
+                        self._stale[repo.name] = (self._whole.get(repo.name), mine_errors[0])
+                    else:
+                        self._whole[repo.name] = now
+                        self._stale.pop(repo.name, None)
                 items += mine
                 answered += done
             # A kept ask's reviews are the last good read's: their run folders don't change.

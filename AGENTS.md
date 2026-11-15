@@ -938,7 +938,10 @@ python3 -m dashboard    # http://queue.localhost:5289/ is the runner's; http://l
   `inbox.Reader`), even while Stefan has stopped that lane (it only reads), and the snapshot
   writes from that read, never from GitHub. **GitHub down:** a repo it can't read keeps the last
   good read's asks, and the GitHub source turns red with that read's time and an `affects`
-  line (`asks.stale_github`). **Templates, no AI** (`asks.render`): `about` is the first prose
+  line (`asks.stale_github`). **Part-way** (one ask's PR, issue, dependencies or comments
+  failing, `_Reader.fill`): that ask is the last good read's (`inbox.key`, `Inbox.unfilled`;
+  listed bare only if there's none), the others this read's, and the source says so the same
+  way, with the time of the repo's last whole read. **Templates, no AI** (`asks.render`): `about` is the first prose
   (markdown stripped) under the closed issue's "What to build" or "Summary", else its first
   paragraph, else the PR's, clipped to 300 characters; `because` the stop's reason plus the
   Important findings still open ("Open now: F3, ..."), an approach note's first paragraph after
@@ -967,7 +970,13 @@ python3 -m dashboard    # http://queue.localhost:5289/ is the runner's; http://l
   is its first failing step). Issues come from `GhCli.work_issues` (one paged GraphQL query:
   labels, parent, sub-issues, native blockers). Every repo is read, a stopped one too, and
   `--snapshot` reads the same way. **GitHub down:** a repo it can't read keeps its last good
-  read, and the GitHub source says so (`work.stale_github`, after the Inbox's line). **The
+  read, and the GitHub source says so (`work.stale_github`, after the Inbox's line). **A
+  part failing on its own** (the builds, what's in flight, decisions, live steps, what's merged
+  and not live, the findings, fix rounds or reviews, or one PR's merge re-check, reviews, or
+  its own reading in the lanes' readers, said there as `reading it failed`) keeps that part
+  from the last good read (`work.kept`, `RepoRead.failed`; a PR's own parts only while its
+  head is the same), and the repo is stale, since its last whole read, until a read has every
+  part. **The
   lists** (`work.lists`, `work.queue`) are written from the last read and the job log now, in
   `Facts.repos`' order, a stopped repo's work left out of both queues. **The Claude lane's
   queue** is `Runner.choose`'s order: the jobs a limit cut off, decisions, live steps (ref the
