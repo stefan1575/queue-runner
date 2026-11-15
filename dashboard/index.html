@@ -11,13 +11,15 @@
 
   How it is laid out, and why:
   - The left is for getting around: the repository switcher and the pages. The right is the
-    machine's readings, in view however far the page is scrolled: is it up, how much usage is
-    left, what it builds first. The column between them is centred in the space they leave.
-  - Needs you comes first, one box of one size whatever is in it. It reads like an inbox: a line
-    per ask (why it's yours, what it is, the situation in a sentence), so several can be weighed
-    in one look, and the picked one open under them as a briefing that still makes sense a week
-    later, with what you can do beside it. Past three, the rest fold away; nothing scrolls.
-  - Then the lanes: what each is doing right now, and its own queue of what comes next.
+    machine's readings, in view however far the page is scrolled: how much usage is left, what
+    it builds first, is it up. The column between them is centred in the space they leave.
+  - Three pages do three jobs. Overview is the first glance. Inbox is what waits on you. Queue is
+    the work. (Overview and Queue aren't rebuilt yet: they hold the lanes and the work list as
+    they were, until the Inbox is agreed.)
+  - The Inbox reads like a mail client: the list down the left, a row per ask (why it's yours,
+    what it is, the situation in a sentence), and the picked one open on the right as a briefing
+    that still makes sense a week later, ending in what it needs from you and where you answer.
+    An ask you've answered stays greyed at the foot of the list until the runner acts on it.
   - Nothing moves by itself.
   - Colour is state and nothing else: blue is yours, amber is working, green is done or healthy,
     red is broken. Claude's clay and OpenAI's black or white are on their marks and names only.
@@ -174,55 +176,68 @@ main > * + * { margin-top: 16px; }
 .notice { padding: 12px 16px; border: 1px solid var(--bad-line); border-radius: 12px; background: var(--bad-wash); }
 .notice b { font-weight: 600; }
 
-/* ---------------------------------------------------------------- needs you */
-.inbox { display: flex; flex-direction: column; height: 500px; }
-.inbox.has { border-color: var(--you-line); }
-.inbox.all { height: auto; }
-.inbox-head { flex: none; display: flex; align-items: center; gap: 10px; height: 52px; padding: 0 12px 0 20px; border-bottom: 1px solid var(--line-soft); }
-.inbox-head h2 { font: 600 17px/1.2 var(--display); }
-.inbox-head .fold { margin-left: auto; display: flex; align-items: center; gap: 12px; font-size: 14.5px; color: var(--mute); }
-.ask-rows { flex: none; padding: 8px; border-bottom: 1px solid var(--line-soft); }
-.ask-rows li + li { margin-top: 2px; }
-.ask-row {
-  display: flex; align-items: center; gap: 14px; width: 100%; height: 42px; padding: 0 12px;
-  background: none; border: 0; border-radius: 9px; cursor: pointer; text-align: left;
-}
-.ask-row:hover { background: var(--hover); }
-.ask-row[aria-current="true"] { background: var(--you-wash); }
-.ask-row .rk { flex: 0 0 122px; display: flex; }
-.ask-row .rs { flex: 0 0 300px; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ask-row .rs b { font-weight: 600; }
-.ask-row .rs span { color: var(--dim); margin-left: 8px; font-size: 14.5px; }
-.ask-row .rt { flex: 1 1 0; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--mute); }
-.ask-row[aria-current="true"] .rt { color: var(--ink); }
-.ask-row .ra { flex: 0 0 52px; text-align: right; font-size: 14px; color: var(--dim); white-space: nowrap; }
+/* ---------------------------------------------------------------- inbox */
+body.page-inbox .stage { padding-bottom: 24px; }
+.mail { display: grid; grid-template-columns: 372px minmax(0, 1fr); height: calc(100vh - 108px); min-height: 560px; overflow: hidden; }
+.mail-list { border-right: 1px solid var(--line-soft); display: flex; flex-direction: column; min-height: 0; background: var(--sunk); }
+.mail-count { flex: none; display: flex; align-items: baseline; gap: 10px; height: 52px; padding: 16px 20px 0; border-bottom: 1px solid var(--line-soft); }
+.mail-count b { font: 600 17px/1.2 var(--display); }
+.mail-count span { font-size: 14.5px; color: var(--mute); margin-left: auto; }
+.mail-rows { flex: 1 1 auto; min-height: 0; overflow-y: auto; scrollbar-width: thin; padding: 8px; }
+.mail-rows li + li { margin-top: 2px; }
+.mrow { display: block; width: 100%; padding: 11px 12px 12px 14px; background: none; border: 0; border-radius: 10px; cursor: pointer; text-align: left; position: relative; }
+.mrow:hover { background: var(--hover); }
+.mrow[aria-current="true"] { background: var(--surface); box-shadow: inset 0 0 0 1px var(--you-line); }
+.mrow[aria-current="true"]::before { content: ""; position: absolute; left: 0; top: 10px; bottom: 10px; width: 3px; border-radius: 2px; background: var(--you); }
+.mrow .m1 { display: flex; align-items: center; gap: 8px; }
+.mrow .m1 .ma { margin-left: auto; font-size: 14px; color: var(--dim); white-space: nowrap; }
+.mrow .m2 { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; margin-top: 7px; line-height: 1.35; }
+.mrow .m2 b { font-weight: 600; }
+.mrow .m2 span { color: var(--dim); margin-left: 8px; font-size: 14.5px; white-space: nowrap; }
+.mrow .m3 { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; margin-top: 2px; font-size: 15px; line-height: 1.4; color: var(--mute); }
+.mrow[aria-current="true"] .m3 { color: var(--ink-2); }
 .kind-tag { font-size: 14px; font-weight: 700; line-height: 22px; padding: 0 9px; border-radius: 6px; background: var(--you-wash); color: var(--you); white-space: nowrap; }
 .kind-tag.broken { background: var(--bad-wash); color: var(--bad); }
-.ask-row[aria-current="true"] .kind-tag { background: var(--you); color: var(--you-ink); }
-.ask-row[aria-current="true"] .kind-tag.broken { background: var(--bad); color: var(--page); }
+.kind-tag.answered { background: none; box-shadow: inset 0 0 0 1px var(--line); color: var(--mute); font-weight: 600; }
+.mail-sep { padding: 16px 14px 6px; font-size: 14px; color: var(--dim); }
+.mrow.answered .m2 b { font-weight: 400; color: var(--mute); }
+.mrow.answered .m3 { color: var(--dim); }
+.mrow.answered[aria-current="true"] { box-shadow: inset 0 0 0 1px var(--line); }
+.mrow.answered[aria-current="true"]::before { background: var(--dim); }
 
-.ask { flex: 1 1 auto; min-height: 304px; display: grid; grid-template-columns: minmax(0, 1fr) 420px; }
-.ask-main { padding: 18px 24px 16px 20px; overflow-y: auto; min-width: 0; scrollbar-width: thin; }
-.situation { display: none; font: 400 21px/1.3 var(--serif); margin-bottom: 14px; }
-.brief { display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 12px 14px; }
+.letter { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow-y: auto; scrollbar-width: thin; container-type: inline-size; }
+.letter-head { flex: none; padding: 20px 28px 0; }
+.letter-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 10px; font-size: 14.5px; color: var(--mute); }
+.letter-head h2 { font: 600 25px/1.2 var(--display); letter-spacing: -0.01em; margin-top: 12px; text-wrap: balance; }
+.situation { font: 400 20px/1.35 var(--serif); color: var(--ink-2); margin-top: 6px; max-width: 34em; }
+.letter-body { flex: none; padding: 20px 28px 22px; }
+.brief { display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 14px 14px; }
 .brief dt { color: var(--mute); font-size: 14.5px; padding-top: 1px; }
-.brief dd { color: var(--ink-2); max-width: 44em; }
-.trail { font-size: 15px; line-height: 1.4; padding-top: 1px; }
+.brief dd { color: var(--ink-2); max-width: 40em; }
+.trail { font-size: 15px; line-height: 1.45; padding-top: 1px; }
 .trail li { padding-left: 15px; position: relative; color: var(--mute); }
 .trail li::before { content: ""; position: absolute; left: 1px; top: .58em; width: 5px; height: 5px; border-radius: 50%; background: var(--dim); }
 .trail li:last-child { color: var(--ink); }
 .trail li:last-child::before { background: var(--you); }
-.ask-side { border-left: 1px solid var(--line-soft); padding: 18px 20px 16px; display: flex; flex-direction: column; min-width: 0; }
-.question { font: 400 19px/1.3 var(--serif); text-wrap: balance; }
+/* what it needs from you: the one blue panel on the page */
+.move { flex: none; margin: 0 16px 16px; padding: 16px 20px 18px; border: 1px solid var(--you-line); border-radius: 12px; background: var(--you-wash); display: grid; grid-template-columns: minmax(0, 1fr) 236px; gap: 14px 28px; align-items: start; }
+@container (max-width: 640px) { .move { grid-template-columns: minmax(0, 1fr); } }
+.move-label { grid-column: 1 / -1; font-size: 14px; font-weight: 700; color: var(--you); margin-bottom: -6px; }
+.question { font: 400 20px/1.3 var(--serif); text-wrap: balance; color: var(--ink); }
 .options { margin-top: 12px; display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 7px 12px; align-items: baseline; }
-.options dt { font-weight: 600; font-size: 15px; padding: 0 9px; border: 1px solid var(--btn-line); border-radius: 7px; background: var(--raised); justify-self: start; }
+.options dt { font-weight: 600; font-size: 15px; padding: 0 9px; border: 1px solid var(--you-line); border-radius: 7px; background: var(--surface); justify-self: start; }
 .options dd { color: var(--ink-2); font-size: 15px; }
 .options .rec { color: var(--you); font-weight: 600; font-size: 14px; margin-left: 8px; white-space: nowrap; }
-.holds { margin-top: auto; padding-top: 10px; color: var(--mute); font-size: 14.5px; }
+.move-do { display: grid; gap: 10px; align-self: end; }
+.holds { color: var(--ink-2); font-size: 14.5px; }
 .holds b { color: var(--ink); font-weight: 600; }
-.ask-go { display: flex; align-items: center; gap: 18px; margin-top: 10px; }
-.ask-go .btn { flex: 1; justify-content: center; height: 40px; }
-.ask.none { grid-template-columns: minmax(0, 1fr); place-items: center; text-align: center; }
+.move-do .btn { justify-content: center; height: 40px; }
+.move-do .link { justify-self: center; font-size: 14.5px; color: var(--mute); }
+.move.answered { border-color: var(--line); background: var(--sunk); }
+.move.answered .move-label { color: var(--mute); }
+.move.answered .holds { margin-top: 8px; }
+.letter.none { justify-content: center; align-items: center; text-align: center; padding: 28px; }
+.mail.empty { grid-template-columns: minmax(0, 1fr); }
 .calm .i { width: 34px; height: 34px; color: var(--ok); stroke-width: 1.5; }
 .calm-h { font: 600 22px/1.2 var(--display); margin: 10px 0 6px; }
 
@@ -423,14 +438,12 @@ dialog.sheet::backdrop { background: rgba(4, 6, 10, .55); }
   body.rail-open .rail { display: grid; position: fixed; right: 16px; top: 70px; z-index: 40; width: min(380px, calc(100vw - 32px)); max-height: calc(100vh - 86px); }
 }
 @media (max-width: 1040px) {
-  .inbox, .inbox.all { height: auto; }
-  .inbox-head { height: auto; min-height: 52px; flex-wrap: wrap; padding-top: 8px; padding-bottom: 8px; }
-  .ask-row .rt { display: none; }
-  .ask-row .rs { flex: 1 1 0; }
-  .situation { display: block; }
-  .ask { grid-template-columns: minmax(0, 1fr); min-height: 0; }
-  .ask-side { border-left: 0; border-top: 1px solid var(--line-soft); }
-  .ask.none { height: 220px; }
+  .mail { grid-template-columns: minmax(0, 1fr); height: auto; min-height: 0; overflow: visible; }
+  .mail-list { border-right: 0; border-bottom: 1px solid var(--line-soft); border-radius: 14px 14px 0 0; }
+  .mail-rows { overflow: visible; }
+  .letter { overflow: visible; }
+  .letter.none { min-height: 240px; }
+  .move { grid-template-columns: minmax(0, 1fr); }
   .lanes, .cols { grid-template-columns: 1fr; }
   .feature { grid-template-columns: minmax(0, 1fr) 132px; }
   .feature .count, .feature .hint { display: none; }
@@ -448,6 +461,9 @@ dialog.sheet::backdrop { background: rgba(4, 6, 10, .55); }
   .top-col .btn:first-of-type + h1 { margin-right: auto; }
   .rows > li { grid-template-columns: 8px minmax(0, 1fr); }
   .rows > li > :nth-child(n+3) { grid-column: 2; }
+  .letter-head, .letter-body { padding-left: 20px; padding-right: 20px; }
+  .brief { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .brief dd { margin-bottom: 12px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .side { transition: none; }
@@ -476,7 +492,9 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "
 
 const svg = (d) => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true">${d}</svg>`;
 const ICON = {
-  dashboard: svg('<rect x="3" y="3" width="7.5" height="9" rx="1.5"/><rect x="13.5" y="3" width="7.5" height="5" rx="1.5"/><rect x="13.5" y="12" width="7.5" height="9" rx="1.5"/><rect x="3" y="16" width="7.5" height="5" rx="1.5"/>'),
+  inbox: svg('<path d="M3 13h5l1.5 3h5l1.5-3h5"/><path d="M5.6 5h12.8L21 13v5a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-5l2.6-8Z"/>'),
+  queue: svg('<path d="M9 6h11M9 12h11M9 18h11"/><path d="M4 6h.5M4 12h.5M4 18h.5" stroke-width="2.4"/>'),
+  overview: svg('<rect x="3" y="3" width="7.5" height="9" rx="1.5"/><rect x="13.5" y="3" width="7.5" height="5" rx="1.5"/><rect x="13.5" y="12" width="7.5" height="9" rx="1.5"/><rect x="3" y="16" width="7.5" height="5" rx="1.5"/>'),
   activity: svg('<path d="M3 12h4l3-8 4 16 3-8h4"/>'),
   usage: svg('<path d="M4.6 18a9 9 0 1 1 14.8 0"/><path d="m12 13 4-5"/><circle cx="12" cy="13" r="1"/>'),
   settings: svg('<path d="M4 7h9M19 7h1M4 17h3M13 17h7"/><circle cx="16" cy="7" r="2.5"/><circle cx="10" cy="17" r="2.5"/>'),
@@ -502,28 +520,31 @@ const who = (provider, name) => `<span class="who ${MARK[provider] ? esc(provide
 let snap = null;     // the runner's snapshot, as last read
 let ctl = {};        // control.json, as last read
 let fault = null;    // why the snapshot couldn't be read: "server", "missing", "unreadable"
-const PAGES = [["dashboard", "Dashboard"], ["activity", "Activity"], ["usage", "Usage"], ["settings", "Settings"]];
+const PAGES = [["overview", "Overview"], ["inbox", "Inbox"], ["queue", "Queue"], ["activity", "Activity"], ["usage", "Usage"], ["settings", "Settings"]];
+const UNBUILT = ["overview", "queue"];   // as they were before the split, until the Inbox is agreed
 const sampleName = new URLSearchParams(location.search).get("sample");
-const ui = { page: "dashboard", repo: "", view: "list", pr: null, ask: null, allAsks: false, sel: null, pop: null, nav: false, rail: false };
+const ui = { page: "overview", repo: "", view: "list", pr: null, ask: null, sel: null, pop: null, nav: false, rail: false };
 
 function recall(k) { try { return localStorage.getItem("qr." + k); } catch { return null; } }
 function remember(k, v) { try { localStorage.setItem("qr." + k, v); } catch { /* a private window */ } }
 
 // The address holds what you're looking at, so a toast or a note can link straight to it:
-// ?page=activity, ?repo=leads-dashboard, ?view=pyramid, ?pr=leads-dashboard:207
+// ?page=inbox, ?ask=ask-152, ?repo=leads-dashboard, ?view=pyramid, ?pr=leads-dashboard:207
 function readAddress() {
   const q = new URLSearchParams(location.search);
-  ui.page = PAGES.some((p) => p[0] === q.get("page")) ? q.get("page") : "dashboard";
+  ui.page = PAGES.some((p) => p[0] === q.get("page")) ? q.get("page") : "overview";
+  ui.ask = q.get("ask");
   ui.repo = q.has("repo") ? q.get("repo") : recall("repo") || "";
   ui.view = (q.get("view") || recall("view")) === "pyramid" ? "pyramid" : "list";
   const m = /^(.+):(\d+)$/.exec(q.get("pr") || "");
   ui.pr = m ? { repo: m[1], n: Number(m[2]) } : null;
 }
 function href(over = {}) {
-  const s = { page: ui.page, repo: ui.repo, view: ui.view, pr: ui.pr, sample: sampleName, ...over };
+  const s = { page: ui.page, repo: ui.repo, view: ui.view, pr: ui.pr, ask: ui.ask, sample: sampleName, ...over };
   const q = new URLSearchParams();
   if (s.sample) q.set("sample", s.sample);
-  if (s.page !== "dashboard") q.set("page", s.page);
+  if (s.page !== "overview") q.set("page", s.page);
+  if (s.page === "inbox" && s.ask) q.set("ask", s.ask);
   if (s.repo) q.set("repo", s.repo);
   if (s.view === "pyramid") q.set("view", "pyramid");
   if (s.pr) q.set("pr", `${s.pr.repo}:${s.pr.n}`);
@@ -575,11 +596,11 @@ const ASK = {
   stuck: ["Stuck", "What's wrong", "stuck", "stuck"], decision: ["Your decision", "Why it's yours", "decision", "decisions"],
   merge: ["Ready to merge", "Where it stands", "ready to merge", "ready to merge"], broken: ["Broken", "What failed", "broken", "broken"],
 };
-const askWords = (a) => ASK[a.kind] || ["Needs you", "Why it's yours", "other", "others"];
+const askWords = (a) => ASK[a.kind] || ["Yours", "Why it's yours", "other", "others"];
 const QUEUED = { build: "Build", fix: "Fix round on", conflict: "Conflict round on", decision: "Decision on", live: "Live steps for", review: "Review", merge: "Merge" };
 const STATE = {
   ready: ["Ready", "ready"], building: ["Building", "moving"], review: ["In review", "moving"], fixing: ["Fixing", "moving"],
-  you: ["Needs you", "yours"], blocked: ["Blocked", "blocked"], "not-ready": ["Not ready", "blocked"], done: ["Done", "done"],
+  you: ["Waiting on you", "yours"], blocked: ["Blocked", "blocked"], "not-ready": ["Not ready", "blocked"], done: ["Done", "done"],
 };
 const stateOf = (i) => STATE[i.state] || [i.state, "blocked"];
 const ACTOR = { claude: ["Claude", "claude"], sol: ["ChatGPT", "chatgpt"], chatgpt: ["ChatGPT", "chatgpt"], runner: ["Runner", ""], you: ["You", ""], github: ["GitHub", ""] };
@@ -598,7 +619,7 @@ function side() {
   const item = (name, title, sub) => `<button class="mi" role="menuitemradio" aria-checked="${ui.repo === name}" data-act="repo" data-repo="${esc(name)}">
       <span class="tick">${ui.repo === name ? ICON.check : ""}</span>
       <span class="two"><b>${esc(title)}</b><span>${esc(sub)}</span></span>
-      ${count(name) ? `<span class="badge you" title="${plural(count(name), "thing needs", "things need")} you">${count(name)}</span>` : ""}</button>`;
+      ${count(name) ? `<span class="badge you" title="${count(name)} waiting on you">${count(name)}</span>` : ""}</button>`;
   const cur = repos.find((r) => r.name === ui.repo);
   const switcher = `<div class="pop-root">
       <button class="switch" data-act="pop" data-pop="repo" aria-haspopup="menu" aria-expanded="${ui.pop === "repo"}">
@@ -607,7 +628,7 @@ function side() {
       ${ui.pop === "repo" ? `<div class="pop" role="menu" aria-label="Repository">${item("", "All repositories", "Everything the runner serves")}${repos.map((r) => item(r.name, r.name, merges(r))).join("")}</div>` : ""}</div>`;
 
   const pages = PAGES.map(([id, label]) => `<a class="nav" href="${esc(href({ page: id, pr: null }))}" data-act="page" data-page="${id}" ${ui.page === id ? 'aria-current="page"' : ""}>
-      ${ICON[id]}<span>${label}</span>${id === "dashboard" && count(ui.repo) ? `<span class="badge you" title="${plural(count(ui.repo), "thing needs", "things need")} you">${count(ui.repo)}</span>` : ""}</a>`).join("");
+      ${ICON[id]}<span>${label}</span>${id === "inbox" && count(ui.repo) ? `<span class="badge you" title="${count(ui.repo)} waiting on you">${count(ui.repo)}</span>` : ""}</a>`).join("");
 
   let foot = "";
   if (s.sample) {
@@ -639,7 +660,7 @@ function topBar() {
   const title = PAGES.find((p) => p[0] === ui.page)[1];
   return `<div class="top-in"><div class="top-col">
       <button class="btn icon only-narrow" data-act="nav" aria-label="Open the menu">${ICON.menu}</button>
-      <h1>${title}</h1>${ui.repo ? `<span class="scope">${esc(ui.repo)}</span>` : ""}
+      <h1>${title}</h1>${ui.repo ? `<span class="scope">${esc(ui.repo)}</span>` : ""}${UNBUILT.includes(ui.page) ? `<span class="later" title="This page is as it was before the split, until the Inbox is agreed">Not rebuilt yet</span>` : ""}
       <span class="beat" id="beat" aria-live="polite"></span>
       ${snap ? stopAll() : ""}
       ${snap ? `<button class="btn only-mid" data-act="rail" aria-pressed="${ui.rail}">${ICON.usage}Usage</button>` : ""}
@@ -654,65 +675,79 @@ function notices() {
   return out.join("");
 }
 
-// ------------------------------------------------------------------ needs you
-// One box of one size, read like an inbox. Each ask is one line (why it's yours, what it is, the
-// situation in a sentence), so several can be weighed in one look: a merge takes a moment, a
-// stuck PR takes thought. The picked ask is open under them as a briefing that still makes sense
-// a week later, with what you can do beside it. Past three, the rest fold away, named in the
-// heading; nothing scrolls. The runner lists them in the order they're worth taking.
-const MAX_ASKS = 3;
-function inbox() {
-  const all = snap.asks || [], asks = scoped(all);
-  const folded = asks.length > MAX_ASKS && !ui.allAsks;
-  const shown = folded ? asks.slice(0, MAX_ASKS) : asks;
-  if (!shown.some((a) => a.id === ui.ask)) ui.ask = shown.length ? shown[0].id : null;
-  const cur = shown.find((a) => a.id === ui.ask);
-  const blind = (snap.sources || []).find((s) => s.id === "github" && !s.ok);
-  if (!asks.length) {
-    const calm = blind ? ["Nothing seen that needs you", "GitHub can't be read, so something may be missing."]
-      : ui.repo && all.length ? [`Nothing in ${esc(ui.repo)} needs you`, `${plural(all.length, "thing waits", "things wait")} in another repository. <button class="link" data-act="repo" data-repo="">Show all repositories</button>`]
-      : ["Nothing needs you", "The runner carries on by itself."];
-    return `<section class="card inbox" aria-label="Needs you"><header class="inbox-head"><h2>Needs you</h2></header>
-      <div class="ask none"><div class="calm">${ICON.done}<p class="calm-h">${calm[0]}</p><p class="mute">${calm[1]}</p></div></div></section>`;
-  }
-  let fold = "";
-  if (folded) {
-    const tally = new Map();
-    for (const a of asks.slice(MAX_ASKS)) tally.set(a.kind, (tally.get(a.kind) || 0) + 1);
-    const also = [...tally].map(([k, n]) => `${n} ${askWords({ kind: k })[n === 1 ? 2 : 3]}`).join(", ");
-    fold = `<span class="fold"><span>Also waiting: ${esc(also)}</span><button class="btn sm" data-act="fold">Show all ${asks.length}</button></span>`;
-  } else if (asks.length > MAX_ASKS) fold = `<span class="fold"><button class="btn sm" data-act="fold">Show the first ${MAX_ASKS}</button></span>`;
+// ------------------------------------------------------------------ inbox
+// What waits on you, read like a mail client. The list is down the left, a row per ask: why it's
+// yours, what it is, the situation in a sentence, how long it has waited. The runner lists them
+// in the order they're worth taking. The picked one is open on the right as a briefing that still
+// makes sense a week later, ending in the one blue panel: what it needs from you and where you
+// answer. An ask you've answered stays greyed at the foot of the list until the runner has acted
+// on it, so "handled" and "still held" can be told apart.
+function inboxLists() {
+  return { all: snap.asks || [], open: scoped(snap.asks || []), answered: scoped(snap.answered || []) };
+}
+function pickAsk() {
+  const { open, answered } = inboxLists(), every = [...open, ...answered];
+  if (!every.some((a) => a.id === ui.ask)) ui.ask = open.length ? open[0].id : null;
+  return every.find((a) => a.id === ui.ask) || null;
+}
+const kindTag = (a) => (a.answered ? `<span class="kind-tag answered">Answered</span>`
+  : `<span class="kind-tag${a.kind === "broken" ? " broken" : ""}">${esc(askWords(a)[0])}</span>`);
 
-  const rows = shown.map((a) => `<li><button class="ask-row" data-act="ask" data-id="${esc(a.id)}" aria-current="${a === cur}">
-      <span class="rk"><span class="kind-tag${a.kind === "broken" ? " broken" : ""}">${esc(askWords(a)[0])}</span></span>
-      <span class="rs"><b>${esc(a.subject)}</b><span>${esc(a.ref)}</span></span>
-      <span class="rt">${esc(a.situation || a.question)}</span>
-      ${repoTag(a.repo)}<span class="ra" title="Waiting since ${esc(clock(a.since))}">${esc(ago(a.since))}</span></button></li>`).join("");
-  return `<section class="card inbox has${folded || asks.length <= MAX_ASKS ? "" : " all"}" aria-label="Needs you">
-    <header class="inbox-head"><h2>Needs you</h2><span class="badge you">${asks.length}</span>${fold}</header>
-    <ol class="ask-rows">${rows}</ol>${ask(cur)}</section>`;
+function inbox() {
+  const { all, open, answered } = inboxLists();
+  const cur = pickAsk();
+  const blind = (snap.sources || []).find((s) => s.id === "github" && !s.ok);
+  const row = (a) => `<li><button class="mrow${a.answered ? " answered" : ""}" data-act="ask" data-id="${esc(a.id)}" aria-current="${a === cur}">
+      <span class="m1">${kindTag(a)}${repoTag(a.repo)}
+        <span class="ma" title="${a.answered ? `You answered ${esc(clock(a.answered.at))}` : `Waiting since ${esc(clock(a.since))}`}">${esc(ago(a.answered ? a.answered.at : a.since))}</span></span>
+      <span class="m2"><b>${esc(a.subject)}</b><span>${esc(a.ref)}</span></span>
+      <span class="m3">${esc(a.answered ? a.answered.next : a.situation || a.question)}</span></button></li>`;
+  const oldest = open.reduce((m, a) => (!m || ms(a.since) < ms(m.since) ? a : m), null);
+  const count = open.length ? `<b>${open.length} waiting on you</b><span>oldest ${esc(ago(oldest.since))}</span>` : `<b>Nothing waiting</b>`;
+  const list = `<div class="mail-list"><p class="mail-count">${count}</p>
+    <ol class="mail-rows" data-scroll="asks" aria-label="Waiting on you">${open.map(row).join("")}
+      ${answered.length ? `<li class="mail-sep">Answered. The runner takes ${answered.length === 1 ? "this" : "these"} up next.</li>${answered.map(row).join("")}` : ""}</ol></div>`;
+
+  let right;
+  if (cur) right = letter(cur);
+  else {
+    const calm = blind ? ["Nothing seen that waits on you", "GitHub can't be read, so something may be missing."]
+      : ui.repo && all.length ? [`Nothing in ${esc(ui.repo)} waits on you`, `${plural(all.length, "thing waits", "things wait")} in another repository. <button class="link" data-act="repo" data-repo="">Show all repositories</button>`]
+      : ["Nothing waits on you", "The runner carries on by itself."];
+    right = `<div class="letter none"><div class="calm">${ICON.done}<p class="calm-h">${calm[0]}</p><p class="mute">${calm[1]}</p></div></div>`;
+  }
+  const none = !open.length && !answered.length;   // nothing to list: the calm takes the whole card
+  return `<section class="card mail${none ? " empty" : ""}" aria-label="Inbox">${none ? "" : list}${right}</section>`;
 }
 
-function ask(a) {
+function letter(a) {
+  const done = a.answered;
   const options = (a.options || []).length ? `<dl class="options">${a.options.map((o) =>
     `<dt>${esc(o.say)}</dt><dd>${esc(o.means)}${o.recommended ? '<span class="rec">Recommended</span>' : ""}</dd>`).join("")}</dl>` : "";
   const holds = (a.holds_up || []).length ? `Until then <b>${a.holds_up.map(esc).join("</b> and <b>")}</b> can't start.` : "It holds nothing else up.";
-  return `<article class="ask">
-    <div class="ask-main" data-scroll="ask">
+  const history = a.pr ? prLink(a.repo, a.pr, "PR history") : "";
+  const move = done
+    ? `<footer class="move answered"><p class="move-label">You answered ${esc(clock(done.at))}</p>
+        <div><p class="question">${esc(done.said)}</p><p class="holds">${esc(done.next)}</p></div>
+        <div class="move-do"><a class="btn" href="${esc(a.go.url)}" target="_blank" rel="noreferrer">See where you answered${ICON.out}</a>${history}</div></footer>`
+    : `<footer class="move"><p class="move-label">What it needs from you</p>
+        <div><p class="question">${esc(a.question)}</p>${options}</div>
+        <div class="move-do"><p class="holds">${holds}</p>
+          <a class="btn go" href="${esc(a.go.url)}" target="_blank" rel="noreferrer">${esc(a.go.label)}${ICON.out}</a>${history}</div></footer>`;
+  return `<article class="letter" data-scroll="ask">
+    <header class="letter-head">
+      <p class="letter-meta">${kindTag(a)}<span class="tag">${esc(a.repo)}</span><span>${esc(a.ref)}</span><span>waiting ${esc(ago(a.since))}, since ${esc(clock(a.since))}</span></p>
+      <h2>${esc(a.subject)}</h2>
       <p class="situation">${esc(a.situation || "")}</p>
+    </header>
+    <div class="letter-body">
       <dl class="brief">
         ${a.about ? `<dt>What it is</dt><dd>${esc(a.about)}</dd>` : ""}
         ${a.because ? `<dt>${esc(askWords(a)[1])}</dt><dd>${esc(a.because)}</dd>` : ""}
         ${(a.story || []).length ? `<dt>So far</dt><dd><ol class="trail">${a.story.map((s) => `<li>${esc(s)}</li>`).join("")}</ol></dd>` : ""}
       </dl>
     </div>
-    <div class="ask-side">
-      <p class="question">${esc(a.question)}</p>
-      ${options}
-      <p class="holds">${holds}</p>
-      <p class="ask-go">${a.pr ? prLink(a.repo, a.pr, "PR history") : ""}
-        <a class="btn go" href="${esc(a.go.url)}" target="_blank" rel="noreferrer">${esc(a.go.label)}${ICON.out}</a></p>
-    </div>
+    ${move}
   </article>`;
 }
 
@@ -1082,6 +1117,7 @@ function beat() {
 function draw() {
   document.body.classList.toggle("nav-open", ui.nav);
   document.body.classList.toggle("rail-open", ui.rail);
+  document.body.classList.toggle("page-inbox", ui.page === "inbox");
   if (snap && ui.repo && !(snap.repos || []).some((r) => r.name === ui.repo)) ui.repo = "";
   put("side", side());
   put("top", topBar());
@@ -1093,8 +1129,8 @@ function draw() {
     put("rail", ""); put("sheet", "");
     return;
   }
-  const page = ui.page === "activity" ? activity() : ui.page === "usage" ? usagePage() : ui.page === "settings" ? settings() : inbox() + lanes() + work();
-  put("main", notices() + page);
+  const page = { inbox, queue: work, activity, usage: usagePage, settings }[ui.page] || lanes;
+  put("main", notices() + page());
   put("rail", rail());
   const s = sheet(), dlg = $("sheet");
   put("sheet", s);
@@ -1154,9 +1190,8 @@ document.addEventListener("click", (e) => {
       ui.page = d.page; ui.nav = false; ui.pop = null; ui.rail = false;
       address(true); draw(); scrollTo(0, 0);
       return;
-    case "repo": ui.repo = d.repo; remember("repo", d.repo); ui.pop = null; ui.sel = null; ui.allAsks = false; break;
+    case "repo": ui.repo = d.repo; remember("repo", d.repo); ui.pop = null; ui.sel = null; break;
     case "ask": ui.ask = d.id; break;
-    case "fold": ui.allAsks = !ui.allAsks; break;
     case "view": ui.view = d.view; remember("view", d.view); break;
     case "stop": ui.pop = null; send([{ lane: d.lane, stop: d.how || null }]); return;
     case "all": {
@@ -1180,6 +1215,20 @@ document.addEventListener("click", (e) => {
   }
   address();
   draw();
+});
+// In the Inbox the arrow keys walk the list, as in a mail client.
+document.addEventListener("keydown", (e) => {
+  if (ui.page !== "inbox" || !snap || ui.pop || ui.pr || e.ctrlKey || e.metaKey || e.altKey) return;
+  const step = e.key === "ArrowDown" ? 1 : e.key === "ArrowUp" ? -1 : 0;
+  if (!step || e.target.closest("input, textarea, select")) return;
+  const { open, answered } = inboxLists(), every = [...open, ...answered];
+  const to = every[every.findIndex((a) => a.id === ui.ask) + step];
+  if (!to) return;
+  e.preventDefault();
+  ui.ask = to.id;
+  address(); draw();
+  const row = document.querySelector('.mrow[aria-current="true"]');
+  if (row) { row.focus(); row.scrollIntoView({ block: "nearest" }); }
 });
 document.addEventListener("keydown", (e) => {
   if (e.key !== "Escape" || !(ui.pop || ui.rail || ui.nav)) return;

@@ -611,12 +611,15 @@ threads that need Stefan, so the runner toasts instead.
 
 ## The dashboard
 
-`dashboard/` (ticket 18; Stefan, 2026-11-15). A page that opens on what needs Stefan, then the
-two lanes (what each is doing now, and its own queue), then the work (a list, and a pyramid of
-what blocks what). Its frame is the one Stefan asked for in the prototype rounds: a sidebar for
-getting around (the repository switcher, the pages Dashboard, Activity, Usage and Settings), one
-centred column, and the machine's readings floating on the right, in his order: usage, the build
-order, then the runner's status. **It is its own process and depends on nothing:** no build step, no
+`dashboard/` (ticket 18; Stefan, 2026-11-15). **Three pages do three jobs** (Stefan, 2026-11-15,
+after four takes that put everything on one page): **Overview** is the first glance, **Inbox** is
+what waits on him ("Needs you" before; the name is his), **Queue** is the work. Activity, Usage
+and Settings follow. **Only the Inbox is rebuilt so far:** Overview still shows the two lanes and
+Queue the work list and pyramid, as they were, each marked "Not rebuilt yet"; they're prototyped
+one at a time, Overview next, then Queue (ticket 18, Decisions). Its frame is the one Stefan asked
+for in the prototype rounds: a sidebar for getting around (the repository switcher and the
+pages), one centred column, and the machine's readings floating on the right, in his order:
+usage, the build order, then the runner's status. **It is its own process and depends on nothing:** no build step, no
 package, no network, no runner code, no T3, no GitHub. One HTML file, served by Python's standard
 library.
 
@@ -633,7 +636,8 @@ python3 -m dashboard --sample    # sample data, no runner needed; ?sample=<state
   `write_every` (a snapshot older than three times that, or 90 seconds, means the runner has
   gone quiet: the page says so, greys the health readings and takes the controls away),
   `control_read_at`, `sources` (health; `short` is the name beside its dot), `repos` in build
-  order, `asks` (below), `lanes` (each with its `queue`, what it takes up next, in order, across
+  order, `asks` (below), `answered` (asks Stefan has answered that the runner hasn't acted on
+  yet: an ask plus `answered`: `at`, `said`, `next`; not counted as waiting on him), `lanes` (each with its `queue`, what it takes up next, in order, across
   repositories; `queue_empty` says why there's none), `usage`, `features`, `issues` (with `pick`, the order ready work is
   built in), `prs` (each with its timeline by head), `activity` (what happened, newest first),
   `costs` (what the gate expects each kind of Claude job to take), `roles` (which lane does each
@@ -652,11 +656,15 @@ python3 -m dashboard --sample    # sample data, no runner needed; ?sample=<state
   `because` (the specifics), `story` (what has happened, in order), `question`, `options`,
   `holds_up` and `go` (where it's answered). The runner lists asks in the order they're worth
   taking.
-- **How it looks** is explained at the top of `dashboard/index.html`. Needs you is one box of
-  one size whatever is in it (Stefan: it mustn't change size between repositories), read like an
-  inbox: a line per ask (kind, subject, situation), the picked one open under them as a briefing
-  with what he can do beside it; past three the rest fold away behind "Show all", never a
-  scrollbar. A lane has one Stop button, which asks which stop is meant while a job runs.
+- **How it looks** is explained at the top of `dashboard/index.html`. **The Inbox reads like a
+  mail client:** the list down the left for the page's whole height, a row per ask (kind,
+  subject, situation, how long it has waited) in the runner's order, with the sidebar's Inbox
+  entry carrying the count; the picked ask open on the right as a briefing (what it is, the
+  specifics, the story so far), ending in the one blue panel: what it needs from him, the
+  options, what it holds up and the link it's answered at. An answered ask stays greyed at the
+  foot of the list until the runner has acted on it, so "handled" and "still held" can be told
+  apart. The arrow keys walk the list. A lane has one Stop button, which asks which stop is
+  meant while a job runs.
   Nothing on the page moves by itself (Stefan). Colour is state only: blue is Stefan's, amber
   is working, green is done or healthy, red is broken; a usage bar turns amber from 85% and red
   at the limit, and its blue end is the share kept for him; Claude's clay and OpenAI's black or
@@ -664,8 +672,9 @@ python3 -m dashboard --sample    # sample data, no runner needed; ?sample=<state
   ones Windows ships (Segoe UI Variable, Sitka for an ask's question, Cascadia Mono), 16px and up.
 - **Stop all** (the top bar) is one `{"lane", "stop"}` request per lane; a lane whose Stop now is
   unavailable is asked to stop after its job instead.
-- `?page=activity|usage|settings`, `?repo=<name>` (the switcher's choice, which narrows every
-  page), `?view=pyramid` and `?pr=<repo>:<n>` open the page there.
+- `?page=inbox|queue|activity|usage|settings` (none is the Overview), `?ask=<id>` (the ask open
+  in the Inbox), `?repo=<name>` (the switcher's choice, which narrows every page),
+  `?view=pyramid` and `?pr=<repo>:<n>` open the page there.
 - **Earlier takes, while the look is being agreed:** `dashboard/earlier/take-N.html` is the page
   as it was before a rework, served at `/earlier/take-N.html` with `--sample` only and linked
   from the sidebar's sample menu (`sample.EARLIER`). Before reworking the page again, copy it

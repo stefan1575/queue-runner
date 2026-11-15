@@ -17,7 +17,7 @@ T3 = "https://app.t3.codes/threads/264b77bb-5ec7-4453-8ee5-7d0162886008/mcp%3A"
 
 STATES = {
     "busy": "Three asks, both lanes working",
-    "clear": "Nothing needs you",
+    "clear": "Inbox empty",
     "many": "Six asks",
     "reserve": "Claude waits: the rest of the week is kept for you",
     "limit": "Claude hit its session limit in the middle of a build",
@@ -29,6 +29,7 @@ DEFAULT = "busy"
 # Takes of the page before this one, kept while its look is being agreed: `serve.py` serves the
 # ones in `dashboard/earlier/` in sample mode, and the sidebar's sample menu links them.
 EARLIER = [
+    {"href": "/earlier/take-4.html", "label": "Take 4", "note": "One page: Needs you as a box on top, the lanes, then the work"},
     {"href": "/earlier/take-3.html", "label": "Take 3", "note": "Lanes on top, a tab per ask, status first on the right"},
     {"href": "/earlier/take-2.html", "label": "Take 2", "note": "The asks listed beside the open one, lanes below, health in the sidebar"},
     {"href": "/earlier/take-1.html", "label": "Take 1", "note": "One page, no sidebar, the asks as bright slips"},
@@ -128,6 +129,26 @@ def build(name: str = DEFAULT, base: datetime | None = None, control: dict | Non
                     "The build stopped before writing the form's required fields.",
                     "A decision thread couldn't answer it from the issue.",
                 ],
+            },
+        ],
+        # Asks Stefan has answered that the runner hasn't acted on yet: the same shape, with
+        # `answered` (when, what he said, what the runner does with it). The Inbox keeps them
+        # greyed under the open ones, so an answer that is still held can be told from one
+        # that's handled. They aren't counted as waiting on him.
+        "answered": [
+            {
+                "id": "ask-209", "kind": "stuck", "repo": LD, "ref": "PR #209", "pr": None,
+                "subject": "Voicemail transcripts on the call page", "since": ago(26 * 60),
+                "situation": "Review 3 was still blocking, so it came to you.",
+                "about": "A call that went to voicemail shows its transcript on the call's page.",
+                "because": "The transcript is fetched on every page load. Review 3 found a third place that does it.",
+                "story": ["Fri: built, PR #209 opened", "Reviews 1 and 2: problems fixed", "Yesterday: review 3 still blocking",
+                          "Today: you answered fix on"],
+                "question": "Rework the approach, patch this case too, or hold it?",
+                "holds_up": [],
+                "go": {"label": "Open the needs-info issue", "url": GH[LD] + "/issues/221"},
+                "answered": {"at": ago(7), "said": "fix on",
+                             "next": "The runner reads your reply on its next pass and queues one more fix round."},
             },
         ],
         "lanes": [
@@ -362,6 +383,7 @@ def _source(snap: dict, id: str) -> dict:
 def _vary(snap: dict, name: str, ago, ahead) -> None:
     if name == "clear":
         snap["asks"] = []
+        snap["answered"] = []
         _issue(snap, LD, 191).update(state="done", note=None)
         _issue(snap, LD, 150).update(state="fixing", note="You said rework; its fix round is queued")
         _issue(snap, LD, 214).update(state="ready", note=None)

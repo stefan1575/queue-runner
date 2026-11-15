@@ -51,6 +51,32 @@ After four prototype rounds (`../prototype-app/`, kept as history) and an audit 
   T3 Code's, with the build order under it. Claude and ChatGPT carry their own marks. Needs you
   keeps one size whichever repository is picked. Type is 16px and up.
 
+## Decisions (Stefan, 2026-11-15, later: the split)
+
+Takes 3 and 4 rearranged Needs you inside one box on the one page (tabs, then rows on top), and
+both missed: the box shared the page with the lanes and the work, so it had to stay small. A
+grill settled the split instead:
+
+- **Three pages, three jobs.** Overview (the first glance), Inbox (what waits on him), Queue (the
+  work), then Activity, Usage and Settings as they are. Overview only summarises; each card
+  opens its page.
+- **"Needs you" is the Inbox.** His word. The CLI's `--needs-me` becomes `--inbox` once the page
+  is agreed (not yet: the prototype doesn't touch the runner's code). The snapshot's `asks`
+  keeps its name.
+- **Done means live.** In a feature's progress, a ticket counts as done once its live steps ran
+  (merged is live in a repo with none). "Merged, not live yet" is its own state.
+- **The Inbox keeps all four kinds:** decision, stuck, merge, and broken only when it stops a
+  lane; a health warning that stops nothing stays a dot on the right.
+- **Dev before prod is its own effort** (ticket 19), not the dashboard's.
+- **An answered ask stays greyed in the list until the runner acts on it** (mechanics).
+- **Prototyped one page at a time, judged by eye:** the Inbox first (built, on sample data; take
+  4 is `dashboard/earlier/take-4.html`), then the Overview (three cards: the Inbox in counts,
+  what each lane is doing with its Stop button, a progress bar per feature with the next
+  ticket), then the Queue (features with their bars and tickets in build order, a "what blocks
+  what" view; no kanban board: the runner has at most one build and one review in flight, so
+  its columns would hold one card each). **Still his to decide, when the Queue's turn comes:**
+  whether features or tickets can be reordered from the page, which would be a new control.
+
 ## Comments
 
 2026-11-15: the page was rebuilt a second time, joining the two before it: the prototype

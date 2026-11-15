@@ -102,13 +102,17 @@ class SampleTest(unittest.TestCase):
                 json.dumps(s)
                 self.assertEqual(s["version"], 1)
                 for key in ("written_at", "write_every", "control_read_at", "runner", "sources", "repos",
-                            "asks", "lanes", "usage", "features", "issues", "prs", "activity", "costs", "roles", "knob"):
+                            "asks", "answered", "lanes", "usage", "features", "issues", "prs", "activity", "costs", "roles", "knob"):
                     self.assertIn(key, s)
                 self.assertEqual(s["sample"]["state"], name)
                 keys = {f"{i['repo']}#{i['n']}" for i in s["issues"]}
                 for i in s["issues"]:
                     self.assertLessEqual(set(i["blocked_by"]), keys, i["title"])
-                for a in s["asks"]:
+                for a in s["answered"]:
+                    for key in ("at", "said", "next"):
+                        self.assertTrue(a["answered"][key], f"{a['id']} {key}")
+                self.assertFalse({a["id"] for a in s["asks"]} & {a["id"] for a in s["answered"]})
+                for a in s["asks"] + s["answered"]:
                     self.assertTrue(a["go"]["url"].startswith("https://"), a["id"])
                     self.assertIn(a["kind"], ("stuck", "decision", "merge", "broken"), a["id"])
                     for key in ("situation", "about", "because", "story", "question"):
@@ -201,13 +205,14 @@ class HttpTest(unittest.TestCase):
         self.assertEqual((status, kind), (200, "text/html; charset=utf-8"))
         self.assertIn(b"<title>Queue runner</title>", body)
         status, _, body = self.call("GET", "/snapshot.json?sample=clear")
-        self.assertEqual((status, json.loads(body)["asks"]), (200, []))
+        snap = json.loads(body)
+        self.assertEqual((status, snap["asks"], snap["answered"]), (200, [], []))
         status, _, body = self.call("GET", "/control.json")
         self.assertEqual((status, json.loads(body)["lanes"]), (200, {}))
         self.assertEqual(self.call("GET", "/config.toml")[0], 404)
 
     def test_an_earlier_take_of_the_page_is_served_with_sample_data_only(self):
-        for take in ("take-1", "take-2", "take-3"):
+        for take in ("take-1", "take-2", "take-3", "take-4"):
             status, kind, body = self.call("GET", f"/earlier/{take}.html")
             self.assertEqual((status, kind), (200, "text/html; charset=utf-8"))
             self.assertIn(b"<title>Queue runner</title>", body)
