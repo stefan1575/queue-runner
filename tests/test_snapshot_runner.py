@@ -259,5 +259,24 @@ class SnapshotFlagTest(Harness):
         self.assertFalse(os.path.exists(self.snapshot_path))  # and writes no file
 
 
+    def test_it_reads_github_once_itself_so_it_prints_the_asks_and_the_lists(self):
+        log = JobLog(os.path.join(self.state, 'jobs.jsonl'))
+        stop = log.started(kind='stop', repo='first', issue=12, branch='claude/red-widget-4',
+                           title='t', sha='b' * 40, stop='no-push')
+        log.ended(stop.id, exit_code=None, outcome='filed', reason='nothing pushed',
+                  link='https://github.com/owner/first/issues/30')
+        before = os.path.getsize(log.path)
+        code, out = self.run_main(['--snapshot'])
+        self.assertEqual(code, 0)
+        snap = json.loads(out)
+        self.assertEqual([a['ref'] for a in snap['asks']], ['PR #12'])
+        self.assertEqual([q['ref'] for q in lane(snap, 'claude')['queue']], ['#4'])
+        self.assertEqual([i['n'] for i in snap['issues']], [])   # the fake lists no open issues
+        github = next(s for s in snap['sources'] if s['id'] == 'github')
+        self.assertTrue(github['ok'] and github['checked_at'])
+        self.assertEqual(os.path.getsize(log.path), before)
+        self.assertFalse(os.path.exists(self.snapshot_path))
+
+
 if __name__ == '__main__':
     unittest.main()

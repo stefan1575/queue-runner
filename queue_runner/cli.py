@@ -462,12 +462,21 @@ def _utc_now():
     return datetime.datetime.now(datetime.timezone.utc)
 
 
-def _snapshot(config, gate, sol_usage, clock, out) -> int:
-    """`--snapshot`: one snapshot from the state now, printed. It reads Claude's usage once and
-    Codex's newest rollout, takes no lock, and starts, posts, records and writes nothing. The
-    runner's pid and start are runner.pid's, if one is there."""
+def _snapshot(config, gate, sol_usage, clock, out, github, git) -> int:
+    """`--snapshot`: one snapshot from the state now, printed. It reads Claude's usage once,
+    Codex's newest rollout, and GitHub once for the Inbox and the work as the Sol lane would
+    (ticket 32; git only read, nothing fetched), takes no lock, and starts, posts, records and
+    writes nothing. The runner's pid and start are runner.pid's, if one is there."""
+    from .inbox import Reader as InboxReader
     from .snapshot import Calls, RunnerInfo, Snapshots, Watch
+    from .work import Memo, Reader as WorkReader
     calls = Calls(clock)
+    github = calls.watch(github, 'github')
+    readers = {'inbox': InboxReader(config, github, _jobs(config), clock),
+               'work': WorkReader(config, github, git, _jobs(config), clock)}
+    shared = Memo(github)
+    for reader in readers.values():
+        reader.read(shared)
     pid = started = None
     with contextlib.suppress(OSError, ValueError):
         with open(_pid_file(config), encoding='utf-8') as f:
@@ -475,6 +484,7 @@ def _snapshot(config, gate, sol_usage, clock, out) -> int:
         started = datetime.datetime.fromtimestamp(os.path.getmtime(_pid_file(config)),
                                                   datetime.timezone.utc)
     snaps = Snapshots(config, calls=calls, clock=clock, info=RunnerInfo(pid, started, _commit()),
+                      readers=readers,
                       claude=Watch(gate.reader.read, calls, 'claude_usage', clock),
                       sol=Watch(sol_usage, calls, 'sol_usage', clock, timed=True))
     print(json.dumps(snaps.build(fresh=True), indent=1, ensure_ascii=False), file=out)
@@ -627,15 +637,15 @@ def main(argv=None, github=None, out=None, t3=None, git=None, sleep=None,
     if sol_usage is None:
         from .sol import latest_limits as sol_usage
     snap_clock = clock or _utc_now
-    if args.snapshot:
-        return _snapshot(config, gate, sol_usage, snap_clock, out)
-
     if github is None:
         from .github import GhCli
         github = GhCli()
     if git is None:
         from .git import GitCli
         git = GitCli()
+    if args.snapshot:
+        return _snapshot(config, gate, sol_usage, snap_clock, out, github, git)
+
     if args.inbox:   # read only: posts, starts and records nothing
         from .inbox import report
         print(report(config, github, _jobs(config)), file=out)
