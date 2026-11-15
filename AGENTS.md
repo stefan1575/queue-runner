@@ -977,7 +977,13 @@ python3 -m dashboard    # http://queue.localhost:5289/ is the runner's; http://l
   sidebar** (Stefan): the repository's mark and name on top with the tag (Stuck, Ready to
   merge, Your decision, Broken; each with its icon) and the age, then the subject and the
   situation in a sentence. The mark is the repository's first letter on a plain tile until the
-  snapshot carries a favicon. **The briefing is layout C** (Stefan's pick): the situation as
+  snapshot carries a favicon. **A row's actions are icons over its age** (ticket 44; Stefan,
+  2026-11-15: "a logo, just like in T3"), shown while the row is hovered or has focus or its
+  menu is open, and on the open row where there's no hover (under 1040px, or a touch screen):
+  a waiting row's envelope (Mark unread, or Mark read on an unread one) and clock (Snooze, its
+  menu fixed to the window under the clock: `placeRowMenu`), a snoozed row's struck clock
+  (Unsnooze), a decided row none. Each names itself in a tooltip at once (`data-tip`), and acts
+  without opening the ask. `u` and `s` do the same for the open ask. **The briefing is layout C** (Stefan's pick): the situation as
   the headline and the story as a timeline down the left (what it is, the specifics, each step
   with its time), and the one blue panel standing on the right: what it needs from him, the
   options, what it holds up and the link it's answered at. **Two groups at the list's foot,
@@ -1036,10 +1042,11 @@ python3 -m dashboard    # http://queue.localhost:5289/ is the runner's; http://l
   his, an outline is ready, a faint cell blocked. `--run-fill` is the amber for a cell (the
   text amber is too dark to fill with in light mode).
 - **Read and snoozed** (Stefan, 2026-11-15: "like an IRL inbox"): an ask he hasn't opened is
-  unread (a dot, bold); opening it reads it, and Mark unread puts it back. Snooze takes an ask
+  unread (a dot, bold); opening it reads it, and its row's envelope puts it back (the open
+  one stays unread until another is opened: `ui.hold`). Snooze takes an ask
   out of the list and the count until a time he picks (3 hours, tomorrow 9:00, next Monday
   9:00); it sits in the Snoozed group, still holding its work up, and its row's Unsnooze
-  button (or the briefing's) undoes it. Choosing the snooze times in Settings is pinned (ticket 24).
+  icon undoes it. The briefing has no buttons for either (ticket 44). Choosing the snooze times in Settings is pinned (ticket 24).
   **Both are kept with the runner** (ticket 36), so every browser agrees: the page asks
   `{"ask", "read"}` and `{"ask", "snooze_until"}` (Control, above), kept in `control.json` as
   `asks.<id>` with `read` and `snooze_until` beside that object's other keys (ticket 35's
