@@ -179,8 +179,21 @@ def _work(facts: Facts) -> dict:
     from .asks import render
     from .work import lists
     asks, answered = render(facts.inbox, facts.jobs, facts.releases, facts.repos)
+    for a in asks + answered:
+        a.update(_marks(facts, a['id']))
     return {'asks': asks, 'answered': answered,
             **lists(_view(facts), asks, facts.releases, facts.inbox)}
+
+
+def _marks(facts: Facts, id: str) -> dict:
+    """What Stefan did with an ask in the Inbox (ticket 36: control.json's `asks.<id>`): `read`,
+    and `snoozed_until` while that time is still ahead (a snooze whose time has passed is over).
+    A snoozed ask stays listed: it still holds its work up, and the page leaves it out of the
+    count."""
+    entry = facts.switch.asks.get(id) or {}
+    until = control._when(entry.get('snooze_until'))
+    return {'read': entry.get('read') is True,
+            'snoozed_until': _iso(until) if until is not None and until > facts.now else None}
 
 
 def _view(facts: Facts):
