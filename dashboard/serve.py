@@ -14,7 +14,7 @@ The contract is two files in the state folder:
 - `snapshot.json`: the runner writes it whole, the page only reads it. `dashboard/sample.py`
   builds one in every state the page has to show.
 - `control.json`: what Stefan asked for from the page (stop a lane, the order repos are built
-  in, which asks he has read or snoozed). The page writes it whole, the runner reads it and says in the snapshot's
+  in, which asks he has read or snoozed, a usage refresh). The page writes it whole, the runner reads it and says in the snapshot's
   `control_read_at` which write it has acted on.
 """
 from __future__ import annotations
@@ -74,7 +74,8 @@ def apply_control(control: dict, body: object, now: str, asks: set | None = None
     """The control file after one request: `{"lane", "stop"}`, `{"repo", "stop"}` (ticket 37),
     `{"repo_order"}`, or an ask's `{"ask", "read"}` and `{"ask", "snooze_until"}` (ticket 36) and
     `{"ask", "open": true}` (ticket 35: decide that ask in a T3 thread), kept under `asks.<id>`
-    beside that object's other keys. With `asks`, the ids the snapshot
+    beside that object's other keys, or `{"usage": "refresh"}` (ticket 42: read both plans'
+    usage now), kept as `usage.refresh_at`. With `asks`, the ids the snapshot
     lists now, entries for any other ask are dropped."""
     if not isinstance(body, dict):
         raise Refused("a JSON object is expected")
@@ -84,6 +85,8 @@ def apply_control(control: dict, body: object, now: str, asks: set | None = None
     repos = {k: v for k, v in kept.items() if isinstance(v, dict)}
     kept = control.get("asks") if isinstance(control.get("asks"), dict) else {}
     marks = {k: dict(v) for k, v in kept.items() if isinstance(v, dict)}
+    kept = control.get("usage")
+    refresh = kept.get("refresh_at") if isinstance(kept, dict) and isinstance(kept.get("refresh_at"), str) else None
     keys = set(body)
     if keys == {"lane", "stop"}:
         lane, stop = body["lane"], body["stop"]
@@ -124,13 +127,20 @@ def apply_control(control: dict, body: object, now: str, asks: set | None = None
         record = marks.setdefault(ask, {})
         if not isinstance(record.get("open"), dict):   # asked again: the first time stands
             record["open"] = {"at": now}
+    elif keys == {"usage"}:   # ticket 42: Refresh on the Usage card
+        if body["usage"] != "refresh":
+            raise Refused('usage must be "refresh"')
+        refresh = now
     else:
         raise Refused('send {"lane", "stop"}, {"repo", "stop"}, {"repo_order"}, {"ask", "read"}, '
-                      '{"ask", "snooze_until"} or {"ask", "open": true}')
+                      '{"ask", "snooze_until"}, {"ask", "open": true} or {"usage": "refresh"}')
     if asks is not None:   # an ask that's gone takes its entry with it
         marks = {k: v for k, v in marks.items() if k in asks}
-    return {"version": 1, "written_at": now, "lanes": lanes, "repo_order": order, "repos": repos,
-            "asks": marks}
+    new = {"version": 1, "written_at": now, "lanes": lanes, "repo_order": order, "repos": repos,
+           "asks": marks}
+    if refresh is not None:
+        new["usage"] = {"refresh_at": refresh}
+    return new
 
 
 class App:

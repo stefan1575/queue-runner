@@ -229,6 +229,8 @@ def build(name: str = DEFAULT, base: datetime | None = None, control: dict | Non
                 {"id": "week", "label": "Weekly", "used": 6, "resets_at": ahead(60 * 152.9), "gates": True},
             ]},
         ],
+        # Refresh on the Usage card (ticket 42): the request the runner last read both plans for.
+        "usage_refresh": None,
         "knob": {"paused": False, "reserve": 5},   # gate.json's reserve; paused: the Claude lane is stopped
         # What the gate expects a Claude job to take, per kind (the Usage page).
         "costs": [
@@ -615,6 +617,12 @@ def _obey(snap: dict, control: dict, now: datetime) -> None:
         except (TypeError, ValueError):   # not a time, or one with no offset
             ahead = False
         ask["snoozed_until"] = until if ahead else None   # a snooze whose time has passed is over
+    usage = control.get("usage")   # Refresh (ticket 42): both plans read as the request is read
+    if isinstance(usage, dict) and isinstance(usage.get("refresh_at"), str):
+        read = (datetime.fromisoformat(written) + timedelta(seconds=ACK_SECONDS)).isoformat(timespec="seconds")
+        snap["usage_refresh"] = {"asked_at": usage["refresh_at"], "done_at": read}
+        for plan in snap["usage"]:
+            plan["read_at"] = read
     order = control.get("repo_order") or []
     names = [r["name"] for r in snap["repos"]]
     if sorted(order) == sorted(names):
