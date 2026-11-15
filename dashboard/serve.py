@@ -14,7 +14,7 @@ The contract is two files in the state folder:
 - `snapshot.json`: the runner writes it whole, the page only reads it. `dashboard/sample.py`
   builds one in every state the page has to show.
 - `control.json`: what Stefan asked for from the page (stop a lane, the order repos are built
-  in). The page writes it whole, the runner reads it and says in the snapshot's
+  in, which asks he has read or snoozed). The page writes it whole, the runner reads it and says in the snapshot's
   `control_read_at` which write it has acted on.
 """
 from __future__ import annotations
@@ -46,7 +46,7 @@ START_RUNNER = (f"Start it with its shortcut, ~/.queue-runner/Queue runner.lnk (
 NAME = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
 STOPS = (None, "after-job", "now")
 REPO_STOPS = (None, "after-job")   # a repo's (ticket 37): Stop now stays a lane's
-ASK_ID = re.compile(r"^[A-Za-z0-9._-]{1,128}$")   # an ask's `id` in the snapshot
+ASK = re.compile(r"^[A-Za-z0-9._-]{1,200}$")   # an ask's id: `stop-<job>`, `merge-<repo>-<n>-<head7>`...
 
 
 class Refused(Exception):
@@ -57,18 +57,33 @@ def now_iso() -> str:
     return datetime.now().astimezone().isoformat(timespec="seconds")
 
 
-def apply_control(control: dict, body: object, now: str) -> dict:
+def _snooze_until(value: object) -> str | None:
+    """An ISO time with its offset (the page sends `toISOString()`), in this PC's offset; or null."""
+    if value is None:
+        return None
+    try:
+        t = datetime.fromisoformat(value) if isinstance(value, str) else None
+    except ValueError:
+        t = None
+    if t is None or t.tzinfo is None:
+        raise Refused("snooze_until must be an ISO time with its offset, or null")
+    return t.astimezone().isoformat(timespec="seconds")
+
+
+def apply_control(control: dict, body: object, now: str, asks: set | None = None) -> dict:
     """The control file after one request: `{"lane", "stop"}`, `{"repo", "stop"}` (ticket 37),
-    `{"repo_order"}` or `{"ask", "open": true}` (ticket 35: decide that ask in a T3 thread). An ask's
-    record is `asks.<id>`, an object whose other keys are kept."""
+    `{"repo_order"}`, or an ask's `{"ask", "read"}` and `{"ask", "snooze_until"}` (ticket 36) and
+    `{"ask", "open": true}` (ticket 35: decide that ask in a T3 thread), kept under `asks.<id>`
+    beside that object's other keys. With `asks`, the ids the snapshot
+    lists now, entries for any other ask are dropped."""
     if not isinstance(body, dict):
         raise Refused("a JSON object is expected")
     lanes = {k: v for k, v in (control.get("lanes") or {}).items() if isinstance(v, dict)}
     order = [r for r in (control.get("repo_order") or []) if isinstance(r, str)]
     kept = control.get("repos") if isinstance(control.get("repos"), dict) else {}
     repos = {k: v for k, v in kept.items() if isinstance(v, dict)}
-    held = control.get("asks") if isinstance(control.get("asks"), dict) else {}
-    asks = {k: dict(v) for k, v in held.items() if isinstance(v, dict)}
+    kept = control.get("asks") if isinstance(control.get("asks"), dict) else {}
+    marks = {k: dict(v) for k, v in kept.items() if isinstance(v, dict)}
     keys = set(body)
     if keys == {"lane", "stop"}:
         lane, stop = body["lane"], body["stop"]
@@ -90,19 +105,32 @@ def apply_control(control: dict, body: object, now: str) -> dict:
                 or not all(isinstance(r, str) and NAME.match(r) for r in order)
                 or len(set(order)) != len(order)):
             raise Refused("repo_order must list each repo's name once")
+    elif keys in ({"ask", "read"}, {"ask", "snooze_until"}):
+        ask = body["ask"]
+        if not isinstance(ask, str) or not ASK.match(ask):
+            raise Refused("ask must be an ask's id")
+        if "read" in body:
+            if not isinstance(body["read"], bool):
+                raise Refused("read must be true or false")
+            marks.setdefault(ask, {})["read"] = body["read"]
+        else:
+            marks.setdefault(ask, {})["snooze_until"] = _snooze_until(body["snooze_until"])
     elif keys == {"ask", "open"}:   # ticket 35: the runner starts a thread to decide it in, once
         ask = body["ask"]
-        if not isinstance(ask, str) or not ASK_ID.match(ask):
+        if not isinstance(ask, str) or not ASK.match(ask):
             raise Refused("ask must be an ask's id")
         if body["open"] is not True:
             raise Refused("open must be true")
-        record = asks.setdefault(ask, {})
+        record = marks.setdefault(ask, {})
         if not isinstance(record.get("open"), dict):   # asked again: the first time stands
             record["open"] = {"at": now}
     else:
-        raise Refused('send {"lane", "stop"}, {"repo", "stop"}, {"repo_order"} or {"ask", "open": true}')
+        raise Refused('send {"lane", "stop"}, {"repo", "stop"}, {"repo_order"}, {"ask", "read"}, '
+                      '{"ask", "snooze_until"} or {"ask", "open": true}')
+    if asks is not None:   # an ask that's gone takes its entry with it
+        marks = {k: v for k, v in marks.items() if k in asks}
     return {"version": 1, "written_at": now, "lanes": lanes, "repo_order": order, "repos": repos,
-            "asks": asks}
+            "asks": marks}
 
 
 class App:
@@ -149,9 +177,25 @@ class App:
             return {"version": 1, "lanes": {}, "repo_order": []}
         return data if isinstance(data, dict) else {"version": 1, "lanes": {}, "repo_order": []}
 
+    def ask_ids(self) -> set | None:
+        """The asks the snapshot lists now (waiting and answered), whose control entries are
+        kept; None when there's no snapshot to go by. The sample's: every state's."""
+        if self.sample:
+            from . import sample
+            snaps = [sample.build(name, base=self.started) for name in sample.STATES]
+        else:
+            try:
+                snaps = [json.loads(self.snapshot_path.read_bytes())]
+            except (OSError, ValueError):
+                return None
+        try:
+            return {a["id"] for s in snaps for a in (s.get("asks") or []) + (s.get("answered") or [])}
+        except (AttributeError, KeyError, TypeError):   # not the snapshot's shape: drop nothing
+            return None
+
     def write_control(self, body: object) -> dict:
         with self.lock:
-            new = apply_control(self.control(), body, self.clock())
+            new = apply_control(self.control(), body, self.clock(), asks=self.ask_ids())
             self.state_dir.mkdir(parents=True, exist_ok=True)
             fd, tmp = tempfile.mkstemp(dir=self.state_dir, prefix="control.", suffix=".tmp")
             try:

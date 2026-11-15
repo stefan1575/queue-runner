@@ -1,5 +1,6 @@
 """Decision threads: the answer block parsed (an unreadable one is a stop), and each case and action
 through the real `Runner`, with GitHub, T3, git and Sol faked."""
+import datetime
 import io
 import os
 import tempfile
@@ -13,7 +14,7 @@ from queue_runner.ledger import RUNNER_MARK, runner_post
 from queue_runner.run import Runner
 from queue_runner.stops import held
 from queue_runner.t3 import Message, T3Error
-from tests.fakes import FakeGitHubForReviews, FakeToaster, full_pr, issue
+from tests.fakes import FakeGitHubForReviews, FakeLimits, FakeToaster, full_pr, issue
 from tests.fakes_t3 import FakeReviewGit, FakeSol, FakeT3, decision_reply
 from tests.test_ledger import H2, H3, important, old_marker
 
@@ -95,11 +96,15 @@ class DecisionTest(unittest.TestCase):
         self.git = FakeReviewGit(heads={20: H2})
         self.toaster = FakeToaster()
         self.said = []
+        # Every thread's last request started just now, so it's warm and continued in place,
+        # unless a test says otherwise (ticket 38).
+        self.limits = FakeLimits(default_start=datetime.datetime.now(datetime.timezone.utc))
 
     def runner(self, *outcomes, sol=()):
         self.t3 = FakeT3(list(outcomes))
         self.r = Runner(self.config, github=self.gh, t3=self.t3, git=self.git, out=io.StringIO(),
-                        log_line=self.said.append, sol=FakeSol(list(sol)), toaster=self.toaster)
+                        log_line=self.said.append, sol=FakeSol(list(sol)), toaster=self.toaster,
+                        limits=self.limits)
         return self.r
 
     def jobs(self, kind):
@@ -320,6 +325,67 @@ class DecisionTest(unittest.TestCase):
                          (first.id, 'mcp:t1', 'done-no-pr'))
         self.assertEqual(first.outcome, 'failed')
         self.assertEqual(self.r.jobs.held_issues('first'), {4})
+
+    def cold(self, tokens):
+        """The build's thread last ran two hours ago and holds `tokens`."""
+        two_hours_ago = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=2)
+        self.limits = FakeLimits(contexts={'mcp:t1': tokens}, starts={'mcp:t1': two_hours_ago})
+        # A fresh thread's brief is the build's own, read from the issue again.
+        self.gh.issue_bodies[('owner/first', 4)] = issue(4, 'Blue widget', 'Make it blue.')
+
+    def test_a_cold_big_thread_retried_starts_fresh_with_the_decision_first(self):
+        self.cold(200_000)
+        self.git.tips = {'claude/blue-widget-4': 'abc1234def'}
+        self.build((1, 'failed'),
+                   (0, 'completed', decision_reply('retry', add='Install deps first.')),
+                   (0, 'completed'))
+        self.t3.messages['mcp:t1'] = [Message('assistant', 'npm test failed: missing module')]
+        self.assertEqual(self.r.run_pass(), 'started')
+        self.assertEqual(self.t3.sends, [])
+        fresh = self.t3.starts[2]
+        self.assertEqual((fresh['worktree'], fresh['branch'], fresh['title']),
+                         ('abc1234def', 'claude/blue-widget-4', 'Queue runner build: first#4'))
+        brief = fresh['message']
+        self.assertTrue(brief.startswith('## Direction first\n\nAn earlier thread on this job '
+                                         'failed'))
+        self.assertIn('Install deps first.', brief)
+        self.assertLess(brief.index('Install deps first.'), brief.index('/implement'))
+        self.assertIn('## Picking up from an earlier thread', brief)
+        self.assertIn('cold (its last request started 2 h ago) and 200,000 tokens', brief)
+        self.assertIn('npm test failed: missing module', brief)
+        self.assertEqual(self.git.freed, [('claude/blue-widget-4', 'C:/t3/worktrees/mcp:t1')])
+        first, second = self.jobs('build')
+        self.assertEqual((second.about, second.thread_id, second.outcome),
+                         (first.id, 'mcp:t3', 'done-no-pr'))
+        self.assertEqual((second.resume['how'], second.resume['context']), ('fresh', 200_000))
+        self.assertTrue(any('Restarting build first#4 fresh for the decision (cold' in line
+                            for line in self.said))
+
+    def test_a_cold_big_thread_answered_starts_fresh_with_its_question_and_the_answer(self):
+        self.cold(150_000)
+        self.build((2, 'waiting'), (0, 'completed', decision_reply('answer', text='Use blue.')),
+                   (0, 'completed'))
+        self.t3.messages['mcp:t1'] = [Message('user', 'Go.'),
+                                      Message('assistant', 'Which blue: navy or sky?')]
+        self.r.run_pass()
+        self.assertEqual(self.t3.sends, [])
+        brief = self.t3.starts[2]['message']
+        self.assertIn('An earlier thread on this job stopped to ask a question', brief)
+        self.assertIn('The earlier thread asked:\n\n> Which blue: navy or sky?', brief)
+        self.assertIn('Use blue.', brief)
+        self.assertLess(brief.index('Use blue.'), brief.index('/implement'))
+        first, second = self.jobs('build')
+        self.assertEqual((first.outcome, second.outcome), ('continued', 'done-no-pr'))
+        self.assertEqual(self.r.jobs.waiting_jobs(), [])
+
+    def test_a_cold_thread_under_120k_tokens_retried_carries_on_in_place(self):
+        self.cold(119_000)
+        self.build((1, 'failed'),
+                   (0, 'completed', decision_reply('retry', add='Again.')), (0, 'completed'))
+        self.r.run_pass()
+        self.assertEqual([s['thread_id'] for s in self.t3.sends], ['mcp:t1'])
+        second = self.jobs('build')[1]
+        self.assertEqual((second.resume['how'], second.resume['idle_minutes']), ('in-place', 120))
 
     def test_a_message_that_never_reaches_the_thread_leaves_the_case_to_decide_again(self):
         self.build((2, 'waiting'), (0, 'completed', decision_reply('answer', text='Blue.')),

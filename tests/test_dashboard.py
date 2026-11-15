@@ -39,6 +39,43 @@ class ApplyControlTest(unittest.TestCase):
         self.assertEqual(c["repo_order"], ["queue-runner", "leads-dashboard"])
         self.assertEqual(c["lanes"]["claude"]["stop"], "now")
 
+    def test_an_ask_is_marked_read_or_unread_under_asks_and_the_rest_is_kept(self):
+        c = apply_control({}, {"lane": "claude", "stop": "after-job"}, NOW)
+        c = apply_control(c, {"ask": "stop-0042", "read": True}, NOW)
+        self.assertEqual(c["asks"], {"stop-0042": {"read": True}})
+        self.assertEqual(c["lanes"]["claude"]["stop"], "after-job")
+        c = apply_control(c, {"ask": "stop-0042", "read": False}, "2026-11-15T13:05:00+08:00")
+        self.assertEqual(c["asks"]["stop-0042"], {"read": False})
+        self.assertEqual(c["written_at"], "2026-11-15T13:05:00+08:00")
+
+    def test_an_asks_other_keys_are_kept(self):
+        # Ticket 35 keeps `open` in the same object: a read or a snooze leaves it as it was.
+        c = apply_control({"asks": {"stop-0042": {"open": "t3"}, "merge-qr-5-abc1234": {"read": True}}},
+                          {"ask": "stop-0042", "read": True}, NOW)
+        self.assertEqual(c["asks"], {"stop-0042": {"open": "t3", "read": True},
+                                     "merge-qr-5-abc1234": {"read": True}})
+        c = apply_control(c, {"lane": "sol", "stop": None}, NOW)
+        self.assertEqual(c["asks"]["stop-0042"], {"open": "t3", "read": True})
+
+    def test_an_ask_is_snoozed_until_a_time_and_unsnoozed_with_null(self):
+        c = apply_control({"asks": {"stop-0042": {"read": True}}},
+                          {"ask": "stop-0042", "snooze_until": "2026-11-16T01:00:00.000Z"}, NOW)
+        until = c["asks"]["stop-0042"]["snooze_until"]
+        self.assertEqual(datetime.fromisoformat(until), datetime(2026, 11, 16, 1, tzinfo=timezone.utc))
+        self.assertTrue(c["asks"]["stop-0042"]["read"])
+        c = apply_control(c, {"ask": "stop-0042", "snooze_until": None}, NOW)
+        self.assertEqual(c["asks"]["stop-0042"], {"read": True, "snooze_until": None})
+
+    def test_asks_that_no_longer_exist_are_dropped_on_a_write(self):
+        c = apply_control({"asks": {"stop-1": {"read": True}, "stop-2": {"read": True}}},
+                          {"ask": "stop-3", "read": True}, NOW, asks={"stop-2", "stop-3"})
+        self.assertEqual(c["asks"], {"stop-2": {"read": True}, "stop-3": {"read": True}})
+        c = apply_control(c, {"lane": "claude", "stop": None}, NOW, asks={"stop-3"})
+        self.assertEqual(c["asks"], {"stop-3": {"read": True}})
+        # Not knowing which asks exist (no snapshot yet) drops nothing.
+        self.assertEqual(apply_control(c, {"ask": "stop-9", "read": True}, NOW)["asks"],
+                         {"stop-3": {"read": True}, "stop-9": {"read": True}})
+
     def test_anything_else_is_refused(self):
         for body in (
             {"lane": "claude", "stop": "maybe"},
@@ -51,6 +88,15 @@ class ApplyControlTest(unittest.TestCase):
             {"repo_order": "a"},
             {"lane": "claude", "stop": "now", "repo_order": ["a"]},
             {"paused": True},
+            {"ask": "stop-1", "read": "yes"},
+            {"ask": "stop-1", "read": None},
+            {"ask": "../x", "read": True},
+            {"ask": 3, "read": True},
+            {"ask": "stop-1"},
+            {"ask": "stop-1", "read": True, "snooze_until": None},
+            {"ask": "stop-1", "snooze_until": "tomorrow"},
+            {"ask": "stop-1", "snooze_until": "2026-11-16T09:00:00"},   # no offset: whose 9:00?
+            {"ask": "stop-1", "snooze_until": 3},
             ["lane"],
             "now",
         ):
@@ -95,6 +141,27 @@ class AppTest(unittest.TestCase):
         self.assertEqual(on_disk, {"version": 1, "written_at": NOW, "lanes": {"claude": {"stop": "after-job", "at": NOW}}, "repo_order": [], "repos": {}, "asks": {}})
         self.assertEqual(self.app.control(), on_disk)
         self.assertEqual([p.name for p in self.dir.iterdir()], ["control.json"])   # no temp file left
+
+    def test_a_write_drops_the_entries_of_asks_the_snapshot_no_longer_lists(self):
+        (self.dir / "control.json").write_text(json.dumps({"asks": {
+            "stop-1": {"read": True}, "stop-2": {"read": True, "open": "t3"}, "merge-x-5-abc1234": {"read": True}}}), encoding="utf-8")
+        (self.dir / "snapshot.json").write_text(json.dumps({"version": 1, "asks": [{"id": "stop-2"}],
+                                                            "answered": [{"id": "merge-x-5-abc1234"}]}), encoding="utf-8")
+        new = self.app.write_control({"ask": "stop-2", "snooze_until": None})
+        self.assertEqual(new["asks"], {"stop-2": {"read": True, "open": "t3", "snooze_until": None},
+                                       "merge-x-5-abc1234": {"read": True}})
+
+    def test_with_no_snapshot_to_go_by_a_write_drops_nothing(self):
+        (self.dir / "control.json").write_text(json.dumps({"asks": {"stop-1": {"read": True}}}), encoding="utf-8")
+        self.assertEqual(self.app.write_control({"lane": "sol", "stop": None})["asks"], {"stop-1": {"read": True}})
+        (self.dir / "snapshot.json").write_text("{ torn", encoding="utf-8")
+        self.assertEqual(self.app.write_control({"lane": "sol", "stop": None})["asks"], {"stop-1": {"read": True}})
+
+    def test_the_samples_controls_drop_what_no_sample_state_lists(self):
+        app = App(self.dir, sample=True, clock=lambda: NOW)
+        some = next(a["id"] for a in sample.build("busy")["asks"])
+        app.write_control({"ask": "gone-1", "read": True})
+        self.assertEqual(app.write_control({"ask": some, "read": True})["asks"], {some: {"read": True}})
 
     def test_a_refused_request_writes_nothing(self):
         with self.assertRaises(Refused):
@@ -217,6 +284,28 @@ class SampleTest(unittest.TestCase):
         self.assertEqual(datetime.fromisoformat(s["written_at"]), self.T - timedelta(minutes=42))
         self.assertIsNone(s["control_read_at"])
         self.assertEqual(s["lanes"][0]["state"], "working")
+
+    def test_every_ask_starts_unread_and_not_snoozed(self):
+        for name in sample.STATES:
+            s = sample.build(name, base=self.T, now=self.T)
+            for a in s["asks"] + s["answered"]:
+                with self.subTest(state=name, ask=a["id"]):
+                    self.assertEqual((a["read"], a["snoozed_until"]), (False, None))
+
+    def test_the_pretend_runner_reads_which_asks_are_read_and_snoozed(self):
+        written = self.T.isoformat()
+        ids = [a["id"] for a in sample.build("busy", base=self.T, now=self.T)["asks"]]
+        later, gone = (self.T + timedelta(hours=3)).isoformat(), (self.T - timedelta(minutes=1)).isoformat()
+        asked = {"written_at": written, "asks": {ids[0]: {"read": True}, ids[1]: {"snooze_until": later, "open": "t3"},
+                                                 ids[2]: {"read": True, "snooze_until": gone}}}
+        early = {a["id"]: a for a in sample.build("busy", base=self.T, now=self.T + timedelta(seconds=1), control=asked)["asks"]}
+        self.assertFalse(early[ids[0]]["read"])
+        self.assertIsNone(early[ids[1]]["snoozed_until"])
+        read = {a["id"]: a for a in sample.build("busy", base=self.T, now=self.T + timedelta(seconds=sample.ACK_SECONDS), control=asked)["asks"]}
+        self.assertTrue(read[ids[0]]["read"])
+        self.assertEqual(read[ids[1]]["snoozed_until"], later)
+        self.assertFalse(read[ids[1]]["read"])
+        self.assertEqual((read[ids[2]]["read"], read[ids[2]]["snoozed_until"]), (True, None))   # its time has passed
 
     def test_the_pretend_runner_reads_control_a_few_seconds_after_it_was_written(self):
         written = self.T.isoformat()

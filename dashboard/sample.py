@@ -262,6 +262,7 @@ def build(name: str = DEFAULT, base: datetime | None = None, control: dict | Non
         ask.setdefault("also", None)
     for ask in snap["asks"] + snap["answered"]:
         ask["timeline"] = [{"at": ago(minutes), "text": text} for minutes, text in _TIMELINES[ask["id"]]]
+        ask.update(read=False, snoozed_until=None)   # what Stefan did with it: control.json's `asks` (ticket 36)
     if name == "dead":
         snap["written_at"] = (now - timedelta(minutes=42)).isoformat(timespec="seconds")
     else:
@@ -599,6 +600,18 @@ def _obey(snap: dict, control: dict, now: datetime) -> None:
                     else f"It starts once Claude's current {claude['job']['kind']} ends." if claude["job"]
                     else "It starts on the Claude lane's next pass.")
             ask["decide"] = {"state": "asked", "at": record["open"].get("at"), "note": note}
+    marks = control.get("asks") if isinstance(control.get("asks"), dict) else {}
+    for ask in snap["asks"] + snap["answered"]:   # read and snoozed (ticket 36)
+        mark = marks.get(ask["id"])
+        if not isinstance(mark, dict):
+            continue
+        ask["read"] = mark.get("read") is True
+        until = mark.get("snooze_until")
+        try:
+            ahead = isinstance(until, str) and datetime.fromisoformat(until) > now
+        except (TypeError, ValueError):   # not a time, or one with no offset
+            ahead = False
+        ask["snoozed_until"] = until if ahead else None   # a snooze whose time has passed is over
     order = control.get("repo_order") or []
     names = [r["name"] for r in snap["repos"]]
     if sorted(order) == sorted(names):

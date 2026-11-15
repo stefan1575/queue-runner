@@ -1022,14 +1022,29 @@ function notices() {
 // runner is through with them, so "handled" and "still held" can be told apart).
 const KIND_ICON = { stuck: ICON.stuck, decision: ICON.decision, merge: ICON.merge, broken: ICON.broken };
 
-// Read and snoozed are kept in this browser while the page is a prototype. The real ones go
-// through control.json, so every browser agrees and the runner can hold a snoozed ask's toast.
-function stored(k) { try { return JSON.parse(recall(k) || "{}") || {}; } catch { return {}; } }
-const readKey = (a) => `${a.id}@${a.since}`;   // an ask that came back later is unread again
-const isRead = (a) => !!stored("read")[readKey(a)];
-function setRead(a, yes) { const m = stored("read"); if (yes) m[readKey(a)] = 1; else delete m[readKey(a)]; remember("read", JSON.stringify(m)); }
-function snoozedUntil(a) { const t = stored("snooze")[a.id]; return t && ms(t) > Date.now() ? t : null; }
-function setSnooze(id, until) { const m = stored("snooze"); if (until) m[id] = until; else delete m[id]; remember("snooze", JSON.stringify(m)); }
+// Read and snoozed are kept with the runner (ticket 36): the page asks through control.json's
+// `asks.<id>` and the snapshot's asks carry `read` and `snoozed_until`, so every browser agrees.
+// What the page last asked stands in for an ask until the snapshot has read that control file.
+function mark(a) {
+  const e = ((ctl && ctl.asks) || {})[a.id];
+  const ahead = ctl && ctl.written_at && !(snap.control_read_at && ms(snap.control_read_at) >= ms(ctl.written_at));
+  const read = e && ahead && "read" in e ? e.read === true : !!a.read;
+  const until = e && ahead && "snooze_until" in e ? e.snooze_until : a.snoozed_until;
+  return { read, until };
+}
+const isRead = (a) => mark(a).read;
+function snoozedUntil(a) { const t = mark(a).until; return t && ms(t) > Date.now() ? t : null; }
+const asking = new Set();   // requests on their way, so a redraw meanwhile doesn't send one again
+function askMark(id, change) {
+  const body = { ask: id, ...change }, key = JSON.stringify(body);
+  if (asking.has(key)) return;
+  asking.add(key);
+  // Shown at once; the next read of control.json replaces this.
+  ctl = { ...ctl, written_at: new Date().toISOString(), asks: { ...(ctl.asks || {}), [id]: { ...((ctl.asks || {})[id] || {}), ...change } } };
+  send([body]).finally(() => asking.delete(key));
+}
+const setRead = (a, yes) => askMark(a.id, { read: yes });
+const setSnooze = (id, until) => askMark(id, { snooze_until: until || null });
 function snoozeChoices() {
   const now = new Date(), later = new Date(now.getTime() + 3 * 3600e3);
   const tomorrow = new Date(now); tomorrow.setDate(now.getDate() + 1); tomorrow.setHours(9, 0, 0, 0);

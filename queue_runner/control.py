@@ -15,15 +15,18 @@ each lane starts a job; an unreadable file starts nothing in either lane until i
 of each pass (`ordered`): used when it names every served repo exactly once, and otherwise
 ignored (config.toml's order stands) without making the file unreadable.
 
+`asks.<id>` (ticket 36) is what Stefan did with one ask in the Inbox: `read` (true or false) and
+`snooze_until` (an ISO time or null), beside other keys other tickets keep there (35's `open`).
+The page writes them; the runner only reads them into the snapshot's asks (`Switch.asks`), and
+an entry it can't use is left out without making the file unreadable.
+
 `repos.<name>.stop` (ticket 37) is "after-job" or null, with its `at`: a stopped repo gets nothing
 from either lane (a job already running on it finishes), taken up at the start of each pass
 (`stopped_repos`). A name that isn't served is ignored; an entry the page couldn't have written
 makes the file unreadable, as a lane's does.
 
-`asks.<ask id>` (ticket 35) is an object per Inbox ask, whose `open` (`{"at"}`) asks the runner to
-start a T3 thread to decide that ask in (`ask_threads.py`); other keys in it are other tickets'
-and are kept. A record the page couldn't have written is ignored, never making the file
-unreadable: it starts nothing either way.
+`asks.<id>.open` (ticket 35, `{"at"}`) asks the runner to start a T3 thread to decide that ask in
+(`ask_threads.py`), read as `Switch.opened`; one the page couldn't have written is ignored.
 
 **The older code's pause** was `gate.json`'s `paused`. With `paused: true` there and no entry for
 the Claude lane here, the Claude lane is stopped (since gate.json was written); an entry, either
@@ -63,6 +66,7 @@ class Switch:
     order: object = None   # `repo_order` as written (None: not there); `ordered` judges it
     repos: dict = field(default_factory=dict)   # repo name: Stop, as written (ticket 37)
     opened: dict = field(default_factory=dict)  # ask id: when Stefan asked to open it (ticket 35)
+    asks: dict = field(default_factory=dict)    # ask id: its entry, a dict (ticket 36)
 
     def stop(self, lane: str) -> Stop:
         return self.lanes.get(lane) or Stop()
@@ -157,8 +161,11 @@ def read(state_dir: str) -> Switch:
     written = raw.get('written_at')
     repos = {name: Stop(e.get('stop'), _when(e.get('at')), 'control')
              for name, e in (raw.get('repos') or {}).items()}
+    marks = raw.get('asks') if isinstance(raw.get('asks'), dict) else {}
     return Switch(lanes, written if isinstance(written, str) else None,
-                  order=raw.get('repo_order'), repos=repos, opened=_opened(raw))
+                  order=raw.get('repo_order'), repos=repos,
+                  asks={k: v for k, v in marks.items() if isinstance(v, dict)},
+                  opened=_opened(raw))
 
 
 def _opened(raw: dict) -> dict:
@@ -244,7 +251,7 @@ def ask(state_dir: str, lanes, stop: str | None, now: str, repos=()) -> dict:
     order = [r for r in (raw.get('repo_order') or []) if isinstance(r, str)]
     kept = raw.get('repos') if isinstance(raw.get('repos'), dict) else {}
     stops = {k: v for k, v in kept.items() if isinstance(v, dict)}
-    asks = raw.get('asks') if isinstance(raw.get('asks'), dict) else {}   # the page's (ticket 35)
+    marks = raw.get('asks') if isinstance(raw.get('asks'), dict) else {}
     old = _old_pause(state_dir)
     if old is not None and 'claude' not in entries:
         entries['claude'] = {'stop': 'after-job', 'at': _iso(old)}
@@ -253,7 +260,7 @@ def ask(state_dir: str, lanes, stop: str | None, now: str, repos=()) -> dict:
     for name in repos:
         stops[name] = {'stop': stop, 'at': now}
     data = {'version': 1, 'written_at': now, 'lanes': entries, 'repo_order': order,
-            'repos': stops, 'asks': {k: v for k, v in asks.items() if isinstance(v, dict)}}
+            'repos': stops, 'asks': {k: v for k, v in marks.items() if isinstance(v, dict)}}
     _write(state_dir, data)
     if old is not None:
         from .gate import Knob, read_knob, write_knob
