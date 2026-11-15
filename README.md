@@ -17,5 +17,11 @@ python3 -m queue_runner --stop                # stop the running runner
 python3 -m queue_runner --needs-me            # everything waiting on Stefan: PRs ready to merge, needs-info stops, threads waiting for his answer
 ```
 
+Its dashboard is a separate small process (`dashboard/`; AGENTS.md, The dashboard):
+
+```
+python3 -m dashboard --sample    # the page on sample data, http://127.0.0.1:5289/
+```
+
 The rules, how it runs unattended, the live checks, the tests and everything else are in
 [`AGENTS.md`](AGENTS.md).

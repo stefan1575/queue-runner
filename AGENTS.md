@@ -609,6 +609,42 @@ attention (input, approval, usage limit, failure), for all threads not archived 
 thread whose run Stefan stopped skips the completion one. There's no setting to limit them to
 threads that need Stefan, so the runner toasts instead.
 
+## The dashboard
+
+`dashboard/` (ticket 18; Stefan, 2026-11-15). A page that opens on what needs Stefan, then the
+two lanes, then the work (a list, and a pyramid of what blocks what), with usage, health and the
+build order beside it. **It is its own process and depends on nothing:** no build step, no
+package, no network, no runner code, no T3, no GitHub. One HTML file, served by Python's standard
+library.
+
+```
+python3 -m dashboard             # the runner's snapshot, http://127.0.0.1:5289/
+python3 -m dashboard --sample    # sample data, no runner needed; ?sample=<state> picks a state
+```
+
+- **Two files are the whole contract,** both in the state folder (`--state-dir`, default
+  `~/.queue-runner/state`). `snapshot.json`: the runner writes it whole, the page reads it.
+  `control.json`: the page writes it whole, the runner reads it. **The runner writes neither yet**
+  (ticket 18's remaining boxes), so today only `--sample` shows anything.
+- **The snapshot's shape is what `dashboard/sample.py` builds** (version 1): `written_at` and
+  `write_every` (a snapshot older than three times that, or 90 seconds, means the runner has
+  gone quiet: the page says so, greys the health readings and takes the controls away),
+  `control_read_at`, `sources` (health), `repos` in build order, `asks`, `lanes`, `usage`,
+  `features`, `issues` (with `pick`, the order ready work is built in) and `prs` (each with its
+  timeline by head). Times are ISO strings; the page formats them. `sample.STATES` names every
+  state the page has to show.
+- **Control** (`serve.apply_control`): `POST /control` takes `{"lane", "stop"}` (`"after-job"`,
+  `"now"` or null to carry on) or `{"repo_order": [...]}`, and anything else is refused. The page
+  shows a request as asked until `control_read_at` reaches its time.
+- **Only this PC:** it binds 127.0.0.1, and refuses a request whose `Host` isn't its own address
+  or whose `Origin` is another site's, so a web page elsewhere can't stop a lane.
+- **How it looks** is explained at the top of `dashboard/index.html`: the bright slips are what
+  needs Stefan and nothing else is raised; green is done or healthy, amber is near a limit or
+  out of date, red is broken; working is shown by movement. Fonts are ones Windows ships
+  (Bahnschrift, Sitka, Cascadia Mono).
+- `?view=pyramid` and `?pr=<repo>:<n>` open the page on the pyramid or on a PR's history.
+- The earlier React prototype is `.scratch/queue-runner/prototype-app/` (history only).
+
 ## Sol, as a script sees it
 
 - **Sol runs through `~/codex-sol.sh`, not a T3 thread** (`queue_runner/sol.py`). Checked
@@ -794,6 +830,8 @@ Running unattended: `tests/test_wake.py` (`Waker` against `FakeScheduler` in `fa
 task XML, `Schtasks` on canned calls, `wall_sleep`, a second start, waiting for T3, `--stop`
 with a fake kill); every test that runs `main` continuously passes a waker, so none touches the
 real Task Scheduler.
+The dashboard: `tests/test_dashboard.py` (control requests, the server on a free port, every
+sample state, and that the page loads nothing from outside itself).
 `tests/test_git.py` runs `GitCli` on a real local repo in a
 temp folder.
 
@@ -843,6 +881,8 @@ temp folder.
 - `queue_runner/wake.py`: the wake tasks: `Waker.sync` and the `schtasks` adapter.
 - `queue_runner/restart.py`: restarting on its own new code after main moves (ticket 14).
 - `queue_runner/cli.py`: the command line.
+- `dashboard/`: the dashboard, apart from the runner: `index.html` (the page), `serve.py` (its
+  server and the control file), `sample.py` (the snapshot's shape, in every state).
 - `scripts/live_sandbox.py`, `scripts/live_review.py`, `scripts/live_fix_brief.py` and
   `scripts/live_merge.py`: the live checks.
 - `scripts/make_icon.py`: draws the toast icon, `queue_runner/assets/icon.png`.
