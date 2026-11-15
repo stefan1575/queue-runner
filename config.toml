@@ -17,7 +17,7 @@ model = "claude-opus-5-5"
 
 # Sol reviews run through codex-sol.sh at effort high (a T3 thread can't be given an effort).
 [sol]
-script = "~/codex-sol.sh"
+script = "~/Code/tools/codex-sol/codex-sol.sh"
 bash = "C:/Program Files/Git/bin/bash.exe"
 
 [[repos]]

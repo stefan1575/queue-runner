@@ -1,4 +1,4 @@
-"""Merging a clean PR (ticket 05; `~/.claude/docs/pr-review.md`, Merge), in the Sol lane.
+"""Merging a clean PR (ticket 05; `~/Code/docs/pr-review.md`, Merge), in the Sol lane.
 
 A PR is merged once the runner's own newest review of its head H is `clean` (decide()'s `merge`
 outcome; a clean review that stops for Stefan is `stop`, not `clean`). Just before merging, the
@@ -19,7 +19,7 @@ longer open, the next pass reads it: merged by Stefan, it gets a `merge` job `me
 worktrees go, as after the runner's own merge; closed unmerged, the mark and the label come off. The live steps
 read his merge from git as usual (`live.py`).
 
-Merges are automated posts that need no go-ahead (`~/.claude/CLAUDE.md`, Merge when the review is
+Merges are automated posts that need no go-ahead (`~/Code/global/CLAUDE.md`, Merge when the review is
 clean).
 """
 from .fix import fix_branch

@@ -2,7 +2,7 @@
 
 A script with no AI in it that runs Stefan's fixed build-and-review flow and starts fresh T3 Code
 threads only for work that needs Claude or Sol. The design and its rules live outside this repo:
-`~/.claude/docs/orchestration.md`, `~/.claude/docs/pr-review.md` and `~/.claude/docs/sol.md`. The
+`~/Code/docs/orchestration.md`, `~/Code/docs/pr-review.md` and `~/Code/docs/sol.md`. The
 spec and the tickets that build it are in this repo's `.scratch/queue-runner/` (`spec.md`,
 `issues/NN-*.md`; moved from personal-ops on 2026-11-10). The tracker's conventions are
 `docs/agents/issue-tracker.md` and `docs/agents/triage-labels.md`.
@@ -473,7 +473,7 @@ tickets as markdown, `.scratch/<feature>/issues/NN-<slug>.md` (its
 
 ## A Sol pass
 
-The review loop's rules are `~/.claude/docs/pr-review.md`; leads-dashboard's
+The review loop's rules are `~/Code/docs/pr-review.md`; leads-dashboard's
 `docs/agents/review-loop.md` and `REVIEW.md` define the words.
 
 1. **Settle.** Under `sol.lock`, a review the log shows open was cut off with its runner: it
@@ -527,7 +527,7 @@ The review loop's rules are `~/.claude/docs/pr-review.md`; leads-dashboard's
    tables, notes, a visible `sol-findings` ledger of the PR's whole state, and the old script's
    hidden marker) and `decision.json` (verdict, outcome, signals, the `sol-review` status,
    follow-up issues).
-8. **Post** (`post.GitHubPoster`; automated posts need no go-ahead, `~/.claude/CLAUDE.md`). In
+8. **Post** (`post.GitHubPoster`; automated posts need no go-ahead, `~/Code/global/CLAUDE.md`). In
    order: each new Pre-existing finding as a `needs-triage` issue, with a hidden
    `<!-- sol-finding owner/name#N ID -->` line (an open issue with that line, the old script's
    footer for the PR and ID, or the same title is linked instead of filed again); the comment,
@@ -559,7 +559,7 @@ reviewed), `failed`, `out-of-usage` and `head-moved` (nothing counts).
 
 ## Stops for Stefan
 
-`stops.py` (`~/.claude/docs/pr-review.md`, Stops). Each Sol pass, for every open PR (not one a Claude job
+`stops.py` (`~/Code/docs/pr-review.md`, Stops). Each Sol pass, for every open PR (not one a Claude job
 is writing to), the runner looks for stops on its head H, and
 files each kind once per H (`JobLog.stopped`). The kinds: `review` (the runner's review of H
 stopped: a repeated class, a reopened finding, a kept decline; the reason is decide()'s text from
@@ -770,7 +770,7 @@ python3 -m dashboard --sample    # sample data, no runner needed; ?sample=<state
 
 ## Sol, as a script sees it
 
-- **Sol runs through `~/codex-sol.sh`, not a T3 thread** (`queue_runner/sol.py`). Checked
+- **Sol runs through `~/Code/tools/codex-sol/codex-sol.sh`, not a T3 thread** (`queue_runner/sol.py`). Checked
   2026-11-09: a thread from `t3 thread start --provider codex --model gpt-6.1-sol` ran at effort
   **low**: its rollout (`~/.codex/sessions/2026/11/09/rollout-2026-11-09T19-36-32-*.jsonl`) has
   a `configuration_update` record with `reasoning.effort: "low"`, though `~/.codex/config.toml`

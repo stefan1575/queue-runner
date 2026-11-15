@@ -1,4 +1,4 @@
-"""Sol as the runner sees it: one review through `~/codex-sol.sh`.
+"""Sol as the runner sees it: one review through `~/Code/tools/codex-sol/codex-sol.sh`.
 
 Not a T3 thread: a thread from `t3 thread start --provider codex --model gpt-6.1-sol` ran at
 effort low (checked 2026-11-09 in its rollout: `configuration_update` `reasoning.effort: "low"`),
@@ -18,10 +18,10 @@ import subprocess
 from .ledger import SolFailed
 
 HOME = os.path.expanduser('~')
-SOL_SCRIPT = os.path.join(HOME, 'codex-sol.sh')
+SOL_SCRIPT = os.path.join(HOME, 'Code', 'tools', 'codex-sol', 'codex-sol.sh')
 # Git's bash by full path: 'bash' on PATH here is WSL's (System32\bash.exe).
 GIT_BASH = r'C:\Program Files\Git\bin\bash.exe'
-EFFORT = 'high'   # ~/.claude/CLAUDE.md: high for every Sol run, never lower
+EFFORT = 'high'   # ~/Code/docs/sol.md: high is Sol's default effort
 TIMEOUT_S = 75 * 60
 SESSIONS = os.path.join(HOME, '.codex', 'sessions')   # Codex's rollouts, YYYY/MM/DD/rollout-*.jsonl
 FULL = 99   # used percent at which a window counts as the one that ran out
@@ -55,7 +55,7 @@ def usage_back(text: str, now: datetime.datetime) -> datetime.datetime | None:
 
 
 def rollout_reset(log: str, sessions: str = SESSIONS) -> datetime.datetime | None:
-    """When Sol's plan resets, from its own run's rollout (`~/.claude/docs/sol.md`, Gotchas):
+    """When Sol's plan resets, from its own run's rollout (`~/Code/docs/sol.md`, Gotchas):
     the session id codex-sol.sh logs, that session's newest `rate_limits` record, and the reset
     of the window that ran out (the later one if both did), in this PC's local time. None if
     any of that is missing."""

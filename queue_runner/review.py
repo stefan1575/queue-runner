@@ -1,5 +1,5 @@
 """The Sol lane: adopt every open PR without a review on its newest commit, wait for that commit's
-checks, and have Sol review that exact head H (`~/.claude/docs/pr-review.md`, A round, steps 1-3).
+checks, and have Sol review that exact head H (`~/Code/docs/pr-review.md`, A round, steps 1-3).
 
 The verdict comes from Sol's sol-findings ledger (`ledger.decide`). The comment and verdict go to
 the review's run folder, then `post.GitHubPoster` posts them on the PR (ticket 04); `DryRunPoster`
