@@ -215,5 +215,100 @@ class FeaturesTest(IssuesTest):
                          ['first#30', 'first#1', 'first#20'])
 
 
+def pr_of(snap, n):
+    return next(p for p in snap['prs'] if p['n'] == n)
+
+
+class PrsTest(WorkCase):
+    def test_a_pr_clean_on_its_head_is_ready_for_stefan_with_the_merge_rechecks_steps(self):
+        self.repo = Repo(name='first', github=GH, path=self.dir, merge='stefan')
+        self.config = Config(repos=[self.repo], state_dir=self.config.state_dir,
+                             log_dir=self.config.log_dir)
+        self.gh.prs = [full_pr(5, 'claude/red-3', H1, title='Red', body='Closes #3')]
+        self.gh.work_list = [wi(3, 'Red')]
+        self.reviewed(5, H1, 'clean')
+        snap = self.snap()
+        p = pr_of(snap, 5)
+        self.assertEqual({k: p[k] for k in ('repo', 'n', 'issue', 'title', 'head', 'branch', 'url',
+                                             'status', 'next')},
+                         {'repo': 'first', 'n': 5, 'issue': 3, 'title': 'Red', 'head': 'aaaaaaa',
+                          'branch': 'claude/red-3', 'url': 'https://github.com/owner/first/pull/5',
+                          'status': 'Ready for you to merge', 'next': 'You merge it.'})
+        self.assertIn({'label': 'Clean on aaaaaaa', 'ok': True}, p['checks'])
+        self.assertIn({'label': 'Checks passed on aaaaaaa', 'ok': True}, p['checks'])
+        self.assertTrue(all(c['ok'] for c in p['checks']))
+        self.assertEqual(by_n(snap)[3]['state'], 'you')
+
+    def test_a_clean_pr_whose_checks_run_says_what_it_waits_for(self):
+        self.gh.prs = [full_pr(5, 'claude/red-3', H1, title='Red')]
+        self.gh.check_states = {H1: Checks('pending', pending=('ci',))}
+        self.reviewed(5, H1, 'clean')
+        p = pr_of(self.snap(), 5)
+        self.assertEqual(p['status'], 'Clean, not merged yet')
+        self.assertEqual(p['next'], 'The runner merges it once this clears: checks on aaaaaaa '
+                                    'are pending (ci).')
+        self.assertIn({'label': 'Checks passed on aaaaaaa', 'ok': False}, p['checks'])
+
+    def test_prs_waiting_for_review_say_in_what_order(self):
+        self.gh.prs = [full_pr(5, 'claude/red-3', H1, title='Red', body='Closes #3'),
+                       full_pr(6, 'claude/blue-4', H2, title='Blue')]
+        self.gh.work_list = [wi(3, 'Red')]
+        snap = self.snap()
+        self.assertEqual((pr_of(snap, 5)['status'], pr_of(snap, 5)['next']),
+                         ('Waiting for review', 'Sol reviews aaaaaaa next.'))
+        self.assertEqual(pr_of(snap, 6)['next'], 'Sol reviews bbbbbbb after PR #5.')
+        self.assertEqual(pr_of(snap, 5)['checks'], [])
+        self.assertEqual((by_n(snap)[3]['state'], by_n(snap)[3]['note']),
+                         ('review', 'PR #5: Waiting for review'))
+
+    def test_a_blocking_pr_has_its_fix_round_queued(self):
+        self.gh.prs = [full_pr(5, 'claude/red-3', H1, title='Red', body='Closes #3')]
+        self.gh.work_list = [wi(3, 'Red')]
+        self.reviewed(5, H1, 'blocking')
+        snap = self.snap()
+        self.assertEqual((pr_of(snap, 5)['status'], pr_of(snap, 5)['next']),
+                         ('Fix round next', "Claude's fix round on aaaaaaa is next in its queue."))
+        self.assertEqual(by_n(snap)[3]['state'], 'fixing')
+
+    def test_a_pr_reviewed_before_the_cutover_is_left_alone_until_a_new_head(self):
+        self.gh.prs = [full_pr(5, 'claude/red-3', H1, title='Red')]
+        self.gh.comments[5] = [Comment('stefan1575', '2026-11-08T10:00:00Z',
+                                       f'<!-- sol-pr-review round=1 verdict=blocking sha={H1} -->')]
+        p = pr_of(self.snap(), 5)
+        self.assertEqual(p['status'], 'Left alone: reviewed outside the runner')
+        self.assertEqual(p['next'], 'Review 1 on aaaaaaa (blocking) was posted before the '
+                                    'cutover or by hand, so the runner leaves it to whoever ran '
+                                    'it. A push of a new head lets it go: Sol reviews that.')
+
+    def test_a_pr_whose_reviews_failed_twice_is_left_alone_until_a_push_or_a_release(self):
+        self.gh.prs = [full_pr(5, 'claude/red-3', H1, title='Red')]
+        for _ in range(2):
+            self.job('review', 5, 'failed', sha=H1, round=1)
+        p = pr_of(self.snap(), 5)
+        self.assertEqual(p['status'], 'Left alone: two reviews failed')
+        self.assertEqual(p['next'], 'Both reviews of aaaaaaa failed. A push of a new head, or '
+                                    '--release first#5, lets it go.')
+
+    def test_a_pr_stopped_for_stefan_is_held_and_says_what_lets_it_go(self):
+        self.gh.prs = [full_pr(5, 'claude/red-3', H1, title='Red', body='Closes #3')]
+        self.gh.work_list = [wi(3, 'Red')]
+        self.reviewed(5, H1, 'blocking')
+        self.job('stop', 5, 'filed', sha=H1, stop='review',
+                 link='https://github.com/owner/first/issues/40')
+        snap = self.snap()
+        p = pr_of(snap, 5)
+        self.assertEqual(p['status'], 'Held for you')
+        self.assertIn('issues/40 is closed, he replies, or --release first#5', p['next'])
+        self.assertEqual(by_n(snap)[3]['state'], 'you')
+
+    def test_a_stopped_repos_pr_says_so(self):
+        self.gh.prs = [full_pr(5, 'claude/red-3', H1, title='Red')]
+        stopped = control.Switch(repos={'first': control.Stop('after-job', NOW, 'control')})
+        p = pr_of(self.snap(switch=stopped), 5)
+        self.assertEqual((p['status'], p['next']),
+                         ('Its repository is stopped',
+                          'Neither lane takes up its work until you resume first.'))
+
+
 if __name__ == '__main__':
     unittest.main()

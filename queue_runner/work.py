@@ -89,6 +89,8 @@ class PrRead:
     fix: tuple | None = None            # (cause, why not now) if it's a fix or conflict candidate
     merge: tuple | None = None          # the re-check's steps, (label, why not), if clean on H
     reviews: tuple = ()                 # its reviews as its comments hold them (ledger)
+    held: str | None = None             # why it's left alone for Stefan (`stops.held`)
+    writer: str | None = None           # a Claude job that writes to it, or may again
 
 
 @dataclass(frozen=True)
@@ -119,6 +121,7 @@ def read_repo(config, github, git, jobs, repo, now=None) -> RepoRead:
     from .merge import Merger
     from .picker import closed_issues, in_flight, pickable
     from .review import DryRunPoster, Reviewer
+    from .stops import held
     issues = tuple(github.work_issues(repo))
     pulls = sorted(github.open_pulls(repo), key=lambda p: p.number)
     errors = []
@@ -146,7 +149,10 @@ def read_repo(config, github, git, jobs, repo, now=None) -> RepoRead:
         if merger.clean_on_head(repo, pr):
             merge = part(f'the merge re-check of #{pr.number}',
                          lambda: tuple(merger.steps(repo, pr.number, pr.head_sha)), None)
+        w = jobs.writer(repo.name, pr.branch)
         prs.append(PrRead(pr=pr, issue=closes or builds.get(pr.branch),
+                          held=held(jobs, repo, pr.number),
+                          writer=None if w is None else _writer(w),
                           review_why=whys.get(pr.number, 'it could not be read'),
                           fix=fixes.get(pr.number), merge=merge,
                           reviews=tuple(part(f'the reviews of #{pr.number}', lambda: read_reviews(
@@ -176,6 +182,17 @@ def read_repo(config, github, git, jobs, repo, now=None) -> RepoRead:
     return RepoRead(at=None, issues=issues, prs=tuple(prs), decisions=decisions, live=live,
                     pending=pending, pending_issues=pending_issues, builds=picked,
                     in_flight=flying, errors=tuple(errors))
+
+
+def _writer(j) -> str:
+    what = ('conflict round' if j.cause == 'conflict' else
+            'fix round' if j.kind == 'fix' else j.kind)
+    if j.outcome == 'waiting':
+        return f'its {what} waits for an answer, and may write to the branch again'
+    if j.outcome == 'usage-limit':
+        return (f"its {what} was cut off by Claude's usage limit and resumes after "
+                f'{j.resume_at}')
+    return f'its {what} is writing to the branch'
 
 
 class Reader:
@@ -319,7 +336,8 @@ def lists(v: View | None, asks=(), releases=(), inbox=None) -> dict:
     prs = {(r.name, p.pr.number): _pr_status(v, r, p, cq, sq)
            for r in v.repos if r.name in v.reads for p in v.reads[r.name].prs}
     issues = _issues(v, asks, prs, cq)
-    return {'features': _feature_list(v, issues), 'issues': issues, 'prs': [], 'activity': []}
+    return {'features': _feature_list(v, issues), 'issues': issues, 'prs': _pr_list(v, prs),
+            'activity': []}
 
 
 # --- features -----------------------------------------------------------------------------------
@@ -480,9 +498,105 @@ def _issues(v: View, asks, prs: dict, cq: list) -> list[dict]:
 
 # --- PRs ----------------------------------------------------------------------------------------
 
+def _nth(n: int) -> str:
+    if n == 1:
+        return 'next'
+    return f'{n}{"th" if 10 < n % 100 < 14 else {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")}'
+
+
+def _sentence(text: str) -> str:
+    text = (text or '').strip()
+    return text[:1].upper() + text[1:] + ('' if text.endswith(('.', '!', '?')) else '.')
+
+
+def _place(queue: list, kinds, repo: str, n: int) -> int | None:
+    return next((k for k, e in enumerate(queue, 1)
+                 if e['kind'] in kinds and e['repo'] == repo and e['ref'] == f'PR #{n}'), None)
+
+
+_OUTSIDE = re.compile(r'^review (\d+) is on \w+ already \((\w+)\)')
+
+
 def _pr_status(v: View, repo, p: PrRead, cq: list, sq: list) -> tuple[str, str, str]:
-    """(status, what comes next, the family its issue's state takes)."""
-    return 'Waiting for review', '', REVIEW
+    """(status, what comes next, the family its issue's state takes: you, fixing or review)."""
+    n, h7 = p.pr.number, p.pr.head_sha[:7]
+    on = [j for j in v.jobs if j.open and j.repo == repo.name and j.issue == n]
+    if fix := next((j for j in on if j.kind == 'fix'), None):
+        what = 'Conflict round' if fix.cause == 'conflict' else 'Fix round'
+        return f'{what} running', 'Claude is on it; Sol reviews the head it pushes.', FIXING
+    if review := next((j for j in on if j.kind == 'review'), None):
+        return 'In review', f'Sol is on review {review.round or 1} of {h7}.', REVIEW
+    if any(j.kind == 'merge' for j in on):
+        return 'Merging', f'The runner is merging it at {h7}.', REVIEW
+    if p.writer:
+        return 'A Claude job holds it', _sentence(p.writer), FIXING
+    if repo.name in v.off:
+        return ('Its repository is stopped',
+                f'Neither lane takes up its work until you resume {repo.name}.', REVIEW)
+    if p.held:
+        return 'Held for you', _sentence(p.held), YOU
+    if p.merge is not None and not (p.fix and p.fix[0] == 'conflict'):
+        why = next((w for _, w in p.merge if w), None)
+        if why is None and repo.stefan_merges:
+            return ('Ready for you to merge', 'You merge it.' + (
+                ' Its live steps follow your merge.' if repo.live_doc else ''), YOU)
+        if why is None:
+            return 'Merging next', 'The runner merges it on its next pass.', REVIEW
+        who = 'It comes to you to merge' if repo.stefan_merges else 'The runner merges it'
+        why = why if why.endswith('.') else f'{why}.'
+        return 'Clean, not merged yet', f'{who} once this clears: {why}', REVIEW
+    if p.fix:
+        cause, why = p.fix
+        what = 'conflict round' if cause == 'conflict' else 'fix round'
+        if why is None:
+            k = _place(cq, ('fix', 'conflict'), repo.name, n) or 1
+            return (f'{what.capitalize()} {"next" if k == 1 else "queued"}',
+                    f"Claude's {what} on {h7} is {_nth(k)} in its queue.", FIXING)
+        return ('Conflicts with its base' if cause == 'conflict' else 'Blocking, no fix round now',
+                _sentence(why), REVIEW)
+    why = p.review_why
+    if why is None:
+        k = _place(sq, ('review',), repo.name, n)
+        before = sq[k - 2]['ref'] if k and k > 1 else None
+        return ('Waiting for review', f'Sol reviews {h7} next.' if before is None else
+                f'Sol reviews {h7} after {before}.', REVIEW)
+    if m := _OUTSIDE.match(why):
+        return ('Left alone: reviewed outside the runner',
+                f'Review {m[1]} on {h7} ({m[2]}) was posted before the cutover or by hand, so the '
+                'runner leaves it to whoever ran it. A push of a new head lets it go: Sol reviews '
+                'that.', REVIEW)
+    if 'failed reviews on' in why:
+        return ('Left alone: two reviews failed',
+                f'Both reviews of {h7} failed. A push of a new head, or --release '
+                f'{repo.name}#{n}, lets it go.', REVIEW)
+    if why.startswith('checks still running'):
+        return 'Checks running', f'Sol reviews it once its checks pass on {h7}.', REVIEW
+    if why.startswith('no checks reported'):
+        return 'No checks yet', f'Sol reviews it once its checks report on {h7}.', REVIEW
+    if why.startswith('a check failed'):
+        return 'A check failed', _sentence(why), REVIEW
+    if why.startswith('the runner reviewed'):
+        return 'Reviewed', _sentence(why), REVIEW
+    return 'Not reviewed now', _sentence(why), REVIEW
+
+
+def _pr_list(v: View, statuses: dict) -> list[dict]:
+    out = []
+    for r in v.repos:
+        read = v.reads.get(r.name)
+        if read is None:
+            continue
+        for p in read.prs:
+            status, nxt, _ = statuses[(r.name, p.pr.number)]
+            pr = p.pr
+            out.append({'repo': r.name, 'n': pr.number, 'issue': p.issue, 'title': pr.title,
+                        'head': pr.head_sha[:7], 'branch': pr.branch,
+                        'url': pr.url or f'https://github.com/{r.github}/pull/{pr.number}',
+                        'status': status, 'next': nxt,
+                        'checks': [{'label': label, 'ok': why is None}
+                                   for label, why in (p.merge or ())],
+                        'timeline': []})
+    return out
 
 
 def stale_github(sources: list[dict], stale: dict) -> None:
