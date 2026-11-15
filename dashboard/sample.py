@@ -24,6 +24,7 @@ STATES = {
     "github-down": "GitHub can't be read",
     "no-interrupt": "T3 refuses the interrupt, so Stop now is off for Claude",
     "dead": "The runner stopped writing 42 minutes ago",
+    "repo-stopped": "leads-dashboard is stopped: its running jobs finish, then only queue-runner is worked on",
 }
 DEFAULT = "busy"
 # Takes of the page before this one, kept while its look is being agreed: `serve.py` serves the
@@ -76,9 +77,11 @@ def build(name: str = DEFAULT, base: datetime | None = None, control: dict | Non
             {"id": "t3_interrupt", "group": "local", "name": "Stop now for Claude", "short": "Stop now", "ok": True,
              "note": "T3 accepts the interrupt", "checked_at": ago(399)},
         ],
+        # `stopped` (ticket 37): when Stefan stopped the repo (`at`), or null. A stopped repo
+        # gets nothing from either lane; its asks stay in the Inbox.
         "repos": [
-            {"name": LD, "github": GH[LD], "merge": "stefan"},
-            {"name": QR, "github": GH[QR], "merge": "runner"},
+            {"name": LD, "github": GH[LD], "merge": "stefan", "stopped": None},
+            {"name": QR, "github": GH[QR], "merge": "runner", "stopped": None},
         ],
         # An ask is written to be picked up cold, a week later. `kind` is why it came to Stefan:
         # `stuck` (the runner tried and couldn't get it through), `decision` (a product decision
@@ -544,6 +547,8 @@ def _vary(snap: dict, name: str, ago, ahead) -> None:
     elif name == "github-down":
         _source(snap, "github").update(ok=False, note="No answer since then (HTTP 503)", checked_at=ago(18),
                                        affects="Asks, PRs and the work list are as they were then; some may be missing.")
+    elif name == "repo-stopped":
+        _repo(snap, LD)["stopped"] = {"at": ago(6)}   # after the jobs on it began
     elif name == "no-interrupt":
         _source(snap, "t3_interrupt").update(ok=False, note="T3 refused the session (HTTP 426: protocol 3 expected)",
                                              affects="Stop after this job still works.")
@@ -572,6 +577,10 @@ def _obey(snap: dict, control: dict, now: datetime) -> None:
             lane.update(state="stopped", job=None, wait=None, stopped={"at": ask.get("at"), "during": was if stop == "now" else None})
             if was and stop == "now":
                 lane["next"] = f"{job['ref']} carries on from where it stopped" if lane["id"] == "claude" else f"{job['ref']} is reviewed afresh"
+    for repo in snap["repos"]:   # a repo's stop (ticket 37)
+        ask = (control.get("repos") or {}).get(repo["name"])
+        if isinstance(ask, dict) and "stop" in ask:
+            repo["stopped"] = {"at": ask.get("at")} if ask["stop"] else None
     order = control.get("repo_order") or []
     names = [r["name"] for r in snap["repos"]]
     if sorted(order) == sorted(names):
@@ -620,16 +629,27 @@ def _queue(snap: dict) -> None:
              for i in snap["issues"] if i["state"] == "fixing" and f"PR #{i['pr']}" != job.get("ref")]
     builds = [{"kind": "build", "repo": i["repo"], "ref": f"#{i['n']}", "title": i["title"]}
               for i in sorted((i for i in snap["issues"] if i["pick"]), key=lambda i: i["pick"])]
-    claude["queue"] = held + fixes + builds
+    off = _stopped(snap)   # a stopped repo's work is in no lane's queue (ticket 37)
+    claude["queue"] = [q for q in held + fixes + builds if q["repo"] not in off]
     reviews = [{"kind": "review", "repo": p["repo"], "ref": f"PR #{p['n']}", "title": p["title"]}
-               for p in snap["prs"] if p["status"] == WAITS_FOR_REVIEW]
+               for p in snap["prs"] if p["status"] == WAITS_FOR_REVIEW and p["repo"] not in off]
     _lane(snap, "sol").update(queue=reviews, queue_empty="Nothing is waiting for review.")
+
+
+def _repo(snap: dict, name: str) -> dict:
+    return next(r for r in snap["repos"] if r["name"] == name)
+
+
+def _stopped(snap: dict) -> set:
+    return {r["name"] for r in snap["repos"] if r.get("stopped")}
 
 
 def _number(snap: dict) -> None:
     """The order the runner would build in: the first repo with ready work, lowest number first."""
     rank = {r["name"]: k for k, r in enumerate(snap["repos"])}
-    ready = sorted((i for i in snap["issues"] if i["state"] == "ready"), key=lambda i: (rank[i["repo"]], i["n"]))
+    off = _stopped(snap)   # a stopped repo's ready work isn't built until it's resumed
+    ready = sorted((i for i in snap["issues"] if i["state"] == "ready" and i["repo"] not in off),
+                   key=lambda i: (rank[i["repo"]], i["n"]))
     for k, i in enumerate(ready, 1):
         i["pick"] = k
 

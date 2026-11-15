@@ -665,6 +665,8 @@ button.stn-in:hover { background: var(--hover); }
 .order .n { color: var(--dim); width: 14px; }
 .order .name { min-width: 0; flex: 1; font-weight: 600; }
 .order .name span { display: block; font-size: 14px; font-weight: 400; color: var(--mute); }
+.order li.off .name { color: var(--mute); }
+.tag.off { margin-left: 8px; color: var(--mute); border-style: dashed; }
 
 /* ---------------------------------------------------------------- activity */
 .day { padding: 16px 20px 8px; font-weight: 600; font-size: 15px; color: var(--mute); }
@@ -938,8 +940,11 @@ const key = (i) => `${i.repo}#${i.n}`;
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 const scoped = (xs) => (ui.repo ? xs.filter((x) => x.repo === ui.repo) : xs);
 // A repository's mark on an Inbox row: its first letter on a plain tile. Colour is kept for state.
-const repoMark = (name) => `<span class="rlogo" aria-hidden="true">${esc((name || "?")[0].toUpperCase())}</span><span class="rname">${esc(name)}</span>`;
-const repoTag = (name) => (ui.repo ? "" : `<span class="tag">${esc(name)}</span>`);
+const repoMark = (name) => `<span class="rlogo" aria-hidden="true">${esc((name || "?")[0].toUpperCase())}</span><span class="rname">${esc(name)}</span>${offTag(name)}`;
+const repoTag = (name) => (ui.repo ? offTag(name) : `<span class="tag">${esc(name)}${repoOff(name) ? ", stopped" : ""}</span>`);
+// A repository Stefan stopped (ticket 37): neither lane takes up its work; its asks stay.
+const repoOff = (name) => ((snap && snap.repos) || []).find((r) => r.name === name && r.stopped) || null;
+const offTag = (name) => { const r = repoOff(name); return r ? `<span class="tag off" title="Stopped${r.stopped.at ? ` since ${esc(stamp(r.stopped.at))}` : ""}: neither lane takes up its work">Stopped</span>` : ""; };
 const prLink = (repo, n, text) => `<button class="link" data-act="pr" data-repo="${esc(repo)}" data-n="${n}">${text}</button>`;
 
 // ------------------------------------------------------------------ sidebar
@@ -947,7 +952,7 @@ function side() {
   const s = snap || {};
   const repos = s.repos || [], asks = s.asks || [];
   const count = (name) => asks.filter((a) => (!name || a.repo === name) && !snoozedUntil(a)).length;
-  const merges = (r) => (r.merge === "stefan" ? "You merge its PRs" : "The runner merges its PRs");
+  const merges = (r) => (r.stopped ? "Stopped. " : "") + (r.merge === "stefan" ? "You merge its PRs" : "The runner merges its PRs");
   const item = (name, title, sub) => `<button class="mi" role="menuitemradio" aria-checked="${ui.repo === name}" data-act="repo" data-repo="${esc(name)}">
       <span class="tick">${ui.repo === name ? ICON.check : ""}</span>
       <span class="two"><b>${esc(title)}</b><span>${esc(sub)}</span></span>
@@ -1391,6 +1396,7 @@ function standing(i, q) {
     more = at.n === 1 ? `Next for ${at.lane.name}` : `${nth(at.n)} in ${at.lane.name}'s queue`;
     short = i.state === "ready" ? (at.n === 1 ? "Next in line" : `${nth(at.n)} in line`) : `${word}, ${at.n === 1 ? "next" : nth(at.n)} in line`;
   } else if (ask) more = short = askWords(ask)[0];
+  else if (repoOff(i.repo) && i.state !== "done") more = short = "Its repository is stopped";
   else if (i.state === "blocked" && waits.length) more = short = `After ${waits.map((w) => `#${w.n}`).join(" and ")}`;
   else if (i.state === "not-ready") { more = "Not marked ready for the runner"; short = "Not marked ready"; }
   return { word, seg, on, at, ask, more, short };
@@ -1731,11 +1737,20 @@ function orderRows() {
   const shown = valid ? want : names, stale = frozen();
   const rows = shown.map((name, n) => {
     const r = snap.repos.find((x) => x.name === name);
-    return `<li><span class="n">${n + 1}</span><span class="name">${esc(name)}<span>${r.merge === "stefan" ? "you merge" : "the runner merges"}</span></span>
+    const a = (ctl.repos || {})[name], pending = a && !wasRead(a.at) && !!a.stop !== !!r.stopped;
+    const off = pending ? !!a.stop : !!r.stopped;
+    const sub = pending ? (a.stop ? "Asked to stop: the runner hasn't read it yet" : "Asked to resume: the runner hasn't read it yet")
+      : r.stopped ? `Stopped${r.stopped.at ? ` since ${stamp(r.stopped.at)}` : ""}` : r.merge === "stefan" ? "you merge" : "the runner merges";
+    const btn = stale ? "" : off
+      ? `<button class="btn sm solid" data-act="repostop" data-repo="${esc(name)}" data-how="" title="Both lanes take up its work again">${ICON.play}Resume</button>`
+      : `<button class="btn sm" data-act="repostop" data-repo="${esc(name)}" data-how="after-job" title="A job running on it finishes; then neither lane takes up its work">${ICON.pause}Stop</button>`;
+    return `<li${r.stopped ? ' class="off"' : ""}><span class="n">${n + 1}</span><span class="name">${esc(name)}<span>${esc(sub)}</span></span>${btn}
       <button class="btn sm icon" data-act="move" data-repo="${esc(name)}" data-by="-1" aria-label="Build ${esc(name)} earlier" title="Build earlier" ${n === 0 || stale ? "disabled" : ""}>${ICON.up}</button>
       <button class="btn sm icon" data-act="move" data-repo="${esc(name)}" data-by="1" aria-label="Build ${esc(name)} later" title="Build later" ${n === shown.length - 1 || stale ? "disabled" : ""}>${ICON.down}</button></li>`;
   }).join("");
-  const note = valid && want.join("\n") !== names.join("\n") ? "You changed the order. The runner hasn't taken it up yet." : "The first repository with ready work gets the next build.";
+  const note = valid && want.join("\n") !== names.join("\n") ? "You changed the order. The runner hasn't taken it up yet."
+    : snap.repos.some((r) => r.stopped) ? "The first repository with ready work gets the next build. A stopped one gets nothing until you resume it."
+    : "The first repository with ready work gets the next build.";
   return `<ol class="order">${rows}</ol><p class="plan-note">${note}</p>`;
 }
 
@@ -1936,6 +1951,7 @@ document.addEventListener("click", (e) => {
     case "open": ui.open = ui.open.includes(d.id) ? ui.open.filter((x) => x !== d.id) : [...ui.open, d.id]; break;   // the Queue, B
     case "variant": turnVariant(Number(d.by)); break;   // PROTOTYPE
     case "stop": ui.pop = null; send([{ lane: d.lane, stop: d.how || null }]); return;
+    case "repostop": send([{ repo: d.repo, stop: d.how || null }]); return;   // one repository (ticket 37)
     case "all": {
       const how = d.how || null;
       ui.pop = null;

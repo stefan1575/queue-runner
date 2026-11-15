@@ -105,7 +105,10 @@ class Merger:
     # --- merging --------------------------------------------------------------------------
 
     def merge_pass(self) -> None:
-        for repo in self.config.repos:
+        """Merges, ready marks and Stefan's merges noticed, in each repo but those Stefan
+        stopped (ticket 37: noticed once he resumes it)."""
+        from .config import working
+        for repo in working(self.config):
             if not repo.github:
                 continue
             try:

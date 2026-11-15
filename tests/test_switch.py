@@ -197,8 +197,9 @@ class CliTest(Harness):
         self.assertEqual(self.lanes(), {'claude': None, 'sol': None})
         self.run_main(['--pause', 'all'])
         self.assertEqual(self.lanes(), {'claude': 'after-job', 'sol': 'after-job'})
-        with self.assertRaises(SystemExit):
-            self.run_main(['--pause', 'somebody'])
+        code, out = self.run_main(['--pause', 'somebody'])   # not a lane, nor a served repo
+        self.assertEqual(code, 2)
+        self.assertIn("not 'somebody'", out)
 
     def test_it_says_what_it_did_and_how_to_undo_it_and_logs_it(self):
         code, out = self.run_main(['--pause'])

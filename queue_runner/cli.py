@@ -32,7 +32,7 @@ import time
 import traceback
 
 from .brief import build_brief
-from .config import DEFAULT_CONFIG, load_config
+from .config import DEFAULT_CONFIG, load_config, working
 from .run import RESTART, Runner, RunnerBusy, runner_lock, wall_sleep
 from .state import JobLog
 
@@ -61,13 +61,22 @@ def _gate(config, usage, clock):
 
 
 def _switch_lines(config) -> list[str]:
-    """Each lane's switch (`control.py`), as the log says it."""
+    """Each lane's switch (`control.py`), then each repo Stefan stopped (ticket 37), as the log
+    says them."""
     from . import control
     switch = control.read(config.state_dir)
     if switch.error is not None:
         return [control.unreadable_text(switch)]
     return [control.stopped_text(id) if switch.stop(id).stopped else
-            f'The {control.NAMES[id]} lane carries on' for id in control.LANES]
+            f'The {control.NAMES[id]} lane carries on' for id in control.LANES
+            ] + _repo_stop_lines(config, switch)
+
+
+def _repo_stop_lines(config, switch) -> list[str]:
+    from . import control
+    names, unknown = control.stopped_repos(config.repos, switch)
+    return [control.repo_stopped_text(n) for n in names] + (
+        [control.unknown_repos_text(unknown)] if unknown else [])
 
 
 def _print_gate(gate, out, config) -> None:
@@ -114,10 +123,23 @@ def _switch(config, args, out) -> int:
     write it (`control.py`)."""
     from . import control
     lane = args.pause or args.resume
-    lanes = control.LANES if lane == 'all' else (lane,)
+    served = [r.name for r in config.repos]
+    words = (*control.LANES, 'all')   # a lane's id and all keep their meaning (ticket 30)
+    if lane not in (*words, *served):
+        print(f'--pause and --resume take {", ".join(words)}'
+              + (f', {", ".join(served[:-1])} or {served[-1]}' if served else '')
+              + f', not {lane!r}.', file=out)
+        return 2
+    repos = () if lane in words else (lane,)
+    lanes = control.LANES if lane == 'all' else () if repos else (lane,)
     if (was := control.read(config.state_dir)).error:
         print(f'{was.error}; writing it afresh.', file=out)
-    control.ask(config.state_dir, lanes, 'after-job' if args.pause else None, _now_iso())
+    control.ask(config.state_dir, lanes, 'after-job' if args.pause else None, _now_iso(),
+                repos=repos)
+    for name in repos:   # ticket 37: one repo, in both lanes
+        print(f'{control.repo_stopped_text(name)}.' if args.pause else
+              f'{control.repo_resumed_text(name)}: both lanes take up its work again on their '
+              'next pass.', file=out)
     for id in lanes:
         if args.pause:
             print(f'{control.stopped_text(id)}. A job running now runs to its end.', file=out)
@@ -147,8 +169,9 @@ def _knob(config, args, out) -> int:
 
 def _dry_run_limited(config, out, log_line) -> bool:
     """A job cut off by a usage limit comes first: when, and in place or fresh."""
+    from .config import stopped
     from .limits import in_place
-    limited = _jobs(config).limited_jobs()
+    limited = [j for j in _jobs(config).limited_jobs() if j.repo not in stopped(config)]
     if not limited:
         return False
     j = limited[0]
@@ -178,6 +201,11 @@ def _dry_run(config, github, git, out, log_line, t3=None, gate=None) -> int:
         print(f'dry run: repos are taken in {whose}: {", ".join(r.name for r in repos)}',
               file=out)
     config = dataclasses.replace(config, repos=repos)
+    if switch.error is None:   # ticket 37: what a stopped repo holds back, as the lanes do
+        from .config import set_stopped
+        for line in _repo_stop_lines(config, switch):
+            print(f'dry run: {line}', file=out)
+        set_stopped(config, control.stopped_repos(repos, switch)[0])
     if not _dry_run_limited(config, out, log_line) and \
             not _dry_run_decision(config, github, t3, out, log_line) and \
             not _dry_run_live(config, github, git, t3, out, log_line) and \
@@ -197,7 +225,7 @@ def _dry_run_stops(config, github, out) -> None:
     jobs = _jobs(config)
     stopper = Stopper(config, github=github, jobs=jobs, say=lambda line: None)
     print('Stops for Stefan (dry run: nothing filed or toasted):', file=out)
-    for repo in config.repos:
+    for repo in working(config):   # a stopped repo: none (37)
         if not repo.github:
             continue
         for pr in sorted(github.open_pulls(repo), key=lambda p: p.number):
@@ -280,7 +308,7 @@ def _dry_run_fix(config, github, git, out, log_line) -> bool:
     from .fix import Fixer
     from .fix import fix_branch
     fixer = Fixer(config, github=github, git=git, jobs=_jobs(config))
-    for repo in config.repos:
+    for repo in working(config):   # a stopped repo: none (37)
         if not repo.github:
             continue
         for pr, review, why in fixer.candidates(repo):
@@ -314,7 +342,7 @@ def _dry_run_merges(config, github, out) -> None:
     from .merge import Merger
     merger = Merger(config, github=github, git=None, jobs=_jobs(config), say=lambda line: None)
     print('Merges (dry run: nothing merged):', file=out)
-    for repo in config.repos:
+    for repo in working(config):   # a stopped repo: none (37)
         if not repo.github:
             continue
         for pr, why in merger.candidates(repo):
@@ -327,7 +355,7 @@ def _dry_run_merges(config, github, out) -> None:
 def _dry_run_build(config, github, out, log_line) -> None:
     from .picker import pick
     jobs = _jobs(config)
-    for repo in config.repos:
+    for repo in working(config):   # a stopped repo: none (37)
         if repo.local_issues:   # shown, but the lane builds none: go on to what it would build
             _dry_run_ticket(repo, out, log_line)
             continue
@@ -373,7 +401,7 @@ def _dry_run_reviews(config, github, out) -> None:
     reviewer = Reviewer(config, github=github, git=None, sol=None, jobs=_jobs(config),
                         say=lambda line: None, poster=DryRunPoster(lambda line: None))
     print('Sol reviews (dry run: Sol not started):', file=out)
-    for repo in config.repos:
+    for repo in working(config):   # a stopped repo: none (37)
         if not repo.github:
             continue
         for pr, why in reviewer.candidates(repo):
@@ -545,13 +573,13 @@ def main(argv=None, github=None, out=None, t3=None, git=None, sleep=None,
     parser.add_argument('--gate', action='store_true',
                         help="print Claude's usage now and whether each job kind would start")
     knob = parser.add_mutually_exclusive_group()
-    lanes = ('claude', 'sol', 'all')
-    knob.add_argument('--pause', nargs='?', const='claude', choices=lanes, metavar='LANE',
-                      help='stop a lane after its job: claude (the default), sol or all; '
-                           "the dashboard's Stop")
-    knob.add_argument('--resume', nargs='?', const='claude', choices=lanes, metavar='LANE',
-                      help="let a lane carry on: claude (the default), sol or all; the "
-                           "dashboard's Resume")
+    # A lane (claude, sol, all) or a served repo's name (ticket 37), checked once config is read
+    knob.add_argument('--pause', nargs='?', const='claude', metavar='LANE|REPO',
+                      help='stop a lane after its job: claude (the default), sol or all; or '
+                           "one served repo, in both lanes; the dashboard's Stop")
+    knob.add_argument('--resume', nargs='?', const='claude', metavar='LANE|REPO',
+                      help="let a lane or a repo carry on: claude (the default), sol, all or a "
+                           "repo's name; the dashboard's Resume")
     parser.add_argument('--reserve', type=float, metavar='PERCENT',
                         help='the share of the week kept for Stefan until 24h before its reset')
     parser.add_argument('--stop', action='store_true', help='stop the running runner')

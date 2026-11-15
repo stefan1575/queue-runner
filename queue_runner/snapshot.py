@@ -152,8 +152,16 @@ def build(facts: Facts) -> dict:
 
 
 def _repos(facts: Facts) -> list[dict]:
+    """In the build order, each with `stopped` (ticket 37): when Stefan stopped it, or None."""
     return [{'name': r.name, 'github': f'https://github.com/{r.github}' if r.github else None,
-             'merge': r.merge} for r in facts.repos]
+             'merge': r.merge, 'stopped': _repo_stopped(facts, r.name)} for r in facts.repos]
+
+
+def _repo_stopped(facts: Facts, name: str) -> dict | None:
+    stop = facts.switch.repo_stop(name)
+    if facts.switch.error is not None or not stop.stopped:
+        return None
+    return {'at': _iso(stop.at) if stop.at else None}
 
 
 def _work(facts: Facts) -> dict:

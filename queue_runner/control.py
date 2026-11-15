@@ -15,6 +15,11 @@ each lane starts a job; an unreadable file starts nothing in either lane until i
 of each pass (`ordered`): used when it names every served repo exactly once, and otherwise
 ignored (config.toml's order stands) without making the file unreadable.
 
+`repos.<name>.stop` (ticket 37) is "after-job" or null, with its `at`: a stopped repo gets nothing
+from either lane (a job already running on it finishes), taken up at the start of each pass
+(`stopped_repos`). A name that isn't served is ignored; an entry the page couldn't have written
+makes the file unreadable, as a lane's does.
+
 **The older code's pause** was `gate.json`'s `paused`. With `paused: true` there and no entry for
 the Claude lane here, the Claude lane is stopped (since gate.json was written); an entry, either
 way, wins. `ask` carries such a pause over into this file and drops it from gate.json, which then
@@ -27,6 +32,7 @@ from dataclasses import dataclass, field
 
 LANES = ('claude', 'sol')
 STOPS = (None, 'after-job', 'now')
+REPO_STOPS = (None, 'after-job')   # a repo's: Stop now stays a lane's (ticket 37)
 NAMES = {'claude': 'Claude', 'sol': 'reviewing'}
 
 
@@ -50,9 +56,13 @@ class Switch:
     written_at: str | None = None
     error: str | None = None
     order: object = None   # `repo_order` as written (None: not there); `ordered` judges it
+    repos: dict = field(default_factory=dict)   # repo name: Stop, as written (ticket 37)
 
     def stop(self, lane: str) -> Stop:
         return self.lanes.get(lane) or Stop()
+
+    def repo_stop(self, name: str) -> Stop:
+        return self.repos.get(name) or Stop()
 
     def holds(self, lane: str) -> bool:
         """Whether the lane may start nothing now."""
@@ -114,6 +124,12 @@ def _load(state_dir: str) -> dict:
     for id, entry in lanes.items():
         if not isinstance(entry, dict) or entry.get('stop') not in STOPS:
             raise Unreadable(f'lane "{id}" is not {{"stop": "after-job", "now" or null}}')
+    repos = raw.get('repos') or {}
+    if not isinstance(repos, dict):
+        raise Unreadable('its "repos" is not an object')
+    for name, entry in repos.items():
+        if not isinstance(entry, dict) or entry.get('stop') not in REPO_STOPS:
+            raise Unreadable(f'repo "{name}" is not {{"stop": "after-job" or null}}')
     return raw
 
 
@@ -133,8 +149,10 @@ def read(state_dir: str) -> Switch:
         else:
             lanes[id] = Stop()
     written = raw.get('written_at')
+    repos = {name: Stop(e.get('stop'), _when(e.get('at')), 'control')
+             for name, e in (raw.get('repos') or {}).items()}
     return Switch(lanes, written if isinstance(written, str) else None,
-                  order=raw.get('repo_order'))
+                  order=raw.get('repo_order'), repos=repos)
 
 
 def ordered(repos: list, order) -> tuple[list, str | None]:
@@ -158,6 +176,15 @@ def ordered(repos: list, order) -> tuple[list, str | None]:
     return list(repos), why
 
 
+def stopped_repos(repos: list, switch: Switch) -> tuple[list[str], list[str]]:
+    """The served repos Stefan stopped (in `repos`' order), and the names control.json stops
+    that aren't served (ignored)."""
+    names = [r.name for r in repos]
+    stopped = [n for n in names if switch.repo_stop(n).stopped]
+    unknown = sorted(n for n, s in switch.repos.items() if s.stopped and n not in names)
+    return stopped, unknown
+
+
 # --- asking: --pause and --resume --------------------------------------------------------------
 
 def _iso(t: datetime.datetime) -> str:
@@ -179,14 +206,15 @@ def _write(state_dir: str, data: dict) -> None:
             os.remove(tmp)
 
 
-def ask(state_dir: str, lanes, stop: str | None, now: str) -> dict:
-    """control.json after Stefan asks `stop` of each of `lanes` at `now` (an ISO time), in the
-    page's format (`dashboard/serve.py`'s `apply_control`), written whole. An unreadable file is
+def ask(state_dir: str, lanes, stop: str | None, now: str, repos=()) -> dict:
+    """control.json after Stefan asks `stop` of each of `lanes` and `repos` (served repos' names,
+    ticket 37) at `now` (an ISO time), in the page's format (`dashboard/serve.py`'s
+    `apply_control`), written whole. An unreadable file is
     started afresh and entries it can't use are dropped, as the page does. gate.json's older
     pause, with no Claude entry yet, is carried over first (since gate.json was written), and
     gate.json is left with its reserve only."""
-    if stop not in STOPS:
-        raise ValueError(f'stop must be one of {STOPS}')
+    if stop not in STOPS or (repos and stop not in REPO_STOPS):
+        raise ValueError(f'stop must be one of {REPO_STOPS if repos else STOPS}')
     try:   # as leniently as the page reads it (`serve.App.control`): what it can't use goes
         with open(path(state_dir), encoding='utf-8') as f:
             raw = json.load(f)
@@ -196,12 +224,17 @@ def ask(state_dir: str, lanes, stop: str | None, now: str) -> dict:
         raw = {}
     entries = {k: v for k, v in (raw.get('lanes') or {}).items() if isinstance(v, dict)}
     order = [r for r in (raw.get('repo_order') or []) if isinstance(r, str)]
+    kept = raw.get('repos') if isinstance(raw.get('repos'), dict) else {}
+    stops = {k: v for k, v in kept.items() if isinstance(v, dict)}
     old = _old_pause(state_dir)
     if old is not None and 'claude' not in entries:
         entries['claude'] = {'stop': 'after-job', 'at': _iso(old)}
     for lane in lanes:
         entries[lane] = {'stop': stop, 'at': now}
-    data = {'version': 1, 'written_at': now, 'lanes': entries, 'repo_order': order}
+    for name in repos:
+        stops[name] = {'stop': stop, 'at': now}
+    data = {'version': 1, 'written_at': now, 'lanes': entries, 'repo_order': order,
+            'repos': stops}
     _write(state_dir, data)
     if old is not None:
         from .gate import Knob, read_knob, write_knob
@@ -238,6 +271,21 @@ def order_text(repos: list, why: str | None) -> str:
         return f"Repos are taken in Stefan's build order now: {names}"
     return (f"control.json's repo_order is ignored ({why}): repos are taken in config.toml's "
             f'order, {names}. Reorder them on the dashboard to set it afresh')
+
+
+def repo_stopped_text(name: str) -> str:
+    return (f'{name} is stopped by Stefan: neither lane takes up its work, and a job already '
+            f'running on it finishes (Resume it on the dashboard, or python3 -m queue_runner '
+            f'--resume {name})')
+
+
+def repo_resumed_text(name: str) -> str:
+    return f'{name} runs again: Stefan resumed it'
+
+
+def unknown_repos_text(names: list[str]) -> str:
+    verb = 'is' if len(names) == 1 else 'are'
+    return f"control.json stops {', '.join(names)}, which {verb} not served: ignored"
 
 
 def unreadable_text(switch: Switch) -> str:

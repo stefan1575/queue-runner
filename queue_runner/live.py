@@ -158,7 +158,10 @@ class LiveSteps:
         self.wait_until: datetime.datetime | None = None   # a live run's usage-limit resume
 
     def served(self):
-        return [r for r in self.config.repos if r.live_doc and r.github]
+        """The repos whose live steps run, in the build order; a repo Stefan stopped has none
+        (`config.working`, ticket 37)."""
+        from .config import working
+        return [r for r in working(self.config) if r.live_doc and r.github]
 
     # --- where the last run reached ------------------------------------------------------------
 

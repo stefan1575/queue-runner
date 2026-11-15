@@ -134,8 +134,9 @@ class Stopper:
 
     def stop_pass(self) -> None:
         """Each repo: the stops Stefan answered go back to the loop, then every open PR's new
-        stops are filed."""
-        for repo in self.config.repos:
+        stops are filed. A repo Stefan stopped is left as it is (ticket 37)."""
+        from .config import working
+        for repo in working(self.config):
             if not repo.github:
                 continue
             self.answers(repo)

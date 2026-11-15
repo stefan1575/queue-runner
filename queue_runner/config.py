@@ -65,6 +65,23 @@ def set_build_order(config: Config, repos: list[Repo]) -> None:
     object.__setattr__(config, 'repos', list(repos))
 
 
+def set_stopped(config: Config, names) -> None:
+    """The repos Stefan stopped (control.json's `repos`, ticket 37): every part that chooses work
+    goes through `working`, which leaves them out. `repos` itself keeps them, for what is only
+    looked up or shown (a job's own repo, the Inbox, the snapshot)."""
+    object.__setattr__(config, '_stopped', frozenset(names))
+
+
+def stopped(config: Config) -> frozenset:
+    return getattr(config, '_stopped', frozenset())
+
+
+def working(config: Config) -> list[Repo]:
+    """The repos the lanes take work from: `repos`, in the build order, less those stopped."""
+    off = stopped(config)
+    return [r for r in config.repos if r.name not in off]
+
+
 def _path(p: str) -> str:
     return os.path.normpath(os.path.expanduser(p))
 

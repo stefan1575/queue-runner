@@ -55,9 +55,9 @@ class BuildTest(unittest.TestCase):
     def test_repos_come_in_config_order_with_their_github_page_and_who_merges(self):
         self.assertEqual(snapshot.build(facts())['repos'], [
             {'name': 'leads-dashboard', 'github': 'https://github.com/RoyalBullyAgency-RBA/leads-dashboard',
-             'merge': 'stefan'},
+             'merge': 'stefan', 'stopped': None},
             {'name': 'queue-runner', 'github': 'https://github.com/stefan1575/queue-runner',
-             'merge': 'runner'},
+             'merge': 'runner', 'stopped': None},
         ])
 
 

@@ -14,7 +14,7 @@ import os
 from importlib import resources
 from string import Template
 
-from .config import Config, Repo
+from .config import Config, Repo, working
 from .github import Comment, PullRequest
 from .ledger import TAGS, OPEN, SolFailed, decide, next_round, norm, read_reviews, runner_post, \
     state
@@ -138,7 +138,7 @@ class Reviewer:
                     self.stopper.stop_pass()
                 if self.merger:
                     self.merger.merge_pass()
-                for repo in self.config.repos:
+                for repo in working(self.config):   # a repo Stefan stopped: none (ticket 37)
                     if not repo.github:
                         continue
                     for pr, why in self._candidates(repo):
@@ -314,11 +314,23 @@ class Reviewer:
                         signals=[s['signal'] for s in d['signals']], run_dir=run_dir, link=url)
         why = f' ({"; ".join(s["text"] for s in d["signals"])})' if d['signals'] else ''
         self.say(f'{name}: review {rnd} on {h[:7]} is {d["verdict"]}, next: {d["outcome"]}{why}')
-        if outcome == 'clean' and self.merger:
+        if self.stopped_now(repo):   # the review was the job: what follows waits for Resume
+            self.say(f'{name}: {repo.name} was stopped during the review; '
+                     + ('its merge' if outcome == 'clean' else 'what follows')
+                     + ' waits until Stefan resumes it')
+        elif outcome == 'clean' and self.merger:
             self.merger.try_merge(repo, pr)
         elif outcome in ('stop', 'approach-note') and self.stopper:
             self.stopper.check(repo, pr)
         return STARTED
+
+    def stopped_now(self, repo: Repo) -> bool:
+        """Whether Stefan has stopped the repo (ticket 37), control.json read now: a review
+        running when he stopped it finishes, and nothing after it happens."""
+        from . import control
+        from .config import stopped
+        return (repo.name in stopped(self.config)
+                or control.read(self.config.state_dir).repo_stop(repo.name).stopped)
 
     def _inputs(self, repo, pr, rnd, last, gone, earlier, run_dir, wt) -> list[str]:
         """Writes Sol's inputs to the run folder; returns the brief's list of them."""

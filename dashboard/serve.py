@@ -45,6 +45,7 @@ START_RUNNER = (f"Start it with its shortcut, ~/.queue-runner/Queue runner.lnk (
 
 NAME = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
 STOPS = (None, "after-job", "now")
+REPO_STOPS = (None, "after-job")   # a repo's (ticket 37): Stop now stays a lane's
 
 
 class Refused(Exception):
@@ -56,11 +57,14 @@ def now_iso() -> str:
 
 
 def apply_control(control: dict, body: object, now: str) -> dict:
-    """The control file after one request: `{"lane", "stop"}` or `{"repo_order"}`."""
+    """The control file after one request: `{"lane", "stop"}`, `{"repo", "stop"}` (ticket 37) or
+    `{"repo_order"}`."""
     if not isinstance(body, dict):
         raise Refused("a JSON object is expected")
     lanes = {k: v for k, v in (control.get("lanes") or {}).items() if isinstance(v, dict)}
     order = [r for r in (control.get("repo_order") or []) if isinstance(r, str)]
+    kept = control.get("repos") if isinstance(control.get("repos"), dict) else {}
+    repos = {k: v for k, v in kept.items() if isinstance(v, dict)}
     keys = set(body)
     if keys == {"lane", "stop"}:
         lane, stop = body["lane"], body["stop"]
@@ -69,6 +73,13 @@ def apply_control(control: dict, body: object, now: str) -> dict:
         if stop not in STOPS:
             raise Refused('stop must be "after-job", "now" or null')
         lanes[lane] = {"stop": stop, "at": now}
+    elif keys == {"repo", "stop"}:
+        repo, stop = body["repo"], body["stop"]
+        if not isinstance(repo, str) or not NAME.match(repo):
+            raise Refused("repo must be a repo's name")
+        if stop not in REPO_STOPS:
+            raise Refused('a repo\'s stop must be "after-job" or null')
+        repos[repo] = {"stop": stop, "at": now}
     elif keys == {"repo_order"}:
         order = body["repo_order"]
         if (not isinstance(order, list) or not 1 <= len(order) <= 50
@@ -76,8 +87,8 @@ def apply_control(control: dict, body: object, now: str) -> dict:
                 or len(set(order)) != len(order)):
             raise Refused("repo_order must list each repo's name once")
     else:
-        raise Refused('send {"lane", "stop"} or {"repo_order"}')
-    return {"version": 1, "written_at": now, "lanes": lanes, "repo_order": order}
+        raise Refused('send {"lane", "stop"}, {"repo", "stop"} or {"repo_order"}')
+    return {"version": 1, "written_at": now, "lanes": lanes, "repo_order": order, "repos": repos}
 
 
 class App:

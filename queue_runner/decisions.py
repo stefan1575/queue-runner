@@ -200,7 +200,8 @@ class Decider:
         self.say, self.stopper = say, stopper
 
     def next_case(self) -> Case | None:
-        for repo in self.config.repos:
+        from .config import working   # a repo Stefan stopped gets no decision (ticket 37)
+        for repo in working(self.config):
             if not repo.github:
                 continue
             try:

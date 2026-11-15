@@ -16,7 +16,7 @@ import traceback
 
 from . import control
 from .brief import build_brief
-from .config import Config, Repo, set_build_order, toml_order
+from .config import Config, Repo, set_build_order, set_stopped, stopped, toml_order, working
 from .decisions import Decider
 from .fix import Fixer, fix_branch, fix_title
 from .stops import CONFLICT
@@ -124,6 +124,7 @@ class Runner:
         # take it up.
         self._order_lock = threading.Lock()
         self._said_order: str | None = None
+        self._said_unknown: str | None = None   # control.json stops a repo not served (37)
 
     def say(self, line: str) -> None:
         with self._say_lock:   # both lanes say things
@@ -161,7 +162,8 @@ class Runner:
         decision may continue in the same pass (a retry or an answer). A job cut off by a usage
         limit comes before all of them, and until it may resume nothing else starts: the limit
         is the whole account's."""
-        if limited := self.jobs.limited_jobs():
+        off = stopped(self.config)   # a stopped repo's limited job waits for its Resume (37)
+        if limited := [j for j in self.jobs.limited_jobs() if j.repo not in off]:
             old = limited[0]
             at = _when(old.resume_at) if old.resume_at else self.now()
             if self.now() < at:
@@ -182,7 +184,7 @@ class Runner:
             return 'live', None, lambda: self.live.run(*live)
         if fix := self.next_fix():
             return 'fix', None, lambda: self.run_fix(*fix)
-        for repo in self.config.repos:
+        for repo in working(self.config):
             if not repo.github or repo.local_issues:
                 # No GitHub issues to pick from: a local-ticket repo (`tickets.py`) is only
                 # named by --dry-run.
@@ -258,6 +260,24 @@ class Runner:
             if text is not None and text != self._said_order:
                 self.say(text)
             self._said_order = text if why else None   # an ignored order: said once
+            self._take_repo_stops(switch)
+
+    def _take_repo_stops(self, switch) -> None:
+        """The repos Stefan stopped (ticket 37), taken up with the order: from now on every part
+        that chooses work goes through `working`, which leaves them out. Each change is said
+        once, and a name that isn't served once."""
+        names, unknown = control.stopped_repos(toml_order(self.config), switch)
+        was = stopped(self.config)
+        for name in names:
+            if name not in was:
+                self.say(control.repo_stopped_text(name))
+        for name in sorted(was - set(names)):
+            self.say(control.repo_resumed_text(name))
+        set_stopped(self.config, names)
+        text = control.unknown_repos_text(unknown) if unknown else None
+        if text is not None and text != self._said_unknown:
+            self.say(text)
+        self._said_unknown = text
 
     def idle_seconds(self) -> float:
         """The pause after a pass that started nothing: `poll_seconds`, or less when the gate
@@ -271,7 +291,7 @@ class Runner:
     def next_fix(self):
         """(repo, PR, its blocking review job) for the first PR that needs a fix round now;
         the review is None for a conflict round."""
-        for repo in self.config.repos:
+        for repo in working(self.config):
             if not repo.github:
                 continue
             try:
