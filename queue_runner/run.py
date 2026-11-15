@@ -109,7 +109,8 @@ class Runner:
         # its last pass left it (a snapshot.Wait, or None), the titles of the issues and PRs the
         # passes started jobs on, and the publisher the loop writes it with (None: no snapshot).
         self.claude_wait = None
-        self.titles: dict[tuple[str, int], str] =             self.reviewer.titles if self.reviewer is not None else {}
+        self.titles: dict[tuple[str, int], str] = (
+            self.reviewer.titles if self.reviewer is not None else {})
         self.publisher = None
 
     def say(self, line: str) -> None:
@@ -123,7 +124,8 @@ class Runner:
         job = self.plan()
         if not callable(job):
             from .snapshot import Wait
-            self.claude_wait = Wait(self.gate_until, self._last_gate or '')                 if job == GATED else None
+            waits = job == GATED
+            self.claude_wait = Wait(self.gate_until, self._last_gate or '') if waits else None
             return job
         self.claude_wait = None
         return job()

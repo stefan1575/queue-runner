@@ -29,7 +29,8 @@ READ_EVERY = 300    # seconds: the snapshot reads usage itself no more often tha
 CLAUDE_KINDS = ('build', 'fix', 'decision', 'live')   # the Claude lane's jobs (gate.CLAUDE_KINDS)
 SOL_KINDS = ('review', 'merge')                       # the reviewing lane's
 SOL_MODEL = 'GPT-6.1 Sol'   # codex-sol.sh's model (`~/Code/docs/sol.md`)
-ON_PR = ('fix', 'review', 'merge', 'live')   # a job whose `issue` is a PR (live: its batch's newest)
+# A job whose `issue` is a PR (a live run's: its batch's newest).
+ON_PR = ('fix', 'review', 'merge', 'live')
 NO_STOP_NOW = {'available': False, 'note': "Stop now isn't built yet: stop after the job instead.",
                'effect': None}
 
@@ -64,7 +65,8 @@ WINDOW_LABELS = {300: ('five_hour', 'Session'), 10080: ('week', 'Weekly')}
 
 @dataclass(frozen=True)
 class Call:
-    """The last real call of one kind (a source): when, whether it answered, and when one last did."""
+    """The last real call of one kind (a source): when, whether it answered, and when one last
+    did."""
     at: datetime.datetime
     ok: bool
     note: str | None                       # what went wrong, when it failed
@@ -96,9 +98,11 @@ class Facts:
     knob: Knob | None = Knob()                   # gate.json; None: unreadable
     knob_at: datetime.datetime | None = None     # when gate.json was last written
     claude_model: str = 'claude-opus-5-5'
-    claude_wait: Wait | None = None   # the gate's verdict or a limit's resume, as the last pass left it
+    # The gate's verdict or a limit's resume, as the Claude lane's last pass left it.
+    claude_wait: Wait | None = None
     sol_wait: Wait | None = None      # ChatGPT out of usage: when reviews start again
-    titles: dict = field(default_factory=dict)    # (repo, n): the issue's or PR's title, as a pass read it
+    # (repo, n): the issue's or PR's title, as the pass that started a job on it read it.
+    titles: dict = field(default_factory=dict)
     threads: dict = field(default_factory=dict)   # job id: its T3 thread's link, once found
     runner: RunnerInfo | None = None
     calls: dict = field(default_factory=dict)     # source id: Call
@@ -256,7 +260,8 @@ def _claude_usage(facts: Facts) -> dict:
              'resets_at': _iso(five.resets_at), 'gates': True},
             {'id': 'week', 'label': 'Weekly', 'used': week.used, 'resets_at': _iso(week.resets_at),
              'gates': True, 'reserve': facts.knob.reserve if facts.knob else None,
-             'reserve_opens_at': _iso(week.resets_at - RESERVE_RELEASE) if week.resets_at else None},
+             'reserve_opens_at': _iso(week.resets_at - RESERVE_RELEASE)
+             if week.resets_at else None},
         ]
     return _plan('claude', 'claude', 'Claude', reading, windows)
 
