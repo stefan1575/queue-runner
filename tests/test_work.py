@@ -155,5 +155,65 @@ class QueueTest(WorkCase):
         self.assertEqual(git.fetches, [])
 
 
+def by_n(snap):
+    return {i['n']: i for i in snap['issues']}
+
+
+class IssuesTest(WorkCase):
+    def setUp(self):
+        super().setUp()
+        self.gh.work_list = [
+            wi(1, 'Spec: the app', labels=('spec',),
+               subs=[(2, 'Two', 'closed'), (4, 'Four', 'open'), (5, 'Five', 'open'),
+                     (6, 'Six', 'open')]),
+            wi(4, 'Four', parent=1, blocked=[(2, 'closed')]),
+            wi(5, 'Five', parent=1, blocked=[(4, 'open')]),
+            wi(6, 'Six', labels=(), parent=1),
+            wi(8, 'Eight'),
+            wi(10, 'PR #9 needs Stefan', labels=('needs-info',),
+               body='<!-- queue-runner needs-info owner/first#9 -->'),
+            wi(11, 'Eleven', body='Blocked by: #8'),
+        ]
+        self.gh.issues = [ready(4, 'Four'), Issue(5, 'Five', '', open_blockers=1),
+                          ready(8, 'Eight'), ready(11, 'Eleven', 'Blocked by: #8')]
+        self.gh.states = {8: 'open'}
+        self.gh.prs = [full_pr(9, 'claude/eight-8', H1, title='Eight', body='Closes #8')]
+
+    def test_open_issues_and_a_features_closed_ones_each_where_it_stands(self):
+        got = by_n(self.snap())
+        self.assertEqual(sorted(got), [2, 4, 5, 6, 8, 11])   # no spec, no needs-info issue
+        self.assertEqual({n: i['state'] for n, i in got.items()},
+                         {2: 'done', 4: 'ready', 5: 'blocked', 6: 'not-ready', 8: 'review',
+                          11: 'blocked'})
+        self.assertEqual(got[4], {'repo': 'first', 'n': 4, 'title': 'Four', 'state': 'ready',
+                                  'feature': 'first#1', 'pr': None, 'blocked_by': ['first#2'],
+                                  'note': None, 'pick': 1})
+        self.assertEqual(got[5]['blocked_by'], ['first#4'])
+        self.assertEqual(got[11]['blocked_by'], ['first#8'])
+        self.assertIsNone(got[11]['feature'])
+        self.assertEqual((got[8]['pr'], got[8]['pick']), (9, None))
+        self.assertEqual(got[2]['feature'], 'first#1')
+
+    def test_building_and_held_builds_say_so(self):
+        self.job('build', 4, None, branch='claude/four-4')
+        got = by_n(self.snap())
+        self.assertEqual((got[4]['state'], got[4]['note']), ('building', 'Claude is building it'))
+
+
+class FeaturesTest(IssuesTest):
+    def test_a_spec_with_sub_issues_is_a_feature_its_tickets_in_the_order_theyre_built(self):
+        [f] = self.snap()['features']
+        self.assertEqual(f, {'id': 'first#1', 'repo': 'first', 'n': 1, 'title': 'The app',
+                             'tickets': ['first#2', 'first#4', 'first#5', 'first#6']})
+
+    def test_features_in_build_order_one_with_nothing_open_last(self):
+        self.gh.work_list += [
+            wi(20, 'Map: old', labels=('wayfinder:map',), subs=[(21, 'Done', 'closed')]),
+            wi(30, 'Spec: soon', labels=('spec',), subs=[(3, 'Three', 'open')]),
+            wi(3, 'Three', parent=30)]
+        self.assertEqual([f['id'] for f in self.snap()['features']],
+                         ['first#30', 'first#1', 'first#20'])
+
+
 if __name__ == '__main__':
     unittest.main()

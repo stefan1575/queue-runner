@@ -315,7 +315,173 @@ def lists(v: View | None, asks=(), releases=(), inbox=None) -> dict:
     """The snapshot's `features`, `issues`, `prs` and `activity`."""
     if v is None:
         return {'features': [], 'issues': [], 'prs': [], 'activity': []}
-    return {'features': [], 'issues': [], 'prs': [], 'activity': []}
+    cq, sq = claude_queue(v), sol_queue(v)
+    prs = {(r.name, p.pr.number): _pr_status(v, r, p, cq, sq)
+           for r in v.repos if r.name in v.reads for p in v.reads[r.name].prs}
+    issues = _issues(v, asks, prs, cq)
+    return {'features': _feature_list(v, issues), 'issues': issues, 'prs': [], 'activity': []}
+
+
+# --- features -----------------------------------------------------------------------------------
+
+_PREFIX = re.compile(r'^\s*(spec|map)\s*:\s*', re.I)
+# How far along a ticket is, furthest first (as `dashboard/sample.py` orders a feature's bar).
+_FAR = {'done': 0, 'merged': 1, 'review': 2, 'fixing': 2, 'building': 3, 'you': 4}
+
+
+def _feature_title(title: str) -> str:
+    t = _PREFIX.sub('', title)
+    return t[:1].upper() + t[1:]
+
+
+def _tickets(its: list[dict]) -> list[str]:
+    """In the order they're built: what has started first, furthest along first; then the rest,
+    a blocker before what it blocks, lowest number first, one not marked ready last."""
+    started = sorted((i for i in its if i['state'] in _FAR),
+                     key=lambda i: (_FAR[i['state']], i['n']))
+    rest = {_key(i['repo'], i['n']): i for i in its if i['state'] not in _FAR}
+    later = []
+    while rest:
+        free = [i for i in rest.values() if not any(b in rest for b in i['blocked_by'])] \n            or list(rest.values())
+        nxt = min(free, key=lambda i: (i['state'] == 'not-ready', i['n']))
+        later.append(nxt)
+        del rest[_key(nxt['repo'], nxt['n'])]
+    return [_key(i['repo'], i['n']) for i in started + later]
+
+
+def _feature_list(v: View, issues: list[dict]) -> list[dict]:
+    """Each repo's features, in the build order: the repos' order, then the feature whose first
+    open ticket has the lowest number; one with nothing open last."""
+    rank = {r.name: k for k, r in enumerate(v.repos)}
+    out = []
+    for r in v.repos:
+        read = v.reads.get(r.name)
+        if read is None:
+            continue
+        for n, f in _features(read).items():
+            fid = _key(r.name, n)
+            its = [i for i in issues if i['feature'] == fid]
+            out.append({'id': fid, 'repo': r.name, 'n': n, 'title': _feature_title(f.title),
+                        'tickets': _tickets(its)})
+
+    def first_open(f):
+        return min((i['n'] for i in issues if i['feature'] == f['id'] and i['state'] != 'done'),
+                   default=None)
+    out.sort(key=lambda f: (first_open(f) is None, rank[f['repo']], first_open(f) or 0))
+    return out
+
+
+# --- issues -------------------------------------------------------------------------------------
+
+READY = 'ready-for-agent'
+NEEDS_INFO_MARK = '<!-- queue-runner needs-info '
+# A PR's status, by the family its issue's state takes: `you`, `fixing` or `review`.
+YOU, FIXING, REVIEW = 'you', 'fixing', 'review'
+
+
+def _key(repo: str, n: int) -> str:
+    return f'{repo}#{n}'
+
+
+def _features(read: RepoRead) -> dict[int, object]:
+    """The repo's features: each open issue with sub-issues (a spec or a map)."""
+    return {i.number: i for i in read.issues if i.sub_issues}
+
+
+def _blocked_by(repo, i, names) -> list[str]:
+    """Its blockers as `repo#n` keys: GitHub's dependencies, then `Blocked by:` lines; one in a
+    repo the runner doesn't serve is left out."""
+    from .picker import blockers
+    found = [(where.lower(), n) for where, n, _ in i.blocked_by]
+    found += blockers(i.body, repo.github)
+    out = []
+    for where, n in found:
+        if (name := names.get(where)) and _key(name, n) not in out:
+            out.append(_key(name, n))
+    return out
+
+
+def _issue(repo, n, title, state, feature=None, pr=None, blocked_by=(), note=None) -> dict:
+    return {'repo': repo, 'n': n, 'title': title, 'state': state, 'feature': feature,
+            'pr': pr, 'blocked_by': list(blocked_by), 'note': note, 'pick': None}
+
+
+def _held_state(v: View, repo: str, n: int) -> tuple[str, str] | None:
+    """An issue the job log holds for a build: what its newest build left."""
+    builds = [j for j in v.jobs if j.kind == 'build' and j.repo == repo and j.issue == n
+              and j.outcome not in ('not-started', 'not-sent')]
+    if not builds:
+        return None
+    j = builds[-1]
+    if j.open:
+        return 'building', 'Claude is building it'
+    return {
+        'waiting': ('building', 'Its build waits for an answer: a decision comes first'),
+        'failed': ('building', 'Its build failed: a decision on what next comes first'),
+        'done-no-pr': ('building', 'Its build opened no PR: a decision on what next comes first'),
+        'usage-limit': ('building', "Its build was cut off by Claude's usage limit and resumes "
+                                    'after the reset'),
+        'continued': ('building', 'Its build carries on in the same thread'),
+    }.get(j.outcome, ('you', f'Held since its build ended {j.outcome}: --release {repo}#{n} '
+                             'lets the runner build it again'))
+
+
+def _issues(v: View, asks, prs: dict, cq: list) -> list[dict]:
+    names = {r.github.lower(): r.name for r in v.repos if r.github}
+    picks = {(e['repo'], e['ref']): k for k, e in
+             enumerate((e for e in cq if e['kind'] == 'build'), 1)}
+    asked = {(a['repo'], a['ref']) for a in asks} | {(a['repo'], f'PR #{a["pr"]}')
+                                                    for a in asks if a.get('pr')}
+    held = {}   # repo: issues the job log holds
+    out = []
+    for r in v.repos:
+        read = v.reads.get(r.name)
+        if read is None:
+            continue
+        features = _features(read)
+        pr_of = {p.issue: p.pr.number for p in read.prs if p.issue}
+        builds = {n for n, _ in read.builds}
+        for i in sorted(read.issues, key=lambda i: i.number):
+            if i.sub_issues or NEEDS_INFO_MARK in i.body:
+                continue
+            feature = _key(r.name, i.parent) if i.parent in features else None
+            n, pr = i.number, pr_of.get(i.number)
+            note = None
+            if pr is not None:
+                status, _, family = prs[(r.name, pr)]
+                state, note = family, f'PR #{pr}: {status}'
+            elif (r.name, f'#{n}') in asked:
+                state = YOU
+            elif got := _held_state(v, r.name, n):
+                state, note = got
+            elif n in read.in_flight:
+                state, note = 'building', 'A branch or PR is already on it'
+            elif READY not in i.labels:
+                state = 'not-ready'
+            elif n in builds:
+                state = 'ready'
+            else:
+                state = 'blocked'
+            item = _issue(r.name, n, i.title, state, feature, pr, _blocked_by(r, i, names), note)
+            item['pick'] = picks.get((r.name, f'#{n}'))
+            out.append(item)
+        for f in features.values():   # a feature's closed tickets: done, or merged not live yet
+            for s in f.sub_issues:
+                if s.state != 'closed' or s.repo.lower() != r.github.lower():
+                    continue
+                merged = s.number in read.pending_issues
+                out.append(_issue(r.name, s.number, s.title, 'merged' if merged else 'done',
+                                  _key(r.name, f.number),
+                                  note='Merged; its live steps are still to run' if merged
+                                  else None))
+    return out
+
+
+# --- PRs ----------------------------------------------------------------------------------------
+
+def _pr_status(v: View, repo, p: PrRead, cq: list, sq: list) -> tuple[str, str, str]:
+    """(status, what comes next, the family its issue's state takes)."""
+    return 'Waiting for review', '', REVIEW
 
 
 def stale_github(sources: list[dict], stale: dict) -> None:
