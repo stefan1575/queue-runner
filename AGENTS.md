@@ -20,6 +20,7 @@ python3 -m queue_runner --release NAME#N      # let the picker take a held issue
 python3 -m queue_runner --review NAME#N       # Sol reviews that PR's head now, if adoption says it needs one
 python3 -m queue_runner --gate                # Claude's usage now, and whether a build, fix or decision would start
 python3 -m queue_runner --pause | --resume [LANE]   # stop a lane after its job, or let it carry on (claude by default; sol, all): the dashboard's Stop and Resume
+python3 -m queue_runner --pause | --resume NAME     # stop one served repo in both lanes, or let it carry on: the Build order card's Stop and Resume
 python3 -m queue_runner --reserve PERCENT     # the share of the week kept for Stefan (default 5)
 python3 -m queue_runner --stop                # stop the running runner
 python3 -m queue_runner --inbox               # everything waiting on Stefan: PRs ready to merge, needs-info stops, threads waiting for his answer
@@ -285,6 +286,40 @@ and reviews in that order.
   `Facts.repos` in that order (ticket 32 fills them).
 - `--once --dry-run` says the order first (`dry run: repos are taken in Stefan's build order:
   ...`, config.toml's, or why his is ignored) and chooses in it.
+
+## Stopping one repo
+
+`config.working` and `Runner._take_repo_stops` (ticket 37; Stefan, 2026-11-15: so game-backdrop
+can be the first real run while leads-dashboard stays served). **`control.json`'s
+`repos.<name>.stop`** (`"after-job"` or null, with its `at`; Stop now stays a lane's) is written by
+the Build order card's Stop and Resume (`apply_control`'s `{"repo", "stop"}`) and by `--pause NAME`
+and `--resume NAME` (`control.ask(..., repos=[NAME])`; a lane's id and `all` keep their meaning, and
+any other name is refused with exit 2).
+
+- **A stopped repo gets nothing from either lane:** no decision, live run, fix or conflict round,
+  limit recovery or build in the Claude lane; no stop filed, merge, ready mark, noticing of
+  Stefan's merge or review in the Sol lane. Each of those goes through `config.working(config)`,
+  the build order less the stopped repos (`decisions.next_case`, `live.served`, `Runner.next_fix`,
+  `Runner.choose`'s builds and limited jobs, `stops.stop_pass`, `merge.merge_pass`,
+  `Reviewer.review_pass`); `config.repos` keeps every repo for what is only looked up or shown (a
+  job's own repo when it's settled, the Inbox, the snapshot). The next repo's work is taken.
+- **A job already running on it finishes** and is settled as usual. A review that ends after its
+  repo was stopped (`Reviewer.stopped_now` reads control.json then) merges nothing and files no
+  stop: both wait for Resume, when the next pass does them.
+- **Taken up with the build order** at the start of each lane's pass (`take_order`), said once
+  each: `leads-dashboard is stopped by Stefan: neither lane takes up its work, ...` and
+  `leads-dashboard runs again: Stefan resumed it`. A name that isn't served is ignored and said
+  once (`control.json stops old-repo, which is not served: ignored`). An entry the page couldn't
+  have written (`"now"`, not an object) makes control.json unreadable, as a lane's does.
+- **Its asks stay in the Inbox** (`inbox.collect` reads every repo); stopping the work answers
+  nothing. **Its waits set no wake task:** a stopped repo's limited job and live run are skipped,
+  so they set no `gate_until`. The usage limit is the account's, so another repo's job may then
+  start and meet the gate or the limit itself.
+- `--gate` lists the stopped repos after the lanes; `--once --dry-run` says them after the order
+  and chooses as the lanes would.
+- The snapshot's repo carries `stopped` (`{"at"}` or null); `control_read_at` moves as for any
+  write.
+- `--review NAME#N` is Stefan's own and still reviews a stopped repo's PR, but merges nothing after.
 
 ## A Claude pass
 
@@ -748,7 +783,7 @@ python3 -m dashboard    # http://queue.localhost:5289/ is the runner's; http://l
   gone quiet: the page says so, greys the health readings and takes the controls away),
   `control_read_at`, `sources` (health; `short` is the name beside its dot, `group` sorts them
   on the page: `provider`, `local` or `external`), `repos` in build
-  order, `asks` (below), `answered` (asks Stefan has answered that the runner hasn't acted on
+  order (each with `stopped`, `{"at"}` or null: ticket 37), `asks` (below), `answered` (asks Stefan has answered that the runner hasn't acted on
   yet: an ask plus `answered`: `at`, `said`, `next`; not counted as waiting on him), `lanes` (each with its `queue`, what it takes up next, in order, across
   repositories, a job a limit cut off first, and for the reviewing lane the PRs waiting for their review; `queue_empty` says why there's none), `usage`, `features` (in build order: the repos'
   order, then the feature whose first open ticket has the lowest number, a finished one last; each with `tickets`, its
@@ -762,8 +797,16 @@ python3 -m dashboard    # http://queue.localhost:5289/ is the runner's; http://l
   `chatgpt`), which picks the mark beside the name; the reviewing lane's id stays `sol`. Times
   are ISO strings; the page formats them. `sample.STATES` names every state the page has to show.
 - **Control** (`serve.apply_control`): `POST /control` takes `{"lane", "stop"}` (`"after-job"`,
-  `"now"` or null to carry on) or `{"repo_order": [...]}`, and anything else is refused. The page
-  shows a request as asked until `control_read_at` reaches its time.
+  `"now"` or null to carry on), `{"repo", "stop"}` (`"after-job"` or null: Stopping one repo,
+  above) or `{"repo_order": [...]}`, and anything else is refused; each write keeps what the
+  others wrote. The page shows a request as asked until `control_read_at` reaches its time.
+- **A stopped repo on the page** (ticket 37): each row of the Build order card has Stop or Resume
+  and says "Stopped since ..." (or "Asked to stop/resume: the runner hasn't read it yet"); its
+  work reads as stopped wherever it's listed: a dashed "Stopped" tag beside its name on Inbox rows
+  and repo tags, "Stopped." in the repository switcher, and "Its repository is stopped" as an
+  unfinished ticket's standing on the Queue (`repoOff`, `offTag`, `standing`). The sample's
+  `repo-stopped` state stops leads-dashboard while its two jobs finish: the queues hold
+  queue-runner's work only, and its asks stay.
 - **Only this PC:** it binds 127.0.0.1, and refuses a request whose `Host` isn't its own address
   or whose `Origin` is another site's, so a web page elsewhere can't stop a lane.
 - **An ask is written to be picked up cold** (Stefan: he may come back a week later with the
@@ -1114,6 +1157,12 @@ dry run's words, an unreadable control.json, and the wake tasks a stopped lane d
 The build order: `tests/test_build_order.py` (two served repos through `main` and the real
 `Runner`: each lane in `repo_order`, the orders that are ignored and said once, a new order
 written mid-job, the dry run, and the snapshot's `repos` and `control_read_at`).
+Stopping one repo: `tests/test_repo_stop.py` (leads-dashboard with live steps due and
+game-backdrop first through the run loop: game-backdrop's build comes first; each kind of Claude
+work and the Sol lane's stops, merges and reviews with a control run unstopped; a review that ends
+after its repo was stopped; `apply_control` and `--pause NAME` writing the same file; the log said
+once, an unserved name, an unreadable entry, wake tasks, the Inbox, the snapshot, `--gate`, the
+dry run, and the sample's `repo-stopped` state).
 `tests/test_git.py` runs `GitCli` on a real local repo in a
 temp folder.
 
@@ -1161,7 +1210,10 @@ temp folder.
   (`usage.jsonl`).
 - `queue_runner/control.py`: each lane's switch: reading `control.json` (and gate.json's older
   pause), writing it for `--pause` and `--resume`, and what the runner says (ticket 30); the
-  build order, `ordered` (ticket 33).
+  build order, `ordered` (ticket 33); each repo's stop, `stopped_repos` (ticket 37).
+- `queue_runner/config.py`: the served repos and the runner's folders; the build order
+  (`set_build_order`) and the stopped repos (`set_stopped`), and `working`, the repos the lanes
+  take work from.
 - `queue_runner/limits.py` and `templates/restart.md`: usage-limit stops: T3's record of the
   reset, the transcript's context, when and how a job resumes, the auto-resume warning.
 - `queue_runner/lock.py`: `runner.lock` and `sol.lock`.
