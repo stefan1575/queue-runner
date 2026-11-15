@@ -139,3 +139,8 @@ The runner's side grows by this: it has to write each ask's `kind`, `situation`,
 2026-11-15, later, **corrected: the Queue page (ticket 21) is next, as several variants**; the
 grill (ticket 25) waits until the Overview's turn. Stefan's order is Queue, Inbox (agreed), then
 Overview, since the Overview shows what the other two hold.
+
+2026-11-15, **the runner side is split into tickets 28 to 36** (spec: `../dashboard-live.md`), built ahead
+of the Overview and Queue looks at Stefan's word: "let's prioritize that first over the UI". Two things
+he decided on the way: `queue.localhost` is the real dashboard and `localhost` the sample one, and
+pausing is the same switch as the page's Stop on the Claude lane.
