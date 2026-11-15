@@ -10,7 +10,7 @@ import unittest
 from dataclasses import replace
 
 from dashboard import sample
-from queue_runner import snapshot
+from queue_runner import control, snapshot
 from queue_runner.config import Config, Repo
 from queue_runner.gate import Cost, Knob, write_knob
 from queue_runner.sol import Limits as SolLimits, LimitWindow as SolWindow
@@ -133,20 +133,61 @@ class LanesTest(unittest.TestCase):
         sol = lane(snapshot.build(facts(sol_wait=snapshot.Wait(until, 'ChatGPT is out of usage'))), 'sol')
         self.assertEqual((sol['state'], when(sol['wait']['until'])), ('waiting', until))
 
-    def test_paused_through_gate_json_the_claude_lane_is_stopped_since_the_knob_was_set(self):
+    def test_stopped_by_stefan_with_no_job_open_the_lane_is_stopped_since_he_asked(self):
         at = NOW - datetime.timedelta(hours=3)
-        snap = snapshot.build(facts(knob=Knob(paused=True), knob_at=at))
+        snap = snapshot.build(facts(switch=stopped(claude=('after-job', at, 'control'))))
         claude = lane(snap, 'claude')
         self.assertEqual((claude['state'], claude['job'], claude['wait']), ('stopped', None, None))
         self.assertEqual(when(claude['stopped']['at']), at)
         self.assertIsNone(claude['stopped']['during'])
-        self.assertEqual(lane(snap, 'sol')['state'], 'idle')   # pausing holds Claude jobs only
-        self.assertEqual(snap['knob'], {'paused': True, 'reserve': 5.0})
+        self.assertEqual(lane(snap, 'sol')['state'], 'idle')
+        self.assertEqual(snap['knob'], {'paused': True, 'reserve': 5.0})   # one word: the switch
 
-    def test_paused_while_a_job_runs_the_lane_is_stopping_after_it(self):
-        snap = snapshot.build(facts(knob=Knob(paused=True), knob_at=NOW, jobs=[job('build', 212, 3)]))
+    def test_gate_jsons_old_pause_reads_stopped_too(self):
+        snap = snapshot.build(facts(switch=stopped(claude=('after-job', NOW, 'gate'))))
+        self.assertEqual(lane(snap, 'claude')['state'], 'stopped')
+
+    def test_now_reads_stopped_after_the_job_until_stop_now_is_built(self):
+        snap = snapshot.build(facts(switch=stopped(claude=('now', NOW, 'control')),
+                                    jobs=[job('build', 212, 3)]))
+        self.assertEqual(lane(snap, 'claude')['state'], 'stopping')
+
+    def test_stopped_while_a_job_runs_the_lane_is_stopping_after_it(self):
+        snap = snapshot.build(facts(switch=stopped(claude=('after-job', NOW, 'control')),
+                                    jobs=[job('build', 212, 3)]))
         claude = lane(snap, 'claude')
         self.assertEqual((claude['state'], claude['job']['ref']), ('stopping', '#212'))
+        self.assertNotIn('stopped', claude)
+
+    def test_the_reviewing_lane_stops_the_same_way(self):
+        snap = snapshot.build(facts(switch=stopped(sol=('after-job', NOW, 'control')),
+                                    sol_wait=snapshot.Wait(NOW, 'ChatGPT is out of usage')))
+        sol = lane(snap, 'sol')
+        self.assertEqual((sol['state'], sol['wait']), ('stopped', None))
+        self.assertEqual(lane(snap, 'claude')['state'], 'idle')
+        self.assertEqual(snap['knob']['paused'], False)
+
+    def test_control_read_at_is_the_control_files_own_written_at(self):
+        written = '2026-11-15T12:58:00+08:00'
+        snap = snapshot.build(facts(switch=control.Switch({}, written)))
+        self.assertEqual(snap['control_read_at'], written)
+        self.assertEqual(lane(snap, 'claude')['state'], 'idle')
+
+    def test_an_unreadable_control_json_holds_both_lanes_and_says_so(self):
+        bad = control.Switch(error='control.json is unreadable (Expecting value)')
+        snap = snapshot.build(facts(switch=bad, jobs=[job('build', 212, 3)]))
+        self.assertIsNone(snap['control_read_at'])
+        claude, sol = lane(snap, 'claude'), lane(snap, 'sol')
+        self.assertEqual(claude['state'], 'working')   # its job runs on; nothing starts after
+        self.assertEqual(sol['state'], 'waiting')
+        self.assertIsNone(sol['wait']['until'])
+        self.assertIn('control.json is unreadable (Expecting value)', sol['wait']['reason'])
+        self.assertIn('until it is fixed', sol['wait']['reason'])
+
+
+def stopped(**lanes):
+    return control.Switch({id: control.Stop(*stop) for id, stop in lanes.items()},
+                          '2026-11-15T12:58:00+08:00')
 
 
 FIVE_RESET = NOW + datetime.timedelta(hours=1)
@@ -288,7 +329,7 @@ class ContractTest(unittest.TestCase):
 
     def test_the_real_snapshot_has_the_samples_keys(self):
         for snap in (snapshot.build(busy_facts()), snapshot.build(facts()),
-                     snapshot.build(facts(knob=Knob(paused=True), knob_at=NOW))):
+                     snapshot.build(facts(switch=stopped(claude=('after-job', NOW, 'gate'))))):
             self.assertEqual(set(snap), set(self.samples[0]) - {'sample'})
             self.holds(snap['lanes'], lambda s: s['lanes'], 'a lane')
             self.holds([l['job'] for l in snap['lanes'] if l['job']],
@@ -308,7 +349,7 @@ class ContractTest(unittest.TestCase):
             json.dumps(snap)   # it's written as JSON
 
     def test_a_stopped_lane_says_when_as_the_samples_do(self):
-        snap = snapshot.build(facts(knob=Knob(paused=True), knob_at=NOW))
+        snap = snapshot.build(facts(switch=stopped(claude=('after-job', NOW, 'control'))))
         self.holds([lane(snap, 'claude')['stopped']],
                    lambda s: [l['stopped'] for l in s['lanes'] if 'stopped' in l], "a lane's stop")
 
@@ -475,11 +516,15 @@ class SnapshotsTest(unittest.TestCase):
     def test_the_job_log_gate_json_and_the_costs_from_the_state_folder(self):
         self.jobs.started(kind='build', repo='leads-dashboard', issue=212, branch='claude/x-212',
                           title='Queue runner build: leads-dashboard#212')
-        write_knob(self.state, Knob(paused=True, reserve=5.0))
+        write_knob(self.state, Knob(reserve=5.0))
+        with open(os.path.join(self.state, 'control.json'), 'w', encoding='utf-8') as f:
+            json.dump({'version': 1, 'written_at': '2026-11-15T12:58:00+08:00',
+                       'lanes': {'sol': {'stop': 'after-job', 'at': '2026-11-15T12:58:00+08:00'}}}, f)
         facts = self.snapshots().facts()
         self.assertEqual([(j.kind, j.issue, j.open) for j in facts.jobs], [('build', 212, True)])
-        self.assertEqual(facts.knob, Knob(paused=True, reserve=5.0))
-        self.assertAlmostEqual(facts.knob_at.timestamp(), os.path.getmtime(os.path.join(self.state, 'gate.json')), 3)
+        self.assertEqual(facts.knob, Knob(reserve=5.0))
+        self.assertTrue(facts.switch.holds('sol'))
+        self.assertEqual(facts.switch.written_at, '2026-11-15T12:58:00+08:00')
         self.assertEqual(facts.costs['build'], (Cost(60, 15), False))
         self.assertEqual(facts.runner, snapshot.RunnerInfo(42, NOW, 'abc1234'))
         self.assertEqual(facts.repos, [LD, QR])
@@ -540,7 +585,7 @@ class SnapshotsTest(unittest.TestCase):
         with open(os.path.join(self.state, 'gate.json'), 'w') as f:
             f.write('{ torn')
         snap = self.snapshots().build()
-        self.assertEqual(snap['knob'], {'paused': None, 'reserve': None})
+        self.assertEqual(snap['knob'], {'paused': False, 'reserve': None})
 
 
 if __name__ == '__main__':

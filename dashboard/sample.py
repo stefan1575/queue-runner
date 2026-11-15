@@ -211,7 +211,7 @@ def build(name: str = DEFAULT, base: datetime | None = None, control: dict | Non
                 {"id": "week", "label": "Weekly", "used": 6, "resets_at": ahead(60 * 152.9), "gates": True},
             ]},
         ],
-        "knob": {"paused": False, "reserve": 5},   # gate.json, as the runner last read it
+        "knob": {"paused": False, "reserve": 5},   # gate.json's reserve; paused: the Claude lane is stopped
         # What the gate expects a Claude job to take, per kind (the Usage page).
         "costs": [
             {"kind": "build", "label": "Build", "session": 60, "week": 15, "basis": "The cautious default, until 3 builds are recorded"},

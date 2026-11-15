@@ -19,7 +19,7 @@ python3 -m queue_runner --once --dry-run      # print the next Claude job's brie
 python3 -m queue_runner --release NAME#N      # let the picker take a held issue again (a PR: retry its failed reviews, merges and fix round; let a stopped PR go)
 python3 -m queue_runner --review NAME#N       # Sol reviews that PR's head now, if adoption says it needs one
 python3 -m queue_runner --gate                # Claude's usage now, and whether a build, fix or decision would start
-python3 -m queue_runner --pause | --resume    # Stefan's knob: start no Claude job, or start them again
+python3 -m queue_runner --pause | --resume [LANE]   # stop a lane after its job, or let it carry on (claude by default; sol, all): the dashboard's Stop and Resume
 python3 -m queue_runner --reserve PERCENT     # the share of the week kept for Stefan (default 5)
 python3 -m queue_runner --stop                # stop the running runner
 python3 -m queue_runner --inbox               # everything waiting on Stefan: PRs ready to merge, needs-info stops, threads waiting for his answer
@@ -85,7 +85,8 @@ Ticket 10 (`orchestration.md`, The runner and Sleep).
   that nothing waits for any more, is deleted at the next sync (said in the log), and each
   expires an hour after its time so Windows deletes it if the runner is gone. Times under a
   minute ahead get no new task, but one already set is kept until it fires. Plain idle polls (`poll_seconds`) set no wake: a sleeping PC just
-  polls later. A Task Scheduler error is logged once and never stops the loop.
+  polls later. A lane Stefan stopped (Stopping a lane, below) waits for nothing, so it sets
+  none, and neither lane does while `control.json` is unreadable. A Task Scheduler error is logged once and never stops the loop.
 - **Sleeping by the wall clock:** the loop's waits (`run.wall_sleep`, the Sol lane's too) look at
   the wall clock every 30 seconds, since Windows' timers may not count time the PC slept.
 - `--once` sets no wake tasks.
@@ -147,10 +148,10 @@ isn't gated**, and neither is an Approach-note answer read from Stefan's words (
 - **Waiting:** a held pass is `gated`; the log says once why and until when (`Claude lane waits:
   ...`, and again only when that changes), and the loop sleeps `poll_seconds` or until the gate
   opens, if sooner. The Sol lane goes on.
-- **The knob** is `<state_dir>/gate.json` (`paused`, `reserve`), written whole by `--pause`,
-  `--resume` and `--reserve N` without the runner lock, and read before every Claude job, so it
-  works while the runner runs (within one `poll_seconds`). Pausing doesn't stop a running job or
-  the Sol lane.
+- **The knob** is `<state_dir>/gate.json` (`reserve` only, since ticket 30), written whole by
+  `--reserve N` without the runner lock, and read before every Claude job, so it works while the
+  runner runs (within one `poll_seconds`). Stopping a lane isn't the gate's: it's `control.json`
+  (Stopping a lane, below), read before the gate; an older `paused: true` here is read there.
 - **Learned cost:** each Claude job pass that started a thread appends to
   `<state_dir>/usage.jsonl`: the kind, the jobs it started, usage before (the gate's read) and
   after, and `spent` per window (null for a window that reset mid-job). The expected cost per kind
@@ -227,6 +228,35 @@ starts, so what that pass's review decides waits for the next pass.
 **One writer per PR** (`JobLog.writer`): while a build or fix job is open on a PR's branch, or
 waiting for an answer (until it ends or is released), Sol doesn't review it, it doesn't merge,
 and it gets no other fix round.
+
+## Stopping a lane
+
+`control.py` (ticket 30; spec `.scratch/queue-runner/dashboard-live.md`, One switch). **One
+switch per lane:** `<state_dir>/control.json`'s `lanes.<id>.stop`, which the dashboard's Stop,
+Resume and Stop all write (`dashboard/serve.py`, `apply_control`) and `--pause [LANE]` and
+`--resume [LANE]` write in the same format (`control.ask`; `LANE` is `claude` by default, `sol`
+or `all`). `"after-job"` lets the lane's job finish and starts nothing after it; null carries
+on; `"now"` is read as `"after-job"` until ticket 34.
+
+- **Read** (`control.read`, never raises) at the start of each lane's pass: the Claude lane after
+  settling (`Runner.plan`, a pass that ends `stopped`), the Sol lane before it files a stop,
+  merges or reviews anything (`Runner._sol_pass`), so a stopped Sol lane does none of them.
+  `--once` obeys too; `--review` is Stefan's own and doesn't ask. The log says once
+  `The Claude lane is stopped by Stefan: it starts no job (Resume on the dashboard, or python3
+  -m queue_runner --resume)` (the reviewing lane's: `... --resume sol`), and `... runs again:
+  Stefan resumed it` when it changes.
+- **Unreadable** (not JSON, not an object, a lane's entry without a `stop` the page could have
+  written): neither lane starts anything until it's fixed, said once; any Stop or Resume on the
+  page, or `--pause`/`--resume`, writes it afresh (keeping what they can read, as the page does).
+- **The older pause:** with `paused: true` in gate.json and no `claude` entry in control.json,
+  the Claude lane is stopped (since gate.json's mtime). An entry, either way, wins. The CLI's
+  `ask` (and `--reserve`, through `carry_over`) moves that pause into control.json and leaves
+  gate.json with `reserve` only; the runner itself writes neither file. Today's runner was
+  paused that way, so restarting onto this code starts no Claude job.
+- **Wake tasks:** a stopped lane sets none (`Runner.wake_times`).
+- `--gate` prints each lane's switch first (and each kind `waits: the Claude lane is stopped by
+  Stefan` while it is); `--once --dry-run` says a stopped lane's line before what it would do
+  once resumed.
 
 ## A Claude pass
 
@@ -659,7 +689,8 @@ python3 -m dashboard    # http://queue.localhost:5289/ is the runner's; http://l
 - **Two files are the whole contract,** both in the state folder (`--state-dir`, default
   `~/.queue-runner/state`). `snapshot.json`: the runner writes it whole, the page reads it.
   `control.json`: the page writes it whole, the runner reads it. **The runner writes
-  `snapshot.json`** (ticket 28, below); it reads no `control.json` yet (ticket 30).
+  `snapshot.json`** (ticket 28, below) and obeys `control.json`'s stops (ticket 30: Stopping a
+  lane, above); `repo_order` isn't read yet (ticket 33).
 - **The runner's snapshot** (`queue_runner/snapshot.py`, ticket 28; spec
   `.scratch/queue-runner/dashboard-live.md`). In continuous mode only (`--once` writes none):
   `Publisher` writes it whole (a temp file, then `os.replace`) after every pass of either lane,
@@ -667,8 +698,11 @@ python3 -m dashboard    # http://queue.localhost:5289/ is the runner's; http://l
   blocked in a job. A write that fails is logged once (`The dashboard snapshot was not
   written ...`, then `... is written again`) and never stops a lane. `build(Facts)` is pure, one
   small function per part; `Snapshots` gathers the facts: the job log (each lane's open job),
-  `gate.json` (paused: the Claude lane `stopped`, `stopped.at` gate.json's mtime; `stopping` while
-  a job still runs), the learned costs (`CostBook.learned`), the Claude lane's wait as its last
+  each lane's switch (`control.read`: a stopped lane is `stopped`, `stopped.at` when Stefan
+  asked, or gate.json's mtime for the older pause; `stopping` while its job still runs; an
+  unreadable control.json makes an idle lane `waiting` with the reason; `control_read_at` is
+  the `written_at` of the control.json the snapshot read, since each lane reads it again before
+  it starts anything; `knob.paused` is whether the Claude lane is stopped), gate.json's reserve, the learned costs (`CostBook.learned`), the Claude lane's wait as its last
   pass left it (`Runner.claude_wait`: the gate's verdict text or a limit's resume), Sol's resume
   (`JobLog.sol_resume_at`), and the titles the passes read (`Runner.titles`). **Sources** are the
   last real call of each kind: the CLI wraps GitHub and T3 in `Calls.watch` and the gate's usage
@@ -678,7 +712,7 @@ python3 -m dashboard    # http://queue.localhost:5289/ is the runner's; http://l
   Codex's rollouts, the account's) at most every 5 minutes (`READ_EVERY`), and an open Claude job's
   thread in T3 until found. Empty until tickets 31 and 32: `asks`, `answered`, `features`,
   `issues`, `prs`, `activity` and each lane's `queue` (`_work` and `_queue`, where those tickets
-  plug in). `stop_now` is unavailable until ticket 30. `--snapshot` prints one built the same way
+  plug in). `stop_now` is unavailable until ticket 34. `--snapshot` prints one built the same way
   with no runner in memory (its pid and start from runner.pid, a limit's wait from the job log).
 - **The snapshot's shape is what `dashboard/sample.py` builds** (version 1): `written_at` and
   `write_every` (a snapshot older than three times that, or 90 seconds, means the runner has
@@ -1009,6 +1043,10 @@ sample's keys at the top, in a lane, its job, a plan, a window and a source) and
 run, paused, none with `--once`, `--snapshot` with the lock held; `main`'s `sol_usage` and
 `snapshot_every` keep it off Codex's real rollouts and fast). `sol.latest_limits` is in
 `tests/test_sol.py`.
+Stopping a lane: `tests/test_switch.py` (today's gate.json pause through the run loop, each
+stop through `main` and `Runner.run_once`, the older pause against an entry, `--pause` and
+`--resume`, the same file from the CLI's writer and `serve.App.write_control`, `--gate` and the
+dry run's words, an unreadable control.json, and the wake tasks a stopped lane doesn't set).
 `tests/test_git.py` runs `GitCli` on a real local repo in a
 temp folder.
 
@@ -1052,6 +1090,8 @@ temp folder.
 - `queue_runner/usage.py`: Claude's usage windows from `api/oauth/usage`, with the Claude login.
 - `queue_runner/gate.py`: the usage gate: `decide()`, Stefan's knob (`gate.json`), learned costs
   (`usage.jsonl`).
+- `queue_runner/control.py`: each lane's switch: reading `control.json` (and gate.json's older
+  pause), writing it for `--pause` and `--resume`, and what the runner says (ticket 30).
 - `queue_runner/limits.py` and `templates/restart.md`: usage-limit stops: T3's record of the
   reset, the transcript's context, when and how a job resumes, the auto-resume warning.
 - `queue_runner/lock.py`: `runner.lock` and `sol.lock`.

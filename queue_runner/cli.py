@@ -10,7 +10,9 @@
     python -m queue_runner --release NAME#N   # let the picker take a held issue again
     python -m queue_runner --review NAME#N    # Sol reviews that PR's head now
     python -m queue_runner --gate             # Claude's usage now, and whether each job kind fits
-    python -m queue_runner --pause | --resume # hold Claude jobs back, or let them start again
+    python -m queue_runner --pause | --resume [LANE]   # stop a lane after its job, or let it
+                                              # carry on (claude by default; sol, all): the
+                                              # dashboard's Stop and Resume, in control.json
     python -m queue_runner --reserve PERCENT  # the share of the week kept for Stefan (default 5)
     python -m queue_runner --stop             # stop the running runner (its pid in runner.pid)
     python -m queue_runner --inbox            # everything waiting on Stefan: PRs ready to
@@ -57,18 +59,32 @@ def _gate(config, usage, clock):
     return Gate(config.state_dir, usage, clock)
 
 
-def _print_gate(gate, out) -> None:
-    """The knob, Claude's windows now and each job kind's verdict (reads usage once)."""
+def _switch_lines(config) -> list[str]:
+    """Each lane's switch (`control.py`), as the log says it."""
+    from . import control
+    switch = control.read(config.state_dir)
+    if switch.error is not None:
+        return [control.unreadable_text(switch)]
+    return [control.stopped_text(id) if switch.stop(id).stopped else
+            f'The {control.NAMES[id]} lane carries on' for id in control.LANES]
+
+
+def _print_gate(gate, out, config) -> None:
+    """Each lane's switch, the knob, Claude's windows now and each job kind's verdict (reads
+    usage once)."""
+    from . import control
     from .gate import CLAUDE_KINDS, CostBook, decide
     from .usage import UsageError
+    for line in _switch_lines(config):
+        print(line, file=out)
+    held = control.read(config.state_dir).holds('claude')
     try:
         knob = gate.knob()
     except (OSError, ValueError) as e:
         print(f'gate.json is unreadable ({e}): no Claude job starts until it is fixed or removed',
               file=out)
         return
-    print(f'Claude usage gate: {"paused" if knob.paused else "running"}, weekly reserve '
-          f'{knob.reserve:g}%', file=out)
+    print(f'Claude usage gate: weekly reserve {knob.reserve:g}%', file=out)
     try:
         usage = gate.reader.read()
     except UsageError as e:
@@ -81,30 +97,50 @@ def _print_gate(gate, out) -> None:
     for kind in CLAUDE_KINDS:
         cost = gate.book.expected(kind)
         learned = ' (the cautious default)' if cost == CostBook.default(kind) else ''
+        if held:
+            print(f'  {kind}: waits: the Claude lane is stopped by Stefan', file=out)
+            continue
         v = decide(usage, kind, cost, knob, gate.clock())
         print(f'  {kind}: {"starts" if v.go else "waits"}: {v.text}{learned}', file=out)
 
 
+def _now_iso() -> str:
+    return datetime.datetime.now().astimezone().isoformat(timespec='seconds')
+
+
+def _switch(config, args, out) -> int:
+    """`--pause [LANE]` and `--resume [LANE]`: control.json, as the dashboard's Stop and Resume
+    write it (`control.py`)."""
+    from . import control
+    lane = args.pause or args.resume
+    lanes = control.LANES if lane == 'all' else (lane,)
+    if (was := control.read(config.state_dir)).error:
+        print(f'{was.error}; writing it afresh.', file=out)
+    control.ask(config.state_dir, lanes, 'after-job' if args.pause else None, _now_iso())
+    for id in lanes:
+        if args.pause:
+            print(f'{control.stopped_text(id)}. A job running now runs to its end.', file=out)
+        else:
+            print(f'The {control.NAMES[id]} lane carries on: it starts jobs again on its next '
+                  'pass.', file=out)
+    return 0
+
+
 def _knob(config, args, out) -> int:
-    from dataclasses import replace
+    from . import control
     from .gate import Knob, read_knob, write_knob
+    if not 0 <= args.reserve <= 100:
+        print('--reserve takes a percent from 0 to 100.', file=out)
+        return 2
     try:
-        knob = read_knob(config.state_dir)
-    except (OSError, ValueError) as e:   # set afresh from the defaults
-        print(f'gate.json was unreadable ({e}); starting again from the defaults.', file=out)
-        knob = Knob()
-    if args.reserve is not None:
-        if not 0 <= args.reserve <= 100:
-            print('--reserve takes a percent from 0 to 100.', file=out)
-            return 2
-        knob = replace(knob, reserve=args.reserve)
-    if args.pause or args.resume:
-        knob = replace(knob, paused=args.pause)
-    write_knob(config.state_dir, knob)
-    state = ('Paused: no Claude job starts (one running now runs to its end; Sol goes on)'
-             if knob.paused else 'Running: Claude jobs start when they fit')
-    print(f'{state}; the weekly reserve is {knob.reserve:g}%. A running runner reads this '
-          'before its next Claude job.', file=out)
+        read_knob(config.state_dir)
+    except (OSError, ValueError) as e:   # set afresh
+        print(f'gate.json was unreadable ({e}); writing it afresh.', file=out)
+    else:
+        control.carry_over(config.state_dir, _now_iso())   # an older pause in it stands
+    write_knob(config.state_dir, Knob(reserve=args.reserve))
+    print(f'The weekly reserve is {args.reserve:g}%. A running runner reads this before its '
+          'next Claude job.', file=out)
     return 0
 
 
@@ -125,13 +161,21 @@ def _dry_run_limited(config, out, log_line) -> bool:
 
 
 def _dry_run(config, github, git, out, log_line, t3=None, gate=None) -> int:
+    from . import control
+    switch = control.read(config.state_dir)
+    if switch.error is not None:
+        print(f'dry run: {control.unreadable_text(switch)}. Once it is, the lanes would:',
+              file=out)
+    for id in control.LANES:
+        if switch.error is None and switch.stop(id).stopped:
+            print(f'dry run: {control.stopped_text(id)}. Once resumed, it would:', file=out)
     if not _dry_run_limited(config, out, log_line) and \
             not _dry_run_decision(config, github, t3, out, log_line) and \
             not _dry_run_live(config, github, git, t3, out, log_line) and \
             not _dry_run_fix(config, github, git, out, log_line):
         _dry_run_build(config, github, out, log_line)
     if gate is not None:
-        _print_gate(gate, out)
+        _print_gate(gate, out, config)
     _dry_run_stops(config, github, out)
     _dry_run_reviews(config, github, out)
     _dry_run_merges(config, github, out)
@@ -492,8 +536,13 @@ def main(argv=None, github=None, out=None, t3=None, git=None, sleep=None,
     parser.add_argument('--gate', action='store_true',
                         help="print Claude's usage now and whether each job kind would start")
     knob = parser.add_mutually_exclusive_group()
-    knob.add_argument('--pause', action='store_true', help='start no Claude job until --resume')
-    knob.add_argument('--resume', action='store_true', help='let Claude jobs start again')
+    lanes = ('claude', 'sol', 'all')
+    knob.add_argument('--pause', nargs='?', const='claude', choices=lanes, metavar='LANE',
+                      help='stop a lane after its job: claude (the default), sol or all; '
+                           "the dashboard's Stop")
+    knob.add_argument('--resume', nargs='?', const='claude', choices=lanes, metavar='LANE',
+                      help="let a lane carry on: claude (the default), sol or all; the "
+                           "dashboard's Resume")
     parser.add_argument('--reserve', type=float, metavar='PERCENT',
                         help='the share of the week kept for Stefan until 24h before its reset')
     parser.add_argument('--stop', action='store_true', help='stop the running runner')
@@ -526,13 +575,17 @@ def main(argv=None, github=None, out=None, t3=None, git=None, sleep=None,
         return 0
 
     if args.pause or args.resume or args.reserve is not None:
-        code = _knob(config, args, out)
+        code = 0
+        if args.reserve is not None:
+            code = _knob(config, args, out)
+        if code == 0 and (args.pause or args.resume):
+            code = _switch(config, args, out)
         if code == 0:
-            log_line(f'gate knob: {" ".join(argv or sys.argv[1:])}')
+            log_line(f'Stefan: {" ".join(argv or sys.argv[1:])}')
         return code
     gate = _gate(config, usage, clock)
     if args.gate:
-        _print_gate(gate, out)
+        _print_gate(gate, out, config)
         return 0
     if sol_usage is None:
         from .sol import latest_limits as sol_usage

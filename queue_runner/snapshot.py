@@ -19,6 +19,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 
+from . import control
 from .gate import RECENT, RESERVE_RELEASE, SAMPLES, Knob
 
 VERSION = 1
@@ -96,7 +97,8 @@ class Facts:
     repos: list = field(default_factory=list)    # config.Repo, in config order
     jobs: list = field(default_factory=list)     # state.Job, the job log folded
     knob: Knob | None = Knob()                   # gate.json; None: unreadable
-    knob_at: datetime.datetime | None = None     # when gate.json was last written
+    # Each lane's stop (control.json, or gate.json's older pause), as read for this snapshot.
+    switch: control.Switch = control.Switch()
     claude_model: str = 'claude-opus-5-5'
     # The gate's verdict or a limit's resume, as the Claude lane's last pass left it.
     claude_wait: Wait | None = None
@@ -120,7 +122,9 @@ def build(facts: Facts) -> dict:
         'version': VERSION,
         'written_at': _iso(facts.now),
         'write_every': WRITE_EVERY,
-        'control_read_at': None,   # the runner reads no control.json yet (ticket 30)
+        # The control file this snapshot's lanes obey: each lane reads it again before it
+        # starts anything, so what's shown here is what they do (ticket 30).
+        'control_read_at': facts.switch.written_at if facts.switch.error is None else None,
         'runner': _runner(facts),
         'start_hint': START_HINT,
         'sources': _sources(facts),
@@ -182,10 +186,14 @@ def _job(facts: Facts, job) -> dict:
     }
 
 
-def _lane(facts: Facts, id: str, job, wait: Wait | None, paused: bool) -> dict:
+def _lane(facts: Facts, id: str, job, wait: Wait | None) -> dict:
+    stop = facts.switch.stop(id)
+    if facts.switch.error is not None:   # nothing starts until it's fixed: say so
+        wait = Wait(None, control.unreadable_text(facts.switch))
+        stop = control.Stop()
     if job is not None:
-        state = 'stopping' if paused else 'working'
-    elif paused:
+        state = 'stopping' if stop.stopped else 'working'
+    elif stop.stopped:
         state = 'stopped'
     else:
         state = 'waiting' if wait else 'idle'
@@ -206,19 +214,20 @@ def _lane(facts: Facts, id: str, job, wait: Wait | None, paused: bool) -> dict:
         'queue_empty': empty,
     }
     if state == 'stopped':
-        lane['stopped'] = {'at': _iso(facts.knob_at), 'during': None}
+        lane['stopped'] = {'at': _iso(stop.at), 'during': None}   # "now" is ticket 34's
     return lane
 
 
 def _lanes(facts: Facts) -> list[dict]:
-    paused = bool(facts.knob and facts.knob.paused)   # gate.json holds Claude jobs only
-    return [_lane(facts, 'claude', _open_job(facts, CLAUDE_KINDS), facts.claude_wait, paused),
-            _lane(facts, 'sol', _open_job(facts, SOL_KINDS), facts.sol_wait, False)]
+    return [_lane(facts, 'claude', _open_job(facts, CLAUDE_KINDS), facts.claude_wait),
+            _lane(facts, 'sol', _open_job(facts, SOL_KINDS), facts.sol_wait)]
 
 
 def _knob(facts: Facts) -> dict:
-    k = facts.knob
-    return {'paused': k.paused, 'reserve': k.reserve} if k else {'paused': None, 'reserve': None}
+    """gate.json's reserve, and `paused` in the switch's word: whether Stefan stopped the Claude
+    lane."""
+    return {'paused': facts.switch.stop('claude').stopped,
+            'reserve': facts.knob.reserve if facts.knob else None}
 
 
 def _runner(facts: Facts) -> dict:
@@ -497,10 +506,6 @@ class Snapshots:
             knob = read_knob(state)
         except (OSError, ValueError):
             knob = None
-        knob_path = os.path.join(state, 'gate.json')
-        knob_at = (datetime.datetime.fromtimestamp(os.path.getmtime(knob_path),
-                                                   datetime.timezone.utc)
-                   if os.path.exists(knob_path) else None)
         book = CostBook(os.path.join(state, 'usage.jsonl'))
         try:
             costs = {k: (book.expected(k), book.learned(k)) for k in KINDS}
@@ -510,7 +515,8 @@ class Snapshots:
             threads = dict(self._threads)
         runner = self.runner
         return Facts(
-            now=now, repos=list(self.config.repos), jobs=jobs, knob=knob, knob_at=knob_at,
+            now=now, repos=list(self.config.repos), jobs=jobs, knob=knob,
+            switch=control.read(state),
             claude_model=self.config.claude_model,
             claude_wait=runner.claude_wait if runner is not None else self._limit_wait(log, now),
             sol_wait=self._sol_wait(log, now),

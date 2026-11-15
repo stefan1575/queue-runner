@@ -14,6 +14,7 @@ import threading
 import time
 import traceback
 
+from . import control
 from .brief import build_brief
 from .config import Config, Repo
 from .decisions import Decider
@@ -36,6 +37,7 @@ from .wake import NoWaker
 # earlier runner, so none was started), idle (nothing to start), gated (the usage gate held the
 # chosen Claude job back: `Runner.gate_until` says when to look again).
 STARTED, BUSY, IDLE, GATED = 'started', 'busy', 'idle', 'gated'
+STOPPED = 'stopped'   # Stefan stopped the lane (`control.py`), or control.json is unreadable
 RESTART = 'restart'   # run_forever's end when the runner's own code moved (`restart.py`)
 
 WALL_STEP = 30      # a long sleep looks at the wall clock this often (seconds)
@@ -112,6 +114,8 @@ class Runner:
         self.titles: dict[tuple[str, int], str] = (
             self.reviewer.titles if self.reviewer is not None else {})
         self.publisher = None
+        # What each lane last said about its switch (`control.py`), so it's said once.
+        self._said_switch: dict[str, str | None] = {}
 
     def say(self, line: str) -> None:
         with self._say_lock:   # both lanes say things
@@ -136,6 +140,8 @@ class Runner:
         self.gate_until = None   # a wait from an earlier pass is that pass's
         if self.settle() == BUSY:
             return BUSY
+        if self.held('claude'):
+            return STOPPED
         chosen = self.choose()
         return self._gated(*chosen) if isinstance(chosen, tuple) else chosen
 
@@ -207,6 +213,24 @@ class Runner:
                 self.gate.measured(learned, [j.id for j in new], verdict.usage)
             return did
         return measured
+
+    def held(self, lane: str) -> bool:
+        """Whether Stefan stopped `lane` (control.json, read now), or control.json is unreadable:
+        then the lane starts nothing. Said once, and again when it changes."""
+        switch = control.read(self.config.state_dir)
+        if switch.error is not None:
+            text = control.unreadable_text(switch)
+        elif switch.stop(lane).stopped:
+            text = control.stopped_text(lane)
+        else:
+            text = None
+        said = self._said_switch.get(lane)
+        if text is not None and text != said:
+            self.say(text)
+        elif text is None and said is not None:
+            self.say(f'The {control.NAMES[lane]} lane runs again: Stefan resumed it')
+        self._said_switch[lane] = text
+        return text is not None
 
     def idle_seconds(self) -> float:
         """The pause after a pass that started nothing: `poll_seconds`, or less when the gate
@@ -585,15 +609,21 @@ class Runner:
 
     def _sol_pass(self) -> str:
         try:
-            return self.reviewer.review_pass() if self.reviewer else IDLE
+            if self.reviewer is None:
+                return IDLE
+            if self.held('sol'):   # stopped: no stop filed, no merge, no review
+                return STOPPED
+            return self.reviewer.review_pass()
         except Exception:
             self.log_line('Sol pass failed:\n' + traceback.format_exc())
             return IDLE
 
     def wake_times(self) -> list[datetime.datetime]:
-        """The times the lanes wait for now: the Claude lane's gate or limit, Sol's resume."""
-        times = [self._claude_waits]
-        if resume := self.jobs.sol_resume_at():
+        """The times the lanes wait for now: the Claude lane's gate or limit, Sol's resume. A lane
+        Stefan stopped waits for nothing (`control.py`), so it wakes no PC."""
+        switch = control.read(self.config.state_dir)
+        times = [] if switch.holds('claude') else [self._claude_waits]
+        if not switch.holds('sol') and (resume := self.jobs.sol_resume_at()):
             times.append(_when(resume))
         return [t for t in times if t is not None and t > self.now()]
 
