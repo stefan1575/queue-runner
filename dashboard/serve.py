@@ -46,6 +46,8 @@ START_RUNNER = (f"Start it with its shortcut, ~/.queue-runner/Queue runner.lnk (
 NAME = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
 STOPS = (None, "after-job", "now")
 REPO_STOPS = (None, "after-job")   # a repo's (ticket 37): Stop now stays a lane's
+LANES = ("claude", "sol")   # the runner's lanes (queue_runner/control.py's LANES)
+BROKEN = object()   # control.json is there but isn't JSON (`usable`)
 ASK = re.compile(r"^[A-Za-z0-9._-]{1,200}$")   # an ask's id: `stop-<job>`, `merge-<repo>-<n>-<head7>`...
 
 
@@ -70,20 +72,52 @@ def _snooze_until(value: object) -> str | None:
     return t.astimezone().isoformat(timespec="seconds")
 
 
-def apply_control(control: dict, body: object, now: str, asks: set | None = None) -> dict:
+def _usable_entry(entry: object, stops: tuple) -> bool:
+    return isinstance(entry, dict) and "stop" in entry and entry["stop"] in stops
+
+
+def usable(raw: object, now: str) -> dict:
+    """control.json as the page and its writes read it, from `raw` as parsed (None when there is
+    none, BROKEN when it isn't JSON), the same as the runner's `control.repaired`: what can be
+    read is kept, and nothing an unreadable file held is let go by a write that doesn't name it.
+    A lane's or repo's entry that can't be used reads as stopped ("after-job", at `now`), and
+    with no lanes to read (not JSON, not an object, `lanes` not one) each lane does. A `repos`
+    that isn't an object names no repo; an order or ask that can't be used is dropped."""
+    broken = not isinstance(raw, dict) and raw is not None
+    raw = raw if isinstance(raw, dict) else {}
+    stopped = {"stop": "after-job", "at": now}
+    lanes, entries = {}, raw.get("lanes", {})
+    if isinstance(entries, dict):
+        for lane, entry in entries.items():
+            if _usable_entry(entry, STOPS):
+                lanes[lane] = entry
+            elif lane in LANES:
+                lanes[lane] = dict(stopped)
+    if broken or not isinstance(entries, dict):
+        for lane in LANES:
+            lanes.setdefault(lane, dict(stopped))
+    repos, entries = {}, raw.get("repos", {})
+    for name, entry in (entries.items() if isinstance(entries, dict) else ()):
+        repos[name] = entry if _usable_entry(entry, REPO_STOPS) else dict(stopped)
+    order, marks = raw.get("repo_order"), raw.get("asks")
+    return {"version": 1, "written_at": raw.get("written_at"), "lanes": lanes,
+            "repo_order": [r for r in order if isinstance(r, str)] if isinstance(order, list) else [],
+            "repos": repos,
+            "asks": {k: v for k, v in marks.items() if isinstance(v, dict)} if isinstance(marks, dict) else {}}
+
+
+def apply_control(control: object, body: object, now: str, asks: set | None = None) -> dict:
     """The control file after one request: `{"lane", "stop"}`, `{"repo", "stop"}` (ticket 37),
     `{"repo_order"}`, or an ask's `{"ask", "read"}` and `{"ask", "snooze_until"}` (ticket 36) and
     `{"ask", "open": true}` (ticket 35: decide that ask in a T3 thread), kept under `asks.<id>`
-    beside that object's other keys. With `asks`, the ids the snapshot
+    beside that object's other keys. `control` is the file as parsed, repaired first (`usable`)
+    if the runner couldn't read it. With `asks`, the ids the snapshot
     lists now, entries for any other ask are dropped."""
     if not isinstance(body, dict):
         raise Refused("a JSON object is expected")
-    lanes = {k: v for k, v in (control.get("lanes") or {}).items() if isinstance(v, dict)}
-    order = [r for r in (control.get("repo_order") or []) if isinstance(r, str)]
-    kept = control.get("repos") if isinstance(control.get("repos"), dict) else {}
-    repos = {k: v for k, v in kept.items() if isinstance(v, dict)}
-    kept = control.get("asks") if isinstance(control.get("asks"), dict) else {}
-    marks = {k: dict(v) for k, v in kept.items() if isinstance(v, dict)}
+    control = usable(control, now)   # an unreadable file is written afresh from what can be read
+    lanes, order, repos = dict(control["lanes"]), list(control["repo_order"]), dict(control["repos"])
+    marks = {k: dict(v) for k, v in control["asks"].items()}
     keys = set(body)
     if keys == {"lane", "stop"}:
         lane, stop = body["lane"], body["stop"]
@@ -170,12 +204,18 @@ class App:
             return 500, json.dumps({"error": "unreadable", "path": str(self.snapshot_path), "detail": str(e)}).encode()
         return 200, raw
 
-    def control(self) -> dict:
+    def raw_control(self) -> object:
+        """control.json as parsed: None when there is none, BROKEN when it isn't JSON."""
         try:
-            data = json.loads(self.control_path.read_text(encoding="utf-8"))
+            return json.loads(self.control_path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return None
         except (OSError, ValueError):
-            return {"version": 1, "lanes": {}, "repo_order": []}
-        return data if isinstance(data, dict) else {"version": 1, "lanes": {}, "repo_order": []}
+            return BROKEN
+
+    def control(self) -> dict:
+        """control.json as the page reads it (`usable`), whatever is in the file."""
+        return usable(self.raw_control(), self.clock())
 
     def ask_ids(self) -> set | None:
         """The asks the snapshot lists now (waiting and answered), whose control entries are
@@ -195,7 +235,7 @@ class App:
 
     def write_control(self, body: object) -> dict:
         with self.lock:
-            new = apply_control(self.control(), body, self.clock(), asks=self.ask_ids())
+            new = apply_control(self.raw_control(), body, self.clock(), asks=self.ask_ids())
             self.state_dir.mkdir(parents=True, exist_ok=True)
             fd, tmp = tempfile.mkstemp(dir=self.state_dir, prefix="control.", suffix=".tmp")
             try:

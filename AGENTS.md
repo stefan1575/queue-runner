@@ -274,9 +274,17 @@ on; `"now"` is read as `"after-job"` until ticket 34.
   stop waits for Resume (`Reviewer.stopped_now`, as for a stopped repo); the Claude lane before
   a decision's retry or answer (`Runner.continue_job`): the decision ends `not-started` and the
   earlier job stays as it was, so the case is decided again after Resume.
-- **Unreadable** (not JSON, not an object, a lane's entry without a `stop` the page could have
-  written): neither lane starts anything until it's fixed, said once; any Stop or Resume on the
-  page, or `--pause`/`--resume`, writes it afresh (keeping what they can read, as the page does).
+- **Unreadable** (not JSON, not an object, `lanes` or `repos` there but not an object, a lane's
+  or repo's entry that isn't an object or has no `stop` the page could have written: a missing
+  `stop` is never a Resume): neither lane starts anything until it's fixed, said once. An odd
+  `repo_order` or ask entry is ignored instead (The build order, Read and snoozed). Any Stop or
+  Resume on the page, any other request it sends, or `--pause`/`--resume`, writes it afresh
+  from what they can read (`control.repaired`, and the page's `serve.usable`, the same file
+  from either end) and **lets go only of what it names**: an entry it can't use is written
+  stopped (`after-job`), and with no lanes to read (not JSON, not an object, `lanes` not one)
+  each lane is, so Resume on one lane leaves the other held until it's resumed too. A `repos`
+  that isn't an object names no repo and is dropped. The page reads control.json through the
+  same repair (`App.control`), so it shows those lanes stopped.
 - **The older pause:** with `paused: true` in gate.json and no `claude` entry in control.json,
   the Claude lane is stopped (since gate.json's mtime). An entry, either way, wins. The CLI's
   `ask` (and `--reserve`, through `carry_over`) moves that pause into control.json and leaves
@@ -1379,7 +1387,8 @@ GitHub read in `tests/test_snapshot_runner.py`; `GhCli.work_issues` in `tests/te
 Stopping a lane: `tests/test_switch.py` (today's gate.json pause through the run loop, each
 stop through `main` and `Runner.run_once`, the older pause against an entry, `--pause` and
 `--resume`, the same file from the CLI's writer and `serve.App.write_control`, `--gate` and the
-dry run's words, an unreadable control.json, and the wake tasks a stopped lane doesn't set).
+dry run's words, an unreadable control.json in every shape, read and repaired from both
+ends, the wake tasks a stopped lane doesn't set, and a Stop asked mid-review or mid-merge).
 The build order: `tests/test_build_order.py` (two served repos through `main` and the real
 `Runner`: each lane in `repo_order`, the orders that are ignored and said once, a new order
 written mid-job, the dry run, and the snapshot's `repos` and `control_read_at`).

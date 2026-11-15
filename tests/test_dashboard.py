@@ -168,11 +168,17 @@ class AppTest(unittest.TestCase):
             self.app.write_control({"lane": "claude", "stop": "sideways"})
         self.assertFalse((self.dir / "control.json").exists())
 
-    def test_an_unreadable_control_file_reads_as_nothing_asked(self):
+    def test_an_unreadable_control_file_reads_as_both_lanes_stopped_as_the_runner_holds_them(self):
+        # The runner starts nothing in either lane while it can't read the file (review 1's F5):
+        # the page says the same, and a write lets go only of what it names.
         (self.dir / "control.json").write_text("not json", encoding="utf-8")
-        self.assertEqual(self.app.control(), {"version": 1, "lanes": {}, "repo_order": []})
-        self.app.write_control({"lane": "sol", "stop": "now"})
-        self.assertEqual(self.app.control()["lanes"], {"sol": {"stop": "now", "at": NOW}})
+        stopped = {"stop": "after-job", "at": NOW}
+        self.assertEqual(self.app.control(), {"version": 1, "written_at": None, "repo_order": [],
+                                              "lanes": {"claude": stopped, "sol": stopped},
+                                              "repos": {}, "asks": {}})
+        self.app.write_control({"lane": "sol", "stop": None})
+        self.assertEqual(self.app.control()["lanes"], {"claude": stopped,
+                                                       "sol": {"stop": None, "at": NOW}})
 
 
 class SampleTest(unittest.TestCase):
