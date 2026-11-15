@@ -20,6 +20,15 @@ model = "claude-opus-5-5"
 script = "~/Code/tools/codex-sol/codex-sol.sh"
 bash = "C:/Program Files/Git/bin/bash.exe"
 
+# First in the build order (Stefan, 2026-11-15: "prioritize game backdrop full stop", its first
+# run under the dashboard). The runner merges its clean PRs itself (the default). It has no live
+# steps: merged is live.
+[[repos]]
+name = "game-backdrop"
+github = "stefan1575/game-backdrop"
+path = "~/Code/Personal/game-backdrop"
+base = "main"
+
 [[repos]]
 name = "leads-dashboard"
 github = "RoyalBullyAgency-RBA/leads-dashboard"
