@@ -101,6 +101,9 @@ class Runner:
                           toaster=self.toaster)
         self.decider = Decider(config, github=github, t3=t3, jobs=self.jobs, say=self.say,
                                stopper=stopper)
+        from .ask_threads import AskThreads   # an ask decided in a T3 thread (ticket 35)
+        self.asking = AskThreads(config, github=github, t3=t3, jobs=self.jobs, say=self.say,
+                                 decider=self.decider)
         self.live = LiveSteps(config, github=github, git=git, t3=t3, jobs=self.jobs,
                               say=self.say, stopper=stopper,
                               merger=Merger(config, github=github, git=git, jobs=self.jobs,
@@ -155,6 +158,7 @@ class Runner:
         self.take_order()
         if self.held('claude'):
             return STOPPED
+        self.asking.read_answers()   # an ask thread's answer, before anything is chosen (35)
         chosen = self.choose()
         return self._gated(*chosen) if isinstance(chosen, tuple) else chosen
 
@@ -178,6 +182,8 @@ class Runner:
                 self._last_gate = text
                 return GATED
             return old.kind, None, lambda: self.recover(old)
+        if ask := self.asking.next(control.read(self.config.state_dir)):   # Stefan's click (35)
+            return 'decision', None, lambda: self.asking.open(*ask)
         if case := self.decider.next_case():
             if self.decider.direct_answer(case):
                 return None, None, lambda: self.decider.run(case, self.continue_job)
@@ -219,8 +225,9 @@ class Runner:
         def measured():
             since = len(self.jobs.jobs())
             did = run()
-            if did == STARTED:   # a thread ran: what it cost teaches the next estimate
-                new = [j for j in self.jobs.jobs()[since:] if j.kind in CLAUDE_KINDS]
+            new = [j for j in self.jobs.jobs()[since:] if j.kind in CLAUDE_KINDS]
+            if did == STARTED and new:   # a thread ran: what it cost teaches the next estimate
+                # (an ask's thread runs on with Stefan, so it teaches nothing: ticket 35)
                 # A decision that continued a build or fix counts as that job's cost, so a
                 # plain decision's estimate stays a decision's.
                 learned = next((j.kind for j in new if j.kind != 'decision'), kind)

@@ -20,6 +20,11 @@ from either lane (a job already running on it finishes), taken up at the start o
 (`stopped_repos`). A name that isn't served is ignored; an entry the page couldn't have written
 makes the file unreadable, as a lane's does.
 
+`asks.<ask id>` (ticket 35) is an object per Inbox ask, whose `open` (`{"at"}`) asks the runner to
+start a T3 thread to decide that ask in (`ask_threads.py`); other keys in it are other tickets'
+and are kept. A record the page couldn't have written is ignored, never making the file
+unreadable: it starts nothing either way.
+
 **The older code's pause** was `gate.json`'s `paused`. With `paused: true` there and no entry for
 the Claude lane here, the Claude lane is stopped (since gate.json was written); an entry, either
 way, wins. `ask` carries such a pause over into this file and drops it from gate.json, which then
@@ -57,6 +62,7 @@ class Switch:
     error: str | None = None
     order: object = None   # `repo_order` as written (None: not there); `ordered` judges it
     repos: dict = field(default_factory=dict)   # repo name: Stop, as written (ticket 37)
+    opened: dict = field(default_factory=dict)  # ask id: when Stefan asked to open it (ticket 35)
 
     def stop(self, lane: str) -> Stop:
         return self.lanes.get(lane) or Stop()
@@ -152,7 +158,19 @@ def read(state_dir: str) -> Switch:
     repos = {name: Stop(e.get('stop'), _when(e.get('at')), 'control')
              for name, e in (raw.get('repos') or {}).items()}
     return Switch(lanes, written if isinstance(written, str) else None,
-                  order=raw.get('repo_order'), repos=repos)
+                  order=raw.get('repo_order'), repos=repos, opened=_opened(raw))
+
+
+def _opened(raw: dict) -> dict:
+    """Each ask Stefan asked to open in a T3 thread (`asks.<id>.open.at`), and when."""
+    asks = raw.get('asks')
+    found = {}
+    for id, record in (asks.items() if isinstance(asks, dict) else ()):
+        at = _when(record.get('open', {}).get('at')) if isinstance(record, dict) and isinstance(
+            record.get('open'), dict) else None
+        if at is not None:
+            found[id] = at
+    return found
 
 
 def ordered(repos: list, order) -> tuple[list, str | None]:
@@ -226,6 +244,7 @@ def ask(state_dir: str, lanes, stop: str | None, now: str, repos=()) -> dict:
     order = [r for r in (raw.get('repo_order') or []) if isinstance(r, str)]
     kept = raw.get('repos') if isinstance(raw.get('repos'), dict) else {}
     stops = {k: v for k, v in kept.items() if isinstance(v, dict)}
+    asks = raw.get('asks') if isinstance(raw.get('asks'), dict) else {}   # the page's (ticket 35)
     old = _old_pause(state_dir)
     if old is not None and 'claude' not in entries:
         entries['claude'] = {'stop': 'after-job', 'at': _iso(old)}
@@ -234,7 +253,7 @@ def ask(state_dir: str, lanes, stop: str | None, now: str, repos=()) -> dict:
     for name in repos:
         stops[name] = {'stop': stop, 'at': now}
     data = {'version': 1, 'written_at': now, 'lanes': entries, 'repo_order': order,
-            'repos': stops}
+            'repos': stops, 'asks': {k: v for k, v in asks.items() if isinstance(v, dict)}}
     _write(state_dir, data)
     if old is not None:
         from .gate import Knob, read_knob, write_knob

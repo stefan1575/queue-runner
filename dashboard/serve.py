@@ -46,6 +46,7 @@ START_RUNNER = (f"Start it with its shortcut, ~/.queue-runner/Queue runner.lnk (
 NAME = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
 STOPS = (None, "after-job", "now")
 REPO_STOPS = (None, "after-job")   # a repo's (ticket 37): Stop now stays a lane's
+ASK_ID = re.compile(r"^[A-Za-z0-9._-]{1,128}$")   # an ask's `id` in the snapshot
 
 
 class Refused(Exception):
@@ -57,14 +58,17 @@ def now_iso() -> str:
 
 
 def apply_control(control: dict, body: object, now: str) -> dict:
-    """The control file after one request: `{"lane", "stop"}`, `{"repo", "stop"}` (ticket 37) or
-    `{"repo_order"}`."""
+    """The control file after one request: `{"lane", "stop"}`, `{"repo", "stop"}` (ticket 37),
+    `{"repo_order"}` or `{"ask", "open": true}` (ticket 35: decide that ask in a T3 thread). An ask's
+    record is `asks.<id>`, an object whose other keys are kept."""
     if not isinstance(body, dict):
         raise Refused("a JSON object is expected")
     lanes = {k: v for k, v in (control.get("lanes") or {}).items() if isinstance(v, dict)}
     order = [r for r in (control.get("repo_order") or []) if isinstance(r, str)]
     kept = control.get("repos") if isinstance(control.get("repos"), dict) else {}
     repos = {k: v for k, v in kept.items() if isinstance(v, dict)}
+    held = control.get("asks") if isinstance(control.get("asks"), dict) else {}
+    asks = {k: dict(v) for k, v in held.items() if isinstance(v, dict)}
     keys = set(body)
     if keys == {"lane", "stop"}:
         lane, stop = body["lane"], body["stop"]
@@ -86,9 +90,19 @@ def apply_control(control: dict, body: object, now: str) -> dict:
                 or not all(isinstance(r, str) and NAME.match(r) for r in order)
                 or len(set(order)) != len(order)):
             raise Refused("repo_order must list each repo's name once")
+    elif keys == {"ask", "open"}:   # ticket 35: the runner starts a thread to decide it in, once
+        ask = body["ask"]
+        if not isinstance(ask, str) or not ASK_ID.match(ask):
+            raise Refused("ask must be an ask's id")
+        if body["open"] is not True:
+            raise Refused("open must be true")
+        record = asks.setdefault(ask, {})
+        if not isinstance(record.get("open"), dict):   # asked again: the first time stands
+            record["open"] = {"at": now}
     else:
-        raise Refused('send {"lane", "stop"}, {"repo", "stop"} or {"repo_order"}')
-    return {"version": 1, "written_at": now, "lanes": lanes, "repo_order": order, "repos": repos}
+        raise Refused('send {"lane", "stop"}, {"repo", "stop"}, {"repo_order"} or {"ask", "open": true}')
+    return {"version": 1, "written_at": now, "lanes": lanes, "repo_order": order, "repos": repos,
+            "asks": asks}
 
 
 class App:

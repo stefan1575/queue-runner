@@ -91,6 +91,10 @@ def build(name: str = DEFAULT, base: datetime | None = None, control: dict | Non
         # below; `story` is the same in fragments, read by the earlier takes only); then `question`, `options` and where it's answered (`go`, whose
         # `where` is "t3" or "github": it picks the mark on the button).
         # `why` is read by the earlier takes only, and goes when they do.
+        # `decide` (ticket 35) is null for an ask that can't be decided in a T3 thread, else where
+        # that stands: `state` "offered" (the page's Decide in T3 asks the runner to open one),
+        # "asked" (the runner read the request; `note` says when it starts) or "open" (`go` is
+        # the thread then, and `also` the other place to answer it, its needs-info issue).
         "asks": [
             {
                 "id": "ask-152", "kind": "stuck", "repo": LD, "ref": "PR #152", "pr": 152,
@@ -109,6 +113,8 @@ def build(name: str = DEFAULT, base: datetime | None = None, control: dict | Non
                 ],
                 "holds_up": ["#216 Ring-to audit page"],
                 "go": {"label": "Decide in T3", "where": "t3", "url": T3 + "0481ebdf-41e8-4253-b3a1-3be2d40a80b2"},
+                "decide": {"state": "open", "at": ago(20), "note": None},
+                "also": {"label": "Open the needs-info issue", "where": "github", "url": GH[LD] + "/issues/219"},
                 "why": [
                     "Review 3 raised I-4 again: the ring-to check reads the Client's owner from before the move.",
                     "The decision thread's approach note recommends rework: read the owner from the call's routing row, not from the Client.",
@@ -251,6 +257,9 @@ def build(name: str = DEFAULT, base: datetime | None = None, control: dict | Non
     }
     snap["activity"] = _activity(snap["prs"], ago)
     _vary(snap, name, ago, ahead)
+    for ask in snap["asks"] + snap["answered"]:
+        ask.setdefault("decide", None)
+        ask.setdefault("also", None)
     for ask in snap["asks"] + snap["answered"]:
         ask["timeline"] = [{"at": ago(minutes), "text": text} for minutes, text in _TIMELINES[ask["id"]]]
     if name == "dead":
@@ -523,7 +532,8 @@ def _vary(snap: dict, name: str, ago, ahead) -> None:
              "because": "test_wake.py timed out once in CI and passes locally. A decision thread couldn't tell a flake from a fault.",
              "story": ["Today: built, PR #4 opened", "Review 1 clean", "The tests timed out on Windows"],
              "question": "Run the tests again, or look first?", "holds_up": [],
-             "go": {"label": "Decide in T3", "where": "t3", "url": T3 + "89d3ed68-05f2-418f-afd8-9b4a28709ddc"},
+             "go": {"label": "Open the needs-info issue", "where": "github", "url": GH[QR] + "/issues/6"},
+             "decide": {"state": "offered", "at": None, "note": None},
              "why": ["test_wake.py timed out once in CI and passes locally."]},
             {"id": "ask-ops", "kind": "decision", "repo": LD, "ref": "#231", "pr": None, "subject": "Monthly report email", "since": ago(1),
              "situation": "The issue names two different recipients.",
@@ -581,6 +591,14 @@ def _obey(snap: dict, control: dict, now: datetime) -> None:
         ask = (control.get("repos") or {}).get(repo["name"])
         if isinstance(ask, dict) and "stop" in ask:
             repo["stopped"] = {"at": ask.get("at")} if ask["stop"] else None
+    claude = _lane(snap, "claude")
+    for ask in snap["asks"]:   # Decide in T3 (ticket 35): read, it starts on the next pass
+        record = (control.get("asks") or {}).get(ask["id"])
+        if (ask.get("decide") or {}).get("state") == "offered" and isinstance(record, dict) and isinstance(record.get("open"), dict):
+            note = ("It starts when you resume the Claude lane." if claude["state"] == "stopped"
+                    else f"It starts once Claude's current {claude['job']['kind']} ends." if claude["job"]
+                    else "It starts on the Claude lane's next pass.")
+            ask["decide"] = {"state": "asked", "at": record["open"].get("at"), "note": note}
     order = control.get("repo_order") or []
     names = [r["name"] for r in snap["repos"]]
     if sorted(order) == sorted(names):

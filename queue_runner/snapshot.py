@@ -179,8 +179,17 @@ def _work(facts: Facts) -> dict:
     from .asks import render
     from .work import lists
     asks, answered = render(facts.inbox, facts.jobs, facts.releases, facts.repos)
+    _decide(facts, asks, answered)
     return {'asks': asks, 'answered': answered,
             **lists(_view(facts), asks, facts.releases, facts.inbox)}
+
+
+def _decide(facts: Facts, asks: list, answered: list) -> None:
+    """Each ask's `decide` and `also` (ticket 35: decided in a T3 thread)."""
+    from .ask_threads import mark, waits_text
+    job, wait = _open_job(facts, CLAUDE_KINDS), facts.claude_wait
+    mark(asks, answered, facts.jobs, facts.switch.opened,
+         lambda repo: waits_text(facts.switch, repo, job, wait.reason if wait else None))
 
 
 def _view(facts: Facts):

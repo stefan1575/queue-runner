@@ -188,7 +188,7 @@ def finished(all_jobs, stop) -> bool:
     """The runner has acted on Stefan's answer: after a reply, the decision on it ended (and the
     fix round it ordered, if it did); after a closed issue, the next job on the PR ended."""
     after = acting(all_jobs, stop)
-    if stop.answer == 'replied':
+    if stop.answer in ('replied', 'thread'):   # a reply, or decided in its T3 thread (35)
         k = next((i for i, j in enumerate(after) if j.kind == 'decision'), None)
         if k is None or after[k].open:
             return False
@@ -206,8 +206,20 @@ def _answered(jobs, all_jobs, repo, pulls) -> list[Waiting]:
     for n in sorted(pulls):
         stops = [s for s in jobs.on('stop', repo.name, n) if s.outcome == 'answered']
         if stops and not finished(all_jobs, stops[-1]):
-            found.append(Waiting('stop', repo.name, n, True, stops[-1]))
+            s = stops[-1]
+            found.append(Waiting('stop', repo.name, n, True, s, said=_in_thread(all_jobs, s)))
     return found
+
+
+def _in_thread(all_jobs, stop) -> str | None:
+    """What Stefan decided in the stop's T3 thread (ticket 35), as its decision says it."""
+    if stop.answer != 'thread':
+        return None
+    d = next((j for j in reversed(all_jobs) if j.kind == 'decision' and j.about == stop.id), None)
+    text = (d.reason or d.outcome) if d is not None and not d.open else 'a decision'
+    line = next((l.strip() for l in text.splitlines() if l.strip()), text)
+    line = f'In T3: {line.rstrip(".")}'   # the page quotes it inside a sentence
+    return line if len(line) <= 120 else line[:119].rstrip() + '…'
 
 
 class _Reader:
@@ -259,7 +271,7 @@ class _Reader:
         if w.kind == 'stop' and w.job.stop == 'approach-note':
             w = replace(w, note=self._note(w))
         if answered:
-            w = replace(w, said=self._said(w))
+            w = replace(w, said=w.said or self._said(w))
         return w
 
     def _note(self, w: Waiting) -> str | None:

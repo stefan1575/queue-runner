@@ -92,7 +92,7 @@ class AppTest(unittest.TestCase):
     def test_a_control_request_is_written_whole_to_the_state_folder(self):
         self.app.write_control({"lane": "claude", "stop": "after-job"})
         on_disk = json.loads((self.dir / "control.json").read_text(encoding="utf-8"))
-        self.assertEqual(on_disk, {"version": 1, "written_at": NOW, "lanes": {"claude": {"stop": "after-job", "at": NOW}}, "repo_order": [], "repos": {}})
+        self.assertEqual(on_disk, {"version": 1, "written_at": NOW, "lanes": {"claude": {"stop": "after-job", "at": NOW}}, "repo_order": [], "repos": {}, "asks": {}})
         self.assertEqual(self.app.control(), on_disk)
         self.assertEqual([p.name for p in self.dir.iterdir()], ["control.json"])   # no temp file left
 
