@@ -1,4 +1,4 @@
-"""Stops for Stefan (ticket 06; `~/.claude/docs/pr-review.md`, Stops), in the Sol lane.
+"""Stops for Stefan (ticket 06; `~/Code/docs/pr-review.md`, Stops), in the Sol lane.
 
 When the loop has to come to Stefan, the runner files the stop: one `needs-info` issue per PR
 (opened, or a comment on the one still open), a comment on the PR that records the stop and links
@@ -16,7 +16,7 @@ with the Approach note a decision thread wrote) and a decision thread's own ques
 (`decision`).
 
 Filing is an automated post in the repo's own issues and PRs, which needs no go-ahead
-(`~/.claude/CLAUDE.md`).
+(`~/Code/global/CLAUDE.md`).
 """
 import datetime
 import json
