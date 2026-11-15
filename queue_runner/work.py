@@ -106,6 +106,7 @@ class RepoRead:
     builds: tuple = ()                  # (issue, title) in the picker's order
     in_flight: frozenset = frozenset()  # issues a branch or PR is on (`picker.in_flight`)
     errors: tuple = ()
+    findings: dict = field(default_factory=dict)   # review job id: {findings, signals}
 
 
 _FROM_BRANCH = re.compile(r'\bfrom \S+?/claude/\S+-(\d+)\b')
@@ -179,7 +180,12 @@ def read_repo(config, github, git, jobs, repo, now=None) -> RepoRead:
         (b.issue.number, b.issue.title)
         for b in pickable(repo, github, held=jobs.held_issues(repo.name))))
     flying = part('what is in flight', lambda: frozenset(in_flight(repo, github)), frozenset())
+    from .inbox import reviews
+    # Each review's decision.json (its findings and signals), as `asks.Story` reads them.
+    found = part("the reviews' findings", lambda: reviews(
+        jobs.jobs(), {(repo.name, p.number) for p in pulls}), {})
     return RepoRead(at=None, issues=issues, prs=tuple(prs), decisions=decisions, live=live,
+                    findings=found,
                     pending=pending, pending_issues=pending_issues, builds=picked,
                     in_flight=flying, errors=tuple(errors))
 
@@ -252,6 +258,7 @@ class View:
     off: frozenset = frozenset()
     limited: list = field(default_factory=list)
     lane_jobs: dict = field(default_factory=dict)   # lane id: its open state.Job, or None
+    titles: dict = field(default_factory=dict)      # (repo, n): a title the passes read
 
 
 def _title(read: RepoRead, n: int) -> str:
@@ -336,8 +343,19 @@ def lists(v: View | None, asks=(), releases=(), inbox=None) -> dict:
     prs = {(r.name, p.pr.number): _pr_status(v, r, p, cq, sq)
            for r in v.repos if r.name in v.reads for p in v.reads[r.name].prs}
     issues = _issues(v, asks, prs, cq)
-    return {'features': _feature_list(v, issues), 'issues': issues, 'prs': _pr_list(v, prs),
-            'activity': []}
+    story = _story(v)
+    titles = {(r, n): t for r, read in v.reads.items() for n, t in _titles(read).items()}
+    titles.update(v.titles)
+    return {'features': _feature_list(v, issues), 'issues': issues,
+            'prs': _pr_list(v, prs, story, releases),
+            'activity': _activity(story, v, titles, releases)}
+
+
+def _titles(read: RepoRead) -> dict:
+    found = {i.number: i.title for i in read.issues}
+    found.update((s.number, s.title) for i in read.issues for s in i.sub_issues)
+    found.update((p.pr.number, p.pr.title) for p in read.prs)
+    return found
 
 
 # --- features -----------------------------------------------------------------------------------
@@ -580,7 +598,7 @@ def _pr_status(v: View, repo, p: PrRead, cq: list, sq: list) -> tuple[str, str, 
     return 'Not reviewed now', _sentence(why), REVIEW
 
 
-def _pr_list(v: View, statuses: dict) -> list[dict]:
+def _pr_list(v: View, statuses: dict, story, releases) -> list[dict]:
     out = []
     for r in v.repos:
         read = v.reads.get(r.name)
@@ -595,8 +613,170 @@ def _pr_list(v: View, statuses: dict) -> list[dict]:
                         'status': status, 'next': nxt,
                         'checks': [{'label': label, 'ok': why is None}
                                    for label, why in (p.merge or ())],
-                        'timeline': []})
+                        'timeline': _timeline(story, v, r, p, releases)})
     return out
+
+
+# --- what happened ------------------------------------------------------------------------------
+
+ACTIVITY_MAX = 200
+_PR_KINDS = ('review', 'fix', 'merge', 'ready', 'stop', 'live')
+
+
+def _h7(sha) -> str:
+    return (sha or '')[:7]
+
+
+def _other(j) -> str | None:
+    """The sentences `asks.Story` doesn't write: what counted for nothing."""
+    h7 = _h7(j.sha)
+    if j.kind == 'review':
+        return {'failed': f"Sol's review of {h7} failed.",
+                'out-of-usage': f'Sol ran out of usage reviewing {h7}; the PR is reviewed afresh '
+                                'after the reset.',
+                'head-moved': f'The head moved while Sol was to review {h7}, so nothing '
+                              'counted.'}.get(j.outcome, f'Sol started reviewing {h7}.'
+                                              if j.open else None)
+    if j.kind == 'merge':
+        return {'head-moved': f'The merge at {h7} was refused: the head had moved.',
+                'failed': f'The merge at {h7} failed.'}.get(
+            j.outcome, f'The runner started merging it at {h7}.' if j.open else None)
+    if j.kind == 'stop' and j.outcome == 'failed':
+        return 'Filing a stop for you failed; the next pass files it again.'
+    return None
+
+
+def _event(story, j) -> list[tuple]:
+    """A job's events: (when, actor, kind, sha, sentence, tone, findings). A stop Stefan answered
+    is two: the stop, and his answer."""
+    from .asks import REVIEWED, SKIPPED
+    from .stops import number_of
+    if j.outcome in SKIPPED or (j.kind == 'live' and j.outcome == 'assumed'):
+        return []
+    at, sha = j.ended_at or j.started_at, _h7(j.sha)
+    tone = None
+    findings = []
+    if j.kind == 'build':
+        text, actor, at = story._build(j), 'claude', j.started_at if j.open else at
+        tone = 'ok' if j.outcome == 'done' else 'bad' if j.outcome == 'failed' else None
+    elif j.kind == 'review':
+        actor = 'sol'
+        text = story._review(j) if j.outcome in REVIEWED else _other(j)
+        tone = 'ok' if j.outcome == 'clean' else 'you' if j.outcome in (
+            'stop', 'approach-note') else None
+        findings = [{'id': f.get('id', ''), 'text': f.get('class') or f.get('text') or '',
+                     'status': f.get('status', 'open')} for f in story.findings(j)]
+    elif j.kind == 'fix':
+        text, actor = story._fix(j), 'claude'
+        at = j.started_at if j.open else at
+        tone = 'ok' if j.outcome == 'pushed' else 'bad' if j.outcome == 'failed' else None
+    elif j.kind == 'ready':
+        text, actor = story._ready(j), 'runner'
+        tone = 'you' if j.outcome == 'marked' else None
+    elif j.kind == 'merge':
+        mine = 'Stefan' in (j.reason or '')
+        text = ('You merged it.' if mine else 'The runner merged it.') \
+            if j.outcome == 'merged' else _other(j)
+        actor, tone = ('you' if mine else 'runner'), 'ok' if j.outcome == 'merged' else None
+    elif j.kind == 'live':
+        text, actor = story._live(j), 'claude'
+        tone = 'ok' if j.outcome == 'live' else 'bad' if j.outcome in ('failed', 'partial') \
+            else 'you' if j.outcome == 'stop' else None
+    elif j.kind == 'decision':
+        text, actor = story._decision(j) or f'A decision ended {j.outcome}.', 'claude'
+        tone = 'you' if j.outcome == 'stop' else None
+    elif j.kind == 'stop':
+        if j.outcome not in ('filed', 'answered'):
+            return [(at, 'runner', 'stop', sha, _other(j), 'bad', [])] if _other(j) else []
+        out = [(j.started_at, 'runner', 'stop', sha, story._stop(j), 'you', [])]
+        if j.outcome == 'answered':
+            out.append((j.ended_at, 'you', 'answer', sha,
+                        f'You closed needs-info issue #{number_of(j.link)}.'
+                        if j.answer == 'issue-closed' and j.link else 'You replied.', None, []))
+        return out
+    else:
+        return []
+    return [(at, actor, j.kind, sha, text, tone, findings)] if text else []
+
+
+def _story(v: View):
+    from .asks import Story
+    reviews = {}
+    for read in v.reads.values():
+        reviews.update(read.findings)
+    return Story(list(v.jobs), [], reviews)
+
+
+def _when(stamp: str) -> datetime.datetime:
+    return datetime.datetime.fromisoformat(stamp.replace('Z', '+00:00'))
+
+
+def _iso(stamp: str | None) -> str | None:
+    return _when(stamp).astimezone().isoformat(timespec='seconds') if stamp else None
+
+
+def _on_pr(j) -> bool:
+    return j.kind in _PR_KINDS or (j.kind == 'decision' and bool(j.sha))
+
+
+def _timeline(story, v: View, repo, p: PrRead, releases) -> list[dict]:
+    """The PR's story, oldest first, each event on the head it happened at: its build, the
+    runner's reviews, fix rounds, decisions, stops, ready marks, merges, live runs and releases."""
+    n = p.pr.number
+    pos = {j.id: k for k, j in enumerate(v.jobs)}
+    events = []
+    for j in v.jobs:
+        if j.repo != repo.name:
+            continue
+        mine = (j.issue == n and _on_pr(j)) or (j.kind == 'live' and n in (j.prs or ())) or (
+            j.kind == 'build' and isinstance(j.pr, dict) and j.pr.get('number') == n)
+        if mine:
+            events += [(e, pos[j.id]) for e in _event(story, j)]
+    for r_repo, r_n, at in releases:
+        if (r_repo, r_n) == (repo.name, n):
+            events.append(((at, 'you', 'release', '', f'You released it (--release '
+                           f'{repo.name}#{n}), so the runner took it up again.', None, []),
+                           len(pos)))
+    events.sort(key=lambda e: (_when(e[0][0]), e[1]))
+    out, sha = [], None
+    for (at, actor, kind, h7, text, tone, findings), _ in events:
+        out.append({'at': _iso(at), 'actor': actor, 'kind': kind, 'sha': h7 or None,
+                    'title': text, 'detail': None, 'tone': tone, 'findings': findings})
+    # A build is on the first head the PR was reviewed or fixed at; a step with no head of its
+    # own is on the head before it.
+    for k, e in enumerate(out):
+        if not e['sha'] and e['kind'] == 'build':
+            e['sha'] = next((x['sha'] for x in out[k + 1:] if x['sha']), p.pr.head_sha[:7])
+    for e in out:
+        sha = e['sha'] = e['sha'] or sha or p.pr.head_sha[:7]
+    return out
+
+
+def _activity(story, v: View, titles: dict, releases) -> list[dict]:
+    """What happened, newest first, the latest `ACTIVITY_MAX`: every job's events and Stefan's
+    releases, each a whole sentence, with its issue's or PR's title."""
+    pos = {j.id: k for k, j in enumerate(v.jobs)}
+    rows = []
+    for j in v.jobs:
+        on_pr = _on_pr(j)
+        n = j.issue
+        for k, (at, actor, kind, sha, text, tone, _) in enumerate(_event(story, j)):
+            if n is None:
+                continue
+            rows.append(((_when(at), pos[j.id], k), {
+                'at': _iso(at), 'actor': actor, 'repo': j.repo, 'pr': n if on_pr else None,
+                'ref': _ref(on_pr, n), 'title': text, 'detail': titles.get((j.repo, n)) or None,
+                'tone': tone}))
+    prs = {(r, p.pr.number) for r, read in v.reads.items() for p in read.prs}
+    for repo, n, at in releases:
+        on_pr = (repo, n) in prs
+        rows.append(((_when(at), len(pos), 0), {
+            'at': _iso(at), 'actor': 'you', 'repo': repo, 'pr': n if on_pr else None,
+            'ref': _ref(on_pr, n),
+            'title': f'You released it (--release {repo}#{n}), so the runner took it up again.',
+            'detail': titles.get((repo, n)) or None, 'tone': None}))
+    rows.sort(key=lambda r: r[0], reverse=True)
+    return [r for _, r in rows[:ACTIVITY_MAX]]
 
 
 def stale_github(sources: list[dict], stale: dict) -> None:

@@ -2,6 +2,7 @@
 way the lanes do, and `snapshot.build` writes the issues, features, PRs, activity and each lane's
 queue from that read."""
 import datetime
+import json
 import os
 import tempfile
 import unittest
@@ -308,6 +309,58 @@ class PrsTest(WorkCase):
         self.assertEqual((p['status'], p['next']),
                          ('Its repository is stopped',
                           'Neither lane takes up its work until you resume first.'))
+
+
+class HistoryTest(WorkCase):
+    def setUp(self):
+        super().setUp()
+        self.gh.prs = [full_pr(5, 'claude/red-3', H2, title='Red', body='Closes #3')]
+        self.gh.work_list = [wi(3, 'Red')]
+        self.job('build', 3, 'done', branch='claude/red-3', commits=['1', '2'],
+                 pr={'number': 5, 'url': 'u'})
+        run = os.path.join(self.dir, 'runs', 'r1')
+        os.makedirs(run)
+        with open(os.path.join(run, 'decision.json'), 'w', encoding='utf-8') as f:
+            json.dump({'findings': [{'id': 'F1', 'tag': 'important', 'class': 'Stale owner',
+                                     'status': 'fixed', 'raised': 1}]}, f)
+        self.job('review', 5, 'blocking', sha=H1, round=1, verdict='blocking', run_dir=run)
+        self.job('fix', 5, 'pushed', sha=H1, round=1, branch='claude/red-3', head=H2,
+                 commits=['3'])
+        self.reviewed(5, H2, 'clean', rnd=2)
+
+    def test_a_prs_timeline_by_head_from_the_job_log(self):
+        tl = pr_of(self.snap(), 5)['timeline']
+        self.assertEqual([(e['actor'], e['kind'], e['sha']) for e in tl],
+                         [('claude', 'build', 'aaaaaaa'), ('sol', 'review', 'aaaaaaa'),
+                          ('claude', 'fix', 'aaaaaaa'), ('sol', 'review', 'bbbbbbb')])
+        self.assertEqual(tl[0]['title'], 'Claude built #3 and opened PR #5, in 2 commits.')
+        self.assertEqual(tl[1]['findings'], [{'id': 'F1', 'text': 'Stale owner',
+                                              'status': 'fixed'}])
+        self.assertEqual((tl[3]['title'], tl[3]['tone']),
+                         ('Review 2 on bbbbbbb came back clean.', 'ok'))
+        self.assertEqual(set(tl[0]), {'at', 'actor', 'kind', 'sha', 'title', 'detail', 'tone',
+                                      'findings'})
+
+    def test_activity_is_the_job_log_newest_first_each_a_whole_sentence(self):
+        stop = self.job('stop', 5, None, sha=H2, stop='review', link='https://x/issues/40')
+        self.jobs.ended(stop.id, exit_code=None, outcome='filed')
+        self.jobs.ended(stop.id, exit_code=None, outcome='answered', answer='replied')
+        rows = self.snap(releases=[('first', 5, '2099-01-01T00:00:00+00:00')])['activity']
+        self.assertEqual(rows[0]['title'], 'You released it (--release first#5), so the runner '
+                                           'took it up again.')
+        self.assertEqual([r['actor'] for r in rows][:2], ['you', 'you'])
+        self.assertEqual(rows[1]['title'], 'You replied.')
+        self.assertEqual(rows[-1], {'at': rows[-1]['at'], 'actor': 'claude', 'repo': 'first',
+                                    'pr': None, 'ref': '#3', 'title': 'Claude built #3 and opened '
+                                    'PR #5, in 2 commits.', 'detail': 'Red', 'tone': 'ok'})
+        self.assertTrue(all(r['title'].endswith('.') for r in rows))
+        times = [r['at'] for r in rows]
+        self.assertEqual(times, sorted(times, reverse=True))
+
+    def test_activity_keeps_the_latest_200(self):
+        for k in range(205):
+            self.job('review', 5, 'failed', sha=H2, round=3)
+        self.assertEqual(len(self.snap()['activity']), 200)
 
 
 if __name__ == '__main__':
