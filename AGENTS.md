@@ -615,9 +615,11 @@ threads that need Stefan, so the runner toasts instead.
 after four takes that put everything on one page): **Overview** is the first glance, **Inbox** is
 what waits on him ("Needs you" before; the name is his), **Queue** is the work. Activity, Usage
 and Settings follow. **The Inbox is agreed** (Stefan, 2026-11-15, after takes 5 to 7, kept in
-`dashboard/earlier/`). **The Overview is prototyped and not agreed yet** (ticket 20: three cards,
-below; Stefan judges it by eye, so expect more takes). Queue still shows the work list and
-pyramid as they were, marked "Not rebuilt yet"; it's next, as ticket 21. Its frame is the one Stefan asked
+`dashboard/earlier/`). **The Overview on the page is a first take that Stefan didn't take to**
+(ticket 20: three cards, below; "way far off on what I want, or I don't actually know what I
+want"). **What's next, in order:** a grill on what the Overview is for (ticket 25), the Queue
+page (ticket 21; it still shows the work list and pyramid as they were, marked "Not rebuilt
+yet"), then the Overview again as several variants switched with `?variant=`. Its frame is the one Stefan asked
 for in the prototype rounds: a sidebar for getting around (the repository switcher and the
 pages), one centred column, and the machine's readings floating on the right, in his order:
 usage, the build order, then the runner's status. **It is its own process and depends on nothing:** no build step, no
@@ -681,7 +683,7 @@ python3 -m dashboard --sample    # sample data, no runner needed; ?sample=<state
   aside behind the Usage button. A decided ask's line says what he said and what the runner
   is doing with it ("You said "fix on". Claude is fixing PR #209, 4 min in."). A lane has one
   Stop button, which asks which stop is meant while a job runs.
-- **The Overview only summarises, in three cards read top to bottom** (ticket 20, proposed;
+- **The Overview only summarises, in three cards read top to bottom** (ticket 20, proposed and not agreed;
   `overview()` in `dashboard/index.html`). **Inbox** (`plate()`): blue while something waits.
   The count in the Inbox's own words ("3 waiting on you", unread, oldest), a row per kind with
   a cell per ask (Stuck, Your decision, Ready to merge, Broken; a kind's row opens the Inbox at

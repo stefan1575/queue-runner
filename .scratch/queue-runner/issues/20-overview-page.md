@@ -2,12 +2,16 @@
 
 Type: prototype
 
-**Blocked by:** None
+**Blocked by:** 21, 25
 
 **Status:** ready-for-human
 
-Pinned: 2026-11-15, Stefan, until the Inbox page is agreed (ticket 18). It needs him at the
-screen: he judges it by eye.
+Pinned: 2026-11-15, Stefan, until the grill on what the Overview is for (ticket 25) and then the
+Queue page (ticket 21) are done. It needs him at the screen: he judges it by eye.
+
+**The question below is due to be rewritten from the grill's answers** (ticket 25). When this
+ticket's turn comes, build several structurally different variants on the one page, switched
+with `?variant=`, not one (Stefan, 2026-11-15).
 
 **The question:** what does the first glance show, so that it answers "what's on my plate, what's
 running, what's next" without a click?
@@ -76,3 +80,18 @@ would have nowhere to show.
 Open for his eye: whether the first three features in build order are the right three (the
 next build in the sample, #211, belongs to no feature, so nothing on the Overview names it);
 the hatched cells; whether "First in line" should also carry the ask's question.
+
+2026-11-15, **Stefan's first look at take 9: not it.** "At first glance it's way far off on what
+I want, or I don't actually know what I want. Think how I would use it." Settled with him:
+
+- **A grill first, on what the Overview is for** (ticket 25). The frame already carries most of
+  what take 9 shows (the Inbox count, usage, build order, runner status, Stop all), and take 9
+  has nothing for "what happened since I last looked".
+- **The Queue page goes before the Overview** (ticket 21, which was blocked by this one; now the
+  other way round). The Progress card summarises a page that doesn't exist, and building it
+  meant inventing three things that are the Queue's to decide: what build order means for
+  features, which ticket is a feature's "next", and how the bar reads.
+- **Then the Overview as several variants**, not one.
+
+Take 9 stays in `dashboard/index.html` as it is, proposed and not agreed. `featureBar(feature)`
+is there for the Queue page to use.

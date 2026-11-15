@@ -80,6 +80,11 @@ grill settled the split instead:
 
 ## Comments
 
+2026-11-15, **the order changed after Stefan's first look at the Overview** (ticket 20, take 9:
+"way far off on what I want, or I don't actually know what I want"). A grill on what the
+Overview is for comes first (ticket 25), then the Queue page (ticket 21), then the Overview
+again (ticket 20), as several variants. Take 9 stays on the page, proposed and not agreed.
+
 2026-11-15, **the Inbox is agreed** (Stefan: "settle this"). Last change: Snoozed is a folding
 group at the list's foot like Decided, each row with its Unsnooze button. Granular snooze
 times in Settings are pinned as ticket 24. Overview and Queue (tickets 20 and 21) are next.

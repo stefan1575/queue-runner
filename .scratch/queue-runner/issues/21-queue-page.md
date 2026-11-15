@@ -2,12 +2,16 @@
 
 Type: prototype
 
-**Blocked by:** 20
+**Blocked by:** 25
 
 **Status:** ready-for-human
 
-Pinned: 2026-11-15, Stefan, until the Inbox and then the Overview are agreed. It needs him at
-the screen: he judges it by eye.
+Pinned: 2026-11-15, Stefan, until the grill on what the Overview is for (ticket 25), which may
+change what this page has to hold. It needs him at the screen: he judges it by eye.
+
+**It goes before the Overview** (Stefan, 2026-11-15; ticket 20 is blocked by this one now): the
+Overview summarises this page, so what build order means for features, which ticket is a
+feature's "next" and how a feature's bar reads are decided here.
 
 **The question:** how should the work be shown so that "what's next" and "when is this feature
 usable" are answered at a glance, one ticket after another until a feature is done?
@@ -34,3 +38,10 @@ control the runner has to obey.
 (`dashboard/index.html`, `work()`).
 
 ## Comments
+
+2026-11-15: the Overview's first take (ticket 20, take 9) left three things here to start from,
+none agreed: `featureBar(feature)` in `dashboard/index.html` (a cell per ticket: done, merged
+but not live, in a PR, building, waiting on him, ready, blocked); the sample's `merged` issue
+state and its `features` in build order (the repos' order, then the feature whose first open
+ticket has the lowest number); and one "Next" per lane on the Overview, with the rest of each
+lane's queue owed to this page (its old markup is in `dashboard/earlier/take-8.html`).
