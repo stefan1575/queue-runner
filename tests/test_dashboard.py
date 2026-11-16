@@ -33,9 +33,9 @@ class ApplyControlTest(unittest.TestCase):
         resumed = apply_control(stopped, {"lane": "claude", "stop": None}, NOW)
         self.assertIsNone(resumed["lanes"]["claude"]["stop"])
 
-    def test_the_build_order_replaces_the_one_before_and_keeps_the_lanes(self):
-        c = apply_control({}, {"lane": "claude", "stop": "now"}, NOW)
-        c = apply_control(c, {"repo_order": ["queue-runner", "leads-dashboard"]}, NOW)
+    def test_a_build_order_already_in_the_file_is_kept_for_the_runner(self):
+        # The page can't reorder (#61), but the runner reads repo_order until #50.
+        c = apply_control({"repo_order": ["queue-runner", "leads-dashboard"]}, {"lane": "claude", "stop": "now"}, NOW)
         self.assertEqual(c["repo_order"], ["queue-runner", "leads-dashboard"])
         self.assertEqual(c["lanes"]["claude"]["stop"], "now")
 
@@ -83,6 +83,7 @@ class ApplyControlTest(unittest.TestCase):
             {"lane": 3, "stop": "now"},
             {"lane": "claude"},
             {"repo_order": []},
+            {"repo_order": ["queue-runner", "leads-dashboard"]},   # #61: the page can't reorder
             {"repo_order": ["a", "a"]},
             {"repo_order": ["a", 2]},
             {"repo_order": "a"},

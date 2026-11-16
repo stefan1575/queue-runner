@@ -674,11 +674,11 @@ class ControlRepairTest(unittest.TestCase):
                     self.assertEqual(self.written(cli), self.written(page))
                     self.assertEqual('usage' in self.written(page), kept)
 
-    def test_the_pages_order_and_ask_requests_repair_it_too(self):
+    def test_the_pages_ask_and_refresh_requests_repair_it_too(self):
         from dashboard import serve
         from queue_runner import control as ctl
         for name, shape in {**BAD_SHAPES, **ODD_SHAPES}.items():
-            for request in ({'repo_order': ['first']}, {'ask': 'stop-1', 'read': True},
+            for request in ({'ask': 'stop-1', 'read': True},
                             {'ask': 'stop-1', 'snooze_until': None},
                             {'ask': 'stop-1', 'open': True}, {'usage': 'refresh'}):
                 with self.subTest(name, request=request), tempfile.TemporaryDirectory() as state:

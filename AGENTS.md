@@ -23,7 +23,7 @@ python3 -m queue_runner --release NAME#N      # let the picker take a held issue
 python3 -m queue_runner --review NAME#N       # Sol reviews that PR's head now, if adoption says it needs one
 python3 -m queue_runner --gate                # Claude's usage now, and whether a build, fix or decision would start
 python3 -m queue_runner --pause | --resume [LANE]   # stop a lane after its job, or let it carry on (claude by default; sol, all): the dashboard's Stop and Resume
-python3 -m queue_runner --pause | --resume NAME     # stop one served repo in both lanes, or let it carry on: the Build order card's Stop and Resume
+python3 -m queue_runner --pause | --resume NAME     # stop one served repo in both lanes, or let it carry on: the Repositories card's Stop and Resume
 python3 -m queue_runner --reserve PERCENT     # the share of the week kept for Stefan (default 5)
 python3 -m queue_runner --stop                # stop the running runner
 python3 -m queue_runner --inbox               # everything waiting on Stefan: PRs ready to merge, needs-info stops, threads waiting for his answer
@@ -307,8 +307,9 @@ on; `"now"` is read as `"after-job"` until ticket 34.
 ## The build order
 
 `control.ordered` and `Runner.take_order` (ticket 33). **`control.json`'s `repo_order`**, which
-the dashboard's Build order card writes (`apply_control`), is the order both lanes go through the
-served repos: the first repo with work gets the next job, and the Sol lane files stops, merges
+the dashboard's Build order card wrote until #61 (2026-11-16: the page can't reorder now, and
+`POST /control` refuses it; a value already in the file is kept, and #50 stops the runner reading
+it), is the order both lanes go through the served repos: the first repo with work gets the next job, and the Sol lane files stops, merges
 and reviews in that order.
 
 - **Used only when it names every served repo exactly once.** Missing or `[]` is config.toml's
@@ -335,7 +336,7 @@ and reviews in that order.
 `config.working` and `Runner._take_repo_stops` (ticket 37; Stefan, 2026-11-15: so game-backdrop
 can be the first real run while leads-dashboard stays served). **`control.json`'s
 `repos.<name>.stop`** (`"after-job"` or null, with its `at`; Stop now stays a lane's) is written by
-the Build order card's Stop and Resume (`apply_control`'s `{"repo", "stop"}`) and by `--pause NAME`
+the Repositories card's Stop and Resume (`apply_control`'s `{"repo", "stop"}`) and by `--pause NAME`
 and `--resume NAME` (`control.ask(..., repos=[NAME])`; a lane's id and `all` keep their meaning, and
 any other name is refused with exit 2).
 
@@ -929,10 +930,11 @@ python3 -m dashboard    # http://queue.localhost/ is the runner's; http://localh
   are ISO strings; the page formats them. `sample.STATES` names every state the page has to show.
 - **Control** (`serve.apply_control`): `POST /control` takes `{"lane", "stop"}` (`"after-job"`,
   `"now"` or null to carry on), `{"repo", "stop"}` (`"after-job"` or null: Stopping one repo,
-  above), `{"repo_order": [...]}`, an ask's `{"ask", "read"}` (true or false) and `{"ask",
+  above), an ask's `{"ask", "read"}` (true or false) and `{"ask",
   "snooze_until"}` (an ISO time with its offset, kept in this PC's, or null), or `{"ask": <id>,
   "open": true}` (`asks.<id>.open`: Deciding an ask in T3, above), or `{"usage": "refresh"}`
-  (`usage.refresh_at`: Usage, below), and anything else is refused;
+  (`usage.refresh_at`: Usage, below), and anything else is refused, `{"repo_order"}` too
+  since #61;
   each write keeps what the others wrote. The page shows a request as asked until
   `control_read_at` reaches its time.
 - **Usage** (ticket 42): the Usage card's head has Refresh (an icon, "Refresh" on hover) where
@@ -955,7 +957,16 @@ python3 -m dashboard    # http://queue.localhost/ is the runner's; http://localh
   again). A plan
   says "2 resets left" on its line, and nothing when it has none. **Redeeming one isn't on the
   page:** it spends the credit, so it stays Stefan's, in T3.
-- **A stopped repo on the page** (ticket 37): each row of the Build order card has Stop or Resume
+- **The Repositories card** (#61, Stefan 2026-11-16: "just stop and resume") was the Build order
+  card: no numbers or arrows, the repos in the order the runner takes them up (config.toml's,
+  or a `repo_order` still in control.json: the snapshot's `repos`), its note "Taken up in this
+  order." naming neither (PR #62's F2), on every page; Settings has no copy of it.
+- **What's left** (#60, Stefan 2026-11-16: "71% left as opposed to the current usage"): each
+  usage window says `100 - used` as "N% left", on the Usage card and page; the bar holds what's
+  left, amber at 15% left or less and red at none, and the share kept for you is blue at its left
+  end, never wider than what's left (none at 0% left: PR #62's F1, `tests/test_meter.py` runs the
+  page's `meter()` in node). The snapshot still carries `used`.
+- **A stopped repo on the page** (ticket 37): each row of the Repositories card has Stop or Resume
   and says "Stopped since ..." (or "Asked to stop/resume: the runner hasn't read it yet"); its
   work reads as stopped wherever it's listed: a dashed "Stopped" tag beside its name on Inbox rows
   and repo tags, "Stopped." in the repository switcher, and "Its repository is stopped" as an
