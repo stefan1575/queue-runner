@@ -39,7 +39,7 @@ class ConfigTest(unittest.TestCase):
             load_config(write_config(self.dir, '[claude]\neffort = "ultrathink"\n'))
 
     def test_the_served_config_runs_claude_jobs_at_medium(self):
-        # Stefan, 2026-11-16 (fba6c8f): "Opus 5.5 medium as worker".
+        # Stefan, 2026-11-16: "Opus 5.5 medium as worker" (fba6c8f).
         from queue_runner.config import DEFAULT_CONFIG
         self.assertEqual(load_config(DEFAULT_CONFIG).claude_effort, 'medium')
 
