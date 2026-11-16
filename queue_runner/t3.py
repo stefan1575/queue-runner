@@ -163,3 +163,18 @@ class T3Cli:
         if self.mcp is None:
             raise T3Error("renaming a thread needs T3's MCP endpoint (no MCP client given)")
         self.mcp.rename(thread_id, title)
+
+
+def settle_quietly(t3, thread_id: str | None, name: str, say) -> bool:
+    """Settles a thread the runner started, once it's done with it (ticket 70): it leaves
+    Stefan's sidebar and stays readable. A failure is said and never raised: a thread left in
+    the sidebar stops no lane. False if it wasn't settled."""
+    if not thread_id or t3 is None:
+        return False
+    try:
+        t3.settle(thread_id)
+    except Exception as e:   # noqa: BLE001 - T3 down, refused, or no MCP client
+        say(f'{name}: settling its thread {thread_id} in T3 failed '
+            f'({type(e).__name__}: {e}); it stays in the sidebar')
+        return False
+    return True

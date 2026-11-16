@@ -491,6 +491,53 @@ class DecisionTest(unittest.TestCase):
         self.assertEqual(self.r.jobs.waiting_jobs(), [])
         self.assertEqual(self.toaster.toasts, [])
 
+    # --- settling threads (ticket 70) -------------------------------------------------------
+
+    def test_a_failed_build_is_settled_its_decision_too_and_a_retry_settles_it_again(self):
+        self.build((1, 'failed'),
+                   (0, 'completed', decision_reply('retry', add='Install deps first.')),
+                   (0, 'completed'))
+        self.assertEqual(self.t3.settles, ['mcp:t1'])   # the build's end recorded
+        self.t3.messages['mcp:t1'] = [Message('assistant', 'npm test failed: missing module')]
+        self.r.run_pass()
+        # The decision read the settled thread's last reply, and was settled once read; the
+        # retry's message unsettled the build's thread (as T3 does) and its end settled it again.
+        self.assertIn('npm test failed: missing module', self.t3.starts[1]['message'])
+        self.assertEqual(self.t3.settles, ['mcp:t1', 'mcp:t2', 'mcp:t1'])
+        self.assertTrue(self.t3.threads['mcp:t1'].settled)
+
+    def test_a_build_waiting_on_stefan_is_not_settled_its_decision_is(self):
+        self.build((2, 'waiting'), (0, 'completed', decision_reply('stop', question='Blue?')))
+        self.assertEqual(self.t3.settles, [])
+        self.r.run_pass()
+        self.assertEqual(self.jobs('decision')[0].outcome, 'stop')
+        self.assertEqual(self.t3.settles, ['mcp:t2'])   # the decision; the build still waits
+
+    def test_a_decision_thread_that_asked_back_is_not_settled(self):
+        self.build((1, 'failed'), (2, 'waiting', 'Which deps?'))
+        self.r.run_pass()
+        self.assertEqual(self.jobs('decision')[0].outcome, 'stop')
+        self.assertEqual(self.t3.settles, ['mcp:t1'])
+
+    def test_a_settle_that_fails_stops_no_lane(self):
+        self.build((1, 'failed'), (0, 'completed', decision_reply('stop', question='?')))
+        self.t3.settle_error = T3Error('T3 refused it')
+        self.assertEqual(self.r.run_pass(), 'started')
+        self.assertEqual(self.jobs('decision')[0].outcome, 'stop')
+        self.assertIn('decision first#4 (failed): settling its thread mcp:t2 in T3 failed '
+                      '(T3Error: T3 refused it); it stays in the sidebar', self.said)
+
+    def test_a_dead_runners_build_is_settled_once_its_end_is_recorded(self):
+        self.gh.prs = []
+        r = self.runner((1, 'failed'), (0, 'completed', decision_reply('stop', question='?')))
+        job = r.jobs.started(kind='build', repo='first', issue=4, branch='claude/blue-widget-4',
+                             title='Queue runner build: first#4')
+        self.t3.add('mcp:old', 'Queue runner build: first#4', 'completed')
+        r.run_pass()
+        [ended] = [j for j in self.jobs('build') if j.id == job.id]
+        self.assertEqual((ended.thread_id, ended.outcome), ('mcp:old', 'done-no-pr'))
+        self.assertEqual(self.t3.settles[0], 'mcp:old')
+
     def test_a_build_without_a_pr_closed_as_not_needed(self):
         self.build((0, 'completed'),
                    (0, 'completed', decision_reply('close', reason='#3 did it already.')))

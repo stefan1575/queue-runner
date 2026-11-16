@@ -12,7 +12,7 @@ from queue_runner.merge import READY, Merger
 from queue_runner.review import Reviewer
 from queue_runner.state import JobLog
 from tests.fakes import FakeGitHubForReviews, FakeToaster, full_pr
-from tests.fakes_t3 import FakeReviewGit, FakeSol
+from tests.fakes_t3 import FakeReviewGit, FakeSol, FakeT3
 from tests.test_ledger import H2, H3, important, reply
 
 NOW = datetime.datetime(2026, 11, 9, 12, 0)
@@ -200,6 +200,38 @@ class MergeTest(unittest.TestCase):
                                                       ('C:/t3/wt/fix', fix_branch(20, H3))])
         self.assertIn('merge first#20: fix worktree C:/t3/wt/fix not removed; remove it by '
                       'hand', self.said)
+
+    def test_the_prs_build_and_fix_threads_are_settled_after_it_merges(self):
+        t3 = FakeT3()
+        for tid in ('mcp:build', 'mcp:fix', 'mcp:other'):
+            t3.add(tid, tid, 'completed')
+        build = self.jobs.started(kind='build', repo='first', issue=5, branch='claude/red-5',
+                                  title='Queue runner build: first#5')
+        self.jobs.ended(build.id, exit_code=0, outcome='done', thread_id='mcp:build')
+        for outcome in ('failed', 'pushed'):   # a retry in place: the same thread twice
+            fix = self.jobs.started(kind='fix', repo='first', issue=20, branch='claude/red-5',
+                                    title='Queue runner fix: first#20', sha=H3)
+            self.jobs.ended(fix.id, exit_code=0, outcome=outcome, thread_id='mcp:fix')
+        other = self.jobs.started(kind='build', repo='first', issue=6, branch='claude/blue-6',
+                                  title='Queue runner build: first#6')
+        self.jobs.ended(other.id, exit_code=0, outcome='done', thread_id='mcp:other')
+        Reviewer(self.config, github=self.gh, git=self.git, sol=FakeSol([reply()]),
+                 jobs=self.jobs, say=self.said.append, now=lambda: NOW, t3=t3).review_pass()
+        self.assertEqual(self.merges(), [(20, H2)])
+        self.assertEqual(t3.settles, ['mcp:build', 'mcp:fix'])
+
+    def test_a_merge_whose_settle_fails_is_still_merged(self):
+        from queue_runner.t3 import T3Error
+        t3 = FakeT3()
+        t3.settle_error = T3Error('down')
+        build = self.jobs.started(kind='build', repo='first', issue=5, branch='claude/red-5',
+                                  title='Queue runner build: first#5')
+        self.jobs.ended(build.id, exit_code=0, outcome='done', thread_id='mcp:build')
+        Reviewer(self.config, github=self.gh, git=self.git, sol=FakeSol([reply()]),
+                 jobs=self.jobs, say=self.said.append, now=lambda: NOW, t3=t3).review_pass()
+        self.assertEqual(self.outcomes(), ['merged'])
+        self.assertIn('merge first#20: settling its thread mcp:build in T3 failed (T3Error: '
+                      'down); it stays in the sidebar', self.said)
 
     def test_a_merge_cut_off_with_its_runner_is_settled_from_github(self):
         self.reviewed_clean()

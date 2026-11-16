@@ -95,6 +95,7 @@ class ConflictRoundTest(unittest.TestCase):
         self.assertEqual((fix.cause, fix.sha, fix.round, fix.outcome, fix.head),
                          ('conflict', H2, None, 'pushed', H3))
         self.assertIn('to resolve its conflict with main', self.out.getvalue())
+        self.assertEqual(self.t3.settles, ['mcp:t1'])   # its end recorded: settled (ticket 70)
 
     def test_sol_leaves_a_conflicted_head_alone_then_reviews_the_new_head_afresh(self):
         self.only(20)

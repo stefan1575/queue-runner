@@ -26,6 +26,7 @@ from .fix import fix_branch
 from .ledger import newest_on, said_since
 from .stops import held
 from .state import JobLog
+from .t3 import settle_quietly
 from .toast import NoToaster
 
 MAX_FAILED = 2   # failed merges on one head before the runner leaves it until a release or a push
@@ -37,9 +38,10 @@ def merge_title(repo, number: int) -> str:
 
 
 class Merger:
-    def __init__(self, config, *, github, git, jobs: JobLog, say, toaster=None):
+    def __init__(self, config, *, github, git, jobs: JobLog, say, toaster=None, t3=None):
         self.config, self.github, self.git, self.jobs, self.say = config, github, git, jobs, say
         self.toaster = toaster or NoToaster()
+        self.t3 = t3   # settles the PR's threads after its merge (ticket 70); None settles none
         self._last_why: dict[tuple, str | None] = {}
 
     # --- which PRs ------------------------------------------------------------------------
@@ -178,7 +180,7 @@ class Merger:
             return 'failed'
         self.jobs.ended(job.id, exit_code=None, outcome='merged', head=merged or None)
         self.say(f'{name}: merged at {h[:7]}' + (f' (merge commit {merged[:7]})' if merged else ''))
-        self.remove_worktrees(repo, pr)
+        self.after_merge(repo, pr)
         return 'merged'
 
     # --- Stefan merges (merge = "stefan", ticket 17) ----------------------------------------
@@ -284,9 +286,23 @@ class Merger:
                     self.github.remove_label(repo, n, READY)
                 except Exception as e:
                     self.say(f'merge {repo.name}#{n}: removing {READY} failed: {e}')
-            self.remove_worktrees(repo, pr)
+            self.after_merge(repo, pr)
         elif pr.state == 'closed':   # its label goes too, so a reopened PR isn't left ready
             self._unmark(repo, pr, last, 'closed without merging')
+
+    def after_merge(self, repo, pr) -> None:
+        self.remove_worktrees(repo, pr)
+        self.settle_threads(repo, pr)
+
+    def settle_threads(self, repo, pr) -> None:
+        """The threads of the PR's build and fix jobs, settled once it merged: the latest point
+        one of them can still be open (ticket 70). Each was settled when its end was recorded,
+        unless that failed; settling one again changes nothing."""
+        done = set()
+        for j in self.jobs.pr_jobs(repo.name, pr.number, pr.branch):
+            if j.thread_id and j.thread_id not in done:
+                done.add(j.thread_id)
+                settle_quietly(self.t3, j.thread_id, f'merge {repo.name}#{pr.number}', self.say)
 
     def remove_worktrees(self, repo, pr) -> None:
         """The worktrees and local branches of the PR's build and fix jobs, once it merged."""
@@ -320,4 +336,4 @@ class Merger:
             self.say(f'merge {job.repo}#{job.issue}: cut off with its runner; '
                      + ('it merged' if merged else 'it did not merge'))
             if merged:
-                self.remove_worktrees(repo, pr)
+                self.after_merge(repo, pr)
