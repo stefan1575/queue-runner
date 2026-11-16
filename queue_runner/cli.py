@@ -109,7 +109,8 @@ def _print_gate(gate, out, config) -> None:
         learned = ' (the cautious default)' if cost == CostBook.default(kind) else ''
         # The Opus review while Sol is out of usage (issue #69) runs in the reviewing lane.
         lane = 'sol' if kind == FALLBACK_REVIEW else 'claude'
-        name = 'review (Opus, while Sol is out)' if kind == FALLBACK_REVIEW else kind
+        name = (('review (Opus, set in config.toml)' if config.review_provider == 'claude'
+                 else 'review (Opus, while Sol is out)') if kind == FALLBACK_REVIEW else kind)
         if switch.holds(lane):
             print(f'  {name}: waits: the {control.NAMES[lane]} lane is stopped by Stefan',
                   file=out)
