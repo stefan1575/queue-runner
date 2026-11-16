@@ -18,11 +18,15 @@ import { SettingsPage } from "./pages/Settings";
 import { UsagePage } from "./pages/Usage";
 import { StoreProvider, useStore } from "./store";
 
-function TopBar({ title, onMenu, usageOpen, toggleUsage }: { title: string; onMenu: () => void; usageOpen: boolean; toggleUsage: () => void }) {
+// PROTOTYPE (#36): the Settings page gets a wider column than the other pages.
+const COLUMN = "mx-auto max-w-[1180px] min-[1600px]:mr-[max(344px,calc((100%-1180px)/2))]";
+const WIDE_COLUMN = "mx-auto max-w-[1400px] min-[1600px]:mr-[max(344px,calc((100%-1400px)/2))]";
+
+function TopBar({ title, wide, onMenu, usageOpen, toggleUsage }: { title: string; wide?: boolean; onMenu: () => void; usageOpen: boolean; toggleUsage: () => void }) {
   const { live } = useStore();
   return (
     <header className="sticky top-0 z-30 border-b border-line bg-page/90 px-4 backdrop-blur md:px-6">
-      <div className="mx-auto flex h-14 max-w-[1180px] items-center gap-3 min-[1600px]:mr-[max(344px,calc((100%-1180px)/2))]">
+      <div className={cn("flex h-14 items-center gap-3", wide ? WIDE_COLUMN : COLUMN)}>
       <button type="button" onClick={onMenu} className="-ml-1 rounded-lg p-1.5 hover:bg-sunk md:hidden" aria-label="Open menu"><Menu className="size-5" /></button>
       <h1 className="text-[20px] font-semibold tracking-[-0.01em]">{title}</h1>
       <div className="ml-auto flex items-center gap-2">
@@ -125,9 +129,9 @@ function Main() {
       </Dialog.Root>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <TopBar title={page.label} onMenu={() => setMenu(true)} usageOpen={usage} toggleUsage={() => setUsage(!usage)} />
+        <TopBar title={page.label} wide={page.path === "/settings"} onMenu={() => setMenu(true)} usageOpen={usage} toggleUsage={() => setUsage(!usage)} />
         <main id="main" className={cn("flex-1 px-4 py-5 md:px-6", world.runner.process === "stopped" && "[&_section]:opacity-80")}>
-          <div className="mx-auto max-w-[1180px] space-y-4 min-[1600px]:mr-[max(344px,calc((100%-1180px)/2))]">
+          <div className={cn("space-y-4", page.path === "/settings" ? WIDE_COLUMN : COLUMN)}>
           <Banner />
           {page.path === "/" && <Dashboard />}
           {page.path === "/activity" && <ActivityPage />}

@@ -12,7 +12,10 @@ pnpm dev        # http://localhost:5288
   with its connections. Usage floats on the right (from a top-bar button on narrow windows).
 - Colour is state: blue needs you, amber working, red broken, green healthy, grey idle. Claude's and
   OpenAI's brand colours appear only on their marks.
-- One realistic busy state, no prototype bar. Other states still load by URL (`?demo=`, see
+- **Settings is a layout prototype** (#36): three layouts of the same settings on `/settings`,
+  switched by `?variant=A|B|C` or the floating bar (← → keys too); `?data=new` shows a new install.
+  The bar's "Stored JSON" shows what the runner would store. Code: `src/pages/settings-prototype/`.
+- Elsewhere: one realistic busy state, no prototype bar. Other states still load by URL (`?demo=`, see
   `src/data/fixtures.ts`) for when we look at one element's edge cases.
 - It "refreshes" on tab focus and every 10 s while focused (here it only ticks elapsed minutes).
 - Stack: Vite 8, React 19, TypeScript, Tailwind 4, Radix (popover, dialog, switch), cmdk, sonner,
