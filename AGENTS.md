@@ -958,12 +958,14 @@ python3 -m dashboard    # http://queue.localhost/ is the runner's; http://localh
   says "2 resets left" on its line, and nothing when it has none. **Redeeming one isn't on the
   page:** it spends the credit, so it stays Stefan's, in T3.
 - **The Repositories card** (#61, Stefan 2026-11-16: "just stop and resume") was the Build order
-  card: no numbers or arrows, the repos in the order the runner takes them up (config.toml's),
-  on every page; Settings has no copy of it.
+  card: no numbers or arrows, the repos in the order the runner takes them up (config.toml's,
+  or a `repo_order` still in control.json: the snapshot's `repos`), its note "Taken up in this
+  order." naming neither (PR #62's F2), on every page; Settings has no copy of it.
 - **What's left** (#60, Stefan 2026-11-16: "71% left as opposed to the current usage"): each
   usage window says `100 - used` as "N% left", on the Usage card and page; the bar holds what's
   left, amber at 15% left or less and red at none, and the share kept for you is blue at its left
-  end. The snapshot still carries `used`.
+  end, never wider than what's left (none at 0% left: PR #62's F1, `tests/test_meter.py` runs the
+  page's `meter()` in node). The snapshot still carries `used`.
 - **A stopped repo on the page** (ticket 37): each row of the Repositories card has Stop or Resume
   and says "Stopped since ..." (or "Asked to stop/resume: the runner hasn't read it yet"); its
   work reads as stopped wherever it's listed: a dashed "Stopped" tag beside its name on Inbox rows

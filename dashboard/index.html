@@ -1830,7 +1830,7 @@ function repoRows() {
       : `<button class="btn sm" data-act="repostop" data-repo="${esc(name)}" data-how="after-job" title="A job running on it finishes; then neither lane takes up its work">${ICON.pause}Stop</button>`;
     return `<li${r.stopped ? ' class="off"' : ""}><span class="name">${esc(name)}<span>${esc(sub)}</span></span>${btn}</li>`;
   }).join("");
-  return `<ul class="order">${rows}</ul><p class="plan-note">Built in config.toml's order. A stopped one gets nothing until you resume it.</p>`;
+  return `<ul class="order">${rows}</ul><p class="plan-note">Taken up in this order. A stopped one gets nothing until you resume it.</p>`;
 }
 
 // Refresh (ticket 42): asks the runner to read both plans now (control.json's usage.refresh_at).
