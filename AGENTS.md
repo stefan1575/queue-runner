@@ -1575,7 +1575,11 @@ at `[claude] effort` (`high`).
 - **Where a project's default lives:** T3's settings are folded (`projectSettingsFolded: true` in
   `~/.t3/userdata/settings.json`), so launch reads only that file's
   `projectSettingsOverrides[<project id>].defaultModelSelection`, else its global
-  `defaultModelSelection` (`resolveProjectOverrides`, `ManagedEndpointRuntime-*.mjs`). The
+  `defaultModelSelection` (`resolveProjectOverrides`, `ManagedEndpointRuntime-*.mjs`). **The
+  fallback model is the file's top-level `fallbackModelSelection` only**: it isn't one of the
+  project-scoped keys (`PROJECT_SCOPED_SERVER_SETTING_KEYS`, read 2026-11-16: PR #100's review
+  1, F1), so a project's entry can neither set nor clear it, and `T3Files.project_default` reads
+  only the top-level one. None is set on this PC (2026-11-16). The
   project row's `default_model_selection_json` (`projection_projects`, what MCP's
   `t3_project_update` writes; personal-ops has Opus 5.5 at high there) is not read once folded.
   T3 has no Settings screen that writes the override yet (Stefan, 2026-11-16: issue #90), so it's
@@ -1608,9 +1612,11 @@ at `[claude] effort` (`high`).
   while it runs), in `~/.t3/userdata/settings.json`, under
   `projectSettingsOverrides[<project id>].defaultModelSelection`, put `{"instanceId":
   "claudeAgent", "model": "claude-opus-5-5", "options": [{"id": "effort", "value": "high"}]}`
-  (the config's provider, model and effort), with no `fallbackModelSelection` there, then start
-  T3 again. The runner's start line for a repo not set says the same with its project id and
-  the JSON for the config (`Effort.step`). Once set it says `<repo>: its T3 project's default
+  (the config's provider, model and effort), then start T3 again. A top-level
+  `fallbackModelSelection` also keeps jobs on `--model`, and taking it out changes every
+  project's new threads, so it's his choice; the start line names it when one is set. The
+  runner's start line for a repo not set says the same with its project id and the JSON for
+  the config (`Effort.step`). Once set it says `<repo>: its T3 project's default
   model is claude-opus-5-5 at effort high; its Claude jobs start on it (no --model)`. If it still
   says "it has no default model", the entry is under another id or went to the project row,
   which launch doesn't read.

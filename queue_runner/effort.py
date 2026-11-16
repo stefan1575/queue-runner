@@ -108,11 +108,12 @@ class T3Files:
             except ValueError:
                 pass
 
-        def effective(key):
-            return overrides[key] if key in overrides else settings.get(key)
-
-        return ProjectDefault(pid, effective('defaultModelSelection'),
-                              effective('fallbackModelSelection'))
+        selection = (overrides['defaultModelSelection'] if 'defaultModelSelection' in overrides
+                     else settings.get('defaultModelSelection'))
+        # The fallback isn't one of T3's project-scoped keys (`PROJECT_SCOPED_SERVER_SETTING_KEYS`
+        # in server.asar, read 2026-11-16: PR #100's review 1, F1): a project's entry neither
+        # sets nor clears it, so only the top-level one counts.
+        return ProjectDefault(pid, selection, settings.get('fallbackModelSelection'))
 
     def _run(self, run_id: str) -> dict:
         for (payload,) in self._rows('select payload_json from orchestration_v2_projection_runs '
@@ -252,16 +253,22 @@ class Effort:
 
     def step(self, found: ProjectDefault | None) -> str:
         """How Stefan sets the project's default by hand (issue #90): T3 has no Settings screen
-        for it yet, so the entry goes in its settings.json, with T3 closed."""
+        for it yet, so the entry goes in its settings.json, with T3 closed; and a fallback model,
+        which T3 reads only at the file's top level, comes out there."""
         c = self.config
         where = getattr(self.files, 'settings', None) or '~/.t3/userdata/settings.json'
         pid = json.dumps(found.project_id) if found else '<its project id>'
         selection = json.dumps({'instanceId': c.claude_provider, 'model': c.claude_model,
                                 'options': [{'id': 'effort', 'value': c.claude_effort}]})
+        # T3 reads the fallback only at the file's top level, for every project (PR #100's
+        # review 1, F1), so a set one is named there, and nothing is said of one when none is.
+        fallback = found.fallback if found else None
+        drop = (f", and remove the top-level fallbackModelSelection ({fallback.get('model')}): "
+                "T3 has no per-project one, so that stops every project's new threads moving to "
+                'it while Claude is out of usage') if fallback else ''
         return (f'To run them at {c.claude_effort}: with T3 closed (it may write over the file '
                 f'while it runs), in {where}, under projectSettingsOverrides[{pid}]'
-                f'.defaultModelSelection, put {selection}, with no fallbackModelSelection '
-                'there, then start T3 again')
+                f'.defaultModelSelection, put {selection}{drop}, then start T3 again')
 
     def check(self, repos) -> None:
         """At start: says for each served repo how its jobs will start."""
