@@ -165,8 +165,39 @@ class FallbackTest(unittest.TestCase):
         self.assertIn('stopped to ask a question', failed[1].error)
         self.assertEqual(failed[0].thread_id, 'mcp:t1')
         self.assertEqual(self.posted('comment'), [])
-        self.assertEqual(self.t3.settles, ['mcp:t1'])   # the one that asked is left
+        # Each settled once its end was recorded, the one that asked too (issue #77): nobody
+        # answers a review thread.
+        self.assertEqual(self.t3.settles, ['mcp:t1', 'mcp:t2'])
         self.assertEqual(r.review_pass(), 'idle')   # two failed reviews on H2, as for Sol's
+
+    def test_a_review_thread_settles_only_once_its_end_is_recorded(self):
+        self.sol_out()
+        r = self.reviewer((0, 'completed', reply()))
+        seen = []
+        settle = self.t3.settle
+        self.t3.settle = lambda tid: (seen.append([j.open for j in self.reviews()]), settle(tid))
+        r.review_pass()
+        self.assertEqual(seen, [[False]])   # the job's end was in the log first (issue #77)
+        self.assertEqual(self.t3.settles, ['mcp:t1'])
+
+    def test_a_review_whose_post_failed_still_settles_its_thread(self):
+        self.sol_out()
+        self.gh.fail = {'comment'}
+        r = self.reviewer((0, 'completed', reply()))
+        r.review_pass()
+        [job] = self.reviews()
+        self.assertEqual((job.outcome, job.thread_id), ('failed', 'mcp:t1'))
+        self.assertEqual(self.t3.settles, ['mcp:t1'])
+
+    def test_a_failed_settle_is_said_and_the_review_counts(self):
+        self.sol_out()
+        r = self.reviewer((0, 'completed', reply()))
+        self.t3.settle_error = T3Error('refused')
+        self.assertEqual(r.review_pass(), 'started')
+        [job] = self.reviews()
+        self.assertEqual(job.outcome, 'clean')
+        self.assertTrue(any('settling its thread mcp:t1 in T3 failed' in s for s in self.said),
+                        self.said)
 
     def test_t3_not_starting_the_thread_is_a_failed_review(self):
         self.sol_out()
