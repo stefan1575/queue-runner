@@ -522,6 +522,11 @@ class SolStopsAfterItsJobTest(unittest.TestCase):
 BAD_SHAPES = {   # control.json shapes the page could not have written (review 1's F2 and F5)
     'not JSON': '{ torn',
     'not an object': '[]',
+    # Review 2's F9: JSON null parsed to None, which both ends took for no file at all.
+    'null': 'null',
+    'false': 'false',
+    'a number': '0',
+    'a string': '"after-job"',
     'lanes a list': {'lanes': ['invalid']},
     'lanes null': {'lanes': None},
     'lanes an empty list': {'lanes': []},
@@ -630,6 +635,8 @@ class ControlRepairTest(unittest.TestCase):
         from queue_runner import control as ctl
         # What each shape held, beyond "everything while unreadable", once it's repaired.
         still = {'not JSON': ('claude', 'sol'), 'not an object': ('claude', 'sol'),
+                 'null': ('claude', 'sol'), 'false': ('claude', 'sol'),
+                 'a number': ('claude', 'sol'), 'a string': ('claude', 'sol'),
                  'lanes a list': ('claude', 'sol'), 'lanes null': ('claude', 'sol'),
                  'lanes an empty list': ('claude', 'sol'), 'a lane not an object': ('sol',),
                  'a lane without a stop': ('sol',), 'a lane with a bad stop': ('sol',),

@@ -282,7 +282,9 @@ on; `"now"` is read as `"after-job"` until ticket 34.
   from what they can read (`control.repaired`, and the page's `serve.usable`, the same file
   from either end) and **lets go only of what it names**: an entry it can't use is written
   stopped (`after-job`), and with no lanes to read (not JSON, not an object, `lanes` not one)
-  each lane is, so Resume on one lane leaves the other held until it's resumed too. A `repos`
+  each lane is, so Resume on one lane leaves the other held until it's resumed too. JSON `null`
+  is not an object either: both ends mark no file as `MISSING`, never None, which `null` parses
+  to (review 2's F9). A `repos`
   that isn't an object names no repo and is dropped. The page reads control.json through the
   same repair (`App.control`), so it shows those lanes stopped.
 - **The older pause:** with `paused: true` in gate.json and no `claude` entry in control.json,

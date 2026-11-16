@@ -47,7 +47,8 @@ NAME = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
 STOPS = (None, "after-job", "now")
 REPO_STOPS = (None, "after-job")   # a repo's (ticket 37): Stop now stays a lane's
 LANES = ("claude", "sol")   # the runner's lanes (queue_runner/control.py's LANES)
-BROKEN = object()   # control.json is there but isn't JSON (`usable`)
+BROKEN = object()    # control.json is there but isn't JSON (`usable`)
+MISSING = object()   # there is no control.json (`usable`); not None, which JSON null parses to
 ASK = re.compile(r"^[A-Za-z0-9._-]{1,200}$")   # an ask's id: `stop-<job>`, `merge-<repo>-<n>-<head7>`...
 
 
@@ -77,13 +78,14 @@ def _usable_entry(entry: object, stops: tuple) -> bool:
 
 
 def usable(raw: object, now: str) -> dict:
-    """control.json as the page and its writes read it, from `raw` as parsed (None when there is
-    none, BROKEN when it isn't JSON), the same as the runner's `control.repaired`: what can be
+    """control.json as the page and its writes read it, from `raw` as parsed (MISSING when there is
+    none, BROKEN when it isn't JSON; JSON null is None, unreadable as `[]` is: review 2's F9),
+    the same as the runner's `control.repaired`: what can be
     read is kept, and nothing an unreadable file held is let go by a write that doesn't name it.
     A lane's or repo's entry that can't be used reads as stopped ("after-job", at `now`), and
     with no lanes to read (not JSON, not an object, `lanes` not one) each lane does. A `repos`
     that isn't an object names no repo; an order or ask that can't be used is dropped."""
-    broken = not isinstance(raw, dict) and raw is not None
+    broken = not isinstance(raw, dict) and raw is not MISSING
     raw = raw if isinstance(raw, dict) else {}
     stopped = {"stop": "after-job", "at": now}
     lanes, entries = {}, raw.get("lanes", {})
@@ -205,11 +207,11 @@ class App:
         return 200, raw
 
     def raw_control(self) -> object:
-        """control.json as parsed: None when there is none, BROKEN when it isn't JSON."""
+        """control.json as parsed: MISSING when there is none, BROKEN when it isn't JSON."""
         try:
             return json.loads(self.control_path.read_text(encoding="utf-8"))
         except FileNotFoundError:
-            return None
+            return MISSING
         except (OSError, ValueError):
             return BROKEN
 

@@ -152,13 +152,14 @@ def _load(state_dir: str) -> dict:
 
 def repaired(raw, now: str) -> dict:
     """What a write starts from, as the page's does (`dashboard/serve.py`'s `usable`): `raw` is
-    control.json as parsed (None when there is none, `BROKEN` when it isn't JSON). What can be
+    control.json as parsed (`MISSING` when there is none, `BROKEN` when it isn't JSON; JSON
+    `null` parses to None, which is no more an object than `[]` is: review 2's F9). What can be
     read is kept, and nothing the unreadable file held is let go by a write that doesn't name it:
     a lane's or repo's entry that can't be used is written stopped ("after-job", at `now`), and
     with no lanes to read (not JSON, not an object, `lanes` not one) each lane is. A `repos` that
     isn't an object names no repo, and an order or ask that can't be used is dropped (neither
     held anything)."""
-    if raw is None:
+    if raw is MISSING:
         raw = {}
     broken = not isinstance(raw, dict)
     raw = {} if broken else raw
@@ -185,7 +186,8 @@ def repaired(raw, now: str) -> dict:
             if isinstance(marks, dict) else {}}
 
 
-BROKEN = object()   # control.json is there but isn't JSON (`repaired`)
+BROKEN = object()    # control.json is there but isn't JSON (`repaired`)
+MISSING = object()   # there is no control.json (`repaired`); not None, which JSON null parses to
 
 
 def read(state_dir: str) -> Switch:
@@ -289,7 +291,7 @@ def ask(state_dir: str, lanes, stop: str | None, now: str, repos=()) -> dict:
         with open(path(state_dir), encoding='utf-8') as f:
             raw = json.load(f)
     except FileNotFoundError:
-        raw = None
+        raw = MISSING
     except (OSError, ValueError):
         raw = BROKEN
     base = repaired(raw, now)
