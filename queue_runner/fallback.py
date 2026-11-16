@@ -7,8 +7,10 @@ It plays the Sol seam (`review(brief, reply, workdir, out, writable)`, as `sol.S
 Reviewer builds the brief, reads the verdict from the sol-findings block and posts exactly as for
 Sol. The differences:
 
-- **The usage gate:** it's a Claude job, gated as kind `review` (`gate.FALLBACK_REVIEW`), and
-  what it spent is recorded like any Claude job's.
+- **The usage gate:** it's a Claude job, gated as kind `review` (`gate.FALLBACK_REVIEW`) beside
+  the Claude lane's jobs running (#50), and counted among them while it runs (`beside`, the
+  Runner); what it spent is recorded like any Claude job's, with `shared_with` the Claude lane's
+  jobs that ran meanwhile (PR #74's review 1, F1).
 - **Where it runs:** a T3 thread in the repo's project folder with no worktree (T3 can't start a
   thread in an existing folder, and the runner's checkout of H is where the dependencies are
   linked in), told to work in that checkout and change nothing in the project folder. It starts
@@ -32,6 +34,32 @@ WHY = {KIND: 'fallback while Sol is out', SET: 'set in config.toml'}
 # Who reviews, as the log, the work lists and the Inbox's story say it.
 WHO = {KIND: 'Opus (the fallback while Sol is out of usage)', SET: 'Opus (config.toml says so)'}
 OPUS_KINDS = tuple(WHO)   # a review job's `reviewer` when an Opus thread reviewed
+
+
+def gate_label(repo: str, number: int) -> str:
+    """An Opus review as the usage gate and `shared_with` name it: `review queue-runner#67`."""
+    return f'review {repo}#{number}'
+
+
+class Alone:
+    """No Claude lane beside the review (the tests' Reviewer, the live checks): nothing to
+    count, nothing shared."""
+
+    def __init__(self):
+        import threading
+        self.gate_lock = threading.Lock()
+
+    def claude_jobs(self) -> list:
+        return []
+
+    def review_began(self, label: str) -> None:
+        pass
+
+    def review_shared(self, label: str) -> list:
+        return []
+
+    def review_ended(self, label: str) -> None:
+        pass
 
 
 def chosen(config) -> bool:
@@ -130,18 +158,32 @@ class OpusThread:
 
 class OpusFallback:
     """What the Sol lane needs for the fallback: T3, the usage gate (None: every review starts,
-    as for the tests' Runner without one) and the effort (None: --model, nothing read back)."""
+    as for the tests' Runner without one), the effort (None: --model, nothing read back) and
+    `beside`, the Claude lane (`run.Runner`: its jobs running, and the review counted among them
+    while it runs; `Alone` without one)."""
 
-    def __init__(self, config, *, t3, gate=None, effort=None, say=lambda line: None):
+    def __init__(self, config, *, t3, gate=None, effort=None, say=lambda line: None,
+                 beside=None):
         self.config, self.t3, self.gate, self.effort = config, t3, gate, effort
         self.say = say   # a failed settle of its thread (ticket 70)
+        self.beside = beside or Alone()
 
-    def check(self):
-        """The gate's verdict for a fallback review now, or None with no gate (it starts)."""
-        if self.gate is None:
-            return None
+    def check(self, label: str):
+        """The gate's verdict for the Opus review `label` now, beside the Claude lane's jobs
+        running, or None with no gate (it starts). One let in counts among the Claude jobs
+        running until `ended`: the Claude lane's gate counts it, and each side's spending is
+        the other's `shared_with`."""
         from .gate import FALLBACK_REVIEW
-        return self.gate.check(FALLBACK_REVIEW)
+        with self.beside.gate_lock:   # the Claude lane admits nothing meanwhile
+            verdict = None if self.gate is None else self.gate.check(
+                FALLBACK_REVIEW, running=self.beside.claude_jobs())
+            if verdict is None or verdict.go:
+                self.beside.review_began(label)
+        return verdict
+
+    def ended(self, label: str) -> None:
+        """The Opus review `label` let in by `check` is over (posted, failed or never run)."""
+        self.beside.review_ended(label)
 
     @property
     def kind(self) -> str:
@@ -158,8 +200,10 @@ class OpusFallback:
         if self.gate is not None:
             self.gate.job_ended(job_id)
 
-    def measured(self, jobs: list, verdict) -> None:
-        """What a fallback review that ran a thread cost, learned as kind `review`."""
+    def measured(self, jobs: list, verdict, label: str) -> None:
+        """What an Opus review that ran a thread cost, learned as kind `review`; one that ran
+        beside a Claude lane job teaches nothing (`shared_with`, #50)."""
         if self.gate is not None and verdict is not None and verdict.usage is not None:
             from .gate import FALLBACK_REVIEW
-            self.gate.measured(FALLBACK_REVIEW, jobs, verdict.usage)
+            self.gate.measured(FALLBACK_REVIEW, jobs, verdict.usage,
+                               shared_with=self.beside.review_shared(label) or None)

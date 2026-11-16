@@ -539,7 +539,7 @@ BAD_SHAPES = {   # control.json shapes the page could not have written (review 1
     'a repo without a stop': {'repos': {'first': {}}},
     'a repo stopped now': {'repos': {'first': {'stop': 'now'}}},
 }
-# Shapes the runner reads without fault: an order it ignores, asks it leaves out.
+# Shapes the runner reads without fault: an old order it ignores (#50), asks it leaves out.
 ODD_SHAPES = {
     'repo_order a string': {'repo_order': 'first'},
     'repo_order an object': {'repo_order': {'first': 1}},
@@ -696,7 +696,7 @@ class ControlRepairTest(unittest.TestCase):
                 self.assertTrue(all(isinstance(v, dict) for v in got['lanes'].values()))
                 self.assertIsInstance(got['repos'], dict)
                 self.assertTrue(all(isinstance(v, dict) for v in got['repos'].values()))
-                self.assertIsInstance(got['repo_order'], list)
+                self.assertNotIn('repo_order', got)   # #50: an old order is dropped
                 self.assertIsInstance(got['asks'], dict)
                 self.assertTrue(all(isinstance(v, dict) for v in got['asks'].values()))
                 self.assertEqual(serve.App(state, sample=True).snapshot()[0], 200)

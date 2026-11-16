@@ -1,4 +1,5 @@
-# The repos the queue runner serves, in priority order: the first one with work gets the next job.
+# The repos the queue runner serves. Each gets its own Claude job at once, as the usage gate allows
+# (#50); when it has room for only one more, this order breaks a tie.
 # State and logs live outside every served repo.
 state_dir = "~/.queue-runner/state"
 log_dir = "~/.queue-runner/logs"
@@ -35,7 +36,7 @@ bash = "C:/Program Files/Git/bin/bash.exe"
 [review]
 provider = "chatgpt"
 
-# First in the build order (Stefan, 2026-11-15: "prioritize game backdrop full stop", its first
+# First in this order (Stefan, 2026-11-15: "prioritize game backdrop full stop", its first
 # run under the dashboard). Stefan merges its PRs himself (2026-11-15: "no auto merge, just
 # leave it up to me"): a desktop app nobody runs before a merge. It has no live steps: merged
 # is live.

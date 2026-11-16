@@ -15,7 +15,7 @@ from dashboard.serve import App
 from queue_runner import cli, snapshot
 from queue_runner.config import Config, Repo
 from queue_runner.gate import FIVE_HOUR, UNREADABLE
-from queue_runner.run import BUSY, GATED, STARTED, Runner
+from queue_runner.run import BUSY, GATED, STARTED, Runner, Start
 from queue_runner.state import JobLog
 from queue_runner.sol import Limits as SolLimits, LimitWindow as SolWindow
 from tests.fakes import FakeGitHubWithPulls, StubEndpoint, issue
@@ -383,7 +383,8 @@ class EndedElsewhereTest(Harness):
             self.log.ended(job.id, exit_code=0, outcome='not-started',
                            error='the earlier job was not continued')
             return 'idle'
-        self.r.choose = lambda: ('decision', None, run)
+        self.r.choose = lambda skip=frozenset(): [   # one repo's job (#50)
+            Start('queue-runner', 'decision', None, run, 'decision queue-runner#4')]
         self.assertEqual(self.r.run_pass(), 'idle')
         del self.r.choose
         self.assert_held_until_the_next_read()
@@ -395,7 +396,8 @@ class EndedElsewhereTest(Harness):
             job = self.a_build()
             self.log.ended(job.id, exit_code=None, outcome='not-started', error='T3 is down')
             return 'idle'
-        self.r.choose = lambda: ('build', None, run)
+        self.r.choose = lambda skip=frozenset(): [
+            Start('queue-runner', 'build', None, run, 'build queue-runner#5')]
         self.r.run_pass()
         del self.r.choose
         self.clock.at(14, 2, 49)
@@ -478,6 +480,7 @@ class DeadFallbackReviewTest(EndedElsewhereTest):
     def test_the_sol_lanes_own_review_now_runs_beside_the_claude_lane(self):
         job = self.a_review('running')
         self.r.reviewer.live = job.id                  # this runner's review, running now
+        self.endpoint.five = 10                        # room for a build beside its cost (#50)
         self.tick()
         self.clock.at(14, 2, 49)
         self.assertEqual(self.r.run_pass(), STARTED)

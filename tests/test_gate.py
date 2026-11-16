@@ -141,3 +141,69 @@ class GateCheckTest(unittest.TestCase):
         self.assertEqual(book.expected('fix'), Cost(10, 2))
         book.record('fix', [], snap(10, 10), snap(40, 12))
         self.assertEqual(book.expected('fix'), Cost(30, 2))
+
+
+class RunningJobsTest(unittest.TestCase):
+    """#50: each repo runs its own Claude job at once, so a job starts only when its cost fits
+    after the cost of every Claude job still running."""
+
+    def test_a_job_that_fits_alone_waits_beside_running_jobs_until_one_ends(self):
+        from queue_runner.gate import RUNNING, Running
+        running = Running().plus('build first#4', BUILD)
+        v = decide(usage(30, 10), 'build', BUILD, Knob(), NOW, running)
+        self.assertEqual((v.go, v.why, v.until), (False, RUNNING, None))
+        self.assertIn('build would fit alone, but the Claude job running (build first#4) is '
+                      'expected to take 40% of 5 hours, 10% of the week: it waits for one of '
+                      'them to end', v.text)
+
+    def test_a_job_that_fits_beside_them_starts_and_says_so(self):
+        from queue_runner.gate import Running
+        running = Running().plus('fix first#12', Cost(20, 5)).plus('decision second#3', Cost(5, 1))
+        v = decide(usage(30, 10), 'build', BUILD, Knob(), NOW, running)
+        self.assertEqual((v.go, v.why), (True, FITS))
+        self.assertIn('the 2 Claude jobs running (fix first#12, decision second#3) are expected '
+                      'to take 25% of 5 hours, 6% of the week, and it fits beside them', v.text)
+
+    def test_one_that_does_not_fit_alone_waits_for_the_reset_as_before(self):
+        from queue_runner.gate import Running
+        v = decide(usage(70, 10), 'build', BUILD, Knob(), NOW, Running().plus('x', BUILD))
+        self.assertEqual((v.why, v.until), (FIVE_HOUR, FIVE_RESET + datetime.timedelta(minutes=2)))
+
+    def test_a_fresh_window_takes_any_job_only_while_nothing_runs(self):
+        from queue_runner.gate import RUNNING, Running
+        big = Cost(70, 5)
+        self.assertTrue(decide(usage(0, 0, five_reset=None), 'build', big, Knob(), NOW).go)
+        v = decide(usage(0, 0, five_reset=None), 'build', big, Knob(), NOW,
+                   Running().plus('build first#4', big))
+        self.assertEqual(v.why, RUNNING)
+
+    def test_the_reserve_counts_the_running_jobs_too(self):
+        from queue_runner.gate import RUNNING, Running
+        v = decide(usage(10, 80), 'build', BUILD, Knob(reserve=5), NOW,
+                   Running().plus('build first#4', BUILD))
+        self.assertTrue(decide(usage(10, 80), 'build', BUILD, Knob(reserve=5), NOW).go)
+        self.assertEqual(v.why, RUNNING)
+
+    def test_the_gate_counts_each_running_jobs_expected_cost_and_what_it_may_continue(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        from queue_runner.gate import Gate
+        from tests.fakes import FakeUsage
+        gate = Gate(tmp.name, FakeUsage(usage(0, 10), usage(0, 10)), clock=lambda: NOW)
+        running = gate.running([('decision first#3', 'decision', 'build')])
+        self.assertEqual(running.cost, CostBook.default('decision') + CostBook.default('build'))
+        self.assertTrue(gate.check('decision').go)
+        v = gate.check('build', running=[('decision first#3', 'decision', 'build')])
+        self.assertFalse(v.go)   # 15 + 60 + 60 of 5 hours
+
+    def test_a_pass_shared_with_another_job_teaches_nothing(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        book = CostBook(os.path.join(tmp.name, 'usage.jsonl'))
+        for _ in range(3):
+            book.record('fix', ['f'], snap(10, 10), snap(50, 20), shared_with=['b'])
+        self.assertEqual(book.expected('fix'), CostBook.default('fix'))
+        self.assertFalse(book.learned('fix'))
+        for _ in range(3):
+            book.record('fix', ['f'], snap(10, 10), snap(20, 12))
+        self.assertEqual(book.expected('fix'), Cost(10, 2))

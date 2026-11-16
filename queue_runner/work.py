@@ -7,7 +7,7 @@ lane takes up next, the issues and features, the open PRs and what happened.
   really take up. Nothing is posted, started, fetched or recorded. One read of a repo answers
   each GitHub call once (`Memo`), and the Sol lane reads once after each pass; a repo GitHub
   can't be read keeps its last good read, and `stale` says since when.
-- **The lists** (`lists`) are pure: the last read and the job log now, in the build order, a
+- **The lists** (`lists`) are pure: the last read and the job log now, in config.toml's order, a
   stopped repo's work left out of the queues (ticket 37). The shapes are `dashboard/sample.py`'s.
 """
 import datetime
@@ -261,9 +261,8 @@ class Reader:
 
     def read(self, github=None) -> dict:
         """Reads every served repo once (with `github`, a `Memo` the pass shares, else its own)."""
-        from .config import toml_order
         gh = github if github is not None else Memo(self.github)
-        for repo in toml_order(self.config):
+        for repo in self.config.repos:
             if not repo.github or repo.local_issues:
                 continue
             try:
@@ -304,14 +303,14 @@ def _at(r: RepoRead, at) -> RepoRead:
 
 @dataclass(frozen=True)
 class View:
-    """What the lists are written from: the reads, the job log now, the build order and the
+    """What the lists are written from: the reads, the job log now, the repos in config.toml's order and the
     stopped repos, and what each lane is on."""
     reads: dict
     jobs: list
     repos: list
     off: frozenset = frozenset()
     limited: list = field(default_factory=list)
-    lane_jobs: dict = field(default_factory=dict)   # lane id: its open state.Job, or None
+    lane_jobs: dict = field(default_factory=dict)   # lane id: its open state.Jobs (one per repo)
     titles: dict = field(default_factory=dict)      # (repo, n): a title the passes read
     released: frozenset = frozenset()   # the jobs a release settled (`JobLog.released_ids`)
 
@@ -345,7 +344,7 @@ def _same(entry: dict, job) -> bool:
 def claude_queue(v: View) -> list[dict]:
     """The Claude lane's queue, as `Runner.choose` takes it: a job a limit cut off, decisions,
     live steps, fix and conflict rounds, then builds in the picker's order; each kind through
-    the repos in the build order."""
+    the repos in config.toml's order."""
     working = [r for r in v.repos if r.name not in v.off and r.name in v.reads]
     out = []
     for j in v.limited:
@@ -371,8 +370,8 @@ def claude_queue(v: View) -> list[dict]:
     for r in working:
         for n, title in v.reads[r.name].builds:
             out.append(_entry('build', r.name, False, n, title))
-    now = v.lane_jobs.get('claude')
-    return [e for e in out if not _same(e, now)]
+    now = v.lane_jobs.get('claude') or []
+    return [e for e in out if not any(_same(e, j) for j in now)]
 
 
 def sol_queue(v: View) -> list[dict]:
@@ -380,8 +379,8 @@ def sol_queue(v: View) -> list[dict]:
     out = [_entry('review', r.name, True, p.pr.number, p.pr.title)
            for r in v.repos if r.name not in v.off and r.name in v.reads
            for p in v.reads[r.name].prs if p.review_why is None]
-    now = v.lane_jobs.get('sol')
-    return [e for e in out if not _same(e, now)]
+    now = v.lane_jobs.get('sol') or []
+    return [e for e in out if not any(_same(e, j) for j in now)]
 
 
 def queue(v: View | None, lane: str) -> tuple[list[dict], str]:
@@ -442,7 +441,7 @@ def _tickets(its: list[dict]) -> list[str]:
 
 
 def _feature_list(v: View, issues: list[dict]) -> list[dict]:
-    """Each repo's features, in the build order: the repos' order, then the feature whose first
+    """Each repo's features: the repos' order (config.toml's), then the feature whose first
     open ticket has the lowest number; one with nothing open last."""
     rank = {r.name: k for k, r in enumerate(v.repos)}
     out = []

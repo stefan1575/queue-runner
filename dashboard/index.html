@@ -1098,8 +1098,16 @@ function pickAsk() {
   if (!every.some((a) => a.id === ui.ask)) ui.ask = open.length ? open[0].id : null;
   return every.find((a) => a.id === ui.ask) || null;
 }
-// The lane whose job is on this ask's work, if one is.
-const laneOn = (a) => (snap.lanes || []).find((l) => l.state === "working" && l.job && l.job.repo === a.repo && (l.job.ref === a.ref || (a.pr && l.job.pr === a.pr)));
+// Every job a lane runs now: the Claude lane runs one per repository (#50; `job` is the newest).
+const laneJobs = (l) => l.jobs || (l.job ? [l.job] : []);
+// The lane whose job is on this ask's work, if one is, with that job as its `job`.
+function laneOn(a) {
+  for (const l of snap.lanes || []) {
+    const j = l.state === "working" && laneJobs(l).find((j) => j.repo === a.repo && (j.ref === a.ref || (a.pr && j.pr === a.pr)));
+    if (j) return { ...l, job: j };
+  }
+  return null;
+}
 function kindTag(a) {
   if (a.answered) return laneOn(a) ? `<span class="kind-tag run"><i class="pulse"></i>Working</span>` : `<span class="kind-tag quiet">${ICON.check}Runner's turn</span>`;
   return `<span class="kind-tag${a.kind === "broken" ? " broken" : ""}">${KIND_ICON[a.kind] || ""}${esc(askWords(a)[0])}</span>`;
@@ -1319,6 +1327,11 @@ function laneSays(l) {
     how = "Waiting";
     head = l.wait && l.wait.until ? `Waiting until ${esc(stamp(l.wait.until))}` : "Waiting";
     sub = esc((l.wait && l.wait.reason) || "");
+  } else if (job && laneJobs(l).length > 1) {   // one job per repository at once (#50)
+    const jobs = laneJobs(l);
+    how = `${l.state === "stopping" ? "Stopping, " : ""}${jobs.length} at once`;
+    head = jobs.map((j) => `${esc(kind(j.kind)[0])} ${esc(j.ref)} in ${esc(j.repo)}`).join("; ");
+    sub = jobs.map((j) => `${esc(j.ref)} ${esc(j.title)}, ${esc(ago(j.started_at))} in.${j.thread ? ` <a class="link" href="${esc(j.thread)}" target="_blank" rel="noreferrer">Open the thread</a>` : ""}`).join("<br>");
   } else if (job) {
     how = `${l.state === "stopping" ? "Stopping, " : ""}${esc(ago(job.started_at))}`;
     head = `${esc(doing)} ${esc(job.ref)} ${esc(job.title)}`;
@@ -1824,14 +1837,18 @@ function repoRows() {
   const rows = (snap.repos || []).map((r) => {
     const name = r.name, a = (ctl.repos || {})[name], pending = a && !wasRead(a.at) && !!a.stop !== !!r.stopped;
     const off = pending ? !!a.stop : !!r.stopped;
+    // What it's doing now (#50: each runs its own Claude job): the job, else why none starts.
+    const now = r.doing ? `${kind(r.doing.kind)[0]} ${r.doing.ref}, ${ago(r.doing.started_at)} in`
+      : r.wait ? `Waiting: ${r.wait.reason.replace(/\.$/, "")}` : "Idle";
     const sub = pending ? (a.stop ? "Asked to stop: the runner hasn't read it yet" : "Asked to resume: the runner hasn't read it yet")
-      : r.stopped ? `Stopped${r.stopped.at ? ` since ${stamp(r.stopped.at)}` : ""}` : r.merge === "stefan" ? "you merge" : "the runner merges";
+      : r.stopped ? `Stopped${r.stopped.at ? ` since ${stamp(r.stopped.at)}` : ""}${r.doing ? `; ${now.replace(/^./, (c) => c.toLowerCase())}` : ""}`
+      : `${now}. ${r.merge === "stefan" ? "You merge" : "The runner merges"}.`;
     const btn = stale ? "" : off
       ? `<button class="btn sm solid" data-act="repostop" data-repo="${esc(name)}" data-how="" title="Both lanes take up its work again">${ICON.play}Resume</button>`
       : `<button class="btn sm" data-act="repostop" data-repo="${esc(name)}" data-how="after-job" title="A job running on it finishes; then neither lane takes up its work">${ICON.pause}Stop</button>`;
     return `<li${r.stopped ? ' class="off"' : ""}><span class="name">${esc(name)}<span>${esc(sub)}</span></span>${btn}</li>`;
   }).join("");
-  return `<ul class="order">${rows}</ul><p class="plan-note">Taken up in this order. A stopped one gets nothing until you resume it.</p>`;
+  return `<ul class="order">${rows}</ul><p class="plan-note">Each runs its own Claude job at once, as the usage gate allows. A stopped one gets nothing until you resume it.</p>`;
 }
 
 // Refresh (ticket 42): asks the runner to read both plans now (control.json's usage.refresh_at).

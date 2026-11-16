@@ -101,7 +101,8 @@ class GitHubAnswers:
                 stamps.append(j.answer)
         return max(stamps)
 
-    def next(self):
+    def next(self, repos=None):
         """(the waiting job, the message to send it, the marks for its `continued` end) for the
-        first Stefan replied to, or None."""
-        return self._replies[0] if self._replies else None
+        first Stefan replied to, or None. With `repos`, in those repos' names alone (#50: each
+        repo's job is chosen apart)."""
+        return next((r for r in self._replies if repos is None or r[0].repo in repos), None)

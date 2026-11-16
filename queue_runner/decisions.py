@@ -205,9 +205,13 @@ class Decider:
         from .effort import Effort   # ticket 39: how its thread starts, its effort read back
         self.effort = effort or Effort(config)
 
-    def next_case(self) -> Case | None:
+    def next_case(self, repos=None) -> Case | None:
+        """The first case to decide, in the working repos (or in `repos` of them: the Claude
+        lane chooses each repo's job apart, #50)."""
         from .config import working   # a repo Stefan stopped gets no decision (ticket 37)
         for repo in working(self.config):
+            if repos is not None and repo.name not in repos:
+                continue
             if not repo.github:
                 continue
             try:
