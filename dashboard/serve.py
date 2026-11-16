@@ -237,7 +237,8 @@ class App:
 
     def ask_ids(self) -> set | None:
         """The asks the snapshot lists now (waiting and answered), whose control entries are
-        kept; None when there's no snapshot to go by. The sample's: every state's."""
+        kept; None when there's no snapshot to go by, or it hasn't read the Inbox yet (`asks` null:
+        issue #92). The sample's: every state's that lists asks."""
         if self.sample:
             from . import sample
             snaps = [sample.build(name, base=self.started) for name in sample.STATES]
@@ -246,6 +247,11 @@ class App:
                 snaps = [json.loads(self.snapshot_path.read_bytes())]
             except (OSError, ValueError):
                 return None
+        # A snapshot whose `asks` is null hasn't read the Inbox yet (issue #92): it lists nothing
+        # to go by, so it drops nothing. The sample goes by the states that list asks.
+        snaps = [s for s in snaps if not isinstance(s, dict) or s.get("asks") is not None]
+        if not snaps:
+            return None
         try:
             return {a["id"] for s in snaps for a in (s.get("asks") or []) + (s.get("answered") or [])}
         except (AttributeError, KeyError, TypeError):   # not the snapshot's shape: drop nothing

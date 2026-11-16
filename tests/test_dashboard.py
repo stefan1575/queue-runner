@@ -173,6 +173,30 @@ class AppTest(unittest.TestCase):
         self.assertEqual(new["asks"], {"stop-2": {"read": True, "open": "t3", "snooze_until": None},
                                        "merge-x-5-abc1234": {"read": True}})
 
+    def test_a_snapshot_written_before_the_first_inbox_read_drops_no_ask_marks(self):
+        # Issue #92: the runner restarted, the Sol lane spent 10 minutes on a review before it
+        # read the Inbox, and four Decide in T3 requests sent meanwhile wiped every ask's marks.
+        from queue_runner import snapshot
+        before = snapshot.build(snapshot.Facts(now=datetime(2026, 11, 16, 10, 42, tzinfo=timezone.utc), repos=[]))
+        self.assertIsNone(before["asks"])
+        (self.dir / "snapshot.json").write_text(json.dumps(before), encoding="utf-8")
+        (self.dir / "control.json").write_text(json.dumps({"asks": {
+            "stop-1": {"read": True}, "stop-2": {"read": True, "open": {"at": NOW}}}}), encoding="utf-8")
+        new = self.app.write_control({"ask": "stop-3", "open": True})
+        self.assertEqual(set(new["asks"]), {"stop-1", "stop-2", "stop-3"})
+        self.assertEqual(new["asks"]["stop-1"], {"read": True})
+        self.assertEqual(new["asks"]["stop-2"], {"read": True, "open": {"at": NOW}})
+        self.assertIn("open", new["asks"]["stop-3"])
+
+    def test_once_the_inbox_is_listed_an_ask_it_doesnt_list_is_still_dropped(self):
+        (self.dir / "control.json").write_text(json.dumps({"asks": {
+            "stop-1": {"read": True}, "stop-2": {"read": True}}}), encoding="utf-8")
+        (self.dir / "snapshot.json").write_text(json.dumps({"version": 1, "asks": [{"id": "stop-2"}],
+                                                            "answered": None}), encoding="utf-8")
+        self.assertEqual(self.app.write_control({"lane": "sol", "stop": None})["asks"], {"stop-2": {"read": True}})
+        (self.dir / "snapshot.json").write_text(json.dumps({"version": 1, "asks": [], "answered": []}), encoding="utf-8")
+        self.assertEqual(self.app.write_control({"lane": "sol", "stop": None})["asks"], {})
+
     def test_with_no_snapshot_to_go_by_a_write_drops_nothing(self):
         (self.dir / "control.json").write_text(json.dumps({"asks": {"stop-1": {"read": True}}}), encoding="utf-8")
         self.assertEqual(self.app.write_control({"lane": "sol", "stop": None})["asks"], {"stop-1": {"read": True}})

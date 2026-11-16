@@ -199,14 +199,17 @@ def _repo_stopped(facts: Facts, name: str) -> dict | None:
 
 def _work(facts: Facts) -> dict:
     """The work lists: the Inbox's asks (`asks.py`, ticket 31); the features, issues, PRs and
-    activity (`work.py`, ticket 32)."""
+    activity (`work.py`, ticket 32). Before the Sol lane's first Inbox read, `asks` and
+    `answered` are null, not empty (issue #92): the page's control writes drop the marks of asks
+    the snapshot doesn't list, and an Inbox not read yet lists nothing to go by."""
     from .asks import render
     from .work import lists
     asks, answered = render(facts.inbox, facts.jobs, facts.releases, facts.repos)
     _decide(facts, asks, answered)
     for a in asks + answered:
         a.update(_marks(facts, a['id']))
-    return {'asks': asks, 'answered': answered,
+    unread = facts.inbox is None   # issue #92: not read yet is no list, so the page drops no marks
+    return {'asks': None if unread else asks, 'answered': None if unread else answered,
             **lists(_view(facts), asks, facts.releases, facts.inbox)}
 
 
