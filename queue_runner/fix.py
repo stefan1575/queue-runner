@@ -79,9 +79,22 @@ class Fixer:
         hand-run review after the cutover is left to the session that ran it, and so is one
         decide() would have sent to Stefan (`ledger.escalation`: a stop or an Approach note),
         since the stops and notes read only the runner's own reviews. None if not."""
+        reviews = self._old_reviews(repo, number, sha, rnd)
+        if not reviews or escalation(reviews):   # it went to Stefan, not to a fix round
+            return None
+        r = reviews[-1]
+        return Job(id=f'adopted:{repo.name}#{number}:{sha[:7]}:{r["round"]}', kind='review',
+                   repo=repo.name, issue=number, branch=None,
+                   title=f'review {r["round"]} from before the runner', started_at=r['at'],
+                   ended_at=r['at'], sha=sha, round=r['round'], verdict='blocking',
+                   outcome='blocking')
+
+    def _old_reviews(self, repo, number: int, sha: str, rnd: int | None = None) -> list[dict]:
+        """The PR's reviews (read_reviews(); with `rnd`, up to that one) when the newest is
+        blocking on `sha` and was posted before the cutover (`adopt_reviews_before`), else []."""
         cutover = self.config.adopt_reviews_before
         if not cutover:
-            return None
+            return []
         reviews = read_reviews(self.github.issue_comments(repo, number))
         if rnd is not None:   # that review, and the ones before it
             reviews = reviews[:1 + max((i for i, r in enumerate(reviews) if r['round'] == rnd),
@@ -89,14 +102,19 @@ class Fixer:
         r = reviews[-1] if reviews else None
         if not (r and r['sha'] and sha.startswith(r['sha']) and r['verdict'] == 'blocking'
                 and r['at'] and r['at'] < cutover):
-            return None
-        if escalation(reviews):   # it went to Stefan, not to a fix round: it stays his
-            return None
-        return Job(id=f'adopted:{repo.name}#{number}:{sha[:7]}:{r["round"]}', kind='review',
-                   repo=repo.name, issue=number, branch=None,
-                   title=f'review {r["round"]} from before the runner', started_at=r['at'],
-                   ended_at=r['at'], sha=sha, round=r['round'], verdict='blocking',
-                   outcome='blocking')
+            return []
+        return reviews
+
+    def old_escalation(self, repo, pr) -> str | None:
+        """Why the PR's newest review, blocking on its head from before the cutover, went to
+        Stefan (`ledger.escalation`), or None. `adopted` leaves such a PR alone, and so does a
+        conflict round (PR #4's review 2, F1): nothing automatic runs on it until Stefan orders
+        a round on H (`order`)."""
+        why = escalation(self._old_reviews(repo, pr.number, pr.head_sha))
+        if why and not self.order(repo, pr):
+            return (f'its newest review, from before the runner, went to Stefan ({why}): '
+                    'left for him')
+        return None
 
     def why_not(self, repo, pr) -> str | None:
         """Why a PR whose head the runner found blocking gets no fix round now, or None."""
@@ -135,6 +153,8 @@ class Fixer:
         """Why a PR that conflicts with its base gets no conflict round now, or None. `prs` is
         the repo's open PRs: one conflicted PR at a time."""
         if why := self._busy(repo, pr):
+            return why
+        if why := self.old_escalation(repo, pr):
             return why
         # A decision that ordered a round on H since (Stefan's reply to the stop) overrides
         # the stop: `_busy` has seen that no round ran after it.

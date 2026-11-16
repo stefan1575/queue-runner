@@ -359,10 +359,30 @@ class AdoptedReviewTest(FixTest):
             'repeated class': ([{**f1, 'status': 'open'}],
                                [{**f1, 'status': 'fixed', 'closed': 2}, {**f3, 'status': 'open'}]),
         }
+        cases['reopened'] = ([{**f1, 'status': 'open'}], [{**f1, 'status': 'fixed', 'closed': 2}],
+                             [{**f1, 'status': 'open'}])
         for name, rounds in cases.items():
-            with self.subTest(name):
-                self.old_reviews(*rounds)
-                self.assertIsNone(self.runner(FakeT3([])).next_fix())
+            for conflicted in (False, True):
+                with self.subTest(name, conflicted=conflicted):
+                    self.old_reviews(*rounds)
+                    self.gh.conflicts = {20} if conflicted else set()
+                    said = []
+                    r = self.runner(FakeT3([]))
+                    r.say = said.append
+                    self.assertIsNone(r.next_fix())
+                    if conflicted:   # no conflict round either (PR 4's review 2, F1)
+                        self.assertTrue(any('#20' in s and 'Stefan' in s for s in said), said)
+
+    def test_a_conflict_round_still_starts_once_stefan_ordered_a_fix(self):
+        f1 = {**important('F1'), 'raised': 1}
+        self.old_reviews([{**f1, 'status': 'open'}], [{**f1, 'status': 'decline-kept'}])
+        self.gh.conflicts = {20}
+        r = self.runner(FakeT3([]))
+        d = r.jobs.started(kind='decision', repo='first', issue=20, branch='claude/red-5',
+                           title='t', sha=H2)
+        r.jobs.ended(d.id, exit_code=None, outcome='fix')
+        found = r.next_fix()
+        self.assertEqual(found and (found[1].number, found[2]), (20, None))
 
     def test_an_old_review_2_that_only_says_fix_is_adopted(self):
         f1 = {**important('F1'), 'raised': 1}
