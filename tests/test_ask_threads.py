@@ -325,6 +325,38 @@ class AnswerTest(ThreadCase):
         return s
 
 
+class ReleasedTest(ThreadCase):
+    """`--release` settles a stop: its ask is never opened or acted on after (review 1's F3)."""
+
+    def test_releasing_a_stop_drops_its_pending_request(self):
+        self.noted()
+        self.ask_to_open()
+        self.r.jobs.released('first', 20)
+        self.assertIsNone(self.r.asking.next(control.read(self.config.state_dir)))
+        self.t3.outcomes = [(0, 'completed')]   # the build of #4 instead
+        self.r.run_pass()
+        self.assertEqual(self.t3.launches, [])
+
+    def test_releasing_a_stop_keeps_its_open_thread_from_holding_the_pr_again(self):
+        ask = self.opened()
+        self.r.jobs.released('first', 20)
+        self.assertIsNone(held(self.r.jobs, self.repo, 20))
+        self.says(ask, Message('assistant', decision_reply('hold')))
+        self.r.plan()
+        self.assertIsNone(held(self.r.jobs, self.repo, 20))
+        self.assertEqual([j.outcome for j in self.jobs('decision')], ['approach-note'])
+        self.assertEqual(self.stop().id, ask.about)   # still `filed`, as the release left it
+
+    def test_a_released_stops_ask_offers_no_thread_in_the_snapshot(self):
+        from queue_runner.ask_threads import mark
+        ask = self.opened()
+        self.r.jobs.released('first', 20)
+        asks = [{'id': f'stop-{ask.about}', 'repo': 'first', 'go': {'url': 'u'}}]
+        mark(asks, [], self.r.jobs.jobs(), {}, lambda repo: None,
+             released=self.r.jobs.released_ids())
+        self.assertEqual((asks[0]['decide'], asks[0]['go']), (None, {'url': 'u'}))
+
+
 class SnapshotTest(ThreadCase):
     def snap(self):
         got = inbox.collect(self.config, self.gh, self.r.jobs)

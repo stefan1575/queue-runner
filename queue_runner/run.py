@@ -353,6 +353,7 @@ class Runner:
                 self.jobs.ended(job.id, exit_code=None, outcome=NOT_STARTED,
                                 error='No T3 thread was found for this job.')
                 self.say(f'{self._name(job)}: no thread was started; closed as not-started')
+                self._uncontinue(job)
             elif thread.active and not thread.pending_requests:
                 self.say(f'{self._name(job)} is still running in {thread.link}: '
                          'no other Claude job starts')
@@ -445,7 +446,11 @@ class Runner:
         sending `message` to its thread, or in a fresh thread, as `limits.resume_choice` decides
         from how long ago its last request started and its context. In place, the new job
         carries the thread in its start record so a dead runner's settle finds it. The earlier
-        job, if it was waiting, ends `continued`."""
+        job, if it was waiting, ends `continued`. A Stop asked of the Claude lane since the pass
+        began (during a decision's thread, ticket 30) starts nothing: IDLE, and the earlier job
+        stays as it is, so the case is taken up again after Resume."""
+        if self.held('claude'):
+            return IDLE
         choice = self._resume_choice(old)
         if not choice.in_place:
             return self._restart(old, choice, None if limit else message)
@@ -471,8 +476,7 @@ class Runner:
             # The message never reached a run: as it was, and the case is decided again.
             # (`not-sent`, not `not-started`: the issue stays held.)
             self.jobs.ended(job.id, exit_code=None, outcome=NOT_SENT, error=str(e))
-            if old.outcome == 'waiting':
-                self.jobs.ended(old.id, exit_code=old.exit_code, outcome='waiting')
+            self._uncontinue(job)
             self.say(f'{self._name(job)} not continued: {e}')
             return IDLE
         self.finish(job, result.thread_id, result.exit_code, result.status, result.error,
@@ -688,7 +692,18 @@ class Runner:
             self.jobs.ended(old.id, exit_code=old.exit_code, outcome='continued')
         self.say(f'Restarting {self._name(job)} fresh {after} ({choice.why}), on {work} at '
                  f'{tip[:7]}; the old thread was {old.link or old.thread_id}')
-        return self._start(job, repo, brief, tip, work)
+        did = self._start(job, repo, brief, tip, work)
+        if did == IDLE:   # T3 started no thread: the old job was never continued
+            self._uncontinue(job)
+        return did
+
+    def _uncontinue(self, job: Job) -> None:
+        """A job that picked up a waiting one (`about`) never reached a thread: the waiting job
+        was marked `continued` before it, so it waits again as it did, and its case is decided
+        again (as for a message that never reached its thread)."""
+        old = next((j for j in self.jobs.jobs() if j.id == job.about), None) if job.about else None
+        if old is not None and old.outcome == 'continued':
+            self.jobs.ended(old.id, exit_code=old.exit_code, outcome='waiting')
 
     def _brief_again(self, repo: Repo, old: Job) -> str:
         """The job's brief, built afresh from its sources as when it started."""

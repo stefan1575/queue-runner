@@ -132,13 +132,16 @@ class Stopper:
                    for j in self.jobs.on('stop', repo.name, pr.number, pr.head_sha,
                                          released=True))
 
-    def stop_pass(self) -> None:
+    def stop_pass(self, halted=lambda: False) -> None:
         """Each repo: the stops Stefan answered go back to the loop, then every open PR's new
-        stops are filed. A repo Stefan stopped is left as it is (ticket 37)."""
+        stops are filed. A repo Stefan stopped is left as it is (ticket 37), and once `halted()`
+        says the reviewing lane was stopped, the repos after it (ticket 30)."""
         from .config import working
         for repo in working(self.config):
             if not repo.github:
                 continue
+            if halted():
+                return
             self.answers(repo)
             try:
                 prs = sorted(self.github.open_pulls(repo), key=lambda p: p.number)

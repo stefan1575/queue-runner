@@ -264,13 +264,31 @@ on; `"now"` is read as `"after-job"` until ticket 34.
 - **Read** (`control.read`, never raises) at the start of each lane's pass: the Claude lane after
   settling (`Runner.plan`, a pass that ends `stopped`), the Sol lane before it files a stop,
   merges or reviews anything (`Runner._sol_pass`), so a stopped Sol lane does none of them.
-  `--once` obeys too; `--review` is Stefan's own and doesn't ask. The log says once
+  `--once` obeys too; `--review` is Stefan's own and doesn't ask (but merges nothing after,
+  below). The log says once
   `The Claude lane is stopped by Stefan: it starts no job (Resume on the dashboard, or python3
   -m queue_runner --resume)` (the reviewing lane's: `... --resume sol`), and `... runs again:
   Stefan resumed it` when it changes.
-- **Unreadable** (not JSON, not an object, a lane's entry without a `stop` the page could have
-  written): neither lane starts anything until it's fixed, said once; any Stop or Resume on the
-  page, or `--pause`/`--resume`, writes it afresh (keeping what they can read, as the page does).
+- **Asked again between jobs, in both lanes,** so a Stop asked while a job runs lets it finish
+  and starts nothing after it, in that pass too: the Sol lane before its merge pass, before
+  each merge in it (`Merger.merge_pass(halted=...)`), before each repo's stops and before its
+  review (`Reviewer.lane_stopped`); a review that ends after the Stop posts, and its merge or
+  stop waits for Resume (`Reviewer.stopped_now`, as for a stopped repo); the Claude lane before
+  a decision's retry or answer (`Runner.continue_job`): the decision ends `not-started` and the
+  earlier job stays as it was, so the case is decided again after Resume.
+- **Unreadable** (not JSON, not an object, `lanes` or `repos` there but not an object, a lane's
+  or repo's entry that isn't an object or has no `stop` the page could have written: a missing
+  `stop` is never a Resume): neither lane starts anything until it's fixed, said once. An odd
+  `repo_order` or ask entry is ignored instead (The build order, Read and snoozed). Any Stop or
+  Resume on the page, any other request it sends, or `--pause`/`--resume`, writes it afresh
+  from what they can read (`control.repaired`, and the page's `serve.usable`, the same file
+  from either end) and **lets go only of what it names**: an entry it can't use is written
+  stopped (`after-job`), and with no lanes to read (not JSON, not an object, `lanes` not one)
+  each lane is, so Resume on one lane leaves the other held until it's resumed too. JSON `null`
+  is not an object either: both ends mark no file as `MISSING`, never None, which `null` parses
+  to (review 2's F9). A `repos`
+  that isn't an object names no repo and is dropped. The page reads control.json through the
+  same repair (`App.control`), so it shows those lanes stopped.
 - **The older pause:** with `paused: true` in gate.json and no `claude` entry in control.json,
   the Claude lane is stopped (since gate.json's mtime). An entry, either way, wins. The CLI's
   `ask` (and `--reserve`, through `carry_over`) moves that pause into control.json and leaves
@@ -448,7 +466,11 @@ id), and `resume`: whether the earlier thread is continued in place or a fresh t
 any job of its kind; a dead runner's settle finds the thread by its id. A message that never
 reached a run (T3 failed and the thread isn't running) ends the new job `not-sent` (it counts for
 nothing; the issue stays held), puts a waiting job back to `waiting`, and the decision
-`not-started`, so the case is decided again.
+`not-started`, so the case is decided again. **A fresh thread T3 never started** (it failed
+before one existed, or a dead runner's settle finds none) is the same (`Runner._uncontinue`):
+the new job ends `not-started`, which holds the issue still (a build with `about` doesn't free
+it) and is no newer job to the decisions (`Decider.cases` passes over `not-started` and
+`not-sent`), the waiting job is `waiting` again, and the case is decided again.
 
 ## Decision threads
 
@@ -514,8 +536,9 @@ and ticket 36's keys in the same record are kept). The runner starts a thread fo
 click, never by itself.
 
 - **Opening** (`AskThreads.next`, `open`): the Claude lane, after a limited job and before any
-  decision, takes the oldest request whose stop is still `filed`, in a repo it works, with the
-  PR open, and starts `Queue runner ask: <repo>#<n>` in the repo's T3 project with no worktree,
+  decision, takes the oldest request whose stop is still `filed` and not released
+  (`JobLog.released_ids`: a release leaves a stop's outcome `filed`), in a repo it works, with
+  the PR open, and starts `Queue runner ask: <repo>#<n>` in the repo's T3 project with no worktree,
   **without waiting** (`T3Cli.launch`: `t3 thread start --json` prints `{threadId, projectId,
   runId}`, read in `server.asar` 2026-11-15), then reads its link with `thread show`. Gated as a
   decision; it teaches the learned costs nothing (`measured` records only passes that made a
@@ -943,7 +966,12 @@ python3 -m dashboard    # http://queue.localhost:5289/ is the runner's; http://l
   `inbox.Reader`), even while Stefan has stopped that lane (it only reads), and the snapshot
   writes from that read, never from GitHub. **GitHub down:** a repo it can't read keeps the last
   good read's asks, and the GitHub source turns red with that read's time and an `affects`
-  line (`asks.stale_github`). **Templates, no AI** (`asks.render`): `about` is the first prose
+  line (`asks.stale_github`). **Part-way** (one ask's PR, issue, dependencies or comments
+  failing, `_Reader.fill`): that ask is the last good read's (`inbox.key`, `Inbox.unfilled`;
+  listed bare only if there's none), the others this read's, and the source says so the same
+  way, with the time of the repo's last whole read. GitHub saying a thing isn't there (HTTP
+  404, a deleted issue: `inbox.gone`) is the ask's own state: said, the ask listed as the job
+  log has it, and not stale. **Templates, no AI** (`asks.render`): `about` is the first prose
   (markdown stripped) under the closed issue's "What to build" or "Summary", else its first
   paragraph, else the PR's, clipped to 300 characters; `because` the stop's reason plus the
   Important findings still open ("Open now: F3, ..."), an approach note's first paragraph after
@@ -972,7 +1000,13 @@ python3 -m dashboard    # http://queue.localhost:5289/ is the runner's; http://l
   is its first failing step). Issues come from `GhCli.work_issues` (one paged GraphQL query:
   labels, parent, sub-issues, native blockers). Every repo is read, a stopped one too, and
   `--snapshot` reads the same way. **GitHub down:** a repo it can't read keeps its last good
-  read, and the GitHub source says so (`work.stale_github`, after the Inbox's line). **The
+  read, and the GitHub source says so (`work.stale_github`, after the Inbox's line). **A
+  part failing on its own** (the builds, what's in flight, decisions, live steps, what's merged
+  and not live, the findings, fix rounds or reviews, or one PR's merge re-check, reviews, or
+  its own reading in the lanes' readers, said there as `reading it failed`) keeps that part
+  from the last good read (`work.kept`, `RepoRead.failed`; a PR's own parts only while its
+  head is the same), and the repo is stale, since its last whole read, until a read has every
+  part. **The
   lists** (`work.lists`, `work.queue`) are written from the last read and the job log now, in
   `Facts.repos`' order, a stopped repo's work left out of both queues. **The Claude lane's
   queue** is `Runner.choose`'s order: the jobs a limit cut off, decisions, live steps (ref the
@@ -984,7 +1018,8 @@ python3 -m dashboard    # http://queue.localhost:5289/ is the runner's; http://l
   run names its branch). An issue with an open PR takes its PR's family (`you` while it's held or
   ready for him, `fixing` while a round is queued or running, else `review`), with the PR's
   status as `note`; then an ask on it is `you`; a build the job log holds says what it left
-  (`building`, or `you` with the `--release` that frees it); then in flight, `not-ready` without
+  (`building`, or `you` with the `--release` that frees it; a build a release settled holds
+  nothing, `View.released`); then in flight, `not-ready` without
   `ready-for-agent`, `ready` if the picker would take it (`pick` its place in the Claude
   queue's builds), else `blocked`. `blocked_by` is GitHub's dependencies and `Blocked by:` lines,
   as `repo#n`. **Features:** each open issue with sub-issues ("Spec:" or "Map:" taken off its
@@ -1402,7 +1437,8 @@ GitHub read in `tests/test_snapshot_runner.py`; `GhCli.work_issues` in `tests/te
 Stopping a lane: `tests/test_switch.py` (today's gate.json pause through the run loop, each
 stop through `main` and `Runner.run_once`, the older pause against an entry, `--pause` and
 `--resume`, the same file from the CLI's writer and `serve.App.write_control`, `--gate` and the
-dry run's words, an unreadable control.json, and the wake tasks a stopped lane doesn't set).
+dry run's words, an unreadable control.json in every shape, read and repaired from both
+ends, the wake tasks a stopped lane doesn't set, and a Stop asked mid-review or mid-merge).
 The build order: `tests/test_build_order.py` (two served repos through `main` and the real
 `Runner`: each lane in `repo_order`, the orders that are ignored and said once, a new order
 written mid-job, the dry run, and the snapshot's `repos` and `control_read_at`).

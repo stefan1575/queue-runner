@@ -9,7 +9,8 @@ Stop and Resume write it (`dashboard/serve.py`, `apply_control`) and so do `--pa
 
 `lanes.<id>.stop` is "after-job" (the lane's job finishes, and it starts nothing after), "now"
 (read as "after-job" until ticket 34) or null (it carries on). The runner reads it (`read`) before
-each lane starts a job; an unreadable file starts nothing in either lane until it's fixed.
+each lane starts a job; an unreadable file (an entry without a `stop` included) starts nothing
+in either lane until it's fixed, and a write over it lets go only of what it names (`repaired`).
 
 `repo_order` (ticket 33) is the order both lanes go through the served repos, read at the start
 of each pass (`ordered`): used when it names every served repo exactly once, and otherwise
@@ -122,6 +123,12 @@ class Unreadable(ValueError):
     pass
 
 
+def _usable(entry, stops) -> bool:
+    """A lane's or repo's entry as the page writes it: an object whose `stop` is one of `stops`.
+    One without a `stop` is not a Resume: it can't be used."""
+    return isinstance(entry, dict) and 'stop' in entry and entry['stop'] in stops
+
+
 def _load(state_dir: str) -> dict:
     """control.json as a dict ({} when there is none); Unreadable if it isn't one the page could
     have written."""
@@ -134,19 +141,59 @@ def _load(state_dir: str) -> dict:
         raise Unreadable(str(e)) from None
     if not isinstance(raw, dict):
         raise Unreadable('it is not a JSON object')
-    lanes = raw.get('lanes') or {}
+    lanes = raw.get('lanes', {})
     if not isinstance(lanes, dict):
         raise Unreadable('its "lanes" is not an object')
     for id, entry in lanes.items():
-        if not isinstance(entry, dict) or entry.get('stop') not in STOPS:
+        if not _usable(entry, STOPS):
             raise Unreadable(f'lane "{id}" is not {{"stop": "after-job", "now" or null}}')
-    repos = raw.get('repos') or {}
+    repos = raw.get('repos', {})
     if not isinstance(repos, dict):
         raise Unreadable('its "repos" is not an object')
     for name, entry in repos.items():
-        if not isinstance(entry, dict) or entry.get('stop') not in REPO_STOPS:
+        if not _usable(entry, REPO_STOPS):
             raise Unreadable(f'repo "{name}" is not {{"stop": "after-job" or null}}')
     return raw
+
+
+def repaired(raw, now: str) -> dict:
+    """What a write starts from, as the page's does (`dashboard/serve.py`'s `usable`): `raw` is
+    control.json as parsed (`MISSING` when there is none, `BROKEN` when it isn't JSON; JSON
+    `null` parses to None, which is no more an object than `[]` is: review 2's F9). What can be
+    read is kept, and nothing the unreadable file held is let go by a write that doesn't name it:
+    a lane's or repo's entry that can't be used is written stopped ("after-job", at `now`), and
+    with no lanes to read (not JSON, not an object, `lanes` not one) each lane is. A `repos` that
+    isn't an object names no repo, and an order or ask that can't be used is dropped (neither
+    held anything)."""
+    if raw is MISSING:
+        raw = {}
+    broken = not isinstance(raw, dict)
+    raw = {} if broken else raw
+    stopped = {'stop': 'after-job', 'at': now}
+    lanes, entries = {}, raw.get('lanes', {})
+    if isinstance(entries, dict):
+        for id, entry in entries.items():
+            if _usable(entry, STOPS):
+                lanes[id] = entry
+            elif id in LANES:
+                lanes[id] = dict(stopped)
+    if broken or not isinstance(entries, dict):
+        for id in LANES:
+            lanes.setdefault(id, dict(stopped))
+    repos, entries = {}, raw.get('repos', {})
+    for name, entry in (entries.items() if isinstance(entries, dict) else ()):
+        repos[name] = entry if _usable(entry, REPO_STOPS) else dict(stopped)
+    order = raw.get('repo_order')
+    marks = raw.get('asks')
+    return {'version': 1, 'written_at': raw.get('written_at'), 'lanes': lanes,
+            'repo_order': [r for r in order if isinstance(r, str)] if isinstance(order, list)
+            else [], 'repos': repos,
+            'asks': {k: v for k, v in marks.items() if isinstance(v, dict)}
+            if isinstance(marks, dict) else {}}
+
+
+BROKEN = object()    # control.json is there but isn't JSON (`repaired`)
+MISSING = object()   # there is no control.json (`repaired`); not None, which JSON null parses to
 
 
 def read(state_dir: str) -> Switch:
@@ -247,23 +294,20 @@ def ask(state_dir: str, lanes, stop: str | None, now: str, repos=()) -> dict:
     """control.json after Stefan asks `stop` of each of `lanes` and `repos` (served repos' names,
     ticket 37) at `now` (an ISO time), in the page's format (`dashboard/serve.py`'s
     `apply_control`), written whole. An unreadable file is
-    started afresh and entries it can't use are dropped, as the page does. gate.json's older
+    written afresh from what can be read (`repaired`), as the page does. gate.json's older
     pause, with no Claude entry yet, is carried over first (since gate.json was written), and
     gate.json is left with its reserve only."""
     if stop not in STOPS or (repos and stop not in REPO_STOPS):
         raise ValueError(f'stop must be one of {REPO_STOPS if repos else STOPS}')
-    try:   # as leniently as the page reads it (`serve.App.control`): what it can't use goes
+    try:   # as the page reads it (`serve.App.control`): what it can't use is repaired
         with open(path(state_dir), encoding='utf-8') as f:
             raw = json.load(f)
+    except FileNotFoundError:
+        raw = MISSING
     except (OSError, ValueError):
-        raw = {}
-    if not isinstance(raw, dict):
-        raw = {}
-    entries = {k: v for k, v in (raw.get('lanes') or {}).items() if isinstance(v, dict)}
-    order = [r for r in (raw.get('repo_order') or []) if isinstance(r, str)]
-    kept = raw.get('repos') if isinstance(raw.get('repos'), dict) else {}
-    stops = {k: v for k, v in kept.items() if isinstance(v, dict)}
-    marks = raw.get('asks') if isinstance(raw.get('asks'), dict) else {}
+        raw = BROKEN
+    base = repaired(raw, now)
+    entries, order, stops, marks = base['lanes'], base['repo_order'], base['repos'], base['asks']
     old = _old_pause(state_dir)
     if old is not None and 'claude' not in entries:
         entries['claude'] = {'stop': 'after-job', 'at': _iso(old)}
@@ -272,8 +316,8 @@ def ask(state_dir: str, lanes, stop: str | None, now: str, repos=()) -> dict:
     for name in repos:
         stops[name] = {'stop': stop, 'at': now}
     data = {'version': 1, 'written_at': now, 'lanes': entries, 'repo_order': order,
-            'repos': stops, 'asks': {k: v for k, v in marks.items() if isinstance(v, dict)}}
-    if usage := _usage(raw):   # a Refresh asked from the page stands (ticket 42)
+            'repos': stops, 'asks': marks}
+    if usage := (_usage(raw) if isinstance(raw, dict) else {}):   # a Refresh asked from the page stands (ticket 42)
         data['usage'] = {'refresh_at': usage['refresh_at']}
     _write(state_dir, data)
     if old is not None:

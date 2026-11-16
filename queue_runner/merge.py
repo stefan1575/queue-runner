@@ -116,13 +116,17 @@ class Merger:
 
     # --- merging --------------------------------------------------------------------------
 
-    def merge_pass(self) -> None:
+    def merge_pass(self, halted=lambda: False) -> None:
         """Merges, ready marks and Stefan's merges noticed, in each repo but those Stefan
-        stopped (ticket 37: noticed once he resumes it)."""
+        stopped (ticket 37: noticed once he resumes it). `halted()`, asked before each repo and
+        each merge, says the reviewing lane was stopped meanwhile (ticket 30): the merge running
+        finishes, and nothing after it starts."""
         from .config import working
         for repo in working(self.config):
             if not repo.github:
                 continue
+            if halted():
+                return
             try:
                 if repo.stefan_merges:
                     self.stefan_pass(repo)
@@ -131,6 +135,8 @@ class Merger:
                 self.say(f'merge pass on {repo.name} failed: {type(e).__name__}: {e}')
                 continue
             for pr, why in found:
+                if not why and halted():
+                    return
                 self._merge(repo, pr, why)
 
     def try_merge(self, repo, pr) -> str | None:
