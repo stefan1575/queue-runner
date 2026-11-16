@@ -18,6 +18,22 @@ come from decisions (`decisions.py`): review 3 or later still blocking (`approac
 with the Approach note a decision thread wrote) and a decision thread's own question
 (`decision`).
 
+**The base's own failure** (issue #98): before a failed check on H is a stop (or is re-run), the
+runner reads the checks on the head of the repo's base branch (`main`). When every check that
+failed on H fails there too, by name, the failure is the base's: the PR gets no stop, and is held
+on H (a `base-hold` job, `held`), saying `not now, main fails <checks> too`. The repo gets one stop
+of its own instead, the first time the base is seen red: a `needs-info` issue "main fails its
+checks" (a `base` job, `filed`, with the checks, the base's head and its runs). While it's open, no
+build starts in the repo (`run.py`); fix rounds, conflict rounds and decisions go on. It's the one
+stop that resolves itself: once the base's checks pass, each held PR still at its held head is
+brought up to date with GitHub's update-branch (no AI; one GitHub refuses, a conflict, is left to
+the conflict round; one GitHub failed to answer, or with a Claude job writing to it, is tried
+again next pass), and the runner closes the issue. A hold is checked again each pass: a check
+failing on H that the base doesn't fail ends it, and the failure is the PR's own. A base with no checks yet isn't red; while
+the stop is open and the base's new head is still running its checks, its last failing checks
+count. A check that fails on H but passes on the base is the PR's, as before. Only a PR into the
+repo's own base (`base` in config.toml) is compared: a stacked PR's failure is its own.
+
 Filing is an automated post in the repo's own issues and PRs, which needs no go-ahead
 (`~/Code/global/CLAUDE.md`).
 """
@@ -39,6 +55,12 @@ MAX_CONFLICT_ROUNDS = 5
 UNRESOLVED = ('no-push', 'head-unknown', 'branch-exists')
 # A job re-running a failed Actions check on H once before it's a stop (issue #93).
 RERUN = 'rerun'
+# The repo's base branch fails its checks: one stop for the repo, not one per PR (issue #98).
+BASE = 'base'
+# A PR held on H because every check that failed on it fails on the base too (issue #98):
+# `held`, then `updated` (brought up to date with the base once it passed), `update-failed` (GitHub
+# refused, a conflict: the conflict round's) or `moved` (its head moved, or it closed, meanwhile).
+BASE_HOLD = 'base-hold'
 # An Actions run's conclusions that pass (as `github._PASSED`).
 PASSED = ('success', 'neutral', 'skipped')
 KINDS = {
@@ -61,6 +83,37 @@ SIGNALS = {   # decide()'s stop signals, when the review's run folder can't say 
 def needs_info_mark(github: str, n: int) -> str:
     """The hidden line that ties a `needs-info` issue to its PR."""
     return f'<!-- queue-runner needs-info {github}#{n} -->'
+
+
+def base_mark(github: str, branch: str) -> str:
+    """The hidden line on the base stop's issue. It starts as a PR's `needs-info` mark does, so
+    the work lists leave it out of the issues as theirs (`work.NEEDS_INFO_MARK`)."""
+    return f'<!-- queue-runner needs-info {github} base {branch} -->'
+
+
+def red_base(jobs, repo_name: str, branch: str | None = None):
+    """The repo's base stop while its base fails its checks (issue #98), or None. While there's
+    one, no build starts in the repo. It's the newest `base` job on the branch, `filed` or not
+    filed yet (`failed`: its issue couldn't be filed, or still open: cut off while filing), so
+    a red base holds builds back whether or not GitHub took the issue (review 1, F4)."""
+    found = [j for j in jobs.jobs() if j.kind == BASE and j.repo == repo_name
+             and (branch is None or j.branch == branch)]
+    if found and (found[-1].open or found[-1].outcome in ('filed', 'failed')):
+        return found[-1]
+    return None
+
+
+def base_hold(jobs, repo_name: str, pr):
+    """The hold on this PR's head H because the base fails the same checks, or None."""
+    holds = [j for j in jobs.on(BASE_HOLD, repo_name, pr.number, pr.head_sha)
+             if j.outcome == 'held']
+    return holds[-1] if holds else None
+
+
+def refused(e: Exception) -> bool:
+    """Whether GitHub refused a write (HTTP 422: a conflict, or the head moved), as against
+    failing to answer (a 5xx, the network): only a refusal is final (review 1, F2)."""
+    return '(HTTP 422)' in str(e)
 
 
 def utc(stamp: str) -> str:
@@ -97,6 +150,10 @@ class Stopper:
     def __init__(self, config, *, github, jobs, say, toaster=None):
         self.config, self.github, self.jobs, self.say = config, github, jobs, say
         self.toaster = toaster or NoToaster()
+        # Each repo's base as this pass read it: (its head, the checks failing there), or absent
+        # when it isn't red (issue #98).
+        self._red: dict[str, tuple[str, frozenset]] = {}
+        self._said_base: dict[str, str] = {}
 
     # --- what stops ---------------------------------------------------------------------------
 
@@ -126,7 +183,8 @@ class Stopper:
                           f'without pushing, so the PR is still at {h7}, which was reviewed',
                           fixes[-1].link))
         checks = self.github.checks(repo, h)
-        if checks.state == 'failed' and (why := self._failed_check(repo, pr, checks)):
+        if (checks.state == 'failed' and not base_hold(self.jobs, repo.name, pr)
+                and (why := self._failed_check(repo, pr, checks))):
             found.append(('failed-check', why, None))
         if self.github.has_conflict(repo, n) and (stop := conflict_stop(self.jobs, repo, pr)):
             found.append(('conflict', *stop))
@@ -211,8 +269,8 @@ class Stopper:
         """Issue #93: each failed Actions run on H that the runner hasn't re-run gets its failed
         jobs re-run, once per run and head, so a GitHub hiccup never reaches Stefan; once a
         re-run has passed, the PR says so in one line, so a flaky check stays visible."""
-        if self.jobs.writer(repo.name, pr.branch):
-            return
+        if self.jobs.writer(repo.name, pr.branch) or base_hold(self.jobs, repo.name, pr):
+            return   # the base fails the same checks: re-running them wastes a run (#98)
         n, h, h7 = pr.number, pr.head_sha, pr.head_sha[:7]
         name = f'stop {repo.name}#{n}'
         self._settle_reruns(repo, pr, name)
@@ -278,6 +336,7 @@ class Stopper:
             if halted():
                 return
             self.answers(repo)
+            self.base_pass(repo)
             try:
                 prs = sorted(self.github.open_pulls(repo), key=lambda p: p.number)
             except Exception as e:   # GitHub down: the next pass tries again
@@ -290,12 +349,208 @@ class Stopper:
         """Files each stop on the PR's head that isn't filed yet. GitHub failing is said; the
         next pass tries again."""
         try:
+            self.hold_for_base(repo, pr)
             self.retry_checks(repo, pr)
             for kind, why, link in self.new_stops(repo, pr):
                 self.file(repo, pr, kind, why, link)
         except Exception as e:
             self.say(f'stop {repo.name}#{pr.number}: checking for stops failed '
                      f'({type(e).__name__}: {e})')
+
+    # --- the base's own failure (issue #98) ---------------------------------------------------
+
+    def base_pass(self, repo) -> None:
+        """Reads the checks on the head of the repo's base: red, it files the repo's one base
+        stop (once); passing, it brings the PRs held for it up to date and closes that stop.
+        GitHub failing is said, and the base counts as not red this pass."""
+        self._red.pop(repo.name, None)
+        branch = repo.base
+        try:
+            sha = self.github.branch_head(repo, branch)
+            checks = self.github.checks(repo, sha)
+        except Exception as e:
+            self.say_base(repo, f'{repo.name}: reading the checks on {branch} failed '
+                          f'({type(e).__name__}: {e}); next pass')
+            return
+        stop = red_base(self.jobs, repo.name, branch)
+        if checks.state == 'failed':
+            self._red[repo.name] = (sha, frozenset(checks.failed))
+            self.say_base(repo, f'{repo.name}: {branch} fails {", ".join(checks.failed)} at '
+                          f'{sha[:7]}: no build starts from it, and a PR failing only those '
+                          'is held, not stopped')
+            if stop is None or stop.outcome != 'filed':   # none, or its issue not filed yet
+                self._file_base(repo, branch, sha, checks)
+        elif checks.state == 'passed':
+            self._said_base.pop(repo.name, None)
+            self._base_passed(repo, branch, sha, stop)
+        elif stop is not None:   # its new head's checks are still running: still red
+            self._red[repo.name] = (stop.sha, frozenset(stop.signals))
+
+    def say_base(self, repo, line: str) -> None:
+        if self._said_base.get(repo.name) != line:
+            self._said_base[repo.name] = line
+            self.say(line)
+
+    def _file_base(self, repo, branch, sha, checks) -> None:
+        """The repo's one base stop: a `needs-info` issue (or a comment on the open one), and a
+        toast. 'failed' if the issue couldn't be filed: the next pass files it."""
+        name, h7 = f'stop {repo.name} {branch}', sha[:7]
+        names = ', '.join(checks.failed)
+        runs = [f'https://github.com/{repo.github}/actions/runs/{r}' for r in checks.runs]
+        where = ', '.join(f'[run {u.rsplit("/", 1)[-1]}]({u})' for u in runs) or (
+            f'[the commit](https://github.com/{repo.github}/commit/{sha})')
+        why = f'{names} on {h7}'
+        job = self.jobs.started(kind=BASE, repo=repo.name, issue=None, branch=branch,
+                                title=f'Queue runner base: {repo.name} {branch}', sha=sha,
+                                reason=why)
+        line = (f'**{branch} fails its checks**: {names} failed on {branch} at {h7} ({where}). '
+                f'Every PR into {branch} inherits that, so a PR failing only those checks is '
+                'held, not stopped, and no build starts from it.')
+        mark = base_mark(repo.github, branch)
+        try:
+            had = next((i for i in self.github.open_issues(repo) if mark in i.body), None)
+            if had:
+                self.github.post_comment(repo, had.number, f'Red again: {line}\n\n'
+                                         f'{RUNNER_MARK}base red sha={sha} -->\n')
+                url = had.url
+            else:
+                url = self.github.create_issue(repo, f'{branch} fails its checks', (
+                    f'{line}\n\nFix {branch} (a PR that makes these checks pass). Once they pass '
+                    'on its head, the queue runner brings each held PR up to date with '
+                    f'{branch} and closes this issue itself.\n\n'
+                    "<sub>Filed by the queue runner from Stefan's PC.</sub>\n\n" + mark + '\n'),
+                    [NEEDS_INFO])
+        except Exception as e:   # still red (F4): `red_base` holds builds back meanwhile
+            self.jobs.ended(job.id, exit_code=None, outcome='failed', reason=why,
+                            signals=list(checks.failed), error=f'{type(e).__name__}: {e}')
+            self.say(f'{name}: filing its needs-info issue failed ({e}); next pass')
+            return
+        self.jobs.ended(job.id, exit_code=None, outcome='filed', link=url, reason=why,
+                        signals=list(checks.failed))
+        self.say(f'{name}: {branch} fails its checks ({why}); filed {url}')
+        try:
+            self.toaster.toast(f'{repo.name}: {branch} fails its checks', f'{why}.'[:250], url,
+                               tag=f'{repo.name}-base', button='Open the issue')
+        except Exception as e:
+            self.say(f'{name}: the toast failed: {e}')
+
+    def _base_passed(self, repo, branch, sha, stop) -> None:
+        """The base passes again: each PR held for it still at its held head is updated from
+        the base (GitHub's update-branch), then the base stop is closed. A close that fails
+        leaves the stop open, so the next pass closes it.
+
+        A held PR with a Claude job writing to its branch (`JobLog.writer`) waits for that job
+        (review 1, F3); an update GitHub refuses (HTTP 422: a conflict, or the head moved) is
+        `update-failed`, left to the conflict round; any other failure (GitHub down) keeps the
+        hold, and the next pass tries again (F2). Holds are read apart from the stop, so they
+        are tried again after it's closed. A stop whose issue was never filed is closed with
+        nothing posted (F4)."""
+        holds = [j for j in self.jobs.jobs() if j.kind == BASE_HOLD and j.repo == repo.name
+                 and j.outcome == 'held']
+        updated = []
+        for hold in holds:
+            n, name = hold.issue, f'stop {repo.name}#{hold.issue}'
+            try:
+                pr = self.github.pull(repo, n)
+            except Exception as e:
+                self.say(f'{name}: reading it to update it from {branch} failed ({e}); next pass')
+                continue
+            if pr.state != 'open' or pr.head_sha != hold.sha:
+                self.jobs.ended(hold.id, exit_code=None, outcome='moved', reason=hold.reason)
+                continue
+            if writer := self.jobs.writer(repo.name, pr.branch):
+                self.say_hold(hold, f'{name}: {branch} passes again, but {writer.title} is '
+                              'writing to the PR: it is updated once that job ends')
+                continue
+            try:
+                self.github.update_branch(repo, n, hold.sha)
+            except Exception as e:
+                if not refused(e):   # GitHub down, not a refusal: tried again next pass
+                    self.say_hold(hold, f'{name}: updating the PR from {branch} failed '
+                                  f'({type(e).__name__}: {e}); next pass')
+                    continue
+                # a conflict: the conflict round's (fix.py)
+                self.jobs.ended(hold.id, exit_code=None, outcome='update-failed',
+                                reason=hold.reason, error=f'{type(e).__name__}: {e}')
+                self.say(f'{name}: {branch} passes again, but GitHub would not update the PR '
+                         f'from it ({e}); a conflict round comes first')
+                continue
+            self.jobs.ended(hold.id, exit_code=None, outcome='updated', reason=hold.reason)
+            updated.append(n)
+            self.say(f'{name}: {branch} passes again at {sha[:7]}: updated the PR from it')
+        if stop is None:
+            return
+        if stop.outcome != 'filed':   # its issue was never filed: nothing to comment or close
+            self.jobs.ended(stop.id, exit_code=None, outcome='closed', reason=stop.reason,
+                            signals=stop.signals, head=sha)
+            self.say(f'stop {repo.name} {branch}: {branch} passes again at {sha[:7]}')
+            return
+        prs = ', '.join(f'#{n}' for n in updated)
+        try:
+            n = number_of(stop.link)
+            self.github.post_comment(repo, n, (
+                f'**{branch} passes its checks again** at {sha[:7]}.'
+                + (f' The queue runner updated {prs} from it.' if updated else '')
+                + f' Closed by the queue runner.\n\n{RUNNER_MARK}base passed sha={sha} -->\n'))
+            self.github.close_completed(repo, n)
+        except Exception as e:
+            self.say(f'stop {repo.name} {branch}: closing {stop.link} failed ({e}); next pass')
+            return
+        self.jobs.ended(stop.id, exit_code=None, outcome='closed', link=stop.link,
+                        reason=stop.reason, signals=stop.signals, head=sha)
+        self.say(f'stop {repo.name} {branch}: {branch} passes again at {sha[:7]}; closed '
+                 f'{stop.link}')
+
+    def say_hold(self, hold, line: str) -> None:
+        """Said once per hold and line: a held PR waiting on something, pass after pass."""
+        key = f'hold {hold.id}'
+        if self._said_base.get(key) != line:
+            self._said_base[key] = line
+            self.say(line)
+
+    def hold_for_base(self, repo, pr) -> None:
+        """Holds the PR on H, with no stop, when every check that failed on H fails on the base
+        too (issue #98): the failure is the base's. Said once per head.
+
+        A hold is checked again on every pass while the base is red (review 1, F1): once a
+        check fails on H that the base doesn't fail, the failure is the PR's own
+        (`own-failure`), and once nothing fails on H any more there's nothing to hold
+        (`cleared`). Either way the hold ends and the PR goes on as any other (#93's re-run,
+        then a stop). Each pass judges H's failures as they are now, not as they were (review
+        2, F5): once its own failure passes its re-run and H fails only what the base fails,
+        it's held again."""
+        red = self._red.get(repo.name)
+        if red is None or (pr.base and pr.base != repo.base):
+            return
+        n, h7 = pr.number, pr.head_sha[:7]
+        if hold := base_hold(self.jobs, repo.name, pr):
+            checks = self.github.checks(repo, pr.head_sha)
+            if checks.state == 'failed' and not set(checks.failed) <= red[1]:
+                own = ', '.join(c for c in checks.failed if c not in red[1])
+                self.jobs.ended(hold.id, exit_code=None, outcome='own-failure',
+                                reason=hold.reason, error=f'{own} failed on {h7}, not on '
+                                f'{repo.base}')
+                self.say(f'stop {repo.name}#{n}: {own} failed on {h7} and not on {repo.base}: '
+                         'no longer held, the failure is its own')
+            elif checks.state in ('passed', 'none'):
+                self.jobs.ended(hold.id, exit_code=None, outcome='cleared', reason=hold.reason)
+                self.say(f'stop {repo.name}#{n}: nothing fails on {h7} any more: no longer held')
+            return
+        if self.jobs.writer(repo.name, pr.branch):
+            return
+        checks = self.github.checks(repo, pr.head_sha)
+        if checks.state != 'failed' or not set(checks.failed) <= red[1]:
+            return
+        names = ', '.join(checks.failed)
+        stop = red_base(self.jobs, repo.name, repo.base)
+        job = self.jobs.started(kind=BASE_HOLD, repo=repo.name, issue=pr.number,
+                                branch=pr.branch,
+                                title=f'Queue runner base hold: {repo.name}#{pr.number}',
+                                sha=pr.head_sha, about=stop.id if stop else None, reason=names)
+        self.jobs.ended(job.id, exit_code=None, outcome='held', reason=names,
+                        link=stop.link if stop else None)
+        self.say(f'stop {repo.name}#{pr.number}: not now, {repo.base} fails {names} too: held '
+                 f'at {pr.head_sha[:7]} until {repo.base} passes')
 
     # --- filing -------------------------------------------------------------------------------
 

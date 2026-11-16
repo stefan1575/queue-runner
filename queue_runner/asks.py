@@ -2,7 +2,8 @@
 the last collection (`inbox.Inbox`) and the job log into the snapshot's `asks` and `answered`, in
 the shape `dashboard/sample.py` builds: each written to be picked up cold, a week later.
 
-- `kind`: `broken` (a failed check, a live run that stopped), `stuck` (a review stop, an approach
+- `kind`: `broken` (a failed check, a live run that stopped, a base branch failing its checks:
+  issue #98, one ask for the repo), `stuck` (a review stop, an approach
   note, a fix round that pushed nothing, a conflict a round couldn't resolve), `decision` (a
   decision's stop on a PR, a build a decision left to Stefan, a thread waiting for his answer,
   steps only he can do after a live run) or `merge` (ready for him to merge). Listed in that
@@ -199,6 +200,15 @@ class Story:
                     if j.question == 'waiting' else
                     'Its thread went cold, so you opened a fresh one in T3 to decide it.'
                     if j.resume else 'You opened a thread in T3 to decide it.')
+        if not pr:   # a base stop's own issue (#98)
+            for j in self.jobs:
+                if j.kind == 'base' and j.repo == repo and j.link and number_of(j.link) == n:
+                    add(j.started_at, j, f'{j.branch} failed its checks ({j.reason}), so the '
+                        'runner filed this issue and stopped starting builds.')
+                    held = [h for h in self.jobs if h.kind == 'base-hold' and h.about == j.id]
+                    for h in held:
+                        add(h.started_at, h, f'PR #{h.issue} failed only {h.reason}, as '
+                            f'{j.branch} does, so it was held, not stopped.')
         for r_repo, r_n, at in self.releases:
             if (r_repo, r_n) == (repo, n):
                 add(at, None, f'You released it (--release {repo}#{n}), so the runner took it '
@@ -431,6 +441,19 @@ def _stop_ask(story, w, repo) -> dict:
                    'url': s.link or w.url}}
 
 
+def _base_ask(story, w, repo) -> dict:
+    s, b = w.job, w.job.branch
+    n = len(w.holds_up)
+    held = f', and {plural(n, "PR")} failing only those checks wait' if n else ''
+    return {'situation': f'{b} fails its checks, so every PR into it inherits the failure.',
+            'because': sentence(f'{s.reason} on {b}: no build starts from it{held}, with no '
+                                'stop of their own'),
+            'question': f'Fix {b}: once its checks pass, the runner updates the held PRs from it '
+                        'and closes the issue itself.',
+            'options': [],
+            'go': {'label': 'Open the issue', 'where': 'github', 'url': s.link or w.url}}
+
+
 def _merge_ask(story, w, repo) -> dict:
     r = w.job.round if w.job else None
     h7 = (w.head or '')[:7]
@@ -467,7 +490,7 @@ def _thread_ask(story, w, repo) -> dict:
             'go': {'label': 'Answer in T3', 'where': 't3', 'url': j.link or ''}}
 
 
-WRITERS = {'ready': _merge_ask, 'stop': _stop_ask, 'build': _build_ask, 'thread': _thread_ask}
+WRITERS = {'base': _base_ask, 'ready': _merge_ask, 'stop': _stop_ask, 'build': _build_ask, 'thread': _thread_ask}
 
 
 def _id(w) -> str:
@@ -475,6 +498,8 @@ def _id(w) -> str:
         return f'merge-{w.repo}-{w.number}-{(w.head or "")[:7]}'
     if w.kind == 'build':
         return f'decision-{w.decision.id}'
+    if w.kind == 'base':
+        return f'base-{w.job.id}'
     return f'{"stop" if w.kind == "stop" else "thread"}-{w.job.id}'
 
 
@@ -489,6 +514,8 @@ def _since(story, w) -> str | None:
 
 
 def _kind(w) -> str:
+    if w.kind == 'base':
+        return 'broken'
     return 'merge' if w.kind == 'ready' else KIND.get(w.job.stop, 'stuck') \
         if w.kind == 'stop' else 'decision'
 
@@ -504,7 +531,10 @@ def ask(story, w, repos) -> dict:
         'about': about_text(w.issue_body, w.body),
     }
     a.update(WRITERS[w.kind](story, w, repo))
-    holds = [f'#{n} {title}' for n, title in w.holds_up]
+    holds = [f'PR #{n} {title}'.rstrip() if w.kind == 'base' else f'#{n} {title}'
+             for n, title in w.holds_up]
+    if w.kind == 'base':
+        holds.append(f'Every new build in {w.repo}')
     if w.kind == 'stop' and w.job.stop == 'live':
         holds.append(f'Every later live run in {w.repo}')
     a['holds_up'] = holds

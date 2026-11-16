@@ -2,6 +2,9 @@
 from queue_runner.github import Comment, Issue, PullRequest
 
 
+MAIN_HEAD = '9' * 40   # the base branch's head, unless a test says otherwise (issue #98)
+
+
 class FakeGitHub:
     def __init__(self, issues=(), states=None, prs=(), branches=(), comments=None):
         self.issues = list(issues)
@@ -88,6 +91,7 @@ class FakeGitHubForReviews(FakeGitHubWithPulls):
         self.threads = {}            # PR number -> unresolved review threads
         self.push_before_merge = {}  # PR number -> a head pushed just before the merge call
         self.workflow_runs = {}      # Actions run id -> WorkflowRun now (issue #93)
+        self.base_heads = {}         # branch -> its head now (issue #98); default MAIN_HEAD
 
     def checks(self, repo, sha):
         from queue_runner.github import Checks
@@ -106,6 +110,23 @@ class FakeGitHubForReviews(FakeGitHubWithPulls):
         r = self.workflow_runs[run_id]
         self.workflow_runs[run_id] = replace(r, attempt=r.attempt + 1, status='queued',
                                              conclusion=None)
+
+    def branch_head(self, repo, branch):
+        if 'branch_head' in self.fail:
+            raise RuntimeError('gh failed')
+        return self.base_heads.get(branch, MAIN_HEAD)
+
+    def update_branch(self, repo, number, expected_head):
+        """GitHub's update-branch: refused (422) once the head moved, or when `update-branch` is
+        in `fail` (a conflict)."""
+        from queue_runner.github import GhError
+        if 'update-branch' in self.fail or self.pull(repo, number).head_sha != expected_head:
+            raise GhError('gh api failed (1): merge conflict between base and head (HTTP 422)')
+        self.posts.append(('update-branch', number, expected_head))
+
+    def close_completed(self, repo, number):
+        self._write('close-done', number)
+        self.close_issue(number)
 
     def review_replies(self, repo, number):
         return list(self.replies.get(number, []))

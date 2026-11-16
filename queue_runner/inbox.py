@@ -3,7 +3,10 @@
 and the running runner keeps the last one its Sol lane read (`Reader`), from which the snapshot
 writes its asks (`asks.py`). So the two can't disagree.
 
-Four kinds of `Waiting`, read from the job log and GitHub; nothing is posted, started or recorded:
+Five kinds of `Waiting`, read from the job log and GitHub; nothing is posted, started or recorded:
+
+- **base:** a repo's base branch failing its checks (issue #98): its one `needs-info` issue,
+  listed once however many PRs it holds, until the runner closes it once the base passes.
 
 - **ready:** in a repo where Stefan merges (`merge = "stefan"`), each open PR the merge re-check
   passes now (what the merge pass marks `ready-for-stefan`).
@@ -27,10 +30,10 @@ from dataclasses import dataclass, field, replace
 from .ledger import RUNNER_MARK, said_since
 from .merge import Merger
 from .picker import blockers, closed_issues
-from .stops import KINDS, number_of, utc
+from .stops import BASE, BASE_HOLD, KINDS, number_of, utc
 
 BUILD_QUESTIONS = ('failed', 'no-pr')   # a decision's stop on a build: on its issue
-ORDER = ('ready', 'stop', 'build', 'thread')   # `--inbox`'s sections, in its order
+ORDER = ('base', 'ready', 'stop', 'build', 'thread')   # `--inbox`'s sections, in its order
 
 
 def _issue_url(repo, n: int) -> str:
@@ -43,7 +46,7 @@ def _pull_url(repo, n: int) -> str:
 
 @dataclass(frozen=True)
 class Waiting:
-    kind: str                    # ready, stop, build or thread (ORDER)
+    kind: str                    # base, ready, stop, build or thread (ORDER)
     repo: str
     number: int                  # the PR (ready, stop, a fix's thread) or the issue
     on_pr: bool
@@ -134,7 +137,8 @@ def reviews(all_jobs, prs) -> dict:
 
 def _offline(jobs, all_jobs, repo) -> list[Waiting]:
     """What the job log alone says waits, with nothing read from GitHub."""
-    return _stops(jobs, repo) + _builds(jobs, all_jobs, repo) + _threads(jobs, repo)
+    return (_bases(all_jobs, repo) + _stops(jobs, repo) + _builds(jobs, all_jobs, repo)
+            + _threads(jobs, repo))
 
 
 def _repo(config, github, jobs, all_jobs, repo, errors, unfilled=None) -> tuple[list, list]:
@@ -151,10 +155,24 @@ def _repo(config, github, jobs, all_jobs, repo, errors, unfilled=None) -> tuple[
             if merger.clean_on_head(repo, pr) and merger.why_not(repo, n, pr.head_sha) is None:
                 ready.append(Waiting('ready', repo.name, n, True,
                                      jobs.runner_review(repo.name, n, pr.head_sha)))
-    items = [reader.fill(w) for w in ready + _stops(jobs, repo) + _builds(jobs, all_jobs, repo)
-             + _threads(jobs, repo)]
+    items = [reader.fill(w) for w in _bases(all_jobs, repo) + ready + _stops(jobs, repo)
+             + _builds(jobs, all_jobs, repo) + _threads(jobs, repo)]
     done = [reader.fill(w, answered=True) for w in _answered(jobs, all_jobs, repo, pulls)]
     return items, done
+
+
+def _bases(all_jobs, repo) -> list[Waiting]:
+    """The repo's base stop, once, while it's open (issue #98): on its own issue, holding up the
+    PRs held for it (titles filled from GitHub) and every build in the repo."""
+    stops = [j for j in all_jobs if j.kind == BASE and j.repo == repo.name
+             and j.outcome == 'filed' and j.link]
+    if not stops:
+        return []
+    s = stops[-1]
+    held = sorted({j.issue for j in all_jobs if j.kind == BASE_HOLD and j.repo == repo.name
+                   and j.outcome == 'held'})
+    return [Waiting('base', repo.name, number_of(s.link), False, s, base=s.branch,
+                    holds_up=tuple((n, '') for n in held))]
 
 
 def _stops(jobs, repo) -> list[Waiting]:
@@ -277,6 +295,11 @@ class _Reader:
 
     def _fill(self, w: Waiting, answered: bool) -> Waiting:
         repo = self.repo
+        if w.kind == 'base':   # holds up the PRs held for it, not issues (#98)
+            i = self._issue(w.number)
+            return replace(w, title=i.title, url=i.url or _issue_url(repo, w.number), body=i.body,
+                           holds_up=tuple((n, self.pulls[n].title if n in self.pulls else '')
+                                          for n, _ in w.holds_up))
         if w.on_pr:
             pr = self.pulls.get(w.number) or self.github.pull(repo, w.number)
             issue = next((k for where, k in closed_issues(pr.body, repo.github)
@@ -331,6 +354,9 @@ class _Reader:
 def line(w: Waiting) -> str:
     """One `--inbox` line."""
     j, d = w.job, w.decision
+    if w.kind == 'base':
+        return (f'{w.repo}: {j.branch} fails its checks ({j.reason}): no build starts, and '
+                f'{len(w.holds_up)} PR(s) wait ({j.link})')
     if w.kind == 'ready':
         head = w.head or (j.sha if j else '')
         return (f'{w.repo}#{w.number} at {head[:7]}' + (f': {w.title}' if w.title else '')
@@ -346,7 +372,7 @@ def line(w: Waiting) -> str:
             f'{d.reason or "see the thread"} ({j.link or j.thread_id})')
 
 
-TITLES = {'ready': 'Ready for you to merge', 'stop': 'Stops (needs-info)',
+TITLES = {'base': 'A base branch fails its checks', 'ready': 'Ready for you to merge', 'stop': 'Stops (needs-info)',
           'build': 'Stops (needs-info)', 'thread': 'Threads waiting for your answer'}
 
 

@@ -196,7 +196,8 @@ def read_repo(config, github, git, jobs, repo, now=None) -> RepoRead:
             pending = tuple(pr_numbers(commits))
             pending_issues = tuple(int(m[1]) for c in commits
                                    if (m := _FROM_BRANCH.search(c['subject'])))
-    picked = part('builds', lambda: tuple(
+    from .stops import red_base
+    picked = () if red_base(jobs, repo.name, repo.base) else part('builds', lambda: tuple(
         (b.issue.number, b.issue.title)
         for b in pickable(repo, github, held=jobs.held_issues(repo.name))), (), 'builds')
     flying = part('what is in flight', lambda: frozenset(in_flight(repo, github)), frozenset(),
@@ -676,7 +677,7 @@ def _pr_list(v: View, statuses: dict, story, releases) -> list[dict]:
 # --- what happened ------------------------------------------------------------------------------
 
 ACTIVITY_MAX = 200
-_PR_KINDS = ('review', 'fix', 'merge', 'ready', 'stop', 'live', 'rerun')
+_PR_KINDS = ('review', 'fix', 'merge', 'ready', 'stop', 'live', 'rerun', 'base-hold')
 
 
 def _h7(sha) -> str:
@@ -759,6 +760,19 @@ def _event(story, j) -> list[tuple]:
             return []
         text, actor = _other(j), 'runner'
         tone = 'ok' if j.outcome == 'passed' else 'bad' if j.outcome == 'failed' else None
+    elif j.kind == 'base-hold':   # the base fails the same checks (issue #98)
+        text, actor = {
+            'held': f'Its base fails {j.reason} too, so the runner held it, with no stop.',
+            'updated': f'Its base failed {j.reason} too; once the base passed, the runner '
+                       'updated it from the base.',
+            'update-failed': f'Its base failed {j.reason} too; once the base passed, GitHub '
+                             "wouldn't update it from the base (a conflict).",
+            'moved': f'Its base failed {j.reason} too; it moved on before the base passed.',
+            'own-failure': f'Its base failed {j.reason} too, but then a check its base '
+                           "doesn't fail failed on it, so the failure is its own.",
+            'cleared': f'Its base failed {j.reason} too; then nothing failed on it any more.',
+        }.get(j.outcome), 'runner'
+        tone = 'bad' if j.outcome == 'update-failed' else None
     elif j.kind == 'stop':
         if j.outcome not in ('filed', 'answered'):
             return [(at, 'runner', 'stop', sha, _other(j), 'bad', [])] if _other(j) else []
