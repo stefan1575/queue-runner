@@ -68,14 +68,13 @@ def build(name: str = DEFAULT, base: datetime | None = None, control: dict | Non
         "runner": {"pid": 18244, "started_at": ago(399), "commit": "66a5ea1"},
         "start_hint": "Double-click Queue runner.lnk in ~/.queue-runner, or run pythonw -m queue_runner in the repo.",
         "sources": [
-            # `short` is the name beside its dot; `group` sorts them on the page: "provider",
-            # "local" (on this PC) or "external"
+            # Only what the runner depends on, the real snapshot's `SOURCES` (ticket 43). `short` is
+            # the name beside its dot; `group` sorts them on the page: "provider", "local" (on
+            # this PC) or "external"
             {"id": "github", "group": "external", "name": "GitHub", "short": "GitHub", "ok": True, "note": "gh as stefan1575", "checked_at": ago(1)},
             {"id": "t3", "group": "local", "name": "T3 Code", "short": "T3 Code", "ok": True, "note": "server up", "checked_at": ago(1)},
             {"id": "claude_usage", "group": "provider", "name": "Claude usage", "short": "Claude", "ok": True, "note": "read", "checked_at": ago(1)},
             {"id": "sol_usage", "group": "provider", "name": "ChatGPT usage", "short": "ChatGPT", "ok": True, "note": "read", "checked_at": ago(9)},
-            {"id": "t3_interrupt", "group": "local", "name": "Stop now for Claude", "short": "Stop now", "ok": True,
-             "note": "T3 accepts the interrupt", "checked_at": ago(399)},
         ],
         # `stopped` (ticket 37): when Stefan stopped the repo (`at`), or null. A stopped repo
         # gets nothing from either lane; its asks stay in the Inbox.
@@ -566,9 +565,8 @@ def _vary(snap: dict, name: str, ago, ahead) -> None:
     elif name == "repo-stopped":
         _repo(snap, LD)["stopped"] = {"at": ago(6)}   # after the jobs on it began
     elif name == "no-interrupt":
-        _source(snap, "t3_interrupt").update(ok=False, note="T3 refused the session (HTTP 426: protocol 3 expected)",
-                                             affects="Stop after this job still works.")
-        _lane(snap, "claude")["stop_now"].update(available=False, note="T3 refuses the interrupt since its last update.")
+        # Stop now isn't a source the runner depends on (ticket 43): it shows on the Stop button.
+        _lane(snap, "claude")["stop_now"].update(available=False, note="T3 refuses the interrupt since its last update: stop after the job instead.")
 
 
 def _obey(snap: dict, control: dict, now: datetime) -> None:

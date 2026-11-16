@@ -361,6 +361,14 @@ class ContractTest(unittest.TestCase):
             self.holds([snap['runner']], lambda s: [s['runner']], 'the runner')
             json.dumps(snap)   # it's written as JSON
 
+    def test_the_samples_sources_are_the_runners(self):
+        # Only what the runner depends on (ticket 43): no sample lists a source the real
+        # snapshot can't, such as Stop now, which shows on a lane's Stop button instead.
+        real = {id: (group, name, short) for id, group, name, short, _ in snapshot.SOURCES}
+        for s in self.samples:
+            with self.subTest(sample=s.get('sample')):
+                self.assertEqual({x['id']: (x['group'], x['name'], x['short']) for x in s['sources']}, real)
+
     def test_a_stopped_lane_says_when_as_the_samples_do(self):
         snap = snapshot.build(facts(switch=stopped(claude=('after-job', NOW, 'control'))))
         self.holds([lane(snap, 'claude')['stopped']],

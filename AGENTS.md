@@ -1140,7 +1140,9 @@ python3 -m dashboard    # http://queue.localhost/ is the runner's; http://localh
   a snooze's end. A list row keeps the short age ("2 h") with the whole time on hover. Choosing
   the format is pinned (ticket 22).
 - **The runner's status lists its sources by group,** in his order: Providers (Claude, ChatGPT),
-  Local (T3 Code, Stop now), External (GitHub).
+  Local (T3 Code), External (GitHub). **Only what the runner depends on** (ticket 43): the
+  sample's sources are `snapshot.SOURCES` (a test holds them), and whether Stop now is available
+  shows on the lane's Stop button (`stop_now.note`), not here.
   Nothing on the page moves by itself (Stefan). Colour is state only: blue is Stefan's, amber
   is working, green is done or healthy, red is broken; a usage bar turns amber from 85% and red
   at the limit, and its blue end is the share kept for him; Claude's clay and OpenAI's black or
@@ -1445,7 +1447,8 @@ through WScript.Shell).
 The runner's snapshot:
 `tests/test_snapshot.py` (`build` from plain facts with a fixed clock, `Calls`, `Watch`,
 `Publisher`, `Snapshots` on a temp state folder, and the contract: the real snapshot holds the
-sample's keys at the top, in a lane, its job, a plan, a window and a source) and
+sample's keys at the top, in a lane, its job, a plan, a window and a source, and every sample
+lists `SOURCES` and nothing else) and
 `tests/test_snapshot_runner.py` (through `main`: written while a build blocks the lane, after a
 run, paused, none with `--once`, `--snapshot` with the lock held; `main`'s `sol_usage` and
 `snapshot_every` keep it off the real Codex and fast). `sol.latest_limits` (Codex's rollouts, no
