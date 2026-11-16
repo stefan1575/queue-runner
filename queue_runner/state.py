@@ -6,7 +6,10 @@ blocking PR, from H; `cause` `conflict` for a round that merges a conflicted PR'
 `ready` (in a repo Stefan merges, `merge.py`: the PR at H `marked` ready for him, or `unmarked`), `stop` (a stop filed for
 Stefan on a PR at H: `filed`, then `answered` once he closes its `needs-info` issue or replies on
 the PR or the issue; `failed` if the issue couldn't be filed, so the next pass files it) and
-`decision` (a one-off Claude decision thread, or Stefan's reply read directly, on a case the flow
+`rerun` (one failed Actions run on a PR's head H re-run once before it's a stop, `stops.py`;
+its start record has the run and the failed checks, so a runner cut off before asking GitHub is
+settled from the run: `rerun`, then `passed` once its re-run passed and that was said on the PR;
+`failed` if GitHub refused it; `not-started` if GitHub was never asked) and `decision` (a one-off Claude decision thread, or Stefan's reply read directly, on a case the flow
 doesn't cover: `about` the job it decides on, its outcome the action taken) and `live` (a repo's
 live steps after merges, `live.py`: `sha` where the last live run reached, `head` the base's
 commit this one brings live).
@@ -139,6 +142,8 @@ class Job:
     effort: str | None = None      # a Claude job: the effort its run used, read back (ticket 39)
     reviewer: str | None = None    # a review: `opus-fallback` when Opus reviewed in Sol's place
     base: str | None = None        # a conflict round: the sha of origin/<base> it merged (#91)
+    runs: list = field(default_factory=list)   # a rerun: [{id, attempt, url}], each failed
+                                               # Actions run and the attempt that failed (#93)
 
     @property
     def open(self) -> bool:
@@ -147,7 +152,7 @@ class Job:
 
 _END_FIELDS = ('thread_id', 'link', 'run_id', 'exit_code', 'status', 'outcome', 'commits', 'pr',
                'worktree', 'error', 'verdict', 'signals', 'run_dir', 'resume_at', 'head',
-               'reason', 'answer', 'context', 'last_request', 'applied', 'prs', 'effort')
+               'reason', 'answer', 'context', 'last_request', 'applied', 'prs', 'effort', 'runs')
 
 
 class JobLog:
@@ -166,21 +171,23 @@ class JobLog:
                 stop: str | None = None, thread_id: str | None = None, about: str | None = None,
                 question: str | None = None, head: str | None = None,
                 cause: str | None = None, resume: dict | None = None,
-                reviewer: str | None = None, base: str | None = None) -> Job:
+                reviewer: str | None = None, base: str | None = None,
+                reason: str | None = None, runs: list | None = None) -> Job:
         at = _now()
         stamp = at[:19].replace('-', '').replace(':', '').replace('T', '-')
         job = Job(id=f'{stamp}-{kind}-{repo}-{issue}-{uuid.uuid4().hex[:6]}', kind=kind,
                   repo=repo, issue=issue, branch=branch, title=title, started_at=at, sha=sha,
                   round=round, stop=stop, thread_id=thread_id, about=about, question=question,
                   head=head, cause=cause, resume=resume, reviewer=reviewer,
-                  base=base)
+                  base=base, reason=reason, runs=list(runs or []))
         record = {'event': 'start', 'job': job.id, 'kind': kind, 'repo': repo, 'issue': issue,
                   'branch': branch, 'title': title, 'at': at}
         if sha:
             record.update(sha=sha, round=round)
         for k, v in (('stop', stop), ('thread_id', thread_id), ('about', about),
                      ('question', question), ('head', head), ('cause', cause),
-                     ('resume', resume), ('reviewer', reviewer), ('base', base)):
+                     ('resume', resume), ('reviewer', reviewer), ('base', base),
+                     ('reason', reason), ('runs', runs)):
             if v:
                 record[k] = v
         self._append(record)
@@ -209,7 +216,8 @@ class JobLog:
                           thread_id=e.get('thread_id'), about=e.get('about'),
                           question=e.get('question'), head=e.get('head'),
                           cause=e.get('cause'), resume=e.get('resume'),
-                          reviewer=e.get('reviewer'), base=e.get('base'))
+                          reviewer=e.get('reviewer'), base=e.get('base'),
+                          reason=e.get('reason'), runs=e.get('runs') or [])
                 jobs[job.id] = job
                 if job.kind == 'build':
                     held[(job.repo, job.issue)] = True

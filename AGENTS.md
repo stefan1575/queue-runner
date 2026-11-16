@@ -810,7 +810,7 @@ The review loop's rules are `~/Code/docs/pr-review.md`; leads-dashboard's
    head H, after two failed reviews on H (until a push or `--release NAME#N`), while a review
    comment is on H already (any of the three formats below), while H's checks are running or
    none have reported (`sol-review` isn't counted), while it's stopped for Stefan, and when a
-   check failed (a stop) or it conflicts with its base (a conflict round, or a stop: Conflict
+   check failed (re-run once, then a stop: Stops for Stefan, below) or it conflicts with its base (a conflict round, or a stop: Conflict
    rounds, above). GitHub failing on one PR skips only that
    PR.
 5. **Review H.** Fetch `refs/pull/<n>/head` into `refs/queue-runner/pr<n>` and the PR's base
@@ -872,7 +872,8 @@ is writing to), the runner looks for stops on its head H, and
 files each kind once per H (`JobLog.stopped`). The kinds: `review` (the runner's review of H
 stopped: a repeated class, a reopened finding, a kept decline; the reason is decide()'s text from
 the run folder's `decision.json`), `no-push` (a fix round on H ended without pushing),
-`failed-check` and `conflict` (only once a conflict round couldn't resolve it, the PR conflicts
+`failed-check` (only once a re-run failed too: A failed check is re-run once, below) and
+`conflict` (only once a conflict round couldn't resolve it, the PR conflicts
 again with the base its last round merged, or after 5 conflict rounds: Conflict rounds, above). A review that stops files right after it posts. Two kinds are
 filed by decisions in the Claude lane: `approach-note` (review 3 or later still blocking, filed
 with the Approach note; the Sol pass files it again from the decision's record if filing failed)
@@ -897,6 +898,31 @@ stop; `--release NAME#PR` lets it go too. Answers are read at the start of each 
 closed issue puts the PR back in the loop; a reply holds it until a decision acts on what it asks
 (Decision threads, above). Every comment the runner posts outside a review carries a hidden
 `<!-- queue-runner ... -->` line (`ledger.RUNNER_MARK`), so none counts as a reply.
+
+**A failed check is re-run once** (issue #93; `Stopper.retry_checks` and `_failed_check`;
+game-backdrop PR #18 was stopped on 2026-11-16 by `actions/checkout` failing with `Repository
+not found`, and attempt 2 of the same run passed untouched). Each Sol pass, before looking for
+stops, a failed check on H whose failures are all GitHub Actions check runs
+(`Checks.runs`: the run id from the check run's `details_url`, app `github-actions`) gets its
+failed jobs re-run (`POST actions/runs/<id>/rerun-failed-jobs`, as `gh run rerun <id>
+--failed`), **once per run and head** (PR #105's F1: a run that fails after another's re-run
+passed gets its own): a `rerun` job per run on H (`runs` the run's id, failed attempt and URL;
+`reason` that run's own failed checks, `Checks.by_run`, so its pass or its stop names
+only them: F5), its start record written before GitHub is asked, so one a dead runner left
+open is settled from the run (F2: moved past that attempt, `rerun`; else `not-started` and asked
+again). Meanwhile it's no stop and Sol waits for the checks as for pending ones. It's a
+`failed-check` stop when a re-run's attempt has ended and its conclusion isn't a pass (the run's
+own `status`, `run_attempt` and `conclusion`, read from `actions/runs/<id>`, since check-runs can
+list the old failure for a while after the re-run passed: F4); at once when a failure is a commit status or
+another app's check (they can't be re-run), when the run is already past attempt 1 without the
+runner's re-run (re-run by hand), or when GitHub refused the re-run (`rerun` job `failed`, so it
+never loops). Any step counts, not only checkout: a real failure fails again a few minutes
+later. **A pass on the re-run is said on the PR** once, in one line linking the run's failed
+attempt (`.../actions/runs/<id>/attempts/<n>`), under the runner's mark, so a flaky check stays
+visible; the job ends `passed` only once the comment is on the PR (F3: a post that fails is
+tried again next pass, and one already there, by its hidden `rerun passed sha=H run=N` line,
+isn't posted twice). A new head gets its own re-run. The PR's timeline and the
+activity list say each.
 
 **Toasts** (`toast.py`): a native Windows toast under the runner's own name and icon. The runner
 registers its AppUserModelID `Stefan.QueueRunner` under
@@ -1772,7 +1798,7 @@ network: GitHub is the `GhCli` adapter in `queue_runner/github.py`, faked in tes
 (`tests/test_run.py`). The Sol lane is tested against `FakeGitHubForReviews` (every write goes to its `posts`, in
 order; a call named in `fail` raises), `FakeReviewGit` and `FakeSol` (`tests/test_review.py`); `decide()` and the marker formats in
 `tests/test_ledger.py`; the codex-sol.sh adapter in `tests/test_sol.py`; dependencies in `tests/test_deps.py` (a
-fake install) and the junction kept on removal and a checkout git can't delete (a deny-delete ACL) in `tests/test_git.py`. Stops and toasts are in `tests/test_stops.py` (a fake toaster). Merging
+fake install) and the junction kept on removal and a checkout git can't delete (a deny-delete ACL) in `tests/test_git.py`. Stops and toasts are in `tests/test_stops.py` (a fake toaster), with a failed Actions check's one re-run per run and head (`FakeGitHubForReviews.workflow_runs` and `rerun_failed`). Merging
 (`tests/test_merge.py`) plays GitHub moving on through `FakeGitHubForReviews.now` (a PR's fields
 now), `threads` and `push_before_merge`; fix rounds (`tests/test_fix.py`) run the real `Runner`
 with a T3 fake whose thread pushes; `AdoptedReviewTest` runs them all again with a cutover

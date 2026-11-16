@@ -2,7 +2,7 @@ import json
 import unittest
 
 from queue_runner.config import Repo
-from queue_runner.github import Checks, Comment, GhCli, Issue, PullRequest
+from queue_runner.github import Checks, Comment, GhCli, Issue, PullRequest, WorkflowRun
 
 REPO = Repo(name='demo', github='owner/demo', path='C:/demo')
 
@@ -128,6 +128,52 @@ class GhCliTest(unittest.TestCase):
         c = self.checks([('check', 'in_progress', None)], [('deploy', 'pending')])
         self.assertEqual((c.state, c.pending), ('pending', ('check', 'deploy')))
         self.assertEqual(self.checks([], [('ci', 'error')]).failed, ('ci',))
+
+    def test_a_failed_actions_check_names_its_run_so_it_can_be_re_run(self):
+        sha = 'a' * 40
+        runs = [{'name': 'tests', 'status': 'completed', 'conclusion': 'failure',
+                 'app': {'slug': 'github-actions'},
+                 'details_url': 'https://github.com/owner/demo/actions/runs/437/job/9'},
+                {'name': 'lint', 'status': 'completed', 'conclusion': 'failure',
+                 'app': {'slug': 'github-actions'},
+                 'details_url': 'https://github.com/owner/demo/actions/runs/437/job/10'},
+                {'name': 'build', 'status': 'completed', 'conclusion': 'success',
+                 'app': {'slug': 'github-actions'},
+                 'details_url': 'https://github.com/owner/demo/actions/runs/438/job/11'}]
+
+        def checks(statuses=(), more=()):
+            return GhCli(FakeGh({
+                f'repos/owner/demo/commits/{sha}/check-runs?per_page=100':
+                    {'check_runs': runs + list(more)},
+                f'repos/owner/demo/commits/{sha}/status': {'statuses': list(statuses)},
+            })).checks(REPO, sha)
+        self.assertEqual(checks().runs, (437,))
+        # Each run's own failed checks (PR #105's F5).
+        lint2 = {'name': 'e2e', 'status': 'completed', 'conclusion': 'failure',
+                 'app': {'slug': 'github-actions'},
+                 'details_url': 'https://github.com/owner/demo/actions/runs/440/job/12'}
+        c = checks(more=[lint2])
+        self.assertEqual((c.runs, c.by_run),
+                         ((437, 440), ((437, ('tests', 'lint')), (440, ('e2e',)))))
+        self.assertEqual((c.failed_in(440), c.failed_in(999)), (('e2e',), ()))
+        # A failed commit status, or a check run from outside Actions, can't be re-run: no runs.
+        self.assertEqual(checks([{'context': 'deploy', 'state': 'failure'}]).runs, ())
+        self.assertEqual(checks(more=[{'name': 'x', 'status': 'completed',
+                                       'conclusion': 'failure', 'app': {'slug': 'circleci'},
+                                       'details_url': 'https://circleci.com/1'}]).runs, ())
+
+    def test_a_workflow_run_s_attempt_and_its_re_run(self):
+        gh = FakeGh({'repos/owner/demo/actions/runs/437': {
+                        'id': 437, 'run_attempt': 2, 'status': 'in_progress', 'conclusion': None,
+                        'html_url': 'https://github.com/owner/demo/actions/runs/437'},
+                     'repos/owner/demo/actions/runs/437/rerun-failed-jobs': {}})
+        cli = GhCli(gh)
+        self.assertEqual(cli.workflow_run(REPO, 437),
+                         WorkflowRun(437, 2, 'in_progress', None,
+                                     'https://github.com/owner/demo/actions/runs/437'))
+        cli.rerun_failed(REPO, 437)
+        self.assertEqual(gh.calls[-1], ['api', '-X', 'POST',
+                                        'repos/owner/demo/actions/runs/437/rerun-failed-jobs'])
 
     def test_no_checks_yet(self):
         self.assertEqual(self.checks([], [('sol-review', 'success')]).state, 'none')
