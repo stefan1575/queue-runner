@@ -88,10 +88,13 @@ def _thread(raw: dict) -> Thread:
 
 
 class T3Cli:
-    """`run(args, stdin)` returns the CLI's (exit code, stdout, stderr)."""
+    """`run(args, stdin)` returns the CLI's (exit code, stdout, stderr). The CLI has no settle
+    or rename command, so those go to `mcp`, T3's MCP endpoint called directly
+    (`t3_mcp.T3Mcp`, ticket 70); with none, they raise T3Error."""
 
-    def __init__(self, run=run_t3):
+    def __init__(self, run=run_t3, mcp=None):
         self._run = run
+        self.mcp = mcp
 
     def _call(self, args, stdin=None):
         for a in args:
@@ -149,3 +152,14 @@ class T3Cli:
 
     def list(self, project: str) -> list[Thread]:
         return [_thread(t) for t in self._json(['thread', 'list', '--json', '--project', project])]
+
+    def settle(self, thread_id: str) -> None:
+        """Settles a thread the runner started: it leaves T3's sidebar and stays readable."""
+        if self.mcp is None:
+            raise T3Error("settling a thread needs T3's MCP endpoint (no MCP client given)")
+        self.mcp.settle(thread_id)
+
+    def rename(self, thread_id: str, title: str) -> None:
+        if self.mcp is None:
+            raise T3Error("renaming a thread needs T3's MCP endpoint (no MCP client given)")
+        self.mcp.rename(thread_id, title)
