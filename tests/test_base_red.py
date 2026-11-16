@@ -248,6 +248,34 @@ class BaseRedTest(unittest.TestCase):
         r.reviewer.review_pass()   # not held again on H
         self.assertEqual(len(self.of(r, BASE_HOLD)), 1)
 
+    def test_a_head_whose_own_failure_passes_its_re_run_is_held_again(self):
+        """Review 2, F5: held on `tests`, then `lint` fails too (own-failure, re-run); `lint`
+        passes its re-run while `tests` fails again. Now H fails only what main fails, so it's
+        held again, with no failed-check stop."""
+        self.main_fails('tests')
+        self.pr_fails(H2, 'tests')
+        r = self.runner()
+        r.reviewer.review_pass()
+        self.gh.check_states[H2] = Checks('failed', failed=('tests', 'lint'), runs=(437,),
+                                          by_run=((437, ('tests', 'lint')),))
+        r.reviewer.review_pass()
+        self.assertEqual(self.of(r, BASE_HOLD)[-1].outcome, 'own-failure')
+        self.assertEqual(self.calls('rerun'), [(437,)])
+        # The re-run: lint passes, tests fails again (main's failure).
+        self.gh.check_states[H2] = Checks('failed', failed=('tests',), runs=(437,),
+                                          by_run=((437, ('tests',)),))
+        self.gh.workflow_runs[437] = WorkflowRun(437, 2, 'completed', 'failure', RUN)
+        r.reviewer.review_pass()
+        r.reviewer.review_pass()
+        holds = self.of(r, BASE_HOLD)
+        self.assertEqual([h.outcome for h in holds], ['own-failure', 'held'])
+        self.assertEqual(self.of(r, 'stop'), [])
+        self.assertEqual(self.calls('rerun'), [(437,)])
+        # Once main passes, the re-held PR is updated as any held PR.
+        self.main_passes()
+        r.reviewer.review_pass()
+        self.assertEqual(self.calls('update-branch'), [(20, H2)])
+
     def test_an_update_that_fails_for_another_reason_is_tried_again(self):
         """F2: an HTTP 503 from update-branch isn't a conflict: the hold stays and the next pass
         updates the PR."""

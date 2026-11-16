@@ -918,8 +918,10 @@ failing checks), `filed` (or `failed`, filed next pass). A second PR held by the
 files nothing. While it's `filed`, or `failed` to file (PR #110's review 1, F4: the red base
 holds builds whether GitHub took the issue or not), no build starts in the repo (A Claude pass,
 step 5). **A hold is checked again each pass** while the base is red (F1): a check failing on H
-that the base doesn't fail ends it `own-failure` (H isn't held again; #93's re-run, then a stop,
-follow), and nothing failing on H any more ends it `cleared`. **It
+that the base doesn't fail ends it `own-failure` (#93's re-run, then a stop, follow), and
+nothing failing on H any more ends it `cleared`. Each pass judges H's failures as they are now
+(review 2, F5): once its own failure passes its re-run and H fails only what the base fails,
+it's held again. **It
 resolves itself, so no ask thread opens for it:** once the base's checks pass, each PR still at
 its held head is brought up to date with GitHub's update-branch (`PUT pulls/<n>/update-branch`
 with `expected_head_sha`, as `gh pr update-branch`; no AI): `updated`, and it goes through checks

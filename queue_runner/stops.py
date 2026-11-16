@@ -515,8 +515,10 @@ class Stopper:
         A hold is checked again on every pass while the base is red (review 1, F1): once a
         check fails on H that the base doesn't fail, the failure is the PR's own
         (`own-failure`), and once nothing fails on H any more there's nothing to hold
-        (`cleared`). Either way the hold ends, H isn't held again, and the PR goes on as any
-        other (#93's re-run, then a stop)."""
+        (`cleared`). Either way the hold ends and the PR goes on as any other (#93's re-run,
+        then a stop). Each pass judges H's failures as they are now, not as they were (review
+        2, F5): once its own failure passes its re-run and H fails only what the base fails,
+        it's held again."""
         red = self._red.get(repo.name)
         if red is None or (pr.base and pr.base != repo.base):
             return
@@ -536,9 +538,6 @@ class Stopper:
             return
         if self.jobs.writer(repo.name, pr.branch):
             return
-        if any(j.outcome == 'own-failure'
-               for j in self.jobs.on(BASE_HOLD, repo.name, n, pr.head_sha)):
-            return   # H failed a check the base didn't: its failure is its own (F1)
         checks = self.github.checks(repo, pr.head_sha)
         if checks.state != 'failed' or not set(checks.failed) <= red[1]:
             return
