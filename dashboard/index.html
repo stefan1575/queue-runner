@@ -668,11 +668,11 @@ button.stn-in:hover { background: var(--hover); }
 .plan-name { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .plan-name .who { font-size: 17px; }
 .plan-name .who.claude { font-size: 18.5px; }
-.meter { display: grid; grid-template-columns: 108px 1fr 48px; align-items: center; column-gap: 12px; margin-top: 12px; }
+.meter { display: grid; grid-template-columns: 108px 1fr 72px; align-items: center; column-gap: 12px; margin-top: 12px; }
 .meter .label { color: var(--ink-2); }
 .meter .bar { height: 6px; background: var(--line); border-radius: 3px; position: relative; overflow: hidden; }
 .meter .fill { position: absolute; inset: 0 auto 0 0; background: var(--ink-2); border-radius: 3px; }
-.meter .kept { position: absolute; inset: 0 0 0 auto; background: var(--you); opacity: .5; }
+.meter .kept { position: absolute; inset: 0 auto 0 0; background: var(--you); opacity: .5; }
 .meter .pct { text-align: right; font-weight: 600; }
 .meter.near .fill { background: var(--run); }
 .meter.near .pct { color: var(--run); }
@@ -1781,15 +1781,18 @@ function pyramid(m) {
 }
 
 // ------------------------------------------------------------------ status, usage and build order
-// Every window says when it resets. The fill turns amber from 85% and red at the limit; the
-// blue end of a bar is the share kept for you. The Usage page adds what the runner makes of it.
+// Every window says how much is left and when it resets, as T3 Code says it ("70% left"): the
+// fill is what's left and shrinks as it's used. It turns amber with 15% left and red with none;
+// the blue start of a bar is the share kept for you, the last of what's left. The snapshot keeps
+// `used`. The Usage page adds what the runner makes of it.
 function meter(w, full) {
   const used = w.used, known = typeof used === "number";
+  const left = known ? Math.max(0, Math.round(100 - used)) : null;
   const cls = known && used >= 100 ? " full" : known && used >= 85 ? " near" : "";
   return `<div class="meter${cls}" title="${esc(w.note || "")}"><span class="label">${esc(w.label)}</span>
-    <span class="bar" role="img" aria-label="${esc(w.label)}: ${known ? used + "% used" : "unknown"}">
-      ${known ? `<i class="fill" style="width:${Math.min(used, 100)}%"></i>` : ""}${w.reserve ? `<i class="kept" style="width:${w.reserve}%" title="${w.reserve}% kept for you"></i>` : ""}</span>
-    <span class="pct">${known ? used + "%" : "?"}</span>
+    <span class="bar" role="img" aria-label="${esc(w.label)}: ${known ? left + "% left" : "unknown"}">
+      ${known ? `<i class="fill" style="width:${left}%"></i>` : ""}${w.reserve ? `<i class="kept" style="width:${w.reserve}%" title="${w.reserve}% kept for you"></i>` : ""}</span>
+    <span class="pct">${known ? left + "% left" : "?"}</span>
     <span class="when">${w.resets_at ? `resets ${esc(stamp(w.resets_at))}` : "not started"}${full && !w.gates ? `. ${esc(w.note || "Not used by the runner.")}` : ""}</span></div>`;
 }
 // A plan's reset credits (ticket 42): said only while it has some. Redeeming one is T3's.
