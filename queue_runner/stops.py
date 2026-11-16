@@ -35,7 +35,7 @@ count. A check that fails on H but passes on the base is the PR's, as before. On
 repo's own base (`base` in config.toml) is compared: a stacked PR's failure is its own.
 
 Filing is an automated post in the repo's own issues and PRs, which needs no go-ahead
-(`~/Code/global/CLAUDE.md`).
+(`~/Code/AGENTS.md`).
 """
 import datetime
 import json

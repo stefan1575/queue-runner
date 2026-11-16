@@ -346,7 +346,7 @@ class Reviewer:
         kept = set(self.git.sweep_stale(self.config.checkouts_dir))
         for folder in sorted(kept - self._said_kept):
             self.say(f"{folder} can't be deleted yet: Sol's sandbox user owns folders in it "
-                     f"(AGENTS.md, Sol runs tests). Kept; the next review tries again.")
+                     f"(docs/reviews.md, Sol runs tests). Kept; the next review tries again.")
         self._said_kept = kept
 
     def review(self, repo: Repo, pr: PullRequest, by=('sol', None)) -> str:

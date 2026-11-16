@@ -17,11 +17,11 @@ python3 -m queue_runner --stop                # stop the running runner
 python3 -m queue_runner --inbox               # everything waiting on Stefan: PRs ready to merge, needs-info stops, threads waiting for his answer
 ```
 
-Its dashboard is a separate small process (`dashboard/`; AGENTS.md, The dashboard):
+Its dashboard is a separate small process (`dashboard/`; `docs/dashboard.md`):
 
 ```
 python3 -m dashboard    # the runner's page on http://queue.localhost/, sample data on http://localhost:5289/
 ```
 
-The rules, how it runs unattended, the live checks, the tests and everything else are in
-[`AGENTS.md`](AGENTS.md).
+The rules every change follows and how to run the tests are in [`AGENTS.md`](AGENTS.md); how it
+runs unattended, the live checks and everything else are in [`docs/`](docs/), indexed there.

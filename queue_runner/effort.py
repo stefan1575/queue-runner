@@ -1,4 +1,4 @@
-"""The effort a Claude job runs at (ticket 39; AGENTS.md, T3 as a script sees it).
+"""The effort a Claude job runs at (ticket 39; docs/t3.md).
 
 T3's CLI has no effort flag. `t3 thread start --provider P --model M` sends T3's
 `t3_thread_launch` a model selection with no options, so the run gets the model's default effort

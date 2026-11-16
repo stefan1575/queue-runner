@@ -98,7 +98,7 @@ class GitCli:
 
     def remove_checkout(self, path: str, worktree: str, ref: str | None = None) -> str | None:
         """Removes Sol's checkout. A folder git unregistered but couldn't delete (owner-only
-        folders Sol's sandbox user left: AGENTS.md, Sol runs tests) is moved aside to
+        folders Sol's sandbox user left: docs/reviews.md, Sol runs tests) is moved aside to
         `<worktree>.stale-<time>`, so the next `worktree add` finds the path free; returns where
         it went, else None. `sweep_stale` deletes it later if it can."""
         import datetime
@@ -164,7 +164,7 @@ class GitCli:
     def remove_worktree(self, path: str, worktree: str, branch: str | None = None) -> bool:
         """Removes a job's worktree and its local branch. True once git no longer lists the
         worktree: T3 can hold the empty folder open, so `worktree remove` may fail after git
-        has unregistered it and deleted its files (AGENTS.md, T3 as a script sees it)."""
+        has unregistered it and deleted its files (docs/t3.md)."""
         self._run(['-C', path, 'worktree', 'remove', '--force', worktree])
         self._run(['-C', path, 'worktree', 'prune'])
         listed = self._ok(['-C', path, 'worktree', 'list', '--porcelain'])

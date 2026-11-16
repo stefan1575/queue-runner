@@ -19,7 +19,7 @@ adopt_reviews_before = 2026-11-10
 # So a repo's jobs start on its T3 project's default model instead, when that default is this
 # model at this effort (T3 Settings, the project, New threads, Model), and with --model, at
 # medium, when it isn't; the runner says which at start, and each end record has the effort the
-# run used, read back from Claude Code's transcript (AGENTS.md, T3 as a script sees it).
+# run used, read back from Claude Code's transcript (docs/t3.md).
 [claude]
 provider = "claudeAgent"
 model = "claude-opus-5-5"

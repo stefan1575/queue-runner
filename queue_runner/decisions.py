@@ -28,7 +28,7 @@ The cases, in the order a pass takes them, each decided once (`JobLog.decided`):
 A decision job (kind `decision`, `about` the job it decides on, `question`) ends with the action
 taken as its outcome and the text acted on as its `reason`; `not-started` if T3 failed before
 any thread, so the next pass tries again. All posts are automated posts in the repo's own issues
-and PRs (`~/Code/global/CLAUDE.md`).
+and PRs (`~/Code/AGENTS.md`).
 """
 import json
 import re
