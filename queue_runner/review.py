@@ -30,7 +30,7 @@ from .picker import closed_issues
 from .post import GitHubPoster, PostFailed
 from .sol import SolOutOfUsage
 from .state import FAILED_REVIEW, OUT_OF_USAGE, REVIEWED, JobLog, when
-from .stops import Stopper, held
+from .stops import Stopper, base_hold, held
 from .t3 import T3Error, find_job_thread, settle_quietly
 
 STARTED, BUSY, IDLE = 'started', 'busy', 'idle'   # as run.py's lane results
@@ -321,6 +321,8 @@ class Reviewer:
         for r in read_reviews(self.github.issue_comments(repo, pr.number)):
             if r['sha'] and h.startswith(r['sha']):
                 return f'review {r["round"]} is on {h7} already ({r["verdict"]})'
+        if hold := base_hold(self.jobs, repo.name, pr):   # the base's failure (issue #98)
+            return f'not now, {repo.base} fails {hold.reason} too'
         checks = self.github.checks(repo, h)
         if checks.state == 'pending':
             return f'checks still running on {h7} ({", ".join(checks.pending)})'

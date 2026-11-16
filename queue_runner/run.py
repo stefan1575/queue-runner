@@ -34,7 +34,7 @@ from .picker import BuildJob, pick
 from .review import Reviewer
 from .snapshot import Wait
 from .state import NOT_SENT, NOT_STARTED, RESTART_FAILED, USAGE_LIMIT, Job, JobLog, when
-from .stops import Stopper
+from .stops import Stopper, red_base
 from .t3 import T3Error, Thread, find_job_thread, settle_quietly
 from .toast import NoToaster
 from .wake import NoWaker
@@ -209,6 +209,7 @@ class Runner:
         # The repos Stefan stopped (ticket 37): a lock, as both lanes take them up.
         self._order_lock = threading.Lock()
         self._said_unknown: str | None = None   # control.json stops a repo not served (37)
+        self._said_red: dict[str, str] = {}   # a repo's red base, said once per head (#98)
 
     def say(self, line: str) -> None:
         with self._say_lock:   # both lanes say things
@@ -345,6 +346,14 @@ class Runner:
             # No GitHub issues to pick from: a local-ticket repo (`tickets.py`) is only named by
             # --dry-run.
             return None
+        if red := red_base(self.jobs, name, repo.base):   # no build from a red base (#98)
+            text = (f'{name}: no build starts while {repo.base} fails its checks ({red.reason}; '
+                    f'{red.link})')
+            if self._said_red.get(name) != text:
+                self._said_red[name] = text
+                self.say(text)
+            return None
+        self._said_red.pop(name, None)
         job = pick(repo, self.github, held=self.jobs.held_issues(name))
         if job is not None:
             return Start(name, 'build', None, lambda: self.run_build(job),

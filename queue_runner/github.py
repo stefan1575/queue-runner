@@ -288,6 +288,10 @@ class GhCli:
         self._run(['api', '-X', 'POST',
                    f'repos/{repo.github}/actions/runs/{run_id}/rerun-failed-jobs'])
 
+    def branch_head(self, repo, branch) -> str:
+        """The commit a branch of the repo points at now (the base's head: issue #98)."""
+        return self._get(f'repos/{repo.github}/branches/{quote(branch, safe="")}')['commit']['sha']
+
     def has_conflict(self, repo, number) -> bool:
         """True once GitHub says the PR can't merge cleanly; unknown (still computing) is False."""
         return self._get(f'repos/{repo.github}/pulls/{number}').get('mergeable') is False
@@ -367,6 +371,17 @@ class GhCli:
         """Closes an issue as not planned (a decision found it isn't needed)."""
         self._send('PATCH', f'repos/{repo.github}/issues/{number}',
                    {'state': 'closed', 'state_reason': 'not_planned'})
+
+    def close_completed(self, repo, number) -> None:
+        """Closes an issue as done (the base stop, once the base passes: issue #98)."""
+        self._send('PATCH', f'repos/{repo.github}/issues/{number}',
+                   {'state': 'closed', 'state_reason': 'completed'})
+
+    def update_branch(self, repo, number, expected_head) -> None:
+        """GitHub's update-branch (as `gh pr update-branch <n>`): merges the PR's base into its
+        head, only while the head is still `expected_head`. GitHub refuses a conflict (422)."""
+        self._send('PUT', f'repos/{repo.github}/pulls/{number}/update-branch',
+                   {'expected_head_sha': expected_head})
 
     def set_status(self, repo, sha, state, description, target_url='', context=SOL_REVIEW):
         """A commit status on exactly `sha`."""

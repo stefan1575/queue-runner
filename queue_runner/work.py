@@ -196,7 +196,8 @@ def read_repo(config, github, git, jobs, repo, now=None) -> RepoRead:
             pending = tuple(pr_numbers(commits))
             pending_issues = tuple(int(m[1]) for c in commits
                                    if (m := _FROM_BRANCH.search(c['subject'])))
-    picked = part('builds', lambda: tuple(
+    from .stops import red_base
+    picked = () if red_base(jobs, repo.name, repo.base) else part('builds', lambda: tuple(
         (b.issue.number, b.issue.title)
         for b in pickable(repo, github, held=jobs.held_issues(repo.name))), (), 'builds')
     flying = part('what is in flight', lambda: frozenset(in_flight(repo, github)), frozenset(),
