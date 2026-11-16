@@ -644,8 +644,14 @@ click, never by itself.
   orders one more round on H (`Fixer.order`), `hold` holds, `stop` files a `decision` stop.
 - **An answer on GitHub meanwhile still counts:** a stop no longer `filed` (his reply, a closed
   issue, a release) or already decided is that answer's, and the thread's later block is never
-  acted on; once the thread's answer is recorded, the stop isn't `filed`, so a later reply
-  answers nothing. Decided once either way.
+  acted on. The Sol lane answers stops alongside, so each check that guards an action reads the
+  stop from the job log again after every slow read that action needs (`AskThreads._now`; issue
+  #84: the Sol lane answered PR #67's stop two seconds before its thread opened). `open` builds
+  the brief (its GitHub reads) first, then reads the stop: answered or released after the ask was
+  chosen, it gets no thread and no `ask` job, said once. Answered while T3 starts the thread, the
+  `ask` job keeps the thread's id, the thread is settled, and it's said. `read_answers` reads the
+  stop again after the thread and the PR, just before acting. Once the thread's answer is
+  recorded, the stop isn't `filed`, so a later reply answers nothing. Decided once either way.
 - **The snapshot** (`ask_threads.mark`): every ask has `decide` and `also`. `decide` is null for an
   ask that can't be opened, else `{state, at, note}`: `offered`; `asked` (the runner read the
   request: `note` says when it starts, `waits_text`: when the Claude lane or the repo is resumed,
@@ -1326,8 +1332,8 @@ doesn't wait: a PR that needs a review gets one from a T3 thread on the Claude m
   PR isn't reviewed (`why_not`), and the Claude lane starts nothing in any repo
   (`Runner._fallback_runs`: Stefan's rule on PR 67's review 2, kept beside #50's one job per
   repo; the Sol lane's own review now, `Reviewer.live`, still runs beside it). Once it has ended, the Sol lane counts the review `failed`, with its `thread_id`
-  and `run_id`, and whichever lane saw the end first tells the gate (The usage gate, Which
-  reading). No thread found: `failed`, holding nothing. A Reviewer with no fallback (`--review`)
+  and `run_id`, settles its thread (#77), and whichever lane saw the end first tells the gate
+  (The usage gate, Which reading). No thread found: `failed`, holding nothing. A Reviewer with no fallback (`--review`)
   leaves such a review open for the runner's. Until then the dashboard shows it as the
   reviewing lane's job.
 - **Alongside the Claude lane:** the fallback runs in the Sol lane, beside the Claude lane's
@@ -1367,10 +1373,9 @@ provider = "claude"   # "chatgpt" (Sol) is the default
 - **Back to Sol:** set `provider = "chatgpt"` (or remove `[review]`) on main; the runner restarts
   on the merge (Restarting on new code, above). Any other value stops the runner at load, naming
   the key.
-- **Issue #77:** the gate counts a running review among the Claude jobs running since #74
-  (Alongside the Claude lane, above), and #70 settles a review thread once its reply is read
-  (Settling threads, below). Still not settled: a review thread cut off with its runner (its id
-  is never recorded).
+- **Issue #77:** a running review counts among the Claude jobs running at the `review` cost, as
+  `review <repo>#<PR>` (Alongside the Claude lane, above), and its thread is settled once the
+  review's end is recorded, whatever the outcome, a dead runner's too (Settling threads, below).
 
 ## Sol runs tests
 
@@ -1426,8 +1431,10 @@ didn't start: only ids from its own job records.
 
 - **When:** a build, fix or conflict thread once its end is recorded (`Runner.finish`,
   `finish_fix`, so a dead runner's settle too), whatever the outcome except `waiting`; a decision
-  thread once its answer is read (`Decider.run`), and an Opus fallback review's thread once its
-  reply is read (`fallback.OpusThread`), unless either asked back (exit 2); and at a merge
+  thread once its answer is read (`Decider.run`), unless it asked back (exit 2); an Opus
+  review's thread (the fallback or config.toml's) once the review's end is recorded, whatever
+  the outcome, one that asked back too, since nobody answers it (`Reviewer._settle`, issue #77),
+  and a dead runner's once the Sol lane counts it failed (`Reviewer.settle`); and at a merge
   (`Merger.after_merge`: the runner's, Stefan's, or one cut off with its runner), every thread
   the runner started for the PR (`JobLog.pr_threads`: its builds and fixes, the decisions on it
   or on one of those jobs, its Opus fallback reviews), the latest point one can still be open:
@@ -1435,8 +1442,7 @@ didn't start: only ids from its own job records.
   thread, and a job whose question waits on Stefan,** are settled once they no longer need him
   (Threads that need Stefan, below), or once their prompt cache expires (A stale waiting thread,
   below); an ask thread never at a merge (a decision acted on from
-  one carries its id). **Not settled:** live threads. A fallback review cut off with its runner
-  records no thread id, so its thread stays.
+  one carries its id). **Not settled:** live threads.
 - **A settled thread stays readable:** `thread show` and `thread list` still give it and its
   messages (checked live 2026-11-16), so decisions and restarts read its last reply as before.
   **A message to a settled thread unsettles it** (T3's `thread.unsettled` on a new turn,

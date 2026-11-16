@@ -166,8 +166,7 @@ class Runner:
         self.reviewer = Reviewer(config, github=github, git=git, sol=sol, jobs=self.jobs,
                                  say=self.say, toaster=self.toaster, deps=deps,
                                  fallback=OpusFallback(config, t3=t3, gate=gate,
-                                                       effort=self.effort, say=self.say,
-                                                       beside=self),
+                                                       effort=self.effort, beside=self),
                                  t3=t3) if sol is not None else None
         self.fixer = Fixer(config, github=github, git=git, jobs=self.jobs)
         stopper = Stopper(config, github=github, jobs=self.jobs, say=self.say,

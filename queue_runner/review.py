@@ -31,7 +31,7 @@ from .post import GitHubPoster, PostFailed
 from .sol import SolOutOfUsage
 from .state import FAILED_REVIEW, OUT_OF_USAGE, REVIEWED, JobLog, when
 from .stops import Stopper, held
-from .t3 import T3Error, find_job_thread
+from .t3 import T3Error, find_job_thread, settle_quietly
 
 STARTED, BUSY, IDLE = 'started', 'busy', 'idle'   # as run.py's lane results
 MAX_FAILED = 2   # failed reviews on one head before the lane leaves it until a release or a push
@@ -229,6 +229,7 @@ class Reviewer:
             self._said_running.discard(job.id)
             if thread is not None:   # a Claude thread ran and has ended
                 self.fallback.thread_ended(job.id)
+                settle_quietly(self.fallback.t3, thread.thread_id, name, self.say)   # #77
             self.say(f'{name}: cut off with its runner; counted as failed')
         if self.merger:
             self.merger.settle()
@@ -419,6 +420,7 @@ class Reviewer:
             _write(os.path.join(run_dir, 'failed.txt'), error + '\n')
             self.jobs.ended(job.id, exit_code=None, outcome=FAILED_REVIEW, run_dir=run_dir,
                             error=error, **ran(sol))
+            self._settle(opus, sol, name)
             self.say(f'{name}: review failed, nothing counts: {error}')
             return STARTED
         finally:
@@ -440,6 +442,7 @@ class Reviewer:
             _write(os.path.join(run_dir, 'failed.txt'), f'{e}\n')
             self.jobs.ended(job.id, exit_code=None, outcome=FAILED_REVIEW, run_dir=run_dir,
                             verdict=d['verdict'], error=str(e), **ran(sol))
+            self._settle(opus, sol, name)
             self.say(f'{name}: review {rnd} on {h[:7]} was {d["verdict"]} but not posted, '
                      f'so it failed: {e}')
             return STARTED
@@ -447,6 +450,7 @@ class Reviewer:
         self.jobs.ended(job.id, exit_code=None, outcome=outcome, verdict=d['verdict'],
                         signals=[s['signal'] for s in d['signals']], run_dir=run_dir, link=url,
                         **ran(sol))
+        self._settle(opus, sol, name)
         why = f' ({"; ".join(s["text"] for s in d["signals"])})' if d['signals'] else ''
         by_ = f' by {d["reviewer"]}' if d['reviewer'] else ''
         self.say(f'{name}: review {rnd} on {h[:7]} is {d["verdict"]}{by_}, next: '
@@ -461,6 +465,12 @@ class Reviewer:
         elif outcome in ('stop', 'approach-note') and self.stopper:
             self.stopper.check(repo, pr)
         return STARTED
+
+    def _settle(self, opus: bool, sol, name: str) -> None:
+        """An Opus review's thread leaves Stefan's sidebar once the review's end is recorded,
+        whatever the outcome (issue #77; Sol's run is no T3 thread)."""
+        if opus:
+            sol.settle(name, self.say)
 
     def stopped_now(self, repo: Repo) -> bool:
         """Whether Stefan has stopped the repo (ticket 37) or the reviewing lane (ticket 30), or

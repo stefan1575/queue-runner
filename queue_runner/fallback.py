@@ -135,8 +135,6 @@ class OpusThread:
         with open(out, 'w', encoding='utf-8', newline='\n') as fh:
             fh.write(f'T3 thread {result.thread_id}, run {result.run_id}: exit '
                      f'{result.exit_code}, {result.status}\n{result.error or ""}\n')
-        if result.exit_code != 2:   # its end read: settled (ticket 70); one that asked is left
-            settle_quietly(f.t3, result.thread_id, f'review {repo.name} (Opus fallback)', f.say)
         if result.exit_code == 2:
             raise SolFailed(f'The {self.name} thread {result.thread_id} stopped to ask a '
                             'question instead of reviewing.')
@@ -155,6 +153,13 @@ class OpusThread:
     def name(self) -> str:
         return 'Opus fallback' if self.kind == KIND else 'Opus review'
 
+    def settle(self, name: str, say) -> None:
+        """Settles the thread that ran, once the review's end is recorded, whatever its
+        outcome (issue #77): nobody answers a review thread, so one that asked is done too. A
+        failed settle is said and never raised (ticket 70). No thread ran: nothing."""
+        if self.ran:
+            settle_quietly(self.fallback.t3, self.record.get('thread_id'), name, say)
+
 
 class OpusFallback:
     """What the Sol lane needs for the fallback: T3, the usage gate (None: every review starts,
@@ -162,10 +167,8 @@ class OpusFallback:
     `beside`, the Claude lane (`run.Runner`: its jobs running, and the review counted among them
     while it runs; `Alone` without one)."""
 
-    def __init__(self, config, *, t3, gate=None, effort=None, say=lambda line: None,
-                 beside=None):
+    def __init__(self, config, *, t3, gate=None, effort=None, beside=None):
         self.config, self.t3, self.gate, self.effort = config, t3, gate, effort
-        self.say = say   # a failed settle of its thread (ticket 70)
         self.beside = beside or Alone()
 
     def check(self, label: str):
