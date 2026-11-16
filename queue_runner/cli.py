@@ -498,8 +498,8 @@ def _utc_now():
 
 def _snapshot(config, gate, sol_usage, clock, out, github, git) -> int:
     """`--snapshot`: one snapshot from the state now, printed. It reads Claude's usage once,
-    Codex's newest rollout, and GitHub once for the Inbox and the work as the Sol lane would
-    (ticket 32; git only read, nothing fetched), takes no lock, and starts, posts, records and
+    ChatGPT's through codex app-server (ticket 42), and GitHub once for the Inbox and the work
+    as the Sol lane would (ticket 32; git only read, nothing fetched), takes no lock, and starts, posts, records and
     writes nothing. The runner's pid and start are runner.pid's, if one is there."""
     from .inbox import Reader as InboxReader
     from .snapshot import Calls, RunnerInfo, Snapshots, Watch
@@ -669,7 +669,8 @@ def main(argv=None, github=None, out=None, t3=None, git=None, sleep=None,
         _print_gate(gate, out, config)
         return 0
     if sol_usage is None:
-        from .sol import latest_limits as sol_usage
+        from .codex_usage import CodexUsage   # as T3 reads it (ticket 42)
+        sol_usage = CodexUsage().read
     snap_clock = clock or _utc_now
     if github is None:
         from .github import GhCli

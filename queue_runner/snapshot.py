@@ -27,6 +27,7 @@ from .gate import RECENT, RESERVE_RELEASE, SAMPLES, Knob
 VERSION = 1
 WRITE_EVERY = 30    # seconds: the longest the runner goes between writes
 READ_EVERY = 300    # seconds: the snapshot reads usage itself no more often than this
+FORCE_EVERY = 60    # seconds: Refresh on the page reads usage again no more often than this
 
 
 CLAUDE_KINDS = ('build', 'fix', 'decision', 'live')   # the Claude lane's jobs (gate.CLAUDE_KINDS)
@@ -59,7 +60,7 @@ ROLES = [
 # The sources, in the page's order: (id, group, name, short, what an answer is called).
 SOURCES = [
     ('claude_usage', 'provider', 'Claude usage', 'Claude', 'Read'),
-    ('sol_usage', 'provider', 'ChatGPT usage', 'ChatGPT', "Read from Codex's newest session"),
+    ('sol_usage', 'provider', 'ChatGPT usage', 'ChatGPT', 'Read through Codex'),
     ('t3', 'local', 'T3 Code', 'T3 Code', 'Answered'),
     ('github', 'external', 'GitHub', 'GitHub', 'Answered'),
 ]
@@ -128,6 +129,9 @@ class Facts:
     work: dict | None = None
     work_stale: dict = field(default_factory=dict)
     limited: list = field(default_factory=list)
+    # Refresh on the Usage card (ticket 42): the request the publisher last acted on, and when
+    # it read (`Snapshots`); None before one.
+    usage_refresh: tuple | None = None
 
 
 def _iso(t: datetime.datetime | None) -> str | None:
@@ -148,6 +152,8 @@ def build(facts: Facts) -> dict:
         'repos': _repos(facts),
         'lanes': _lanes(facts),
         'usage': [_claude_usage(facts), _sol_usage(facts)],
+        'usage_refresh': {'asked_at': _iso(facts.usage_refresh[0]),
+                          'done_at': _iso(facts.usage_refresh[1])} if facts.usage_refresh else None,
         'knob': _knob(facts),
         'costs': _costs(facts),
         'roles': [dict(r) for r in ROLES],
@@ -321,11 +327,15 @@ def _sources(facts: Facts) -> list[dict]:
 
 def _plan(id: str, provider: str, name: str, reading: Reading | None, windows,
           plan=None) -> dict:
+    """`resets` (ticket 42): the reset credits the plan has left, from the same read as its
+    windows, or None when it has none to give (or isn't read yet)."""
     good = reading is not None and reading.value is not None
     error = reading.error if reading and reading.error else None if good else 'Not read yet'
+    resets = getattr(reading.value, 'resets', None) if good else None
     return {'id': id, 'provider': provider, 'name': name, 'plan': plan,
             'read_at': _iso(reading.at) if good else None,
-            'error': _sentence(error) if error else None, 'windows': windows}
+            'error': _sentence(error) if error else None, 'windows': windows,
+            'resets': {'available': resets} if resets is not None else None}
 
 
 def _claude_usage(facts: Facts) -> dict:
@@ -554,24 +564,31 @@ class Snapshots:
         self.readers = dict(readers or {})
         self._threads: dict[str, str] = {}
         self._lock = threading.Lock()
+        self._refreshed: tuple | None = None   # (the Refresh acted on, when it read)
 
     def build(self, fresh: bool = False) -> dict:
         return build(self.facts(fresh))
 
     def facts(self, fresh: bool = False) -> Facts:
-        """With `fresh`, usage is read when `READ_EVERY` has passed since the last read, and an
-        open Claude job's thread is looked up in T3 until it's found."""
+        """With `fresh`, usage is read when `READ_EVERY` has passed since the last read, or when
+        Stefan asked for a Refresh since the last one acted on and none was forced in the last
+        `FORCE_EVERY` (ticket 42), and an open Claude job's thread is looked up in T3 until
+        it's found."""
         from .gate import CLAUDE_KINDS as KINDS, CostBook, read_knob
         from .state import JobLog
         state = self.config.state_dir
         log = JobLog(os.path.join(state, 'jobs.jsonl'))
         jobs = log.jobs()
         now = self.clock()
+        switch = control.read(state)   # once: the stops, the build order (ticket 33), a Refresh
         if fresh:
+            forced = self._refresh(switch, now)
             for watch in (self.claude, self.sol):
-                if watch is not None and watch.due(READ_EVERY):
+                if watch is not None and (forced or watch.due(READ_EVERY)):
                     with contextlib.suppress(Exception):   # kept in the reading as its error
                         watch.read()
+            if forced:
+                self._refreshed = (switch.refresh_at, self.clock())
             self._find_threads(jobs)
         try:
             knob = read_knob(state)
@@ -585,7 +602,6 @@ class Snapshots:
         with self._lock:
             threads = dict(self._threads)
         runner = self.runner
-        switch = control.read(state)   # once: the stops and the build order (ticket 33)
         repos, _ = control.ordered(toml_order(self.config), switch.order)
         return Facts(
             now=now, repos=repos, jobs=jobs, knob=knob,
@@ -597,7 +613,16 @@ class Snapshots:
             threads=threads, runner=self.info, calls=self.calls.all(),
             claude_usage=self.claude.reading() if self.claude else None,
             sol_usage=self.sol.reading() if self.sol else None, costs=costs,
+            usage_refresh=self._refreshed,
             **self._inbox(log))
+
+    def _refresh(self, switch, now) -> bool:
+        """Whether a Refresh asked on the page is due to be read now: newer than the last one
+        acted on, and none forced in the last `FORCE_EVERY` (it waits for a later tick)."""
+        asked = switch.refresh_at if switch.error is None else None
+        if asked is None or self._refreshed is not None and asked <= self._refreshed[0]:
+            return False
+        return self._refreshed is None or             (now - self._refreshed[1]).total_seconds() >= FORCE_EVERY
 
     def _inbox(self, log) -> dict:
         """The Sol lane's last Inbox read (ticket 31) and work read (ticket 32), the releases
