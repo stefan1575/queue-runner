@@ -98,6 +98,7 @@ class Runner:
         self.gate = gate   # gate.Gate; None starts every Claude job (tests, the live checks)
         self.gate_until: datetime.datetime | None = None
         self._last_gate: str | None = None
+        self._seen_running: set[str] = set()   # waiting jobs a pass saw running again (settle)
         self.out, self.log_line = out, log_line
         self.jobs = JobLog(os.path.join(config.state_dir, 'jobs.jsonl'))
         self.repos = {r.name: r for r in config.repos}
@@ -249,8 +250,18 @@ class Runner:
                     self.say(f"Reading Claude's usage after the job at {at.astimezone():%H:%M:%S}:"
                              ' the usage endpoint is asked at most once every 5 minutes')
                 self.gate.measured(learned, [j.id for j in new], verdict.usage)
+            elif any(j.thread_id and j.outcome != NOT_SENT for j in new):
+                # A thread ran though the pass started nothing (a decision whose retry never
+                # reached its job): what it spent isn't learned, but no reading before it serves.
+                self.gate.job_ended()
             return did
         return measured
+
+    def _thread_ended(self) -> None:
+        """A Claude job's thread was seen to end outside a measured pass (`settle`): the next
+        check waits for a usage reading taken after now (PR 67's review 1, F1)."""
+        if self.gate is not None:
+            self.gate.job_ended()
 
     def held(self, lane: str) -> bool:
         """Whether Stefan stopped `lane` (control.json, read now), or control.json is unreadable:
@@ -349,6 +360,8 @@ class Runner:
             if job.kind == 'live':
                 if self.live.settle(job):
                     busy = BUSY
+                elif next(j for j in self.jobs.jobs() if j.id == job.id).thread_id:
+                    self._thread_ended()   # its thread ran and has ended
                 continue
             if job.kind not in ('build', 'fix'):
                 continue   # an open review or merge is the Sol lane's to settle
@@ -365,6 +378,7 @@ class Runner:
             else:
                 self.finish(job, thread.thread_id, _exit_code(thread), thread.status, None,
                             thread.latest_run_id)
+                self._thread_ended()
         for job in self.jobs.waiting_jobs():
             try:
                 thread, _ = self.t3.show(job.thread_id)
@@ -376,9 +390,14 @@ class Runner:
                 continue
             if thread.active and not thread.pending_requests:
                 busy = BUSY   # answered, and running again
+                self._seen_running.add(job.id)
+            elif job.id in self._seen_running and _exit_code(thread) == 2:
+                self._seen_running.discard(job.id)
+                self._thread_ended()   # it ran on Stefan's answer and asks again
             elif _exit_code(thread) != 2:
                 self.finish(job, thread.thread_id, _exit_code(thread), thread.status, None,
                             thread.latest_run_id)
+                self._thread_ended()   # Stefan's answer set it running again, and it ended
         return busy
 
     def find_thread(self, job: Job) -> Thread | None:

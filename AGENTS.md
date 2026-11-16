@@ -161,7 +161,12 @@ isn't gated**, and neither is an Approach-note answer read from Stefan's words (
   `OAuthUsage.call_every` is the budget; the tests' `FakeUsage` says 0.
 - **Which reading a check decides on:** one taken after the last Claude job ended and no older
   than 30 minutes (`STALE_AFTER`), even if the latest call failed. A 429 beside such a reading
-  never holds the lane.
+  never holds the lane. "Ended" is any Claude thread the runner sees end (`Gate.job_ended`): a
+  measured job's, and outside a measured pass a dead runner's build, fix or live job settled, a
+  waiting job that ran on Stefan's answer (ended, or asking again), and a decision thread whose
+  retry or answer never reached its job (PR 67's review 1, F1). A job settled with no thread
+  holds nothing. An ask thread runs on with Stefan unwatched, like his own sessions, so it
+  doesn't count.
 - **Fits:** the 5-hour window's used percent plus the job's expected cost must be at most 100,
   or the lane waits for its reset (plus 2 minutes); a window with nothing used takes any job. The
   week must leave `reserve` percent (5 by default) for Stefan until 24 hours before its reset,

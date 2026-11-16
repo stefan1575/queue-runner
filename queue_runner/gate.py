@@ -254,6 +254,12 @@ class Gate:
             return r.value, None
         return None, Verdict(False, UNREADABLE, text, next_at)
 
+    def job_ended(self) -> None:
+        """A Claude job's thread has ended (now): the next check decides only on a reading taken
+        after it. `measured` says so itself; the runner says so for a thread that ended outside
+        a measured pass (a dead runner's job settled, a decision whose retry never ran)."""
+        self.ended = self.clock()
+
     def after_wait(self) -> float:
         """How long the after-job read will wait for the endpoint's budget, in seconds."""
         return self.reader.wait_seconds()
@@ -263,7 +269,7 @@ class Gate:
         after it waits for the endpoint's budget (a job under 5 minutes), since the next check
         waits for that reading anyway; a reading another caller took after the job ended serves
         too. A failed read is recorded with its error and no `after`."""
-        self.ended = self.clock()
+        self.job_ended()
         wait = self.reader.wait_seconds()
         if wait > 0:
             if self.sleep is None:

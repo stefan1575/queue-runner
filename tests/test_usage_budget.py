@@ -14,9 +14,12 @@ import unittest
 from dashboard.serve import App
 from queue_runner import cli, snapshot
 from queue_runner.config import Config, Repo
-from queue_runner.gate import UNREADABLE
+from queue_runner.gate import FIVE_HOUR, UNREADABLE
+from queue_runner.run import BUSY, GATED, STARTED, Runner
+from queue_runner.state import JobLog
 from queue_runner.sol import Limits as SolLimits, LimitWindow as SolWindow
-from tests.fakes import StubEndpoint
+from tests.fakes import FakeGitHubWithPulls, StubEndpoint, issue
+from tests.fakes_t3 import FakeGit, FakeT3
 
 SGT = datetime.timezone(datetime.timedelta(hours=8))
 QR = Repo(name='queue-runner', github='stefan1575/queue-runner', path='C:/qr')
@@ -256,6 +259,147 @@ class AfterJobTest(Harness):
         self.gate.measured('fix', [], verdict.usage)
         self.assertEqual(self.statuses(), [200, 200])  # no second call after the wait
         self.assertEqual(self.gate.check('fix').usage.five_hour.used, 44)
+
+
+class EndedElsewhereTest(Harness):
+    """A Claude thread that ends outside a measured pass (PR 67's review 1, F1): a dead runner's
+    job settled, a waiting job Stefan answered that has since ended, a dead runner's live run,
+    or a decision thread whose retry never reached its job. The next check decides only on a
+    reading taken after the runner saw it end, as after a measured job."""
+
+    def setUp(self):
+        super().setUp()
+        import io
+        self.log = JobLog(os.path.join(self.state, 'jobs.jsonl'))
+        self.t3 = FakeT3([(0, 'completed')])
+        self.gh = FakeGitHubWithPulls(issues=[issue(5)])
+        self.r = Runner(self.config, github=self.gh, t3=self.t3, git=FakeGit(),
+                        out=io.StringIO(), log_line=lambda line: None, gate=self.gate,
+                        now=self.clock)
+
+    def a_build(self, status=None):
+        """A build left open by a dead runner, its thread in T3 (if `status`)."""
+        job = self.log.started(kind='build', repo='queue-runner', issue=4,
+                               branch='claude/a-ticket-4',
+                               title='Queue runner build: queue-runner#4')
+        if status:
+            self.t3.add('mcp:old', job.title, status)
+        return job
+
+    def a_live_run(self):
+        return self.log.started(kind='live', repo='queue-runner', issue=13, branch='main',
+                                title='Queue runner live: queue-runner', sha='a' * 40,
+                                head='b' * 40)
+
+    def assert_held_until_the_next_read(self):
+        """The pass after the job ended: held on the reading from before it, until the endpoint
+        may be asked again; then it decides on the new reading (90% used: a build won't fit)."""
+        self.assertEqual(self.r.run_pass(), GATED)
+        self.assertEqual(self.t3.starts, [])
+        self.assertIn('before the last Claude job ended', self.r.claude_wait.reason)
+        self.assertEqual(self.r.gate_until, t(14, 6, 49))
+        self.clock.t = self.r.gate_until
+        self.assertEqual(self.r.run_pass(), GATED)
+        self.assertEqual(self.gate.check('build').why, FIVE_HOUR)
+        self.assertEqual(self.t3.starts, [])
+
+    def test_a_dead_runners_job_that_ends_holds_the_next_job_for_a_reading_after_it(self):
+        self.a_build('running')
+        self.endpoint.five = 10
+        self.tick()                                    # 14:01:49: 10% while the job runs
+        self.assertEqual(self.r.run_pass(), BUSY)
+        self.clock.at(14, 2, 49)
+        self.endpoint.five = 90                        # what the job spent
+        self.t3.set_status('mcp:old', 'completed')
+        self.assert_held_until_the_next_read()
+
+    def test_a_dead_runners_job_found_ended_on_the_first_pass_counts_too(self):
+        self.a_build('completed')
+        self.endpoint.five = 10
+        self.tick()                                    # read before the pass settled it
+        self.clock.at(14, 2, 49)
+        self.endpoint.five = 90
+        self.assert_held_until_the_next_read()
+
+    def test_a_waiting_job_answered_and_ended_since_holds_the_next_job_too(self):
+        job = self.a_build()
+        self.log.ended(job.id, exit_code=2, outcome='waiting', thread_id='mcp:w')
+        self.t3.add('mcp:w', job.title, 'running')     # Stefan answered it in T3
+        self.endpoint.five = 10
+        self.tick()
+        self.assertEqual(self.r.run_pass(), BUSY)
+        self.clock.at(14, 2, 49)
+        self.endpoint.five = 90
+        self.t3.set_status('mcp:w', 'completed')
+        self.assert_held_until_the_next_read()
+
+    def test_a_waiting_job_that_ran_on_stefans_answer_and_asks_again_holds_the_next_job(self):
+        job = self.a_build()
+        self.log.ended(job.id, exit_code=2, outcome='waiting', thread_id='mcp:w')
+        self.t3.add('mcp:w', job.title, 'running')     # Stefan answered it in T3
+        self.endpoint.five = 10
+        self.tick()
+        self.assertEqual(self.r.run_pass(), BUSY)
+        self.clock.at(14, 2, 49)
+        self.endpoint.five = 90
+        self.t3.set_status('mcp:w', 'waiting')         # it ran, and asks him again
+        self.assert_held_until_the_next_read()
+        self.assertEqual(self.log.jobs()[0].outcome, 'waiting')
+
+    def test_a_dead_runners_live_run_settled_holds_the_next_job_too(self):
+        self.a_live_run()
+
+        def settle(job):                               # LiveSteps.settle: its thread ended
+            self.log.ended(job.id, exit_code=0, outcome='live', thread_id='mcp:live')
+            return False
+        self.r.live.settle = settle
+        self.endpoint.five = 10
+        self.tick()
+        self.clock.at(14, 2, 49)
+        self.endpoint.five = 90
+        self.assert_held_until_the_next_read()
+
+    def test_jobs_settled_that_never_reached_a_thread_hold_nothing(self):
+        self.a_build()                                 # no thread in T3: not-started
+        self.a_live_run()
+        self.r.live.settle = lambda job: (
+            self.log.ended(job.id, exit_code=None, outcome='not-started'), False)[1]
+        self.tick()
+        self.clock.at(14, 2, 49)
+        self.assertEqual(self.r.run_pass(), STARTED)   # a build, on the 14:01:49 reading
+        self.assertEqual(len(self.t3.starts), 1)
+
+    def test_a_decision_thread_whose_retry_never_reached_the_job_holds_the_next_job(self):
+        # Decider.act: the decision thread ran, then continuing the job failed, so the pass
+        # returns idle and isn't measured; the decision's thread still spent usage.
+        self.tick()
+        self.endpoint.five = 90
+
+        def run():
+            job = self.log.started(kind='decision', repo='queue-runner', issue=4, branch=None,
+                                   title='Queue runner decision: queue-runner#4')
+            self.clock.at(14, 2, 49)
+            self.log.ended(job.id, exit_code=0, outcome='retry', thread_id='mcp:d')
+            self.log.ended(job.id, exit_code=0, outcome='not-started',
+                           error='the earlier job was not continued')
+            return 'idle'
+        self.r.choose = lambda: ('decision', None, run)
+        self.assertEqual(self.r.run_pass(), 'idle')
+        del self.r.choose
+        self.assert_held_until_the_next_read()
+
+    def test_a_pass_whose_job_reached_no_thread_holds_nothing(self):
+        self.tick()
+
+        def run():                                     # T3 down: the build never started
+            job = self.a_build()
+            self.log.ended(job.id, exit_code=None, outcome='not-started', error='T3 is down')
+            return 'idle'
+        self.r.choose = lambda: ('build', None, run)
+        self.r.run_pass()
+        del self.r.choose
+        self.clock.at(14, 2, 49)
+        self.assertEqual(self.r.run_pass(), STARTED)   # the next build goes on the same reading
 
 
 if __name__ == '__main__':
