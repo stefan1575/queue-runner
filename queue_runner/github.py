@@ -1,5 +1,6 @@
 """GitHub as the runner sees it: the seam, its data, and the gh adapter."""
 import json
+import re
 from urllib.parse import quote
 from dataclasses import dataclass
 
@@ -64,11 +65,35 @@ class Checks:
     state: str
     failed: tuple = ()
     pending: tuple = ()
+    # The GitHub Actions runs behind the failed checks, when every failed check is an Actions
+    # check run, so re-running them may settle it (issue #93). A failed commit status, or a
+    # check run from another app, can't be re-run: then none.
+    runs: tuple = ()
+
+
+@dataclass(frozen=True)
+class WorkflowRun:
+    """A GitHub Actions run as it is now: its latest attempt, and that attempt's status
+    (queued, in_progress, completed...) and conclusion."""
+    id: int
+    attempt: int
+    status: str
+    conclusion: str | None
+    url: str
 
 
 # The runner's own status on a reviewed commit: never counted as one of its checks.
 SOL_REVIEW = 'sol-review'
 _PASSED = {'success', 'neutral', 'skipped'}
+_ACTIONS_RUN = re.compile(r'/actions/runs/(\d+)')
+
+
+def _actions_run(check_run: dict) -> int | None:
+    """The Actions run a check run belongs to, or None for another app's check run."""
+    if (check_run.get('app') or {}).get('slug') != 'github-actions':
+        return None
+    m = _ACTIONS_RUN.search(check_run.get('details_url') or check_run.get('html_url') or '')
+    return int(m.group(1)) if m else None
 
 
 class GhError(RuntimeError):
@@ -228,15 +253,29 @@ class GhCli:
         """Check runs and commit statuses on `sha`, leaving out `sol-review`."""
         runs = self._get(f'repos/{repo.github}/commits/{sha}/check-runs?per_page=100')
         status = self._get(f'repos/{repo.github}/commits/{sha}/status')
-        seen = [(r['name'], r['conclusion'] if r['status'] == 'completed' else 'pending')
-                for r in runs.get('check_runs') or ()]
-        seen += [(s['context'], s['state']) for s in status.get('statuses') or ()
+        seen = [(r['name'], r['conclusion'] if r['status'] == 'completed' else 'pending',
+                 _actions_run(r)) for r in runs.get('check_runs') or ()]
+        seen += [(s['context'], s['state'], None) for s in status.get('statuses') or ()
                  if s['context'] != SOL_REVIEW]
-        failed = tuple(n for n, s in seen if s not in _PASSED and s != 'pending')
-        pending = tuple(n for n, s in seen if s == 'pending')
+        bad = [(n, run) for n, s, run in seen if s not in _PASSED and s != 'pending']
+        failed = tuple(n for n, _ in bad)
+        pending = tuple(n for n, s, _ in seen if s == 'pending')
         state = ('none' if not seen else 'failed' if failed else 'pending' if pending
                  else 'passed')
-        return Checks(state, failed=failed, pending=pending)
+        reruns = () if any(run is None for _, run in bad) else             tuple(dict.fromkeys(run for _, run in bad))
+        return Checks(state, failed=failed, pending=pending, runs=reruns)
+
+    def workflow_run(self, repo, run_id) -> WorkflowRun:
+        """An Actions run's latest attempt and where it stands (issue #93)."""
+        r = self._get(f'repos/{repo.github}/actions/runs/{run_id}')
+        return WorkflowRun(r['id'], r.get('run_attempt') or 1, r.get('status') or '',
+                           r.get('conclusion'), r.get('html_url') or '')
+
+    def rerun_failed(self, repo, run_id) -> None:
+        """Re-runs an Actions run's failed jobs (as `gh run rerun <id> --failed`), a new
+        attempt of the same run on the same commit."""
+        self._run(['api', '-X', 'POST',
+                   f'repos/{repo.github}/actions/runs/{run_id}/rerun-failed-jobs'])
 
     def has_conflict(self, repo, number) -> bool:
         """True once GitHub says the PR can't merge cleanly; unknown (still computing) is False."""
