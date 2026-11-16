@@ -1,7 +1,9 @@
-// The sidebar: the repo switcher on top (like an org switcher), the pages, and at the bottom whether
-// the runner is up and what it's connected to.
+// The sidebar: the repo switcher on top (like an org switcher), the pages, whether the runner is up
+// and what it's connected to, and a footer row where T3 Code has its own: Settings and Usage on the
+// left, Update on the right (T3's Pull requests button has no counterpart here). Update is greyed
+// until updates are specced.
 import * as Popover from "@radix-ui/react-popover";
-import { Activity, ExternalLink, Gauge, History, LayoutDashboard, Settings } from "lucide-react";
+import { Activity, CircleArrowUp, ExternalLink, Gauge, History, LayoutDashboard, Settings } from "lucide-react";
 import { navigate, useUrl } from "@/lib/router";
 import { cn } from "@/lib/cn";
 import { useScoped, useStore } from "@/store";
@@ -14,6 +16,8 @@ export const PAGES = [
   { path: "/usage", label: "Usage", icon: Gauge },
   { path: "/settings", label: "Settings", icon: Settings },
 ] as const;
+// These two sit in the footer row, as T3 Code's do, not in the page list.
+const FOOTER: string[] = ["/usage", "/settings"];
 
 export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const { path } = useUrl();
@@ -24,7 +28,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
     <div className="flex h-full flex-col">
       <div className="p-3"><RepoPicker /></div>
       <nav aria-label="Pages" className="flex-1 space-y-0.5 px-3 pt-1">
-        {PAGES.map(({ path: p, label, icon: Icon }) => {
+        {PAGES.filter((x) => !FOOTER.includes(x.path)).map(({ path: p, label, icon: Icon }) => {
           const on = p === "/" ? path === "/" : path.startsWith(p);
           return (
             <button key={p} type="button" onClick={() => go(p)} aria-current={on ? "page" : undefined}
@@ -40,6 +44,20 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
       </nav>
       <Health onNavigate={() => go("/settings")} />
       <Rounds />
+      <div className="flex items-center gap-1 border-t border-line px-3 py-2">
+        {PAGES.filter((x) => FOOTER.includes(x.path)).reverse().map(({ path: p, label, icon: Icon }) => {
+          const on = path.startsWith(p);
+          return (
+            <button key={p} type="button" onClick={() => go(p)} aria-label={label} title={label} aria-current={on ? "page" : undefined}
+              className={cn("grid size-9 place-items-center rounded-lg", on ? "bg-surface text-ink shadow-sm ring-1 ring-line" : "text-ink-2 hover:bg-surface/60 hover:text-ink")}>
+              <Icon className="size-[18px]" />
+            </button>
+          );
+        })}
+        <button type="button" disabled aria-label="Update" title="Updates: coming soon" className="ml-auto grid size-9 cursor-not-allowed place-items-center rounded-lg text-faint opacity-60">
+          <CircleArrowUp className="size-[18px]" />
+        </button>
+      </div>
     </div>
   );
 }
@@ -82,7 +100,7 @@ const ROUNDS: [string, string, string][] = [
 function Rounds() {
   return (
     <Popover.Root>
-      <Popover.Trigger className="mx-3 mb-3 flex items-center gap-2 rounded-lg px-2 py-1.5 text-[14px] text-mute hover:bg-surface/60 hover:text-ink">
+      <Popover.Trigger className="mx-3 mb-2 flex items-center gap-2 rounded-lg px-2 py-1.5 text-[14px] text-mute hover:bg-surface/60 hover:text-ink">
         <History className="size-4" />Prototype round 4 · earlier rounds
       </Popover.Trigger>
       <Popover.Portal>
