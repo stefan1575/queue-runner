@@ -443,6 +443,7 @@ class DeadFallbackReviewTest(EndedElsewhereTest):
         self.r.reviewer.settle()
         self.r.reviewer.settle()
         self.assertTrue(self.the(job).open)
+        self.assertEqual(self.t3.settles, [])          # running: left in the sidebar
         self.assertEqual(sum('runs on in https://app.t3.codes/threads/env/mcp:opus' in line
                              for line in self.said), 1)   # said once
         self.assertIn('runs on in T3', self.r.reviewer.why_not(
@@ -456,8 +457,18 @@ class DeadFallbackReviewTest(EndedElsewhereTest):
         ended = self.the(job)
         self.assertEqual((ended.outcome, ended.thread_id, ended.run_id),
                          ('failed', 'mcp:opus', 'run:mcp:opus:1'))
+        self.assertEqual(self.t3.settles, ['mcp:opus'])   # its end recorded: settled (#77)
         self.assertEqual(self.gate.ended, t(14, 2, 49))
         self.assert_held_until_the_next_read()
+
+    def test_a_dead_runners_review_thread_whose_settle_fails_is_said_and_counted(self):
+        from queue_runner.t3 import T3Error
+        job = self.a_review('completed')
+        self.t3.settle_error = T3Error('refused')
+        self.r.reviewer.settle()
+        self.assertEqual(self.the(job).outcome, 'failed')
+        self.assertTrue(any('settling its thread mcp:opus in T3 failed' in line
+                            for line in self.said), self.said)
 
     def test_the_claude_lane_seeing_it_end_first_tells_the_gate_once(self):
         job = self.a_review('running')
