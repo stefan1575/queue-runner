@@ -15,6 +15,7 @@ from queue_runner.t3 import Message
 from tests.fakes_t3 import decision_reply
 from tests import test_ask_threads as ta
 from tests import test_decisions as td
+from tests import test_prefixes as tp
 
 UTC = datetime.timezone.utc
 PAST = datetime.datetime(2026, 1, 1, tzinfo=UTC)
@@ -186,6 +187,7 @@ class StaleAnswerTest(unittest.TestCase):
     stale."""
     D = td.DecisionTest
     setUp, runner, jobs, build = D.setUp, D.runner, D.jobs, D.build
+    title, stopped_fix = tp.AnswerTitleTest.title, tp.AnswerTitleTest.stopped_fix
 
     def stale(self):
         self.build((2, 'waiting'), (0, 'completed', decision_reply('stop', question='Blue?')))
@@ -256,6 +258,41 @@ class StaleAnswerTest(unittest.TestCase):
         [sent] = self.t3.sends
         self.assertIn('on GitHub', sent['message'])
         self.assertNotIn('The dark one.', sent['message'])
+
+    def answered_in_the_fresh_thread(self, job):
+        """`job`, stale and waiting on Stefan, gets a fresh answer thread, which has answered."""
+        self.t3.messages[job.thread_id] = [Message('assistant', 'Which blue?')]
+        self.limits.expires[job.thread_id] = PAST
+        self.r.run_pass()
+        ask_for(self.config, {'ask': f'thread-{job.id}', 'fresh': True})
+        self.assertEqual(self.r.run_pass(), 'started')
+        [ask] = self.jobs('ask')
+        self.t3.messages[ask.thread_id] = [Message('assistant', decision_reply(
+            'answer', text='The dark one.'))]
+        self.t3.set_status(ask.thread_id, 'completed')
+        self.t3.outcomes = [(0, 'completed')]
+        return ask
+
+    def test_an_answer_in_the_thread_after_the_issue_closed_resumes_nothing(self):
+        # Sol's review 1 of PR #95, F1: the answer was queued before GitHub's read ended the job
+        build = self.stale()
+        ask = self.answered_in_the_fresh_thread(build)
+        self.gh.states[4] = 'closed'
+        self.r.run_pass()
+        self.assertEqual(self.t3.sends, [])
+        [j] = self.jobs('build')
+        self.assertEqual(j.outcome, 'closed')
+        self.assertTrue(self.t3.threads[ask.thread_id].settled)   # it no longer needs him
+
+    def test_an_answer_in_the_thread_after_the_pr_merged_resumes_nothing(self):
+        fix = self.stopped_fix()
+        ask = self.answered_in_the_fresh_thread(fix)
+        self.gh.now[20] = {'state': 'merged'}
+        self.r.run_pass()
+        self.assertEqual(self.t3.sends, [])
+        [j] = self.jobs('fix')
+        self.assertEqual(j.outcome, 'closed')
+        self.assertTrue(self.t3.threads[ask.thread_id].settled)
 
     def test_a_fresh_waiting_item_is_not_replaced(self):
         self.build((2, 'waiting'), (0, 'completed', decision_reply('stop', question='Blue?')))

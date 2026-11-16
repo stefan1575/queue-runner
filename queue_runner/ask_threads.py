@@ -485,8 +485,23 @@ class AskThreads:
 
     def reply(self, repos=None):
         """(the waiting job, the message to send it, the marks for its `continued` end) for the
-        first answered in a fresh thread (#72), or None. With `repos`, in those repos alone."""
-        return next((r for r in self._replies if repos is None or r[0].repo in repos), None)
+        first answered in a fresh thread (#72), or None. With `repos`, in those repos alone.
+        Each is checked against the job log now: GitHub's read (`waiting.GitHubAnswers.read`)
+        comes after `read_answers` in the pass and may have ended the job `closed` (its issue
+        closed, its PR merged), and a release may have let it go (PR #95's review 1, F1)."""
+        all_jobs = self.jobs.jobs()
+        by_id, gone = {j.id: j for j in all_jobs}, self.jobs.released_ids()
+        for job, message, marks in self._replies:
+            if repos is not None and job.repo not in repos:
+                continue
+            now = self.target(WAITS + job.id, by_id, gone)
+            if now is None:
+                self._once(f'reply {job.id}', f'{job.kind} {job.repo}#{job.issue}: its answer '
+                           'in a T3 thread came after it stopped waiting (closed or released), '
+                           'so it is not sent')
+                continue
+            return now, message, marks
+        return None
 
     def _read(self, repo, stop, j) -> None:
         thread, messages = self.t3.show(j.thread_id, 1)

@@ -1527,7 +1527,9 @@ it then re-reads its whole context uncached.
   same rule, gated as the job's kind), which ends `continued` with `reason` `thread`. Not the
   build itself restarted fresh: that would spend a whole reorienting run before Stefan said
   anything, and its turn would end `done` or `no-push`. A GitHub reply read in the same pass
-  goes first (`waiting.py`), and the fresh thread's block is then never read.
+  goes first (`waiting.py`), and the fresh thread's block is then never read; so is one read in
+  the pass GitHub ends the job `closed` (its issue closed, its PR merged) or after a release:
+  `AskThreads.reply` checks the job log again before it hands the answer on (review 1's F1).
 - `--once --dry-run` prints a fresh ask thread's brief too, but reads no expiry (none is stale).
 
 **The token.** T3's MCP endpoint (`<origin>/mcp`, the origin read from
