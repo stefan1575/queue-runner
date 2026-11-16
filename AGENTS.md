@@ -150,15 +150,35 @@ isn't gated**, and neither is an Approach-note answer read from Stefan's words (
   started. `tests/fixtures/usage/oauth-usage.json` is a real response. The call adds
   `?cedar_ember=1&skip_spend=1`, as T3's does, so the same answer has the reset credits (ticket
   42; `oauth-usage-resets.json`): `Usage.resets` (The dashboard, Usage).
+- **One reading, one budget** (issue 66; T3's `CAPABILITIES_PROBE_TTL` and
+  `resolveUsageLimitsAfterProbe`, read 2026-11-16): the endpoint answers 429 when it's asked
+  about once a minute (per login, shared with T3 and Claude Code), so `usage.CachedUsage`, the
+  one reader `cli._gate` makes and the snapshot shares, asks it at most once every 5 minutes
+  (`CALL_EVERY`), failed calls counted, whoever asks: the gate, the after-job read, the
+  snapshot's 5-minute read and Refresh. Inside that it gives back the cached reading with the
+  time it was taken. A failed call keeps the last good reading, its error beside it; no
+  Retry-After, no back-off. A login that can't be read asks nothing, so it spends no call.
+  `OAuthUsage.call_every` is the budget; the tests' `FakeUsage` says 0.
+- **Which reading a check decides on:** one taken after the last Claude job ended and no older
+  than 30 minutes (`STALE_AFTER`), even if the latest call failed. A 429 beside such a reading
+  never holds the lane.
 - **Fits:** the 5-hour window's used percent plus the job's expected cost must be at most 100,
   or the lane waits for its reset (plus 2 minutes); a window with nothing used takes any job. The
   week must leave `reserve` percent (5 by default) for Stefan until 24 hours before its reset,
   or the lane waits for that release; inside the last 24 hours the reserve may be spent. No room
-  even then: it waits for the weekly reset. Unreadable usage (no login, HTTP 401, the endpoint
-  down) starts nothing and is read again next pass.
+  even then: it waits for the weekly reset. No reading to decide on (none yet, one from before the
+  last job, or one past 30 minutes: Claude usage `unreadable`) starts nothing until the endpoint
+  may be asked again, or the next pass when it may be now (a login that couldn't be read).
 - **Waiting:** a held pass is `gated`; the log says once why and until when (`Claude lane waits:
   ...`, and again only when that changes), and the loop sleeps `poll_seconds` or until the gate
-  opens, if sooner. The Sol lane goes on.
+  opens, if sooner; `gate_until` sets a wake task, the wait for the next read too. The Sol lane
+  goes on.
+- **The after-job read** (`Gate.measured`) makes the call that serves the next check. After a
+  job under 5 minutes the budget doesn't allow one yet, so it waits for it on the wall clock
+  (`run.wall_sleep`; the log says `Reading Claude's usage after the job at ...`), then reads:
+  the next check would wait for that reading anyway, and a short job's cost is still learned. A
+  reading the snapshot took after the job ended serves too. A failed one is recorded with
+  `after` null and its error, and the next check waits for the next read.
 - **The knob** is `<state_dir>/gate.json` (`reserve` only, since ticket 30), written whole by
   `--reserve N` without the runner lock, and read before every Claude job, so it works while the
   runner runs (within one `poll_seconds`). Stopping a lane isn't the gate's: it's `control.json`
@@ -895,11 +915,12 @@ python3 -m dashboard    # http://queue.localhost/ is the runner's; http://localh
   it starts anything; `knob.paused` is whether the Claude lane is stopped), gate.json's reserve, the learned costs (`CostBook.learned`), the Claude lane's wait as its last
   pass left it (`Runner.claude_wait`: the gate's verdict text or a limit's resume), Sol's resume
   (`JobLog.sol_resume_at`), and the titles the passes read (`Runner.titles`). **Sources** are the
-  last real call of each kind: the CLI wraps GitHub and T3 in `Calls.watch` and the gate's usage
-  reader in a `Watch`, so every call the passes make is recorded (a failing one keeps its last
-  good time). **GitHub is never read for the snapshot.** Only the publisher's own 30-second writes
-  read afresh: Claude's usage and ChatGPT's (`codex_usage.CodexUsage`, ticket 42: Usage, below)
-  at most every 5 minutes (`READ_EVERY`) or on a Refresh, and an open Claude job's
+  last real call of each kind: the CLI wraps GitHub and T3 in `Calls.watch`, and the gate's
+  usage reader tells `Calls` each attempt (`on_call`), so every call the passes make is recorded
+  (a failing one keeps its last good time). **GitHub is never read for the snapshot.** Only the
+  publisher's own 30-second writes read afresh: Claude's usage, through the gate's own reader
+  (The usage gate, One reading, one budget), and ChatGPT's (`codex_usage.CodexUsage`, ticket
+  42: Usage, below) every 5 minutes (`READ_EVERY`) or on a Refresh, and an open Claude job's
   thread in T3 until found. `asks` and `answered` are ticket 31's (The Inbox's asks, below);
   `features`, `issues`, `prs`, `activity` and each lane's `queue` ticket 32's (The work lists,
   below). `stop_now` is unavailable until ticket 34. `--snapshot` prints one built the same way
@@ -914,8 +935,9 @@ python3 -m dashboard    # http://queue.localhost/ is the runner's; http://localh
   `snoozed_until`: Read and snoozed, below), `answered` (asks Stefan has answered that the runner hasn't acted on
   yet: an ask plus `answered`: `at`, `said`, `next`; not counted as waiting on him), `lanes` (each with its `queue`, what it takes up next, in order, across
   repositories, a job a limit cut off first, and for the reviewing lane the PRs waiting for their review; `queue_empty` says why there's none), `usage` (a plan
-  each: `id`, `provider`, `name`, `plan`, `read_at`, `error`, `windows`, and `resets`,
-  `{"available": N}` or null: Usage, below), `usage_refresh` (`{"asked_at", "done_at"}`, the
+  each: `id`, `provider`, `name`, `plan`, `read_at`, `error`, `windows`, `resets`,
+  `{"available": N}` or null, and `next_read_at`, when Claude's endpoint may be asked again while
+  that's ahead, null for ChatGPT: Usage, below), `usage_refresh` (`{"asked_at", "done_at"}`, the
   Refresh the runner last read for, or null), `features` (in build order: the repos'
   order, then the feature whose first open ticket has the lowest number, a finished one last; each with `tickets`, its
   tickets' `repo#n` keys in the order they're built: what has started first, furthest along first, then a blocker
@@ -937,12 +959,20 @@ python3 -m dashboard    # http://queue.localhost/ is the runner's; http://localh
   `control_read_at` reaches its time.
 - **Usage** (ticket 42): the Usage card's head has Refresh (an icon, "Refresh" on hover) where
   Details was; the Usage page stays in the sidebar. It posts `{"usage": "refresh"}`; the
-  publisher's next fresh tick (30 seconds at most) reads both plans whatever `READ_EVERY` says,
-  no more than once a minute (`FORCE_EVERY`; a later request waits for a later tick), and the
-  snapshot's `usage_refresh.asked_at` names the request it took. The button spins until then
-  (the page reads every 2 seconds meanwhile), then the card says which plan it couldn't read; it's
-  off while the runner is silent or its snapshot has no `usage_refresh` (older code). A request
-  left from before the runner started is taken by its first read. **Reset credits** come from
+  publisher's next fresh tick (30 seconds at most) takes it whatever `READ_EVERY` says, and the
+  snapshot's `usage_refresh.asked_at` names the request it took. **It doesn't force Claude's
+  call** (issue 66): ChatGPT is read; Claude's reader asks its endpoint only if its 5-minute
+  budget allows, so inside it the card says when the reading was taken and when the next read
+  can be ("Claude: read 2 min ago. Next read from 14:06."), and outside it Claude is read as
+  now. The button spins until the request is taken (the page reads every 2 seconds meanwhile),
+  then the card says which plan it couldn't read; it's off while the runner is silent or its
+  snapshot has no `usage_refresh` (older code). A request left from before the runner started
+  is taken by its first read. **A failure shows only when it matters:** Claude's plan has an
+  `error`, and its source's dot turns red, only once its reading is past 30 minutes (the error
+  then says no Claude job starts until a read answers) or its login is the trouble (no token,
+  HTTP 401); until then it shows its numbers and "read N min ago". Whether a plan failed is the
+  snapshot's `error` alone, never a time the page compares. The sample's `usage-stale` state
+  shows a reading 40 minutes old. **Reset credits** come from
   the same read as the windows, counted as T3 counts them: Claude's from the usage answer's
   `cedar_ember` grants (usable, not paused or ended; none when the grant to use next isn't one:
   `usage.resets`, T3's `claudeResetCreditsToContract`), ChatGPT's from `codex app-server`'s
@@ -1410,7 +1440,12 @@ reply (`decision_reply`), each thread's last messages and the runs `send` starts
 The usage gate: `tests/test_usage.py` (the real response, the login, never the token),
 `tests/test_gate.py` (`decide()` with a fixed clock, the knob, learned costs) and
 `tests/test_gating.py` (the run loop and the knob through `main`, `FakeUsage` in `fakes.py`; every
-test that runs `main` passes one, so none reads the real endpoint).
+test that runs `main` passes one, so none reads the real endpoint; a short job's after-read
+waiting for the budget). One reading, one budget (issue 66): `CachedUsageTest` in
+`tests/test_usage.py`, and `tests/test_usage_budget.py`: the CLI's wiring on `StubEndpoint`
+(`fakes.py`: a real `OAuthUsage` whose fetch answers 429 within a minute of its last call),
+Stefan's 2026-11-16 Refresh replayed, an hour of all four callers with every call 5 minutes
+apart, a 429 beside a recent reading, a stale one, and the after-job read.
 Limit recovery: `tests/test_limits.py` (the resume time, in place or fresh (`resume_choice` with
 a fixed clock), the last call's request start, `T3Store` on a temp
 SQLite holding the real stop's rows, the transcript, the auto-resume warning) and
@@ -1460,8 +1495,9 @@ lists `SOURCES` and nothing else) and
 run, paused, none with `--once`, `--snapshot` with the lock held; `main`'s `sol_usage` and
 `snapshot_every` keep it off the real Codex and fast). `sol.latest_limits` (Codex's rollouts, no
 longer the snapshot's read) is in `tests/test_sol.py`.
-Usage refresh and resets (ticket 42): `tests/test_usage_refresh.py` (the control request, the
-publisher's forced read and its once a minute, the sample's pretend runner),
+Usage refresh and resets (ticket 42): `tests/test_usage_refresh.py` (the control request, a
+Refresh inside and outside Claude's budget on `StubEndpoint`, a 429 and a 401, the sample's
+pretend runner),
 `tests/test_codex_usage.py` (real `account/rateLimits/read` answers in `fixtures/codex/`, with
 and without reset credits, through `fixtures/codex/fake_app_server.py`, so no test starts Codex)
 and `ResetsTest` in `tests/test_usage.py`.
@@ -1539,7 +1575,8 @@ temp folder.
 - `queue_runner/sol.py`: the Sol seam and its codex-sol.sh adapter.
 - `queue_runner/deps.py`: a review checkout's dependencies, cached per lockfile and linked in.
 - `queue_runner/usage.py`: Claude's usage windows and reset credits from `api/oauth/usage`, with
-  the Claude login.
+  the Claude login; `CachedUsage`, the one reader that asks it at most once every 5 minutes
+  (issue 66), and `Reading`.
 - `queue_runner/codex_usage.py`: ChatGPT's usage windows and reset credits through `codex
   app-server` (ticket 42).
 - `queue_runner/gate.py`: the usage gate: `decide()`, Stefan's knob (`gate.json`), learned costs
