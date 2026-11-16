@@ -261,8 +261,14 @@ def _dry_run(config, github, git, out, log_line, t3=None, gate=None) -> int:
             print(f'dry run: {line}', file=out)
         set_stopped(config, control.stopped_repos(config.repos, switch)[0])
     _limit_ahead(config, out, log_line)
+    from .gate import CLAUDE_KINDS
+    running = {j.repo: j for j in _jobs(config).open_jobs() if j.kind in CLAUDE_KINDS}
     for repo in working(config):   # each working repo's own job, side by side (#50)
         one = dataclasses.replace(config, repos=[repo])
+        if job := running.get(repo.name):   # one Claude job per repo: the lane skips it
+            print(f'dry run: {repo.name}\'s Claude job: none: {job.kind} {repo.name}#'
+                  f'{job.issue} is still running there', file=out)
+            continue
         print(f'dry run: {repo.name}\'s Claude job:', file=out)
         if not _dry_run_limited(one, out, log_line) and \
                 not _dry_run_ask(one, github, t3, switch, out, log_line) and \

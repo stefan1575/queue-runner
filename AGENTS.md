@@ -167,8 +167,9 @@ never counts it, and `--gate` prints it as its own line, held by the reviewing l
   down) starts nothing and is read again next pass.
 - **Beside running jobs** (#50; `gate.Running`, `Gate.check(..., running=)`): a job starts only
   when its cost fits after the expected cost of every Claude job still running (this runner's
-  workers, a dead runner's job still running in T3) and every one let in before it in the same
-  pass, each counted whole whatever it has spent so far, so it errs high. One that fits alone but
+  workers, a dead runner's job still running in T3, and the Sol lane's Opus review: the one it
+  let in, or one open in the job log, as `review <repo>#<PR>` at the `review` cost) and every one
+  let in before it in the same pass, each counted whole whatever it has spent so far, so it errs high. One that fits alone but
   not beside them waits for one of them to end (`running`, no time: the lane plans again when a
   job ends): `Claude lane waits on <repo>: build would fit alone, but the Claude job running
   (build first#4) is expected to take ...`. Beside a running job a window with nothing used no
@@ -190,8 +191,10 @@ never counts it, and `--gate` prints it as its own line, held by the reviewing l
   in whole percents, and Stefan's own sessions in the same window count too, so it errs high. A
   decision that may continue a build or fix (its question allows `retry` or `answer`) must fit
   with that job's cost added; a pass in which it did is recorded under the continued job's kind.
-  A pass that ran beside another Claude job measured both: its record has `shared_with` (the
-  others' labels) and teaches nothing.
+  A pass that ran beside another Claude job (an Opus review included, either way) measured
+  both: its record has `shared_with` (the others' labels) and teaches nothing. So while both
+  repos (and reviews) stay busy, nearly every pass is shared and a kind's expected cost stays at
+  its last five solo passes until one runs alone again.
   `usage.jsonl` is written like the job log (`state.append_record`: synced, a torn last line cut
   off); a bad line elsewhere, like an unreadable `gate.json`, starts nothing until it's fixed.
 - `Runner` without a `gate` (the tests, `live_sandbox.py`) starts every job; the CLI always passes
@@ -300,7 +303,9 @@ one job log (a lock per file inside the process).
   no longer read or written. A file that still has it is read as before for its stops, the order
   is ignored without a word, and the next write drops it.
 - `--once --dry-run` lists each working repo's job under `dry run: <repo>'s Claude job:`
-  (`Nothing to start in <repo>: ...` for one with none), after a limit that holds every repo.
+  (`Nothing to start in <repo>: ...` for one with none; `none: <job> is still running there` for
+  one whose Claude job is open in the job log, which the lane skips), after a limit that holds
+  every repo.
   `--gate` lists the Claude jobs running (open in the job log) and the working repos with none,
   then each kind's verdict beside them and how many of it could start at once.
 
@@ -1273,9 +1278,14 @@ doesn't wait: a PR that needs a review gets one from a T3 thread on the Claude m
   goes to Sol**, and if Sol is still out, its `out-of-usage` starts the fallback again. A runner
   that dies mid-review counts the review `failed` as for Sol's (its T3 thread runs on; its reply
   is never read).
-- **Alongside the Claude lane:** the fallback runs in the Sol lane, beside whatever Claude job
-  runs. Each is gated on its own, so a build and a fallback review that each fit may together
-  take more of the 5-hour window than either check saw.
+- **Alongside the Claude lane:** the fallback runs in the Sol lane, beside the Claude lane's
+  jobs, and each side's gate counts the other (PR #74's review 1, F1): the review's check counts
+  the Claude jobs running (`OpusFallback.check(label, ...)`, with the Runner as its `beside`),
+  and once let in it's one of the Claude jobs running for the Claude lane until it ends
+  (`Runner.review_began`, `review_ended`), so a build that fits alone but not beside it waits.
+  One lock (`Runner.gate_lock`) keeps each lane's check and its admission together. Each side's
+  record has the other's label in `shared_with`. `--gate` counts an open Opus review among the
+  jobs running and checks the review beside the Claude lane's.
 - **On the dashboard:** the Sol lane's wait says Opus reviews meanwhile, a lane on a fallback
   review names Claude's model, and the work lists and the Inbox's timelines say a review was
   Opus's.
@@ -1305,9 +1315,10 @@ provider = "claude"   # "chatgpt" (Sol) is the default
 - **Back to Sol:** set `provider = "chatgpt"` (or remove `[review]`) on main; the runner restarts
   on the merge (Restarting on new code, above). Any other value stops the runner at load, naming
   the key.
-- **Not yet covered** (issue #77, after #70 and #74): #74's gate doesn't count a running review
-  among the Claude jobs running, and #70 doesn't settle review threads, so they stay in the
-  sidebar until settled by hand.
+- **Issue #77:** the gate counts a running review among the Claude jobs running since #74
+  (Alongside the Claude lane, above), and #70 settles a review thread once its reply is read
+  (Settling threads, below). Still not settled: a review thread cut off with its runner (its id
+  is never recorded).
 
 ## Sol runs tests
 
@@ -1684,7 +1695,10 @@ waited longest), a held job not holding back a later one that fits, shared passe
 nothing; both jobs cut off by a limit and each recovered in its repo; new code waiting for the
 running jobs; the dry run and `--gate`; the snapshot while both run; an old `repo_order` ignored
 silently and dropped on write). The gate beside running jobs: `RunningJobsTest` in
-`tests/test_gate.py`. `FakeT3` takes a lock, as two workers call it at once.
+`tests/test_gate.py`. `FakeT3` takes a lock, as two workers call it at once. The Opus review
+beside the Claude lane: `tests/test_review_beside_lane.py` (an open review holding a build, one
+the Sol lane let in, the review held by a running build, `shared_with` both ways whichever
+started first, a review alone still teaching, `--gate`).
 Stopping one repo: `tests/test_repo_stop.py` (leads-dashboard with live steps due and
 game-backdrop first through the run loop: game-backdrop's build, with leads-dashboard's live steps
 beside it unless stopped; each kind of Claude

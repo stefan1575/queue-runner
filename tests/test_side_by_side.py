@@ -371,6 +371,16 @@ class DryRunAndGateTest(Harness):
         self.assertNotIn("first's Claude job", out)
         self.assertIn("dry run: second's Claude job:", out)
 
+    def test_a_repo_with_a_job_running_lists_none(self):
+        # PR #74's review 1, F3: plan() skips a repo whose Claude job runs, so the dry run does
+        self.log.started(kind='fix', repo='first', issue=12, branch='claude/red-widget-4',
+                         title='Queue runner fix: first#12')
+        _, out = self.run_main(['--once', '--dry-run'])
+        self.assertIn("dry run: first's Claude job: none: fix first#12 is still running there",
+                      out)
+        self.assertNotIn('issue:  #4 Red widget', out)
+        self.assertIn('issue:  #7 Blue widget', out)
+
     def test_a_repo_with_nothing_says_so_and_the_other_still_lists_its_job(self):
         self.gh.by_repo['first'] = []
         _, out = self.run_main(['--once', '--dry-run'])
