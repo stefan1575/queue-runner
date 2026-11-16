@@ -27,6 +27,7 @@ STATES = {
     "repo-stopped": "leads-dashboard is stopped: its running jobs finish, then only queue-runner is worked on",
     "side-by-side": "Claude runs a job in each repo at once",
     "usage-stale": "Claude's usage hasn't been read for 40 minutes: every call answered 429",
+    "stale": "Two threads waiting on you went cold: their Inbox items open fresh ones",
 }
 DEFAULT = "busy"
 # Takes of the page before this one, kept while its look is being agreed: `serve.py` serves the
@@ -97,7 +98,10 @@ def build(name: str = DEFAULT, base: datetime | None = None, control: dict | Non
         # `decide` (ticket 35) is null for an ask that can't be decided in a T3 thread, else where
         # that stands: `state` "offered" (the page's Decide in T3 asks the runner to open one),
         # "asked" (the runner read the request; `note` says when it starts) or "open" (`go` is
-        # the thread then, and `also` the other place to answer it, its needs-info issue).
+        # the thread then, and `also` the other place to answer it, its needs-info issue), or
+        # "stale" (issue #72: the thread went cold and was settled; `label` is the button that
+        # asks for a fresh one, `note` why). A thread waiting for his answer has a `decide` only
+        # once it's stale, or once a fresh thread to answer in is open.
         "asks": [
             {
                 "id": "ask-152", "kind": "stuck", "repo": LD, "ref": "PR #152", "pr": 152,
@@ -556,6 +560,17 @@ def _vary(snap: dict, name: str, ago, ahead) -> None:
              "go": {"label": "Answer in T3", "where": "t3", "url": T3 + "5823cce7-a3a7-4ac6-9f2b-5883404d9828"},
              "why": ["The issue names both in different places."]},
         ]
+    elif name == "stale":   # issue #72: the runner settled both cold threads
+        cold = ("Its thread went cold (its prompt cache expired {at}), so the runner settled it. A fresh "
+                "thread starts from its brief and the cold one's last messages, so nothing is re-read uncached.")
+        stuck = next(a for a in snap["asks"] if a["id"] == "ask-152")
+        stuck["go"], stuck["also"] = stuck["also"], None
+        stuck["decide"] = {"state": "stale", "at": ago(65), "label": "Decide in a fresh T3 thread",
+                           "note": cold.format(at=ago(65)[11:16])}
+        waiting = next(a for a in snap["asks"] if a["id"] == "ask-214")
+        waiting["since"] = ago(75)
+        waiting["decide"] = {"state": "stale", "at": ago(10), "label": "Answer in a fresh T3 thread",
+                             "note": cold.format(at=ago(10)[11:16])}
     elif name == "reserve":
         snap["usage"][0]["windows"][1]["used"] = 93
         _lane(snap, "claude").update(state="waiting", job=None, next="Fix round on PR #204", wait={
@@ -625,6 +640,9 @@ def _obey(snap: dict, control: dict, now: datetime) -> None:
                     else f"It starts once Claude's current {claude['job']['kind']} ends." if claude["job"]
                     else "It starts on the Claude lane's next pass.")
             ask["decide"] = {"state": "asked", "at": record["open"].get("at"), "note": note}
+        elif (ask.get("decide") or {}).get("state") == "stale" and isinstance(record, dict) and isinstance(record.get("fresh"), dict):
+            ask["decide"] = dict(ask["decide"], state="asked", at=record["fresh"].get("at"),
+                                 note="A fresh thread starts on the Claude lane's next pass.")   # issue #72
     marks = control.get("asks") if isinstance(control.get("asks"), dict) else {}
     for ask in snap["asks"] + snap["answered"]:   # read and snoozed (ticket 36)
         mark = marks.get(ask["id"])

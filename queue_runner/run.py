@@ -175,9 +175,10 @@ class Runner:
                                stopper=stopper, effort=self.effort)
         from .ask_threads import AskThreads   # an ask decided in a T3 thread (ticket 35)
         self.asking = AskThreads(config, github=github, t3=t3, jobs=self.jobs, say=self.say,
-                                 decider=self.decider)
+                                 decider=self.decider, limits=limits, now=self.now)
         from .prefixes import Prefixes   # "Decide: " and "Answer: " on threads that need him (71)
-        self.prefixes = Prefixes(config, t3=t3, jobs=self.jobs, say=self.say)
+        self.prefixes = Prefixes(config, t3=t3, jobs=self.jobs, say=self.say,
+                                 limits=limits, now=self.now)   # and stale ones settled (#72)
         from .waiting import GitHubAnswers   # a waiting thread's question answered on GitHub
         self.answers = GitHubAnswers(config, github=github, jobs=self.jobs, say=self.say)
         self.live = LiveSteps(config, github=github, git=git, t3=t3, jobs=self.jobs,
@@ -316,9 +317,14 @@ class Runner:
             old = mine[0]
             return Start(name, old.kind, None, lambda: self.recover(old), self._name(old))
         if ask := self.asking.next(switch, only=only):   # Stefan's click (35)
-            return Start(name, 'decision', None, lambda: self.asking.open(*ask),
-                         f'ask {name}#{ask[2].number}')
+            return Start(name, 'decision', None, lambda: self.asking.open(ask),
+                         f'ask {name}#{ask.number}')
         if answered := self.answers.next(repos=only):   # Stefan's reply on GitHub (71)
+            old, text, marks = answered
+            return Start(name, old.kind, None,
+                         lambda: self.continue_job(old, text, marks=marks), self._name(old))
+        if answered := self.asking.reply(repos=only):   # his answer in a fresh thread (72);
+            # a GitHub reply read in the same pass goes first: answering there still counts
             old, text, marks = answered
             return Start(name, old.kind, None,
                          lambda: self.continue_job(old, text, marks=marks), self._name(old))

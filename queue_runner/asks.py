@@ -193,8 +193,12 @@ class Story:
                     if j.answer == 'issue-closed' and j.link else 'You decided in T3.'
                     if j.answer == 'thread' else 'You replied.')
         for j in self.on('ask', repo, n):   # a thread Stefan opened to decide in (ticket 35)
-            if j.outcome == 'opened':
-                add(j.ended_at or j.started_at, j, 'You opened a thread in T3 to decide it.')
+            if j.outcome == 'opened':   # or a fresh one in place of a stale one (#72)
+                add(j.ended_at or j.started_at, j,
+                    'Its question went cold, so you opened a fresh thread in T3 to answer it.'
+                    if j.question == 'waiting' else
+                    'Its thread went cold, so you opened a fresh one in T3 to decide it.'
+                    if j.resume else 'You opened a thread in T3 to decide it.')
         for r_repo, r_n, at in self.releases:
             if (r_repo, r_n) == (repo, n):
                 add(at, None, f'You released it (--release {repo}#{n}), so the runner took it '
