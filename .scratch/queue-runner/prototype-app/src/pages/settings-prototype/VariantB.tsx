@@ -2,15 +2,16 @@
 // for it on 2026-11-16, since the runner ships as a desktop app beside T3.
 //
 // What is T3's (read from T3 Code 0.1.9's settings bundle, sized up about 1.15x to the scale Stefan
-// runs T3 at): Settings opens over the app as its own window with a close button; a list of pages
-// on the left with Search and "/" on top; a "Settings / Page" header; one page at a time; each
+// runs T3 at): Settings is a page you navigate to, not a pop-up. It takes the whole app window: the
+// app's sidebar gives way to a list of settings pages with Search and "/" on top and Back in its
+// footer; a "Settings / Page" header with a close button; one page at a time; each
 // setting is a row in a bordered card, medium-weight title over a smaller grey line, its control
 // on the right; Inter; T3's greys and blue (the skin in index.css). No subtitles under headings.
 //
 // What is ours: the eight pages and their settings (#36), the blue counts for what wants a choice,
 // and the search matching other words, current values and a typo. Search results show every
 // matching setting under its page's name.
-import { Bell, CalendarClock, FolderGit2, Inbox, Monitor, PieChart, Search, Trash2, User, Users, X, type LucideIcon } from "lucide-react";
+import { ArrowLeft, Bell, CalendarClock, CircleArrowUp, FolderGit2, Inbox, Monitor, PieChart, Search, Trash2, User, Users, X, type LucideIcon } from "lucide-react";
 import { useEffect, useRef, type ReactNode } from "react";
 import { ClaudeMark, OpenAIMark } from "@/components/Brand";
 import { Chip } from "@/components/ui";
@@ -184,9 +185,9 @@ export function VariantB({ st }: { st: Settings }) {
   }, []);
 
   return (
-    <div className="fixed inset-0 z-[36] bg-black/55 px-3 pb-[78px] pt-3 sm:px-[5vw] sm:pt-[4vh]">
-      <div role="region" aria-label="Settings" className="mx-auto flex h-full w-full max-w-[1560px] overflow-hidden rounded-2xl border border-line-2 bg-page shadow-2xl">
-        <aside className="flex w-[272px] shrink-0 flex-col border-r border-line-2 bg-side max-md:w-[58px]">
+    <div className="fixed inset-0 z-[36] bg-page">
+      <div role="region" aria-label="Settings" className="flex h-full w-full">
+        <aside className="flex w-[280px] shrink-0 flex-col border-r border-line-2 bg-side max-md:w-[58px]">
           <label className="flex h-[54px] shrink-0 items-center gap-2.5 px-5 max-md:justify-center max-md:px-0">
             <Search className="size-[18px] shrink-0 text-mute" />
             <input ref={box} value={raw} onChange={(e) => setParams({ q: e.target.value || null })} onKeyDown={(e) => { if (e.key === "Escape") { setParams({ q: null }); e.currentTarget.blur(); } }}
@@ -208,6 +209,15 @@ export function VariantB({ st }: { st: Settings }) {
               );
             })}
           </nav>
+          {/* T3's sidebar footer while Settings is open: Back in place of the Settings and Usage buttons. */}
+          <div className="flex items-center gap-1 border-t border-line-2 px-2.5 py-2">
+            <button type="button" onClick={() => navigate("/")} title="Back to the app" className="flex h-9 items-center gap-2 rounded-lg px-2.5 text-[15.5px] font-medium text-mute hover:bg-sunk hover:text-ink max-md:px-2">
+              <ArrowLeft className="size-[18px]" /><span className="max-md:hidden">Back</span>
+            </button>
+            <button type="button" disabled aria-label="Update" title="Updates: coming soon" className="ml-auto grid size-9 cursor-not-allowed place-items-center rounded-lg text-faint opacity-60 max-md:hidden">
+              <CircleArrowUp className="size-[18px]" />
+            </button>
+          </div>
         </aside>
 
         <div className="flex min-w-0 flex-1 flex-col">
@@ -223,7 +233,7 @@ export function VariantB({ st }: { st: Settings }) {
           </header>
 
           <div ref={pane} className="min-h-0 flex-1 overflow-y-auto">
-            <div className="mx-auto w-full max-w-[1000px] space-y-8 px-5 py-8 sm:px-8">
+            <div className="mx-auto w-full max-w-[1000px] space-y-8 px-5 pb-28 pt-8 sm:px-8">
               {q ? (
                 <>
                   {hits.length === 0 && <p className="px-1 text-[15px] text-mute">Nothing matches "{q}". Try what a setting does or what it's set to: "merge", "opus", "sound", "sleep", a repository's name, or a date like "nov 19".</p>}
