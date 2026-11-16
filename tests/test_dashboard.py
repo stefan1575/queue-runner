@@ -54,7 +54,9 @@ class ApplyControlTest(unittest.TestCase):
 
 class AppTest(unittest.TestCase):
     def setUp(self):
-        self.dir = Path(tempfile.mkdtemp(prefix="qr-dashboard-test-"))
+        tmp = tempfile.TemporaryDirectory(prefix="qr-dashboard-test-")
+        self.addCleanup(tmp.cleanup)
+        self.dir = Path(tmp.name)
         self.app = App(self.dir, clock=lambda: NOW)
 
     def test_no_snapshot_yet_says_where_it_looked(self):
@@ -225,7 +227,9 @@ class SampleTest(unittest.TestCase):
 
 class HttpTest(unittest.TestCase):
     def setUp(self):
-        self.dir = Path(tempfile.mkdtemp(prefix="qr-dashboard-test-"))
+        tmp = tempfile.TemporaryDirectory(prefix="qr-dashboard-test-")
+        self.addCleanup(tmp.cleanup)
+        self.dir = Path(tmp.name)
         self.app = App(self.dir, sample=True, clock=lambda: NOW)
         self.server = serve(self.app, 0)
         self.port = self.server.server_address[1]

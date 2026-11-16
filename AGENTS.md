@@ -814,6 +814,20 @@ bug with a failing test; CI still gates the merge.
 - **The sandbox user reads the cache through `~/.queue-runner`'s inherited ACL**
   (`CodexSandboxUsers` RX). An install folder made with `tempfile.mkdtemp` gets an owner-only ACL
   on Windows and can't be read (vitest "not recognized", EPERM on stat), so it's `os.makedirs`.
+- **Temp folders Sol's tests leave can't be deleted by Stefan** (ticket 45, 2026-11-16). Codex's
+  sandbox has no writable `%TEMP%`, so Sol sets `TEMP` to `<checkout>/.review-tmp` itself; a
+  folder made there with `mkdtemp` is owner-only, owned by the sandbox user, and Stefan's account
+  can neither delete it nor take it over without admin. `git worktree remove --force` then
+  unregisters the checkout but leaves its folder, and the next review's `worktree add` refused
+  the path (PR #4's and PR #6's failed reviews). So: **this repo's tests clean up every temp
+  folder they make** (`TemporaryDirectory` with `addCleanup`; `tests/test_no_temp_leftovers.py`
+  fails on a bare `mkdtemp(`), and a checkout git can't delete is moved aside to
+  `<checkout>.stale-<time>` (`GitCli.remove_checkout`, also at the next `checkout`), so the
+  review goes on. Before each checkout `GitCli.sweep_stale` deletes the folders moved aside
+  where it can; the log says once of each it can't. Pointing Sol's `TEMP` elsewhere wouldn't
+  help: a folder the sandbox user makes is owner-only wherever it is. Clearing one by hand needs
+  an elevated shell: `takeown /f <folder> /r /d y`, `icacls <folder> /grant Anon:(OI)(CI)F /t`,
+  then delete it.
 - **The brief** (step 4, `review._tests`) tells Sol what it can run: `npm test`, a failing test it
   adds, each command named with its summary line quoted; a failure the change doesn't explain
   (Windows only) is no finding. leads-dashboard's `src/test/callsling-relay.test.ts` has one
@@ -925,7 +939,7 @@ network: GitHub is the `GhCli` adapter in `queue_runner/github.py`, faked in tes
 (`tests/test_run.py`). The Sol lane is tested against `FakeGitHubForReviews` (every write goes to its `posts`, in
 order; a call named in `fail` raises), `FakeReviewGit` and `FakeSol` (`tests/test_review.py`); `decide()` and the marker formats in
 `tests/test_ledger.py`; the codex-sol.sh adapter in `tests/test_sol.py`; dependencies in `tests/test_deps.py` (a
-fake install) and the junction kept on removal in `tests/test_git.py`. Stops and toasts are in `tests/test_stops.py` (a fake toaster). Merging
+fake install) and the junction kept on removal and a checkout git can't delete (a deny-delete ACL) in `tests/test_git.py`. Stops and toasts are in `tests/test_stops.py` (a fake toaster). Merging
 (`tests/test_merge.py`) plays GitHub moving on through `FakeGitHubForReviews.now` (a PR's fields
 now), `threads` and `push_before_merge`; fix rounds (`tests/test_fix.py`) run the real `Runner`
 with a T3 fake whose thread pushes. Conflict rounds (`tests/test_conflicts.py`): a pair of
