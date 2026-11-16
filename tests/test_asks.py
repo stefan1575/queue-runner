@@ -396,6 +396,43 @@ class GitHubDownTest(AskCase):
         reader.read()
         self.assertEqual(reader.stale(), {})
 
+    def snap_of(self, reader):
+        return snapshot.build(snapshot.Facts(
+            now=datetime.datetime(2026, 11, 15, 4, 6, tzinfo=datetime.timezone.utc),
+            repos=[self.repo], jobs=self.jobs.jobs(), inbox=reader.last(),
+            inbox_stale=reader.stale()))
+
+    def test_a_first_read_github_failed_lists_no_asks_to_go_by(self):
+        # PR #104's review 1, F1: the runner restarts with GitHub down, so its first Inbox read
+        # fails. Its asks are no list (null), or the page's next control write drops every
+        # ask's marks; once a read of the repo succeeds they're listed again.
+        times = iter([datetime.datetime(2026, 11, 15, 4, m, tzinfo=datetime.timezone.utc)
+                      for m in (0, 5, 10, 15)])
+        reader = inbox.Reader(self.config, self.gh, self.jobs, clock=lambda: next(times))
+        self.job('stop', 152, 'filed', sha=H2, stop='no-push', reason='nothing pushed',
+                 link='https://github.com/owner/first/issues/30')
+        self.gh.fail.add('open_issues')
+        got = reader.read()
+        self.assertEqual(got.unread, frozenset({'first'}))
+        snap = self.snap_of(reader)
+        self.assertIsNone(snap['asks'])
+        self.assertIsNone(snap['answered'])
+        reader.read()   # still down: still never read
+        self.assertIsNone(self.snap_of(reader)['asks'])
+        self.gh.fail.clear()
+        self.assertEqual(reader.read().unread, frozenset())
+        self.assertEqual([a['subject'] for a in self.snap_of(reader)['asks']],
+                         ['Ring-to number per Client'])
+        self.gh.fail.add('open_issues')   # down again after a good read: the last read's asks
+        self.assertEqual(reader.read().unread, frozenset())
+        self.assertEqual(len(self.snap_of(reader)['asks']), 1)
+
+    def test_a_lone_collection_that_failed_a_repo_has_not_read_it(self):
+        # `--snapshot` reads GitHub once, with no earlier read to fall back on.
+        self.gh.fail.add('open_issues')
+        self.assertEqual(inbox.collect(self.config, self.gh, self.jobs).unread,
+                         frozenset({'first'}))
+
 
 class PartialReadTest(AskCase):
     """GitHub failing part-way through one ask (review 1's F6): that ask is the last good read's,
@@ -513,7 +550,7 @@ class ContractTest(KindsCase):
         self.assertEqual({a['kind'] for a in snap['asks']},
                          {'merge', 'stuck', 'broken', 'decision'})
         self.assertEqual(len(snap['answered']), 1)
-        samples = [sample.build(name) for name in sample.STATES]
+        samples = [s for s in (sample.build(name) for name in sample.STATES) if s['asks'] is not None]
 
         def holds(real, pick, what):
             sets = [set(d) for s in samples for d in pick(s)]

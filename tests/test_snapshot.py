@@ -46,8 +46,11 @@ class BuildTest(unittest.TestCase):
 
     def test_the_work_lists_are_there_and_empty(self):
         snap = snapshot.build(facts())
-        for key in ('asks', 'answered', 'features', 'issues', 'prs', 'activity'):
+        for key in ('features', 'issues', 'prs', 'activity'):
             self.assertEqual(snap[key], [], key)
+        # Before the first Inbox read the asks are null, not empty (issue #92).
+        self.assertIsNone(snap['asks'])
+        self.assertIsNone(snap['answered'])
         for lane in snap['lanes']:
             self.assertEqual(lane['queue'], [], lane['id'])
             self.assertTrue(lane['queue_empty'])

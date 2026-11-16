@@ -201,7 +201,7 @@ class InboxTest(Harness):
                           sol=None, info=RunnerInfo(1, None, None),
                           clock=lambda: datetime.datetime.now(UTC), runner=runner)
         runner._sol_pass()
-        self.assertEqual(snaps.build()['asks'], [])   # no snapshot published: nothing read
+        self.assertIsNone(snaps.build()['asks'])   # no snapshot published: nothing read (issue #92: null)
         runner.publisher = RecordingPublisher()
         runner._sol_pass()
         gh.prs.clear()   # what GitHub says now is the next pass's

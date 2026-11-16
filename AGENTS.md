@@ -1002,7 +1002,11 @@ python3 -m dashboard    # http://queue.localhost/ is the runner's; http://localh
   `stopped`, `{"at"}` or null: ticket 37; `doing`, the Claude job running in it,
   shaped as a lane's `job`, or null; and `wait`, `{until, reason}` while none starts in it
   because the gate held its job or something holds every repo, or null: #50), `asks` (below; each with `read` and
-  `snoozed_until`: Read and snoozed, below), `answered` (asks Stefan has answered that the runner hasn't acted on
+  `snoozed_until`: Read and snoozed, below; null, as `answered` is, until the Sol lane's first
+  Inbox read, and while any repo has had no read GitHub answered (`Inbox.unread`: a first read
+  that failed lists only the job log's part, PR #104's review 1, F1), so a control written
+  meanwhile drops no ask's marks and the page says "Inbox not read yet": issue #92, the
+  sample's `inbox-unread` state), `answered` (asks Stefan has answered that the runner hasn't acted on
   yet: an ask plus `answered`: `at`, `said`, `next`; not counted as waiting on him), `lanes` (each with `job`, the newest job it runs, and `jobs`, every one,
   oldest first: the Claude lane's one per repo, #50; and its `queue`, what it takes up next, in
   order, across repositories, a job a limit cut off first, and for the reviewing lane the PRs waiting for their review; `queue_empty` says why there's none), `usage` (a plan
@@ -1268,8 +1272,8 @@ python3 -m dashboard    # http://queue.localhost/ is the runner's; http://localh
   `control_read_at` reaches the page's last write, its entry stands in for the snapshot's
   (`mark()` in `index.html`), so a click shows at once. **An ask that's gone takes its entry
   with it:** each write drops the entries of asks the snapshot no longer lists (asks or
-  answered; `App.ask_ids`, every sample state's on the sample addresses; no snapshot to go by
-  drops nothing). An ask is keyed by its id only: a stop, review or head that comes back is a
+  answered; `App.ask_ids`, every sample state's that lists asks on the sample addresses; no snapshot
+  to go by drops nothing, and nor does one whose `asks` is null: issue #92). An ask is keyed by its id only: a stop, review or head that comes back is a
   new job and a new id, so it's unread again. The sample's pretend runner reads its own control
   file's `asks` like the rest (`_obey`). The folded groups stay in the browser. The runner
   holding a snoozed ask's toast isn't built.

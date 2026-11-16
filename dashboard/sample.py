@@ -31,6 +31,7 @@ STATES = {
     "repo-stopped": "leads-dashboard is stopped: its running jobs finish, then only queue-runner is worked on",
     "side-by-side": "Claude runs a job in each repo at once",
     "usage-stale": "Claude's usage hasn't been read for 40 minutes: every call answered 429",
+    "inbox-unread": "The runner just started: the Inbox hasn't been read yet (asks null)",
     "stale": "Two threads waiting on you went cold: their Inbox items open fresh ones",
 }
 DEFAULT = "busy"
@@ -291,6 +292,8 @@ def build(name: str = DEFAULT, base: datetime | None = None, control: dict | Non
     _order(snap)
     _tickets(snap)
     _queue(snap)
+    if name == "inbox-unread":   # before the Sol lane's first Inbox read (issue #92)
+        snap["asks"] = snap["answered"] = None
     # The page lists them in the sidebar; the runner's file has no such key.
     snap["sample"] = {"state": name, "states": STATES, "earlier": EARLIER}
     return snap

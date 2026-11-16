@@ -173,6 +173,30 @@ class AppTest(unittest.TestCase):
         self.assertEqual(new["asks"], {"stop-2": {"read": True, "open": "t3", "snooze_until": None},
                                        "merge-x-5-abc1234": {"read": True}})
 
+    def test_a_snapshot_written_before_the_first_inbox_read_drops_no_ask_marks(self):
+        # Issue #92: the runner restarted, the Sol lane spent 10 minutes on a review before it
+        # read the Inbox, and four Decide in T3 requests sent meanwhile wiped every ask's marks.
+        from queue_runner import snapshot
+        before = snapshot.build(snapshot.Facts(now=datetime(2026, 11, 16, 10, 42, tzinfo=timezone.utc), repos=[]))
+        self.assertIsNone(before["asks"])
+        (self.dir / "snapshot.json").write_text(json.dumps(before), encoding="utf-8")
+        (self.dir / "control.json").write_text(json.dumps({"asks": {
+            "stop-1": {"read": True}, "stop-2": {"read": True, "open": {"at": NOW}}}}), encoding="utf-8")
+        new = self.app.write_control({"ask": "stop-3", "open": True})
+        self.assertEqual(set(new["asks"]), {"stop-1", "stop-2", "stop-3"})
+        self.assertEqual(new["asks"]["stop-1"], {"read": True})
+        self.assertEqual(new["asks"]["stop-2"], {"read": True, "open": {"at": NOW}})
+        self.assertIn("open", new["asks"]["stop-3"])
+
+    def test_once_the_inbox_is_listed_an_ask_it_doesnt_list_is_still_dropped(self):
+        (self.dir / "control.json").write_text(json.dumps({"asks": {
+            "stop-1": {"read": True}, "stop-2": {"read": True}}}), encoding="utf-8")
+        (self.dir / "snapshot.json").write_text(json.dumps({"version": 1, "asks": [{"id": "stop-2"}],
+                                                            "answered": None}), encoding="utf-8")
+        self.assertEqual(self.app.write_control({"lane": "sol", "stop": None})["asks"], {"stop-2": {"read": True}})
+        (self.dir / "snapshot.json").write_text(json.dumps({"version": 1, "asks": [], "answered": []}), encoding="utf-8")
+        self.assertEqual(self.app.write_control({"lane": "sol", "stop": None})["asks"], {})
+
     def test_with_no_snapshot_to_go_by_a_write_drops_nothing(self):
         (self.dir / "control.json").write_text(json.dumps({"asks": {"stop-1": {"read": True}}}), encoding="utf-8")
         self.assertEqual(self.app.write_control({"lane": "sol", "stop": None})["asks"], {"stop-1": {"read": True}})
@@ -203,6 +227,25 @@ class AppTest(unittest.TestCase):
                                                        "sol": {"stop": None, "at": NOW}})
 
 
+class InboxNotReadTest(unittest.TestCase):
+    """Issue #92: before the runner's first Inbox read the snapshot's asks are null."""
+    PAGE = Path(__file__).resolve().parent.parent / "dashboard" / "index.html"
+
+    def test_the_sample_has_a_state_whose_inbox_is_not_read_yet(self):
+        s = sample.build("inbox-unread")
+        self.assertIsNone(s["asks"])
+        self.assertIsNone(s["answered"])
+
+    def test_every_read_of_the_snapshots_asks_on_the_page_allows_null(self):
+        import re
+        page = self.PAGE.read_text(encoding="utf-8")
+        reads = re.findall(r"\b(?:snap|s)\.(?:asks|answered)\b(.{0,12})", page)
+        self.assertTrue(reads)
+        for after in reads:
+            self.assertRegex(after, r"^\s*(\|\| \[\]|=== null)", after)
+        self.assertIn("Inbox not read yet", page)
+
+
 class SampleTest(unittest.TestCase):
     T = datetime(2026, 11, 15, 13, 0, tzinfo=timezone(timedelta(hours=8)))
 
@@ -220,11 +263,11 @@ class SampleTest(unittest.TestCase):
                 keys = {f"{i['repo']}#{i['n']}" for i in s["issues"]}
                 for i in s["issues"]:
                     self.assertLessEqual(set(i["blocked_by"]), keys, i["title"])
-                for a in s["answered"]:
+                for a in s["answered"] or []:
                     for key in ("at", "said", "next"):
                         self.assertTrue(a["answered"][key], f"{a['id']} {key}")
-                self.assertFalse({a["id"] for a in s["asks"]} & {a["id"] for a in s["answered"]})
-                for a in s["asks"] + s["answered"]:
+                self.assertFalse({a["id"] for a in s["asks"] or []} & {a["id"] for a in s["answered"] or []})
+                for a in (s["asks"] or []) + (s["answered"] or []):
                     self.assertTrue(a["go"]["url"].startswith("https://"), a["id"])
                     self.assertIn(a["go"]["where"], ("t3", "github"), a["id"])
                     times = [datetime.fromisoformat(e["at"]) for e in a["timeline"]]
@@ -316,7 +359,7 @@ class SampleTest(unittest.TestCase):
     def test_every_ask_starts_unread_and_not_snoozed(self):
         for name in sample.STATES:
             s = sample.build(name, base=self.T, now=self.T)
-            for a in s["asks"] + s["answered"]:
+            for a in (s["asks"] or []) + (s["answered"] or []):
                 with self.subTest(state=name, ask=a["id"]):
                     self.assertEqual((a["read"], a["snoozed_until"]), (False, None))
 

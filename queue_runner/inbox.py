@@ -71,6 +71,14 @@ class Inbox:
     # The items GitHub failed on part-way (their `key`s): listed as the job log has them, and
     # the Reader keeps the last good read's instead.
     unfilled: frozenset = frozenset()
+    # The repos never yet read whole enough to list (GitHub failed them, with no earlier good
+    # read to keep): their asks aren't known, so the snapshot lists none to go by (PR #104's
+    # review 1, F1). None means `failed`: a lone collection has no earlier read.
+    never: frozenset | None = None
+
+    @property
+    def unread(self) -> frozenset:
+        return self.failed if self.never is None else self.never
 
 
 def gone(e: Exception) -> bool:
@@ -403,7 +411,10 @@ class Reader:
                 answered += done
             # A kept ask's reviews are the last good read's: their run folders don't change.
             self._reviews = {**self._reviews, **got.reviews}
-            self._last = Inbox(items, answered, got.errors, got.failed, dict(self._reviews))
+            never = frozenset(r.name for r in self.config.repos
+                              if r.name in got.failed and r.name not in self._good)
+            self._last = Inbox(items, answered, got.errors, got.failed, dict(self._reviews),
+                               never=never)
             return self._last
 
     def last(self) -> Inbox | None:
