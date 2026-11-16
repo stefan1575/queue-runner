@@ -196,6 +196,14 @@ class IssuesTest(WorkCase):
         self.assertEqual((got[8]['pr'], got[8]['pick']), (9, None))
         self.assertEqual(got[2]['feature'], 'first#1')
 
+    def test_an_issue_blocked_both_ways_shows_both_blockers(self):
+        # #73: the queue's issue names GitHub's native blockers and its `Blocked by:` line's.
+        self.gh.work_list.append(wi(12, 'Twelve', blocked=[(4, 'open')], body='Blocked by: #8'))
+        self.gh.issues.append(Issue(12, 'Twelve', 'Blocked by: #8', open_blockers=1))
+        got = by_n(self.snap())[12]
+        self.assertEqual((got['state'], got['blocked_by'], got['pick']),
+                         ('blocked', ['first#4', 'first#8'], None))
+
     def test_building_and_held_builds_say_so(self):
         self.job('build', 4, None, branch='claude/four-4')
         got = by_n(self.snap())
