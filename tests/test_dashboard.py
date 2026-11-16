@@ -365,8 +365,20 @@ class HttpTest(unittest.TestCase):
             self.assertEqual((status, json.loads(body)["sample"]["state"]), (200, "busy"), host)
         status, kind, _ = self.call("GET", "/", headers=self.at("queue.localhost"))
         self.assertEqual((status, kind), (200, "text/html; charset=utf-8"))
-        for host in ("queue.localhost:1", "evil.localhost:%d" % self.port, "queue.localhost", "127.0.0.1"):
+        for host in ("queue.localhost:1", "evil.localhost:%d" % self.port, "localhost", "127.0.0.1"):
             self.assertEqual(self.call("GET", "/snapshot.json", headers={"Host": host})[0], 403, host)
+
+    def test_queue_localhost_with_no_port_is_the_runners_through_the_localhost_proxy(self):
+        """http://queue.localhost/ (Stefan, 2026-11-16): ~/Code/tools/localhost-proxy holds port
+        80 and passes the Host on as the browser sent it, port-less, and so is the page's Origin."""
+        raw = json.dumps({"version": 1, "asks": [], "written_at": NOW}).encode()
+        (self.real_dir / "snapshot.json").write_bytes(raw)
+        status, _, body = self.call("GET", "/snapshot.json", headers={"Host": "queue.localhost"})
+        self.assertEqual((status, body), (200, raw))
+        stop = {"lane": "claude", "stop": "now"}
+        self.assertEqual(self.post(stop, Origin="http://localhost", Host="queue.localhost")[0], 403)
+        self.assertEqual(self.post(stop, Origin="http://queue.localhost", Host="queue.localhost")[0], 200)
+        self.assertEqual(self.real.control()["lanes"]["claude"]["stop"], "now")
 
     def call(self, method, path, body=None, headers=None):
         conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)

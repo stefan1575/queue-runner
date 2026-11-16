@@ -850,12 +850,14 @@ package, no network, no runner code, no T3, no GitHub. One HTML file, served by 
 library.
 
 ```
-python3 -m dashboard    # http://queue.localhost:5289/ is the runner's; http://localhost:5289/ is sample data
+python3 -m dashboard    # http://queue.localhost/ is the runner's; http://localhost:5289/ is sample data
 ```
 
 - **One process, and the address is the switch** (ticket 29; Stefan, 2026-11-15). The request's
-  `Host` picks the data: `queue.localhost:<port>` is the runner's snapshot and control file in
-  `--state-dir`; `localhost:<port>` and `127.0.0.1:<port>` are sample data, whose controls go to
+  `Host` picks the data: `queue.localhost:<port>`, and `queue.localhost` with no port, are the
+  runner's snapshot and control file in `--state-dir` (no port: http://queue.localhost/, through
+  `~/Code/tools/localhost-proxy`, Caddy in Docker Desktop holding 127.0.0.1:80 for every
+  `*.localhost` app and passing the Host on; Stefan, 2026-11-16); `localhost:<port>` and `127.0.0.1:<port>` are sample data, whose controls go to
   a temp folder removed when the dashboard stops. Any other `Host` is refused (403). There is no
   `--sample` any more. `?sample=<state>` and `/earlier/take-N.html` work on the sample addresses
   only, and the real snapshot is served with any `sample` key taken out, so the sample menu and

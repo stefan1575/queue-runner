@@ -20,7 +20,7 @@ python3 -m queue_runner --inbox               # everything waiting on Stefan: PR
 Its dashboard is a separate small process (`dashboard/`; AGENTS.md, The dashboard):
 
 ```
-python3 -m dashboard    # the runner's page on http://queue.localhost:5289/, sample data on http://localhost:5289/
+python3 -m dashboard    # the runner's page on http://queue.localhost/, sample data on http://localhost:5289/
 ```
 
 The rules, how it runs unattended, the live checks, the tests and everything else are in
