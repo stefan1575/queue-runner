@@ -519,8 +519,10 @@ class Decider:
                    f'Approach note was written ({why})')
             self.stopper.file(repo, case.pr, 'approach-note', why, link)
         elif case.question == 'waiting':
-            self.stopper.file_on_issue(repo, n, why, link, open_url=j.link,
-                                       after=f'Answer it in the waiting thread: {j.link}.')
+            self.stopper.file_on_issue(
+                repo, n, why, link, open_url=j.link,
+                after=f'Answer it in the waiting thread ({j.link}), or reply here: the runner '
+                      'sends your reply to it.')
         elif case.pr is not None:
             self.stopper.file(repo, case.pr, 'decision', why, link)
         else:

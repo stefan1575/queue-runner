@@ -126,7 +126,8 @@ class Job:
     head: str | None = None        # a fix: the PR's head after it (H again if it pushed nothing)
     stop: str | None = None        # a stop: its kind (stops.KINDS)
     reason: str | None = None      # a stop: why, as the issue and the toast say it
-    answer: str | None = None      # a stop: how Stefan answered (issue-closed, replied)
+    answer: str | None = None      # a stop: how Stefan answered (issue-closed, replied); a job
+                                   # his GitHub reply continued: that reply's time (waiting.py)
     about: str | None = None       # a decision: the job it decides on; a continued job: the earlier
     question: str | None = None    # a decision: which question (decisions.QUESTIONS)
     context: int | None = None     # usage-limit: the thread's context in tokens (None: unknown)
@@ -275,8 +276,8 @@ class JobLog:
         """The T3 threads the runner started for a PR, oldest first, each once (ticket 70's
         settle at its merge): its build and fix threads, the decisions on it or on one of
         those jobs (a failed build's, before the PR existed), and its Opus fallback reviews.
-        Never an ask thread, which stays Stefan's (a decision acted on from one carries its
-        id), nor a live run's, which isn't the PR's."""
+        Never an ask thread, which `prefixes.py` settles once decided (a decision acted on
+        from one carries its id), nor a live run's, which isn't the PR's."""
         jobs = self.jobs()
         writers = self.pr_jobs(repo, number, branch)
         ids = {j.id for j in writers}
