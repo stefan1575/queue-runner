@@ -108,11 +108,12 @@ function Dashboard() {
 
 function Main() {
   const { world } = useStore();
-  const { path } = useUrl();
+  const { path, params } = useUrl();
   const [menu, setMenu] = useState(false);
   const [usage, setUsage] = useState(false);
   useEffect(() => { document.title = `${world.asks.length ? `(${world.asks.length}) ` : ""}Queue runner`; }, [world.asks.length]);
   const page = PAGES.find((p) => p.path === path) ?? PAGES[0];
+  const wide = page.path === "/settings" && params.get("round") !== "1"; // round 1 of the Settings prototype had the usual column
 
   return (
     <div className="flex min-h-full">
@@ -129,9 +130,9 @@ function Main() {
       </Dialog.Root>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <TopBar title={page.label} wide={page.path === "/settings"} onMenu={() => setMenu(true)} usageOpen={usage} toggleUsage={() => setUsage(!usage)} />
+        <TopBar title={page.label} wide={wide} onMenu={() => setMenu(true)} usageOpen={usage} toggleUsage={() => setUsage(!usage)} />
         <main id="main" className={cn("flex-1 px-4 py-5 md:px-6", world.runner.process === "stopped" && "[&_section]:opacity-80")}>
-          <div className={cn("space-y-4", page.path === "/settings" ? WIDE_COLUMN : COLUMN)}>
+          <div className={cn("space-y-4", wide ? WIDE_COLUMN : COLUMN)}>
           <Banner />
           {page.path === "/" && <Dashboard />}
           {page.path === "/activity" && <ActivityPage />}
