@@ -985,7 +985,8 @@ python3 -m dashboard    # http://queue.localhost/ is the runner's; http://localh
   gone quiet: the page says so, greys the health readings and takes the controls away),
   `control_read_at`, `sources` (health; `short` is the name beside its dot, `group` sorts them
   on the page: `provider`, `local` or `external`), `repos` in config.toml's
-  order (each with `stopped`, `{"at"}` or null: ticket 37; `doing`, the Claude job running in it,
+  order (each with `icon`, its favicon as a data: URL or null: `queue_runner/favicon.py`, below;
+  `stopped`, `{"at"}` or null: ticket 37; `doing`, the Claude job running in it,
   shaped as a lane's `job`, or null; and `wait`, `{until, reason}` while none starts in it
   because the gate held its job or something holds every repo, or null: #50), `asks` (below; each with `read` and
   `snoozed_until`: Read and snoozed, below), `answered` (asks Stefan has answered that the runner hasn't acted on
@@ -1015,8 +1016,9 @@ python3 -m dashboard    # http://queue.localhost/ is the runner's; http://localh
   since #61 (and a `repo_order` already in the file is dropped, #50);
   each write keeps what the others wrote. The page shows a request as asked until
   `control_read_at` reaches its time.
-- **Usage** (ticket 42): the Usage card's head has Refresh (an icon, "Refresh" on hover) where
-  Details was; the Usage page stays in the sidebar. It posts `{"usage": "refresh"}`; the
+- **Usage** (ticket 42): the Usage card's head has Refresh (an icon, "Refresh" on hover), and
+  Details beside it again (Stefan, 2026-11-16, liking the prototype's floating card), which opens
+  the Usage page; the page stays in the sidebar too. It posts `{"usage": "refresh"}`; the
   publisher's next fresh tick (30 seconds at most) takes it whatever `READ_EVERY` says, and the
   snapshot's `usage_refresh.asked_at` names the request it took. **It doesn't force Claude's
   call** (issue 66): ChatGPT is read; Claude's reader asks its endpoint only if its 5-minute
@@ -1047,13 +1049,24 @@ python3 -m dashboard    # http://queue.localhost/ is the runner's; http://localh
   card: no numbers or arrows, the repos in config.toml's order (the snapshot's `repos`), on every
   page; Settings has no copy of it. Each row says what that repo is doing now (#50, `repoRows`):
   "Building #212, 35 min in.", "Waiting: <why>.", or "Idle.", then who merges; a stopped one
-  "Stopped since ..." and the job it still finishes. Its note: each runs its own Claude job at
-  once, as the usage gate allows. `tests/test_repo_rows.py` runs `repoRows()` in node on the
+  "Stopped since <clock>" and the job it still finishes. No note under the list (Stefan,
+  2026-11-16). Each row starts with the repo's mark and ends with Stop or Resume as an icon
+  (pause, play; named on hover and for a screen reader). **A repo's mark** (`repoLogo`, also on
+  Inbox rows): its favicon, else its first two letters on a plain tile ("Le", "Qu"). The runner
+  finds the favicon as T3 Code finds a project's (`favicon.py`: T3's well-known paths in order,
+  then a `<link rel="icon">` in index.html or a root route, under `public/` then the root; read
+  from T3 Code's server bundle 2026-11-16), and the snapshot carries it as a data: URL, so the
+  page stays one file reading one file; one over 64 KB, or a type a browser can't draw, is left
+  out. An answer is kept 10 minutes, a miss 1, as T3 keeps them (`tests/test_favicon.py`).
+  `tests/test_repo_rows.py` runs `repoRows()` in node on the
   sample's states. A lane running several jobs says "2 at once" and lists each with its thread
   (`laneSays`); `laneOn` finds an ask's job among a lane's `jobs`. The sample's `side-by-side`
   state runs a build in each repo.
 - **What's left** (#60, Stefan 2026-11-16: "71% left as opposed to the current usage"): each
-  usage window says `100 - used` as "N% left", on the Usage card and page; the bar holds what's
+  usage window says `100 - used` as "N% left", on the Usage card and page, with when it resets
+  under its bar, short ("Resets 22:56", "Resets Wed 23:38"; the whole stamp on hover); the
+  card is laid out as the prototype's floating card Stefan liked (label, bar, bold figure; "read
+  21:55" by the plan's name), a little roomier; the bar holds what's
   left, amber at 15% left or less and red at none, and the share kept for you is blue at its left
   end, never wider than what's left (none at 0% left: PR #62's F1, `tests/test_meter.py` runs the
   page's `meter()` in node). The snapshot still carries `used`.
@@ -1256,7 +1269,9 @@ python3 -m dashboard    # http://queue.localhost/ is the runner's; http://localh
   is working, green is done or healthy, red is broken; a usage bar says what's **left**, as T3
   Code does ("65% left"; the snapshot keeps `used`), its fill shrinking as it's used, amber with
   15% left and red with none, and its blue start is the share kept for him; Claude's clay and OpenAI's black or
-  white are on their marks and names only (the marks are Simple Icons', CC0, inline). Fonts are
+  white are on their marks only (the marks are Simple Icons', CC0, inline). A provider's name is
+  the page's own type, in the text colour, the same for both, as T3 Code sets them (Stefan,
+  2026-11-16: until then Claude's was a serif in clay). Fonts are
   ones Windows ships (Segoe UI Variable, Sitka for an ask's question, Cascadia Mono), 16px and up.
 - **Stop all** (the top bar) is one `{"lane", "stop"}` request per lane; a lane whose Stop now is
   unavailable is asked to stop after its job instead.
@@ -1896,6 +1911,7 @@ temp folder.
 - `queue_runner/restart.py`: restarting on its own new code after main moves (ticket 14).
 - `queue_runner/snapshot.py`: the dashboard's `snapshot.json`: the facts, `build()`, the
   sources' last calls, the usage readings and the publisher (ticket 28).
+- `queue_runner/favicon.py`: a repo's favicon for its mark on the dashboard, found as T3 Code finds one.
 - `queue_runner/cli.py`: the command line.
 - `dashboard/`: the dashboard, apart from the runner: `index.html` (the page), `serve.py` (its
   server and the control file), `sample.py` (the snapshot's shape, in every state), `earlier/`

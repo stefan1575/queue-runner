@@ -23,6 +23,7 @@ import time
 from dataclasses import dataclass, field
 
 from . import control
+from .favicon import repo_icon
 from .gate import RECENT, RESERVE_RELEASE, SAMPLES, Knob
 from .state import when
 from .usage import STALE_AFTER, Reading
@@ -166,10 +167,11 @@ def build(facts: Facts) -> dict:
 def _repos(facts: Facts) -> list[dict]:
     """In config.toml's order, each with `stopped` (ticket 37): when Stefan stopped it, or None;
     and what it's doing now (#50): `doing`, the Claude job running in it (as a lane's `job`), or
-    None, and `wait`, why the Claude lane starts none in it now, or None."""
+    None, and `wait`, why the Claude lane starts none in it now, or None; and `icon`, its favicon
+    as a data: URL, or None, for its mark on the page (`favicon.py`)."""
     jobs = {j.repo: j for j in _open_jobs(facts, CLAUDE_KINDS)}
     return [{'name': r.name, 'github': f'https://github.com/{r.github}' if r.github else None,
-             'merge': r.merge, 'stopped': _repo_stopped(facts, r.name),
+             'icon': repo_icon(r.path), 'merge': r.merge, 'stopped': _repo_stopped(facts, r.name),
              'doing': _job(facts, jobs[r.name]) if r.name in jobs else None,
              'wait': None if r.name in jobs else _repo_wait(facts, r.name)}
             for r in facts.repos]

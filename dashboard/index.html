@@ -231,7 +231,9 @@ body.page-inbox .stage { padding-bottom: 24px; }
 .mrow.quiet[aria-current="true"] { box-shadow: inset 0 0 0 1px var(--line); }
 .mrow.quiet[aria-current="true"]::before { background: var(--dim); }
 /* each row's top line, as in T3's sidebar: whose it is (the repository and its mark), the tag, the age */
-.rlogo { width: 20px; height: 20px; border-radius: 6px; flex: none; display: grid; place-items: center; background: var(--raised); box-shadow: inset 0 0 0 1px var(--line); font: 700 11.5px/1 var(--sans); color: var(--ink-2); }
+.rlogo { width: 20px; height: 20px; border-radius: 6px; flex: none; display: grid; place-items: center; background: var(--raised); box-shadow: inset 0 0 0 1px var(--line); font: 700 10px/1 var(--sans); color: var(--ink-2); overflow: hidden; }
+.rlogo.img { background: none; box-shadow: none; }
+.rlogo img { width: 100%; height: 100%; object-fit: contain; }
 .rname { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; color: var(--mute); }
 .mrow .m1 .kind-tag { margin-left: 2px; }
 .kind-tag.run { background: var(--run-wash); color: var(--run); }
@@ -371,9 +373,9 @@ a.ov-kind:hover { background: var(--hover); }
 .ov-calm span { display: block; color: var(--mute); margin-top: 3px; }
 
 /* what's running: a line per lane */
-.who { display: inline-flex; align-items: center; gap: 8px; font: 600 18px/1.2 var(--display); white-space: nowrap; }
-.who.claude { font-family: var(--serif); font-size: 19.5px; color: var(--claude); }
-.who.chatgpt { letter-spacing: -0.02em; color: var(--openai); }
+.who { display: inline-flex; align-items: center; gap: 8px; font: 600 18px/1.2 var(--sans); color: var(--ink); white-space: nowrap; }
+.who.claude .mark { color: var(--claude); }
+.who.chatgpt .mark { color: var(--openai); }
 .ov-lane { display: grid; grid-template-columns: 168px minmax(0, 1fr) max-content max-content; grid-template-areas: "who doing for stop"; column-gap: 16px; align-items: start; padding: 12px 20px 13px; }
 .ov-lane + .ov-lane { border-top: 1px solid var(--line-soft); }
 .ov-lane .l-who { grid-area: who; padding-top: 1px; }
@@ -664,28 +666,33 @@ button.stn-in:hover { background: var(--hover); }
 .h-row span { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
 .h-row .no { color: var(--bad); font-weight: 600; }
 .h-bad { display: block; margin-top: 8px; font-size: 14px; color: var(--bad); }
-.plan + .plan { margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--line); }
-.plan-name { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.plan + .plan { margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--line); }
+.plan-name { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 4px; }
+.plan-name .read { font-size: 14px; color: var(--dim); white-space: nowrap; }
 .plan-name .who { font-size: 17px; }
-.plan-name .who.claude { font-size: 18.5px; }
-.meter { display: grid; grid-template-columns: 108px 1fr 5.4em; align-items: center; column-gap: 12px; margin-top: 12px; }
+.meter { display: grid; grid-template-columns: 116px 1fr 5.6em; align-items: center; column-gap: 14px; margin-top: 14px; }
 .meter .label { color: var(--ink-2); }
-.meter .bar { height: 6px; background: var(--line); border-radius: 3px; position: relative; overflow: hidden; }
-.meter .fill { position: absolute; inset: 0 auto 0 0; background: var(--ink-2); border-radius: 3px; }
+.meter .bar { height: 8px; background: var(--line); border-radius: 4px; position: relative; overflow: hidden; }
+.meter .fill { position: absolute; inset: 0 auto 0 0; background: var(--ink-2); border-radius: 4px; }
 .meter .kept { position: absolute; inset: 0 auto 0 0; background: var(--you); opacity: .5; }
 .meter .pct { text-align: right; font-weight: 600; white-space: nowrap; }
 .meter.near .fill { background: var(--run); }
 .meter.near .pct { color: var(--run); }
-.meter .when { grid-column: 1 / -1; font-size: 14px; color: var(--dim); margin-top: 3px; }
+.meter .when { grid-column: 2 / -1; font-size: 14.5px; color: var(--mute); margin-top: 2px; }
 .meter.full .fill { background: var(--bad); }
 .meter.full .pct { color: var(--bad); }
-.plan-note { font-size: 14px; color: var(--mute); margin-top: 10px; }
+.plan-note { font-size: 14.5px; color: var(--mute); margin-top: 12px; }
+.card-head .details { margin-left: auto; font-size: 14.5px; color: var(--mute); text-decoration: none; }
+.card-head .details:hover { color: var(--ink); text-decoration: underline; }
+.card-head .details + .refresh { margin-left: 4px; }
 .plan-note.bad { color: var(--bad); }
 .refresh { margin-left: auto; }
 .refresh.spin .i { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .refresh.spin .i { animation-duration: 3s; } }
-.order li { display: flex; align-items: center; gap: 10px; padding: 6px 0; }
+.order li { display: flex; align-items: center; gap: 12px; padding: 8px 0; }
+.order .rlogo { width: 28px; height: 28px; border-radius: 7px; font-size: 12.5px; }
+.order li.off .rlogo { opacity: .55; }
 .order li + li { border-top: 1px solid var(--line-soft); }
 .order .name { min-width: 0; flex: 1; font-weight: 600; }
 .order .name span { display: block; font-size: 14px; font-weight: 400; color: var(--mute); }
@@ -965,8 +972,16 @@ const ACTOR = { claude: ["Claude", "claude"], sol: ["ChatGPT", "chatgpt"], chatg
 const key = (i) => `${i.repo}#${i.n}`;
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 const scoped = (xs) => (ui.repo ? xs.filter((x) => x.repo === ui.repo) : xs);
-// A repository's mark on an Inbox row: its first letter on a plain tile. Colour is kept for state.
-const repoMark = (name) => `<span class="rlogo" aria-hidden="true">${esc((name || "?")[0].toUpperCase())}</span><span class="rname">${esc(name)}</span>${offTag(name)}`;
+// A repository's mark (Stefan, 2026-11-16): its favicon, found as T3 Code finds one (the
+// snapshot's `icon`, queue_runner/favicon.py), else its first two letters on a plain tile.
+// Colour is kept for state.
+function repoLogo(name) {
+  const icon = ((snap && snap.repos) || []).find((r) => r.name === name)?.icon;
+  if (icon && /^data:image\//.test(icon)) return `<span class="rlogo img" aria-hidden="true"><img src="${esc(icon)}" alt=""></span>`;
+  const two = String(name || "").replace(/[^a-z0-9]/gi, "").slice(0, 2) || "?";
+  return `<span class="rlogo" aria-hidden="true">${esc(two[0].toUpperCase() + two.slice(1).toLowerCase())}</span>`;
+}
+const repoMark = (name) => `${repoLogo(name)}<span class="rname">${esc(name)}</span>${offTag(name)}`;
 const repoTag = (name) => (ui.repo ? offTag(name) : `<span class="tag">${esc(name)}${repoOff(name) ? ", stopped" : ""}</span>`);
 // A repository Stefan stopped (ticket 37): neither lane takes up its work; its asks stay.
 const repoOff = (name) => ((snap && snap.repos) || []).find((r) => r.name === name && r.stopped) || null;
@@ -1804,12 +1819,12 @@ function meter(w, full) {
     <span class="bar" role="img" aria-label="${esc(w.label)}: ${known ? left + "% left" : "unknown"}">
       ${known ? `<i class="fill" style="width:${left}%"></i>` : ""}${kept > 0 ? `<i class="kept" style="width:${kept}%" title="${kept}% of what's left is kept for you"></i>` : ""}</span>
     <span class="pct">${known ? left + "% left" : "?"}</span>
-    <span class="when">${w.resets_at ? `resets ${esc(stamp(w.resets_at))}` : "not started"}${full && !w.gates ? `. ${esc(w.note || "Not used by the runner.")}` : ""}</span></div>`;
+    <span class="when"${w.resets_at ? ` title="${esc(stamp(w.resets_at))}"` : ""}>${w.resets_at ? `Resets ${esc(clock(w.resets_at))}` : "Not started"}${full && !w.gates ? `. ${esc(w.note || "Not used by the runner.")}` : ""}</span></div>`;
 }
 // A plan's reset credits (ticket 42): said only while it has some. Redeeming one is T3's.
 const resetsLeft = (p) => (p.resets && p.resets.available > 0 ? plural(p.resets.available, "reset", "resets") + " left, " : "");
 const plan = (p, full) => `<div class="plan">
-    <p class="plan-name">${who(p.provider, p.name)}<span class="dim small">${p.plan ? esc(p.plan) + ", " : ""}${resetsLeft(p)}${p.read_at ? `<span title="${esc(stamp(p.read_at))}">read ${esc(ago(p.read_at))} ago</span>` : "not read yet"}</span></p>
+    <p class="plan-name">${who(p.provider, p.name)}<span class="read">${p.plan ? esc(p.plan) + ", " : ""}${resetsLeft(p)}${p.read_at ? `<span title="${esc(stamp(p.read_at))}, ${esc(ago(p.read_at))} ago">read ${esc(hm(p.read_at))}</span>` : "not read yet"}</span></p>
     ${p.error ? `<p class="plan-note bad">${esc(p.error)}</p>` : ""}
     ${(p.windows || []).map((w) => meter(w, full)).join("")}
     ${(p.windows || []).filter((w) => w.reserve).map((w) => `<p class="plan-note">${w.reserve}% of the week is kept for you.</p>`).join("")}
@@ -1841,14 +1856,14 @@ function repoRows() {
     const now = r.doing ? `${kind(r.doing.kind)[0]} ${r.doing.ref}, ${ago(r.doing.started_at)} in`
       : r.wait ? `Waiting: ${r.wait.reason.replace(/\.$/, "")}` : "Idle";
     const sub = pending ? (a.stop ? "Asked to stop: the runner hasn't read it yet" : "Asked to resume: the runner hasn't read it yet")
-      : r.stopped ? `Stopped${r.stopped.at ? ` since ${stamp(r.stopped.at)}` : ""}${r.doing ? `; ${now.replace(/^./, (c) => c.toLowerCase())}` : ""}`
+      : r.stopped ? `Stopped${r.stopped.at ? ` since ${clock(r.stopped.at)}` : ""}${r.doing ? `; ${now.replace(/^./, (c) => c.toLowerCase())}` : ""}`
       : `${now}. ${r.merge === "stefan" ? "You merge" : "The runner merges"}.`;
     const btn = stale ? "" : off
-      ? `<button class="btn sm solid" data-act="repostop" data-repo="${esc(name)}" data-how="" title="Both lanes take up its work again">${ICON.play}Resume</button>`
-      : `<button class="btn sm" data-act="repostop" data-repo="${esc(name)}" data-how="after-job" title="A job running on it finishes; then neither lane takes up its work">${ICON.pause}Stop</button>`;
-    return `<li${r.stopped ? ' class="off"' : ""}><span class="name">${esc(name)}<span>${esc(sub)}</span></span>${btn}</li>`;
+      ? `<button class="btn sm icon solid" data-act="repostop" data-repo="${esc(name)}" data-how="" aria-label="Resume ${esc(name)}" title="Resume: both lanes take up its work again">${ICON.play}</button>`
+      : `<button class="btn sm icon" data-act="repostop" data-repo="${esc(name)}" data-how="after-job" aria-label="Stop ${esc(name)}" title="Stop: a job running on it finishes; then neither lane takes up its work">${ICON.pause}</button>`;
+    return `<li${r.stopped ? ' class="off"' : ""}>${repoLogo(name)}<span class="name">${esc(name)}<span>${esc(sub)}</span></span>${btn}</li>`;
   }).join("");
-  return `<ul class="order">${rows}</ul><p class="plan-note">Each runs its own Claude job at once, as the usage gate allows. A stopped one gets nothing until you resume it.</p>`;
+  return `<ul class="order">${rows}</ul>`;
 }
 
 // Refresh (ticket 42): asks the runner to read both plans now (control.json's usage.refresh_at).
@@ -1878,7 +1893,7 @@ function rail() {
   clearTimeout(refreshPoll);
   if (refreshPending()) refreshPoll = setTimeout(load, 2000);
   const notes = refreshNotes().map((n) => `<p class="plan-note${n.bad ? " bad" : ""}" style="margin:0 0 14px">${esc(n.text)}</p>`).join("");
-  const usage = `<section class="card"><header class="card-head"><h2>Usage</h2>${refreshButton()}</header>
+  const usage = `<section class="card"><header class="card-head"><h2>Usage</h2><a class="details" href="${esc(href({ page: "usage", pr: null }))}" data-act="page" data-page="usage">Details</a>${refreshButton()}</header>
     <div class="card-pad">${notes}${(snap.usage || []).map((p) => plan(p, false)).join("")}</div></section>`;
   const repos = `<section class="card"><header class="card-head"><h2>Repositories</h2></header><div class="card-pad" style="padding-top:8px">${repoRows()}</div></section>`;
   return (ui.page === "usage" ? "" : usage) + repos + status();

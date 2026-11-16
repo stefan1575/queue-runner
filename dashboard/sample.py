@@ -13,6 +13,10 @@ from datetime import datetime, timedelta
 
 LD, QR = "leads-dashboard", "queue-runner"
 GH = {LD: "https://github.com/RoyalBullyAgency-RBA/leads-dashboard", QR: "https://github.com/stefan1575/queue-runner"}
+# A made-up favicon for leads-dashboard, so the sample shows both marks: a favicon, and (queue-runner,
+# with none) the first two letters. The runner reads the real one from the repo (queue_runner/favicon.py).
+LD_ICON = ("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+"
+           "PHJlY3Qgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiByeD0iNyIgZmlsbD0iIzI1NjNlYiIvPjxwYXRoIGQ9Ik05IDIzVjlNOSAyM2g4IiBzdHJva2U9IndoaXRlIiBzdHJva2Utd2lkdGg9IjMiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgZmlsbD0ibm9uZSIvPjxjaXJjbGUgY3g9IjIyIiBjeT0iMjAiIHI9IjMuNSIgZmlsbD0id2hpdGUiLz48L3N2Zz4=")
 T3 = "https://app.t3.codes/threads/264b77bb-5ec7-4453-8ee5-7d0162886008/mcp%3A"
 
 STATES = {
@@ -82,9 +86,10 @@ def build(name: str = DEFAULT, base: datetime | None = None, control: dict | Non
         # gets nothing from either lane; its asks stay in the Inbox.
         "repos": [
             # `doing`: the Claude job running in it (as a lane's `job`), and `wait`: why none
-            # starts in it now (#50; both filled in by `_doing`, below).
-            {"name": LD, "github": GH[LD], "merge": "stefan", "stopped": None},
-            {"name": QR, "github": GH[QR], "merge": "runner", "stopped": None},
+            # starts in it now (#50; both filled in by `_doing`, below). `icon`: its favicon as a
+            # data: URL, or null (the page draws its first two letters).
+            {"name": LD, "github": GH[LD], "icon": LD_ICON, "merge": "stefan", "stopped": None},
+            {"name": QR, "github": GH[QR], "icon": None, "merge": "runner", "stopped": None},
         ],
         # An ask is written to be picked up cold, a week later. `kind` is why it came to Stefan:
         # `stuck` (the runner tried and couldn't get it through), `decision` (a product decision
@@ -193,7 +198,7 @@ def build(name: str = DEFAULT, base: datetime | None = None, control: dict | Non
         ],
         "lanes": [
             {
-                # `provider` picks the mark and the name's type: "claude" or "chatgpt"; any other gets none
+                # `provider` picks the mark: "claude" or "chatgpt"; any other gets none
                 "id": "claude", "provider": "claude", "name": "Claude", "does": "builds and fixes", "model": "Opus 5.5",
                 "state": "working",
                 "job": {"kind": "build", "repo": LD, "ref": "#212", "title": "Archive view for old callers",
