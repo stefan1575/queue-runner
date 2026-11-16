@@ -20,7 +20,7 @@ from .config import Config, Repo, set_build_order, set_stopped, stopped, toml_or
 from .decisions import Decider
 from .fix import Fixer, fix_branch, fix_title
 from .stops import CONFLICT
-from .fallback import KIND as FALLBACK
+from .fallback import OPUS_KINDS
 from .gate import CLAUDE_KINDS
 from . import limits as lim
 from .live import LiveSteps
@@ -30,7 +30,7 @@ from .picker import BuildJob, pick
 from .review import Reviewer
 from .state import NOT_SENT, NOT_STARTED, RESTART_FAILED, USAGE_LIMIT, Job, JobLog, when
 from .stops import Stopper
-from .t3 import T3Error, Thread, find_job_thread
+from .t3 import T3Error, Thread, find_job_thread, settle_quietly
 from .toast import NoToaster
 from .wake import NoWaker
 
@@ -113,8 +113,8 @@ class Runner:
         self.reviewer = Reviewer(config, github=github, git=git, sol=sol, jobs=self.jobs,
                                  say=self.say, toaster=self.toaster, deps=deps,
                                  fallback=OpusFallback(config, t3=t3, gate=gate,
-                                                       effort=self.effort)
-                                 ) if sol is not None else None
+                                                       effort=self.effort, say=self.say),
+                                 t3=t3) if sol is not None else None
         self.fixer = Fixer(config, github=github, git=git, jobs=self.jobs)
         stopper = Stopper(config, github=github, jobs=self.jobs, say=self.say,
                           toaster=self.toaster)
@@ -369,7 +369,7 @@ class Runner:
                 elif next(j for j in self.jobs.jobs() if j.id == job.id).thread_id:
                     self._thread_ended()   # its thread ran and has ended
                 continue
-            if job.kind == 'review' and job.reviewer == FALLBACK:
+            if job.kind == 'review' and job.reviewer in OPUS_KINDS:
                 if self._fallback_runs(job):
                     busy = BUSY
                 continue
@@ -616,6 +616,7 @@ class Runner:
                  f', head still {job.sha[:7]}' if head else ', head unknown')
         self.say(f'{self._name(job)} ended: {outcome} (exit {exit_code}{moved}) '
                  f'{link or thread_id}')
+        self._settle_ended(job, thread_id, outcome)
         return job
 
     def finish(self, job: Job, thread_id: str, exit_code: int, status: str, error: str | None,
@@ -653,7 +654,16 @@ class Runner:
         pr_note = f', PR #{pr["number"]}' if pr else ''
         self.say(f'{self._name(job)} ended: {outcome} (exit {exit_code}, {len(commits)} commits'
                  f'{pr_note}) {link or thread_id}')
+        self._settle_ended(job, thread_id, outcome)
         return job
+
+    def _settle_ended(self, job: Job, thread_id: str, outcome: str) -> None:
+        """A build, fix or conflict thread is settled once its end is recorded (ticket 70),
+        unless it waits for an answer: that one is Stefan's, or a decision's, to answer in the
+        thread. One the runner picks up again in place is unsettled by T3 when its message
+        lands, and settled again at its own end."""
+        if outcome != 'waiting':
+            settle_quietly(self.t3, thread_id, self._name(job), self.say)
 
     def _limit(self, thread_id: str, run_id: str | None, exit_code: int, error: str | None,
                said) -> dict | None:
@@ -693,7 +703,8 @@ class Runner:
         `direction` (a decision's text, and for an answer the question it answers) and before
         the old thread's link, where it starts, what it left uncommitted and its last 3
         messages, in a new worktree on the same branch at the old thread's newest commit. The
-        old thread is left as it is: a script can't settle a T3 thread (AGENTS.md)."""
+        old thread is left as it is: it was settled when its end was recorded, unless it waited for
+        an answer (ticket 70 leaves those)."""
         try:
             _, messages = self.t3.show(old.thread_id, 3)
         except T3Error as e:

@@ -99,6 +99,7 @@ class Facts:
     # Each lane's stop (control.json, or gate.json's older pause), as read for this snapshot.
     switch: control.Switch = control.Switch()
     claude_model: str = 'claude-opus-5-5'
+    review_provider: str = 'chatgpt'   # config.toml's `[review] provider` (issue #76)
     # The gate's verdict or a limit's resume, as the Claude lane's last pass left it.
     claude_wait: Wait | None = None
     sol_wait: Wait | None = None      # ChatGPT out of usage: when reviews start again
@@ -267,13 +268,15 @@ def _lane(facts: Facts, id: str, job, wait: Wait | None) -> dict:
     else:
         state = 'waiting' if wait else 'idle'
     queue, empty = _queue(facts, id)
+    # The reviewing lane is Claude's when config.toml says Claude reviews (issue #76), and its
+    # model is while the Opus fallback reviews in Sol's place (issue #69).
+    claude = id == 'claude' or facts.review_provider == 'claude'
     lane = {
         'id': id,
-        'provider': 'claude' if id == 'claude' else 'chatgpt',
-        'name': 'Claude' if id == 'claude' else 'ChatGPT',
+        'provider': 'claude' if claude else 'chatgpt',
+        'name': 'Claude' if claude else 'ChatGPT',
         'does': 'builds and fixes' if id == 'claude' else 'reviews',
-        # A review the Opus fallback runs while Sol is out of usage (issue #69) is Claude's.
-        'model': _model(facts.claude_model) if id == 'claude' or getattr(job, 'reviewer', None)
+        'model': _model(facts.claude_model) if claude or getattr(job, 'reviewer', None)
         else SOL_MODEL,
         'state': state,
         'job': _job(facts, job) if job is not None else None,
@@ -634,8 +637,10 @@ class Snapshots:
             now=now, repos=repos, jobs=jobs, knob=knob,
             switch=switch,
             claude_model=self.config.claude_model,
+            review_provider=self.config.review_provider,
             claude_wait=runner.claude_wait if runner is not None else self._limit_wait(log, now),
-            sol_wait=self._sol_wait(log, now),
+            # Sol's out-of-usage wait holds no review back while Claude reviews (issue #76).
+            sol_wait=None if self.config.review_provider == 'claude' else self._sol_wait(log, now),
             titles=dict(runner.titles) if runner is not None else {},
             threads=threads, runner=self.info, calls=self.calls.all(),
             claude_usage=self.claude.reading() if self.claude else None,

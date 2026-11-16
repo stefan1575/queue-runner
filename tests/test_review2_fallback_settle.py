@@ -2,7 +2,7 @@
 cached reading taken while its thread ran good for the Claude lane's next check."""
 import unittest
 
-from queue_runner.fallback import KIND as FALLBACK
+from queue_runner.fallback import KIND as FALLBACK, SET
 from queue_runner.run import STARTED
 from tests.fakes_t3 import FakeGit
 from tests.test_usage_budget import EndedElsewhereTest as _Base
@@ -14,9 +14,15 @@ class EndedElsewhereTest(_Base):
 
 class FallbackSettleTest(EndedElsewhereTest):
     def test_a_dead_runners_fallback_review_holds_the_next_job_for_a_reading_after_it(self):
+        self._dead_runners_opus_review_holds_the_next_job(FALLBACK)
+
+    def test_a_dead_runners_config_opus_review_holds_the_next_job_for_a_reading_after_it(self):
+        self._dead_runners_opus_review_holds_the_next_job(SET)   # #76: config.toml says Opus
+
+    def _dead_runners_opus_review_holds_the_next_job(self, reviewer):
         job = self.log.started(kind='review', repo='queue-runner', issue=7,
                                branch='claude/x-7', title='Queue runner review: queue-runner#7',
-                               sha='c' * 40, round=1, reviewer=FALLBACK)
+                               sha='c' * 40, round=1, reviewer=reviewer)
         self.t3.add('mcp:opus', job.title, 'running')   # its Opus thread runs on
         self.endpoint.five = 10
         self.tick()                                     # 14:01:49: 10% while it runs

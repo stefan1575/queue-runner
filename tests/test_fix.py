@@ -168,6 +168,31 @@ class FixTest(unittest.TestCase):
         review2 = [j for j in r.jobs.jobs() if j.kind == 'review'][-1]
         self.assertEqual((review2.sha, review2.round, review2.outcome), (H3, 2, 'clean'))
 
+    # --- settling its thread (ticket 70) ---------------------------------------------------
+
+    def test_a_round_that_ended_is_settled_and_still_read(self):
+        r = self.blocking(pushes=H3)
+        r.run_pass()
+        self.assertEqual(self.t3.settles, ['mcp:t1'])
+        thread, _ = self.t3.show('mcp:t1')
+        self.assertTrue(thread.settled)
+
+    def test_a_round_waiting_for_an_answer_is_not_settled(self):
+        r = self.blocking(outcomes=[(2, 'waiting')])
+        r.run_pass()
+        self.assertEqual([f.outcome for f in self.fixes(r)], ['waiting'])
+        self.assertEqual(self.t3.settles, [])
+
+    def test_a_settle_that_fails_is_said_and_the_round_is_recorded(self):
+        from queue_runner.t3 import T3Error
+        t3 = PushingT3([(0, 'completed')], self.gh, H3)
+        t3.settle_error = T3Error("T3's server can't be reached")
+        r = self.blocking(t3=t3)
+        self.assertEqual(r.run_pass(), 'started')
+        self.assertEqual([f.outcome for f in self.fixes(r)], ['pushed'])
+        self.assertIn("fix first#20: settling its thread mcp:t1 in T3 failed (T3Error: T3's "
+                      "server can't be reached); left as it is", self.out.getvalue())
+
     def test_a_round_that_ended_without_pushing_is_recorded_and_h_not_reviewed_again(self):
         r = self.blocking()
         r.run_pass()

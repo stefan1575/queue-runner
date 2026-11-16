@@ -140,8 +140,9 @@ under the dashboard): GitHub issues, builds, Sol reviews, and it merges its own 
 a fix round, a decision thread; a continued job runs inside its decision's pass), after settling
 and choosing it, the Claude lane reads Claude's windows and the job kind's expected cost. **Sol
 isn't gated**, and neither is an Approach-note answer read from Stefan's words (no thread). The
-Opus review while Sol is out of usage is (The Opus fallback, below): the Sol lane checks it as
-kind `review` (default cost 30% of 5 hours, 8% of the week) and records what it spent the same
+Opus review (while Sol is out of usage, or every review when config.toml says Claude reviews: The
+Opus fallback, below) is: the Sol lane checks it as kind `review` (default cost 15% of 5 hours, 4%
+of the week, about a decision's, until three are learned: issue #76) and records what it spent the same
 way; it isn't one of the Claude lane's kinds (`gate.CLAUDE_KINDS`), so that lane's measurement
 never counts it, and `--gate` prints it as its own line, held by the reviewing lane's stop.
 
@@ -168,8 +169,9 @@ never counts it, and `--gate` prints it as its own line, held by the reviewing l
   never holds the lane. "Ended" is any Claude thread the runner sees end (`Gate.job_ended`): a
   measured job's, and outside a measured pass a dead runner's build, fix or live job settled, a
   waiting job that ran on Stefan's answer (ended, or asking again), a decision thread whose
-  retry or answer never reached its job (PR 67's review 1, F1), and a dead runner's Opus fallback
-  review whose thread has ended (review 2, F2: The Opus fallback, The job record). With the
+  retry or answer never reached its job (PR 67's review 1, F1), and a dead runner's Opus review
+  (the fallback, or config.toml's) whose thread has ended (review 2, F2: The Opus fallback, The
+  job record). With the
   job's id it's told once, so the two lanes both seeing one thread end don't throw away a
   reading taken in between; and a job's after-read is judged against its own end, not one the
   other lane said meanwhile. A job settled with no thread holds nothing. An ask thread runs on with Stefan unwatched, like his own sessions, so it
@@ -259,7 +261,8 @@ same limit) is started on it.
   `--release`.
 - **Until then it's the PR's writer** (`JobLog.writer`): Sol doesn't review a head it pushed
   before the limit, nothing merges, and no other fix round starts. `--release` lets it go.
-- **The old thread is left as it is** (not settled): see T3, below.
+- **The old thread** was settled when its stop was recorded (Settling threads, below); a resume
+  in place unsettles it.
 - **T3's "Resume after usage limits"** (`autoResumeLimitedThreads` in
   `~/.t3/userdata/settings.json`, off by default) stays off: it would send "Continue where you
   left off." to the same thread itself. The runner logs a warning at start if it's on.
@@ -555,6 +558,9 @@ decision after it that says `fix` or `carry-on`; another stop's answer doesn't c
 written for that review even if the head has moved since. A reply not yet decided on holds the PR
 too, and one reply that answers several stops is decided once (`stops.undecided_replies`).
 
+**Settled once read:** the decision thread is settled once its answer is read, unless it asked
+back (Settling threads, below).
+
 **Acting:** `retry` and `answer` pick up the earlier job (A continued job, above): in its thread
 while that's warm or cold and under 120k tokens, else in a fresh thread on the same branch
 (`limits.resume_choice`; Usage limits, In place or fresh). A fresh thread's brief starts with
@@ -691,8 +697,8 @@ since 2026-11-10; game-backdrop, since 2026-11-15) isn't merged by the runner; `
   again next pass. A clean review of the new head, or the hold's answer, marks it again, with a
   new toast.
 - **His merge:** a marked PR gone from the open list is read once: merged, it gets a `merge` job
-  `merged` (`reason` "Stefan merged it"), its label and its build and fix worktrees go as after
-  the runner's own merge, and the log says `Stefan merged it; its live steps follow`; closed
+  `merged` (`reason` "Stefan merged it"), its label and its build and fix worktrees go and their
+  threads are settled as after the runner's own merge, and the log says `Stefan merged it; its live steps follow`; closed
   unmerged, it's `unmarked` and the label goes (so a reopened PR isn't left ready). The live steps then read the merge from git as for any merge (a
   merge commit or a squash's `(#N)`; **a rebase merge names no PR**, so its commits wait for the
   next PR's batch).
@@ -732,7 +738,7 @@ The review loop's rules are `~/Code/docs/pr-review.md`; leads-dashboard's
 `docs/agents/review-loop.md` and `REVIEW.md` define the words.
 
 1. **Settle.** Under `sol.lock`, a review the log shows open was cut off with its runner: it
-   counts as `failed` (an Opus fallback review's once its thread has ended: The Opus fallback). An open merge is settled from GitHub: `merged` or `failed`.
+   counts as `failed` (an Opus review's, the fallback or config.toml's, once its thread has ended: The Opus fallback). An open merge is settled from GitHub: `merged` or `failed`.
 2. **Stops** (`stops.Stopper`, before merging, so a PR stopped now neither merges nor is
    reviewed; see Stops for Stefan, below).
 3. **Merge** (`merge.Merger`, also right after a clean review is posted). A PR merges once the
@@ -746,7 +752,8 @@ The review loop's rules are `~/Code/docs/pr-review.md`; leads-dashboard's
    Two failed merges on H leave it until a push or `--release`. After the merge the worktrees of
    the PR's build and fix jobs are removed with their local branches (`GitCli.remove_worktree`:
    gone from `git worktree list` counts, since T3 may hold the empty folder), and one that
-   can't be is said. The repo's live steps (leads-dashboard: Lovable) run later in the Claude
+   can't be is said, and their threads are settled (Settling threads, below). The repo's live
+   steps (leads-dashboard: Lovable) run later in the Claude
    lane (Live steps, below). **In a repo Stefan merges** (leads-dashboard), the PR is marked
    `ready-for-stefan` instead, and his merge is noticed on a later pass (Stefan merges, below).
    **Merge job records** (kind `merge`): `sha` H, `head` the merge commit; outcomes `merged`,
@@ -1293,6 +1300,35 @@ doesn't wait: a PR that needs a review gets one from a T3 thread on the Claude m
   review names Claude's model, and the work lists and the Inbox's timelines say a review was
   Opus's.
 
+### Claude reviews every PR (`[review] provider`)
+
+Issue #76 (Stefan, 2026-11-16: "Claude for now, until I say so, a full override"). A patch to
+this runner until the TypeScript rebuild makes the reviewer role a setting (#68, #36's grill);
+the key copies that role's shape, provider first.
+
+```toml
+[review]
+provider = "claude"   # "chatgpt" (Sol) is the default
+```
+
+- **With "claude"**, `Reviewer._who` sends every review to the Opus thread above, whether or not
+  Sol is out of usage, through the usage gate (`Opus review waits: ...` said once while it
+  holds). Sol isn't asked, and its out-of-usage wait plays no part: the snapshot drops it, and
+  the reviewing lane shows as Claude's (provider, name and model), so the Settings page's Who
+  does what row for Review says Claude.
+- **What says so:** the label is "Opus 5.5 high, set in config.toml" (`fallback.WHY`), in the
+  same places as the fallback's; the job's `reviewer` is `opus-config` (`fallback.SET`); the log
+  says `Opus (config.toml says so) reviews ...`; `--gate` prints `review (Opus, set in
+  config.toml)`. The preamble says Opus reviews in Sol's place, not that Sol is out.
+- **Reviewers with no T3 thread to start** (`--review NAME#N`, the live checks) still run Sol by
+  name.
+- **Back to Sol:** set `provider = "chatgpt"` (or remove `[review]`) on main; the runner restarts
+  on the merge (Restarting on new code, above). Any other value stops the runner at load, naming
+  the key.
+- **Not yet covered** (issue #77, after #70 and #74): #74's gate doesn't count a running review
+  among the Claude jobs running, and #70 doesn't settle review threads, so they stay in the
+  sidebar until settled by hand.
+
 ## Sol runs tests
 
 `deps.py` (ticket 16). Sol can run a repo's tests while it reviews, mainly to confirm a suspected
@@ -1339,6 +1375,58 @@ bug with a failing test; CI still gates the merge.
   (Windows only) is no finding. leads-dashboard's `src/test/callsling-relay.test.ts` has one
   test that fails on Windows outside any sandbox too (EPERM removing its temp folder).
 
+## Settling threads
+
+`t3_mcp.py` and `t3.settle_quietly` (ticket 70; spec #68). The runner settles the threads it
+started once it's done with them, so they leave Stefan's sidebar. It never settles a thread it
+didn't start: only ids from its own job records.
+
+- **When:** a build, fix or conflict thread once its end is recorded (`Runner.finish`,
+  `finish_fix`, so a dead runner's settle too), whatever the outcome except `waiting`; a decision
+  thread once its answer is read (`Decider.run`), and an Opus fallback review's thread once its
+  reply is read (`fallback.OpusThread`), unless either asked back (exit 2); and at a merge
+  (`Merger.after_merge`: the runner's, Stefan's, or one cut off with its runner), every thread
+  the runner started for the PR (`JobLog.pr_threads`: its builds and fixes, the decisions on it
+  or on one of those jobs, its Opus fallback reviews), the latest point one can still be open:
+  so one that waited, asked back or whose settle failed goes then (review 1's F1). **Not
+  settled:** ask threads, even at a merge (a decision acted on from one carries its id), and jobs
+  waiting on Stefan until their PR merges (a later ticket of #68); live threads. A fallback
+  review cut off with its runner records no thread id, so its thread stays.
+- **A settled thread stays readable:** `thread show` and `thread list` still give it and its
+  messages (checked live 2026-11-16), so decisions and restarts read its last reply as before.
+  **A message to a settled thread unsettles it** (T3's `thread.unsettled` on a new turn,
+  `server.asar`): a retry or a limit's resume in place shows it again, and its own end settles
+  it again.
+- **A failed settle** is said (`<job>: settling its thread <id> in T3 failed (...); left as it
+  is`: one Stefan archived is refused too, and isn't in the sidebar) and never raised: no lane
+  stops on one, and nothing retries it but the merge.
+- **The interface:** `T3Cli` gains `settle` and `rename` (#71's), which go to its `mcp`, a
+  `t3_mcp.T3Mcp` (`cli.main` passes one; with none they raise `T3Error`). Everything else stays
+  on the CLI. `--review` and `--dry-run` get no MCP client and settle nothing.
+
+**The token.** T3's MCP endpoint (`<origin>/mcp`, the origin read from
+`~/.t3/userdata/server-runtime.json` on every call) takes only an MCP client session: subject
+`mcp-client`, a bearer token. Its access is its runtime-mode ceiling, and T3 refuses a write to
+any thread whose mode is above it (`runtime_mode_escalation_denied`). Every runner thread is
+`full-access` (the CLI's own session is). Read in `server.asar` and checked live on 2026-11-16:
+
+- **`t3 auth session issue --subject mcp-client`** (the issue's first plan) makes a session with
+  no ceiling, which T3 reads as `approval-required`: it can read threads, but it **can't settle,
+  rename or send to a runner thread, and can't launch a `full-access` thread**. Not used.
+- **So the runner signs in as an outside MCP client** (`T3Mcp._mint`): `t3 auth pairing create`
+  with the full-access scopes (`orchestration:read`, `orchestration:operate`, `settings:write`,
+  `source-control:write`) for 5 minutes gives a one-time code; then `POST /oauth/mcp/register`
+  (a client named `Queue runner`), `POST /oauth/mcp/decision` with `{_tag: "pairing-code",
+  access: "full-access", code}`, and `POST /oauth/mcp/token` with PKCE. That session is
+  `full-access`, good for 30 days (`MCP_CLIENT_SESSION_TTL`), labelled `Queue runner` in `t3 auth
+  session list`: the access the CLI mints for itself on every `thread` call. **It can launch
+  `full-access` threads** (`t3_thread_launch` with `runtimeMode: full-access`, checked live), so
+  the TypeScript rebuild can use it for everything.
+- **Kept in memory only:** never in a log, a record or a file. One per runner process, minted on
+  the first settle; T3 refusing it (401) mints another, once. After each sign-in the runner
+  revokes its older `Queue runner` sessions, so restarts don't pile them up (a second process,
+  `--once`, then signs the first out, which signs in again on its next settle).
+
 ## T3, as a script sees it
 
 - **The CLI** is `~/.t3/bin/t3.cmd` (`queue_runner/t3.py`), a batch file, so the runner keeps
@@ -1367,13 +1455,8 @@ bug with a failing test; CI still gates the merge.
   is unknown. T3's own cleanup (Settings → storage: `worktreeOnMerge`, off by
   default; and on thread delete) is the alternative. It isn't used, because it would race the
   runner.
-- **Settling a thread: a script can't, so the runner leaves threads unsettled.** The CLI has no
-  settle command. T3 settles through its `thread.settle` orchestration command, which the app
-  and MCP's `t3_thread_organize` send; the CLI reaches T3's MCP endpoint only by minting a session
-  from T3's local auth in-process (`withThreadTools`, `issueMcpClientSession` in
-  `apps/server/dist/binCli-*.mjs`, read 2026-11-10), which a Python script can't do. A thread
-  left unsettled costs nothing: T3's auto-resume is off (Usage limits, above) and its
-  notifications are off.
+- **Settling and renaming a thread** go through T3's MCP endpoint, not the CLI (it has no such
+  command): Settling threads, above.
 - **A usage-limit stop, as T3 shows it** (read 2026-11-10 from `server.asar` and a real stop):
   `thread show --json` gives the thread `status: failed` and Claude Code's message as the last
   assistant message; it has no reset time. `--wait --json` exits 1 with the run's error. The
@@ -1456,7 +1539,9 @@ This runs one real build job, a small Haiku thread, through `Runner.run_build` o
 issue ("Add a line to README") in the sandbox. The sandbox is `~/.queue-runner/sandbox/repo`: T3
 project "queue-runner sandbox", with a bare `../origin.git` as its `origin` and no GitHub. Its
 job log and runner log stay in `~/.queue-runner/sandbox/`. It says how the sandbox's jobs start
-(The effort, above) and its record has the `effort` read back. Before running it again, delete the
+(The effort, above) and its record has the `effort` read back. Its thread is settled at its end
+(Settling threads, above): that signs in to T3's MCP endpoint, which signs a running runner out
+until its next settle. Before running it again, delete the
 `claude/add-a-line-to-1` branch locally and in `origin.git`, or the job is held as
 `branch-exists`.
 
@@ -1488,6 +1573,16 @@ clean without merging, pushes again (the merge pass must not merge, and GitHub m
 old expected head with 409), then reviews the new head clean and lets the Sol lane merge it,
 checking the merge commit and that the worktree and branch are gone. Each run makes a new PR;
 its job log and run folders stay in `~/.queue-runner/live-merge/<time>/`.
+
+```
+python3 scripts/live_mcp.py
+```
+
+This checks the direct MCP client (Settling threads, above) in the "queue-runner sandbox" project
+only, and refuses a served repo; it costs no tokens. It signs in as the runner does, launches an
+idle `full-access` thread, shows a `t3 auth session issue` token refused it, settles it, reads it
+back with `thread show`, renames it, archives it and revokes its own session. Run on 2026-11-16:
+all passed.
 
 ## Tests
 
@@ -1566,6 +1661,13 @@ and `also` held to the sample, and `--once --dry-run`).
 The dashboard: `tests/test_dashboard.py` (control requests, the server on a free port with both
 addresses' `Host` and `Origin`, every sample state, that the page loads nothing from outside
 itself, and `python -m dashboard` started twice on one free port: the start line, exit 3).
+Settling threads: `tests/test_t3_mcp.py` (`T3Mcp` against a fake T3 server: the sign-in, PKCE,
+the older sessions revoked, a refused token minted again once, a failed tool, an event stream, no
+server) and, through the real `Runner` with `FakeT3.settle` (settled threads stay readable; a
+`send` unsettles), each job kind's settle and a failing one in `tests/test_fix.py`,
+`tests/test_conflicts.py`, `tests/test_decisions.py` (a build, its decision, a retry, a waiting
+build, a decision that asked back, a dead runner's build), `tests/test_merge.py` and
+`tests/test_ask_threads.py` (an ask thread is left) and `tests/test_fallback.py`.
 Read and snoozed: `tests/test_read_snoozed.py` (control.json's `asks` read and kept by
 `control.py`, and the snapshot's `read` and `snoozed_until` from `snapshot.build` on the Inbox's
 fixtures); the requests, dropping gone asks and the sample's pretend runner in `test_dashboard.py`.
@@ -1619,7 +1721,8 @@ temp folder.
 ## Layout
 
 - `queue_runner/picker.py`: which ticket is next: open, `ready-for-agent`, every blocker closed
-  (GitHub's native dependencies, or `#N`, `owner/name#N` or issue URLs on a `Blocked by:` line or
+  (GitHub's native dependencies, read from the REST `issue_dependencies_summary.blocked_by`,
+  which counts only open blockers: checked 2026-11-16, #73; or `#N`, `owner/name#N` or issue URLs on a `Blocked by:` line or
   under a `## Blocked by` heading), not already in flight (a `claude/*-<issue>` branch, an open
   PR on one, or an open PR that closes it or that GitHub links to it by hand), not a spec with
   open sub-issues (its children are the work); lowest number first. The job branches `claude/<slug>-<issue>` from
@@ -1628,7 +1731,8 @@ temp folder.
 - `queue_runner/brief.py` and `templates/<kind>.md`: a job's brief, filled from the issue and the
   repo; no handoff files.
 - `queue_runner/github.py`: the GitHub seam and its `gh api` adapter.
-- `queue_runner/t3.py`: the T3 seam and its CLI adapter.
+- `queue_runner/t3.py`: the T3 seam and its CLI adapter; `settle_quietly`.
+- `queue_runner/t3_mcp.py`: T3's MCP endpoint called directly, for settle and rename (ticket 70).
 - `queue_runner/git.py`: local git around a job (fetch, leftover branch, the branch's commits),
   a review's checkout (the PR's head, a detached worktree, diffs), a fix brief's commits and
   files, and removing a job's worktree after its PR merged.
@@ -1690,8 +1794,8 @@ temp folder.
 - `dashboard/`: the dashboard, apart from the runner: `index.html` (the page), `serve.py` (its
   server and the control file), `sample.py` (the snapshot's shape, in every state), `earlier/`
   (the page before each rework, until its look is agreed).
-- `scripts/live_sandbox.py`, `scripts/live_review.py`, `scripts/live_fix_brief.py` and
-  `scripts/live_merge.py`: the live checks.
+- `scripts/live_sandbox.py`, `scripts/live_review.py`, `scripts/live_fix_brief.py`,
+  `scripts/live_merge.py` and `scripts/live_mcp.py`: the live checks.
 - `scripts/make_icon.py`: draws the toast icon, `queue_runner/assets/icon.png`.
 - `scripts/make_shortcut.py`: makes the logon shortcuts, the runner's and the dashboard's
   (`--startup` copies both into the Startup folder); `scripts/live_wake.py`: the wake task's
