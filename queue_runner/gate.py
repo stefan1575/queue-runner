@@ -1,4 +1,4 @@
-"""The usage gate: a Claude job starts only when it fits (`~/.claude/docs/orchestration.md`,
+"""The usage gate: a Claude job starts only when it fits (`~/Code/docs/orchestration.md`,
 Limits). Sol isn't gated.
 
 - **The 5-hour window:** the job's expected cost must fit in what's left of it, or the Claude lane

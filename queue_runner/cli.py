@@ -13,7 +13,7 @@
     python -m queue_runner --pause | --resume # hold Claude jobs back, or let them start again
     python -m queue_runner --reserve PERCENT  # the share of the week kept for Stefan (default 5)
     python -m queue_runner --stop             # stop the running runner (its pid in runner.pid)
-    python -m queue_runner --needs-me         # everything waiting on Stefan: PRs ready to
+    python -m queue_runner --inbox            # everything waiting on Stefan: PRs ready to
                                               # merge, needs-info stops, threads waiting
 """
 import argparse
@@ -448,7 +448,7 @@ def main(argv=None, github=None, out=None, t3=None, git=None, sleep=None,
     parser.add_argument('--reserve', type=float, metavar='PERCENT',
                         help='the share of the week kept for Stefan until 24h before its reset')
     parser.add_argument('--stop', action='store_true', help='stop the running runner')
-    parser.add_argument('--needs-me', action='store_true',
+    parser.add_argument('--inbox', action='store_true',
                         help='list everything waiting on Stefan: PRs ready to merge, '
                              'needs-info stops, threads waiting for an answer')
     parser.add_argument('--config', default=DEFAULT_CONFIG)
@@ -489,8 +489,8 @@ def main(argv=None, github=None, out=None, t3=None, git=None, sleep=None,
     if git is None:
         from .git import GitCli
         git = GitCli()
-    if args.needs_me:   # read only: posts, starts and records nothing
-        from .needs_me import report
+    if args.inbox:   # read only: posts, starts and records nothing
+        from .inbox import report
         print(report(config, github, _jobs(config)), file=out)
         return 0
     if args.dry_run:   # T3 only read: a waiting or failed thread's last messages for a brief

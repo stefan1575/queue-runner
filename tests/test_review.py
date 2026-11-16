@@ -104,6 +104,23 @@ class ReviewerTest(unittest.TestCase):
         self.assertEqual((job.outcome, job.verdict), ('blocking', 'blocking'))
         self.assertEqual(job.run_dir, self.run_dir())
 
+    def test_a_checkout_git_couldnt_delete_is_said_and_one_still_kept_is_said_once(self):
+        """Ticket 45: the review goes on whatever its leftovers; the log says where they are."""
+        r = self.one_pr(sol=FakeSol([reply(), reply()]))
+        wt = os.path.join(self.config.checkouts_dir, 'first-pr20')
+        self.git.moved_aside[wt] = wt + '.stale-20261116-010203'
+        self.git.stale = [wt + '.stale-20261116-000000']
+        pr = full_pr(20, 'claude/red-5', H2, base='claude/base-4')
+        for _ in range(2):
+            r.review(self.repo, pr)
+        self.assertEqual(len(self.sol.briefs), 2)
+        moved = [s for s in self.said if 'moved aside' in s]
+        self.assertEqual(len(moved), 2)
+        self.assertIn('first-pr20.stale-20261116-010203', moved[0])
+        kept = [s for s in self.said if 'stale-20261116-000000' in s]
+        self.assertEqual(len(kept), 1, self.said)
+        self.assertIn("can't be deleted", kept[0])
+
     def test_the_comment_and_verdict_are_in_the_run_folder(self):
         self.one_pr().review_pass()
         comment = self.read('comment.md')

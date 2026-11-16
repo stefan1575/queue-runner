@@ -1,5 +1,5 @@
 """The Sol lane: adopt every open PR without a review on its newest commit, wait for that commit's
-checks, and have Sol review that exact head H (`~/.claude/docs/pr-review.md`, A round, steps 1-3).
+checks, and have Sol review that exact head H (`~/Code/docs/pr-review.md`, A round, steps 1-3).
 
 The verdict comes from Sol's sol-findings ledger (`ledger.decide`). The comment and verdict go to
 the review's run folder, then `post.GitHubPoster` posts them on the PR (ticket 04); `DryRunPoster`
@@ -121,6 +121,7 @@ class Reviewer:
                                toaster=toaster) if poster is None else None
         self._last_why: dict[tuple[str, int], str | None] = {}
         self._said_paused = None
+        self._said_kept: set[str] = set()   # checkouts moved aside that can't be deleted yet
 
     # --- a pass ---------------------------------------------------------------------------
 
@@ -236,6 +237,18 @@ class Reviewer:
 
     # --- a review -------------------------------------------------------------------------
 
+    def _said_moved(self, name: str, moved: str | None) -> None:
+        if moved:
+            self.say(f"{name}: git couldn't delete the checkout, so it was moved aside to {moved}")
+
+    def _sweep(self) -> None:
+        """Deletes the checkouts moved aside, where it can; says once of each it can't."""
+        kept = set(self.git.sweep_stale(self.config.checkouts_dir))
+        for folder in sorted(kept - self._said_kept):
+            self.say(f"{folder} can't be deleted yet: Sol's sandbox user owns folders in it "
+                     f"(AGENTS.md, Sol runs tests). Kept; the next review tries again.")
+        self._said_kept = kept
+
     def review(self, repo: Repo, pr: PullRequest) -> str:
         n, h = pr.number, pr.head_sha
         earlier = read_reviews(self.github.issue_comments(repo, n))
@@ -256,7 +269,8 @@ class Reviewer:
                 self.say(f'{name}: the head moved from {h[:7]} to {fetched[:7]}; next pass')
                 return IDLE
             os.makedirs(self.config.checkouts_dir, exist_ok=True)
-            self.git.checkout(repo.path, ref, wt)
+            self._sweep()
+            self._said_moved(name, self.git.checkout(repo.path, ref, wt))
             prepared = self.deps.prepare(repo.name, wt) if self.deps else None
             if prepared and prepared.how:
                 self.say(f'{name}: dependencies {prepared.how}'
@@ -289,7 +303,7 @@ class Reviewer:
             self.say(f'{name}: review failed, nothing counts: {error}')
             return STARTED
         finally:
-            self.git.remove_checkout(repo.path, wt, ref)
+            self._said_moved(name, self.git.remove_checkout(repo.path, wt, ref))
 
         _write(os.path.join(run_dir, 'comment.md'), d['body'])
         _write(os.path.join(run_dir, 'decision.json'), json.dumps({

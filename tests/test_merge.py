@@ -308,8 +308,8 @@ class StefanMergesTest(unittest.TestCase):
         self.assertEqual(self.labels()[-1], ('unlabel', 20, READY))
         self.assertEqual(self.outcomes(), [])
 
-    def test_a_reply_after_the_mark_takes_it_off_and_needs_me_drops_it(self):
-        from queue_runner.needs_me import ready_prs
+    def test_a_reply_after_the_mark_takes_it_off_and_the_inbox_drops_it(self):
+        from queue_runner.inbox import ready_prs
         self.reviewer().review_pass()
         self.assertEqual(len(ready_prs(self.config, self.gh, self.jobs)[0]), 1)
         self.gh.comments[20].append(Comment('michael', LATER, 'Wait, this breaks the export.'))

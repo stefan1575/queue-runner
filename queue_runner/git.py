@@ -89,21 +89,56 @@ class GitCli:
                   f'+refs/heads/{base}:refs/remotes/origin/{base}'])
         return ref, self._ok(['-C', path, 'rev-parse', ref]).strip()
 
-    def checkout(self, path: str, ref: str, worktree: str) -> None:
-        """A detached worktree at `ref` for Sol to read, made afresh."""
-        self.remove_checkout(path, worktree)
+    def checkout(self, path: str, ref: str, worktree: str) -> str | None:
+        """A detached worktree at `ref` for Sol to read, made afresh. Returns where a leftover
+        at `worktree` was moved aside, if it was (`remove_checkout`)."""
+        moved = self.remove_checkout(path, worktree)
         self._ok(['-C', path, 'worktree', 'add', '--detach', worktree, ref])
+        return moved
 
-    def remove_checkout(self, path: str, worktree: str, ref: str | None = None) -> None:
+    def remove_checkout(self, path: str, worktree: str, ref: str | None = None) -> str | None:
+        """Removes Sol's checkout. A folder git unregistered but couldn't delete (owner-only
+        folders Sol's sandbox user left: AGENTS.md, Sol runs tests) is moved aside to
+        `<worktree>.stale-<time>`, so the next `worktree add` finds the path free; returns where
+        it went, else None. `sweep_stale` deletes it later if it can."""
+        import datetime
         import os
         from .deps import Deps
+        moved = None
         if os.path.exists(worktree):
             # First: git follows the node_modules junction and empties the dependency cache.
             Deps.unlink(worktree)
             self._run(['-C', path, 'worktree', 'remove', '--force', worktree])
+            if os.path.exists(worktree):
+                stamp = f'{worktree}.stale-{datetime.datetime.now():%Y%m%d-%H%M%S}'
+                moved, n = stamp, 1
+                while os.path.exists(moved):
+                    n += 1
+                    moved = f'{stamp}-{n}'
+                os.rename(worktree, moved)
         self._run(['-C', path, 'worktree', 'prune'])
         if ref:
             self._run(['-C', path, 'update-ref', '-d', ref])
+        return moved
+
+    @staticmethod
+    def sweep_stale(checkouts_dir: str) -> list[str]:
+        """Deletes the checkouts `remove_checkout` moved aside, where it can. Returns the ones
+        still there (their owner-only folders can't be deleted by Stefan's account)."""
+        import os
+        import shutil
+        try:
+            names = sorted(os.listdir(checkouts_dir))
+        except FileNotFoundError:
+            return []
+        kept = []
+        for name in names:
+            folder = os.path.join(checkouts_dir, name)
+            if '.stale-' in name and os.path.isdir(folder):
+                shutil.rmtree(folder, ignore_errors=True)
+                if os.path.exists(folder):
+                    kept.append(folder)
+        return kept
 
     def is_ancestor(self, path: str, older: str, newer: str) -> bool:
         """Whether `older` is in `newer`'s history; False for a commit this clone lacks."""

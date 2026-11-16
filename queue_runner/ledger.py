@@ -3,7 +3,7 @@ works out a review's verdict and outcome from Sol's sol-findings block, never fr
 
 Ported from `~/sol-pr-review.py` (`decide()`, the marker and block parsing) without its labels,
 spend guard, token counts or session forks. leads-dashboard's `docs/agents/review-loop.md` and
-`REVIEW.md` define the words; `~/.claude/docs/pr-review.md` the loop.
+`REVIEW.md` define the words; `~/Code/docs/pr-review.md` the loop.
 
 A PR's state lives in its review comments. The newest one holds every finding raised so far, each
 with a status, so a review reads only the newest. Three formats are read:

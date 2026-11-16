@@ -1,0 +1,98 @@
+@import "tailwindcss";
+
+/* PROTOTYPE (throwaway): the queue runner's dashboard on fake data.
+   Colour is state, never decoration:
+     blue  = needs you        amber = working        red = broken
+     green = healthy / done   grey  = idle or waiting
+   Brand colour (Claude's clay, OpenAI's monochrome) appears only on the provider's own mark and
+   name, so it never reads as a state. */
+
+@theme {
+  --font-sans: "Atkinson Hyperlegible Next", ui-sans-serif, system-ui, "Segoe UI", sans-serif;
+  --font-mono: "Atkinson Hyperlegible Mono", ui-monospace, monospace;
+  --font-claude: "Source Serif 4", Georgia, serif;
+  --font-openai: "Inter Tight", ui-sans-serif, sans-serif;
+
+  --color-page: var(--c-page);
+  --color-side: var(--c-side);
+  --color-surface: var(--c-surface);
+  --color-sunk: var(--c-sunk);
+  --color-ink: var(--c-ink);
+  --color-ink-2: var(--c-ink-2);
+  --color-mute: var(--c-mute);
+  --color-faint: var(--c-faint);
+  --color-line: var(--c-line);
+  --color-line-2: var(--c-line-2);
+  --color-accent: var(--c-ink);
+
+  /* who: brand marks only */
+  --color-claude: var(--c-claude);
+  --color-openai: var(--c-openai);
+  --color-builder: var(--c-claude);
+  --color-builder-soft: var(--c-claude-soft);
+  --color-reviewer: var(--c-openai);
+  --color-reviewer-soft: var(--c-sunk);
+
+  /* states */
+  --color-you: var(--c-you);
+  --color-you-soft: var(--c-you-soft);
+  --color-you-line: var(--c-you-line);
+  --color-run: var(--c-run);
+  --color-run-soft: var(--c-run-soft);
+  --color-ok: var(--c-ok);
+  --color-ok-soft: var(--c-ok-soft);
+  --color-warn: var(--c-run);
+  --color-warn-soft: var(--c-run-soft);
+  --color-bad: var(--c-bad);
+  --color-bad-soft: var(--c-bad-soft);
+}
+
+:root {
+  --c-page: #f4f5f7; --c-side: #eaecf0; --c-surface: #ffffff; --c-sunk: #eef0f3;
+  --c-ink: #14171c; --c-ink-2: #353b45; --c-mute: #5f6773; --c-faint: #939aa5;
+  --c-line: #dcdfe5; --c-line-2: #eaecf0;
+  --c-claude: #d97757; --c-claude-soft: #f9e9e2; --c-openai: #14171c;
+  --c-you: #2259d6; --c-you-soft: #e6eefc; --c-you-line: #b9cdf5;
+  --c-run: #b37800; --c-run-soft: #fbf1d9;
+  --c-ok: #1d7f4c; --c-ok-soft: #e1f3e8;
+  --c-bad: #c0352b; --c-bad-soft: #fce8e6;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --c-page: #121418; --c-side: #0c0d10; --c-surface: #1a1d22; --c-sunk: #22262d;
+    --c-ink: #eceef2; --c-ink-2: #c6cad2; --c-mute: #969ca7; --c-faint: #687079;
+    --c-line: #2b3038; --c-line-2: #23272e;
+    --c-claude: #e08a6b; --c-claude-soft: #3a2620; --c-openai: #eceef2;
+    --c-you: #7aa7ff; --c-you-soft: #1b2843; --c-you-line: #2f4675;
+    --c-run: #f0b43c; --c-run-soft: #3a2d10;
+    --c-ok: #55cf8c; --c-ok-soft: #15301f;
+    --c-bad: #ff7d70; --c-bad-soft: #3c1a17;
+    color-scheme: dark;
+  }
+}
+
+html, body, #root { height: 100%; }
+body {
+  margin: 0;
+  background: var(--c-page);
+  color: var(--c-ink);
+  font-family: var(--font-sans);
+  font-size: 16px;
+  line-height: 1.45;
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* In the base layer so a utility (outline-none on the switcher's search box) can override it.
+   Unlayered, it beat every utility: that was the switcher's oversized focus ring. */
+@layer base {
+  :focus-visible { outline: 2px solid var(--c-you); outline-offset: 2px; border-radius: 4px; }
+}
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+
+@keyframes pulse-ring { 0% { box-shadow: 0 0 0 0 currentColor; } 70% { box-shadow: 0 0 0 5px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
+.live-dot { animation: pulse-ring 2s ease-out infinite; }
+@keyframes slide-in { from { transform: translateX(16px); opacity: 0; } to { transform: none; opacity: 1; } }
+.sheet-in { animation: slide-in 160ms ease-out; }
+@keyframes slide-in-left { from { transform: translateX(-16px); opacity: 0; } to { transform: none; opacity: 1; } }
+.sheet-in-left { animation: slide-in-left 160ms ease-out; }

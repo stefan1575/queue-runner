@@ -2,10 +2,13 @@
 
 A script with no AI in it that runs Stefan's fixed build-and-review flow and starts fresh T3 Code
 threads only for work that needs Claude or Sol. The design and its rules live outside this repo:
-`~/.claude/docs/orchestration.md`, `~/.claude/docs/pr-review.md` and `~/.claude/docs/sol.md`. The
-spec and the tickets that build it are in this repo's `.scratch/queue-runner/` (`spec.md`,
-`issues/NN-*.md`; moved from personal-ops on 2026-11-10). The tracker's conventions are
-`docs/agents/issue-tracker.md` and `docs/agents/triage-labels.md`.
+`~/Code/docs/orchestration.md`, `~/Code/docs/pr-review.md` and `~/Code/docs/sol.md`. The
+spec and the tickets that build it are GitHub issues: the spec is #8, the dashboard's runner
+side #9 (under ticket 18, #27), each ticket a sub-issue with native blocked-by links. They were
+local markdown in `.scratch/queue-runner/` until 2026-11-16 (moved from personal-ops on
+2026-11-10). **A ticket number in this file or a commit is the local one: ticket NN is issue
+#(NN+9)**, and #8 has the table. The tracker's conventions are `docs/agents/issue-tracker.md`
+and `docs/agents/triage-labels.md`.
 
 **On GitHub as the private `stefan1575/queue-runner`** (Stefan, 2026-11-10; it was local-only
 before). Commit after every completed step, with a message that says what changed and why.
@@ -22,7 +25,7 @@ python3 -m queue_runner --gate                # Claude's usage now, and whether 
 python3 -m queue_runner --pause | --resume    # Stefan's knob: start no Claude job, or start them again
 python3 -m queue_runner --reserve PERCENT     # the share of the week kept for Stefan (default 5)
 python3 -m queue_runner --stop                # stop the running runner
-python3 -m queue_runner --needs-me            # everything waiting on Stefan: PRs ready to merge, needs-info stops, threads waiting for his answer
+python3 -m queue_runner --inbox               # everything waiting on Stefan: PRs ready to merge, needs-info stops, threads waiting for his answer
 ```
 
 **`--once`, the bare command and `--review` start real Claude builds, fix rounds and decision
@@ -453,7 +456,7 @@ since 2026-11-10) isn't merged by the runner; `merge = "runner"` (the default) i
   unmerged, it's `unmarked` and the label goes (so a reopened PR isn't left ready). The live steps then read the merge from git as for any merge (a
   merge commit or a squash's `(#N)`; **a rebase merge names no PR**, so its commits wait for the
   next PR's batch).
-- **`--needs-me`** (`needs_me.py`, read only): the PRs ready to merge (the re-check passes now,
+- **`--inbox`** (`inbox.py`, read only; `--needs-me` until 2026-11-15): the PRs ready to merge (the re-check passes now,
   as the merge pass reads it), the `needs-info` stops filed and not answered or released,
   the builds a decision left to Stefan (until `--release`), and the threads waiting for his
   answer (a decision's `stop` on a waiting job), with their links; `Nothing waits on you.` when
@@ -484,7 +487,7 @@ tickets as markdown, `.scratch/<feature>/issues/NN-<slug>.md` (its
 
 ## A Sol pass
 
-The review loop's rules are `~/.claude/docs/pr-review.md`; leads-dashboard's
+The review loop's rules are `~/Code/docs/pr-review.md`; leads-dashboard's
 `docs/agents/review-loop.md` and `REVIEW.md` define the words.
 
 1. **Settle.** Under `sol.lock`, a review the log shows open was cut off with its runner: it
@@ -538,7 +541,7 @@ The review loop's rules are `~/.claude/docs/pr-review.md`; leads-dashboard's
    tables, notes, a visible `sol-findings` ledger of the PR's whole state, and the old script's
    hidden marker) and `decision.json` (verdict, outcome, signals, the `sol-review` status,
    follow-up issues).
-8. **Post** (`post.GitHubPoster`; automated posts need no go-ahead, `~/.claude/CLAUDE.md`). In
+8. **Post** (`post.GitHubPoster`; automated posts need no go-ahead, `~/Code/global/CLAUDE.md`). In
    order: each new Pre-existing finding as a `needs-triage` issue, with a hidden
    `<!-- sol-finding owner/name#N ID -->` line (an open issue with that line, the old script's
    footer for the PR and ID, or the same title is linked instead of filed again); the comment,
@@ -570,7 +573,7 @@ reviewed), `failed`, `out-of-usage` and `head-moved` (nothing counts).
 
 ## Stops for Stefan
 
-`stops.py` (`~/.claude/docs/pr-review.md`, Stops). Each Sol pass, for every open PR (not one a Claude job
+`stops.py` (`~/Code/docs/pr-review.md`, Stops). Each Sol pass, for every open PR (not one a Claude job
 is writing to), the runner looks for stops on its head H, and
 files each kind once per H (`JobLog.stopped`). The kinds: `review` (the runner's review of H
 stopped: a repeated class, a reopened finding, a kept decline; the reason is decide()'s text from
@@ -620,9 +623,168 @@ attention (input, approval, usage limit, failure), for all threads not archived 
 thread whose run Stefan stopped skips the completion one. There's no setting to limit them to
 threads that need Stefan, so the runner toasts instead.
 
+## The dashboard
+
+`dashboard/` (ticket 18; Stefan, 2026-11-15). **Three pages do three jobs** (Stefan, 2026-11-15,
+after four takes that put everything on one page): **Overview** is the first glance, **Inbox** is
+what waits on him ("Needs you" before; the name is his), **Queue** is the work. Activity, Usage
+and Settings follow. **The Inbox is agreed** (Stefan, 2026-11-15, after takes 5 to 7, kept in
+`dashboard/earlier/`). **The Overview on the page is a first take that Stefan didn't take to**
+(ticket 20: three cards, below; "way far off on what I want, or I don't actually know what I
+want"). **What's next, in order** (Stefan: "Queue, Inbox, then Overview, because Overview
+represents the data where it's from"): the Queue page (ticket 21), **built as three variants
+switched with `?variant=a|b|c`, waiting for Stefan to judge them** (The Queue page, below);
+then, if it's still needed, a grill on what the Overview is for (ticket 25); then the Overview
+again (ticket 20), also as variants. Its frame is the one Stefan asked
+for in the prototype rounds: a sidebar for getting around (the repository switcher and the
+pages), one centred column, and the machine's readings floating on the right, in his order:
+usage, the build order, then the runner's status. **It is its own process and depends on nothing:** no build step, no
+package, no network, no runner code, no T3, no GitHub. One HTML file, served by Python's standard
+library.
+
+```
+python3 -m dashboard             # the runner's snapshot, http://127.0.0.1:5289/
+python3 -m dashboard --sample    # sample data, no runner needed; ?sample=<state> picks a state
+```
+
+- **Two files are the whole contract,** both in the state folder (`--state-dir`, default
+  `~/.queue-runner/state`). `snapshot.json`: the runner writes it whole, the page reads it.
+  `control.json`: the page writes it whole, the runner reads it. **The runner writes neither yet**
+  (ticket 18's remaining boxes), so today only `--sample` shows anything.
+- **The snapshot's shape is what `dashboard/sample.py` builds** (version 1): `written_at` and
+  `write_every` (a snapshot older than three times that, or 90 seconds, means the runner has
+  gone quiet: the page says so, greys the health readings and takes the controls away),
+  `control_read_at`, `sources` (health; `short` is the name beside its dot, `group` sorts them
+  on the page: `provider`, `local` or `external`), `repos` in build
+  order, `asks` (below), `answered` (asks Stefan has answered that the runner hasn't acted on
+  yet: an ask plus `answered`: `at`, `said`, `next`; not counted as waiting on him), `lanes` (each with its `queue`, what it takes up next, in order, across
+  repositories, a job a limit cut off first, and for the reviewing lane the PRs waiting for their review; `queue_empty` says why there's none), `usage`, `features` (in build order: the repos'
+  order, then the feature whose first open ticket has the lowest number, a finished one last; each with `tickets`, its
+  tickets' `repo#n` keys in the order they're built: what has started first, furthest along first, then a blocker
+  before what it blocks, lowest number first, one not marked ready last), `issues` (with `pick`, the order ready work is
+  built in, and `state`: `done` only once it's live, `merged` while it's merged and its live
+  steps haven't run, `review` and `fixing` in a PR, `building`, `you`, `ready`, `blocked`,
+  `not-ready`), `prs` (each with its timeline by head), `activity` (what happened, newest first),
+  `costs` (what the gate expects each kind of Claude job to take), `roles` (which lane does each
+  kind of job) and `knob` (`gate.json`). A lane and a plan name their `provider` (`claude`,
+  `chatgpt`), which picks the mark beside the name; the reviewing lane's id stays `sol`. Times
+  are ISO strings; the page formats them. `sample.STATES` names every state the page has to show.
+- **Control** (`serve.apply_control`): `POST /control` takes `{"lane", "stop"}` (`"after-job"`,
+  `"now"` or null to carry on) or `{"repo_order": [...]}`, and anything else is refused. The page
+  shows a request as asked until `control_read_at` reaches its time.
+- **Only this PC:** it binds 127.0.0.1, and refuses a request whose `Host` isn't its own address
+  or whose `Origin` is another site's, so a web page elsewhere can't stop a lane.
+- **An ask is written to be picked up cold** (Stefan: he may come back a week later with the
+  context gone). `kind` says why it came to him: `stuck` (the runner tried and couldn't get it
+  through), `decision` (a product decision is his), `merge` (ready, his to merge) or `broken`
+  (something failed). Then `situation` (it in one sentence), `about` (what the work is),
+  `because` (the specifics), `timeline` (what has happened, oldest first: each step's `at` and
+  a whole sentence as `text`; Stefan found fragments too short to read), `question`, `options`,
+  `holds_up` and `go` (where it's answered: `label`, `url`, and `where`, `t3` or `github`, which
+  picks the mark on the button). The runner lists asks in the order they're worth taking.
+- **How it looks** is explained at the top of `dashboard/index.html`. **The Inbox reads like a
+  mail client:** the list down the left for the page's whole height, in the runner's order,
+  with the sidebar's Inbox entry carrying the count. **A row reads like a thread in T3's
+  sidebar** (Stefan): the repository's mark and name on top with the tag (Stuck, Ready to
+  merge, Your decision, Broken; each with its icon) and the age, then the subject and the
+  situation in a sentence. The mark is the repository's first letter on a plain tile until the
+  snapshot carries a favicon. **The briefing is layout C** (Stefan's pick): the situation as
+  the headline and the story as a timeline down the left (what it is, the specifics, each step
+  with its time), and the one blue panel standing on the right: what it needs from him, the
+  options, what it holds up and the link it's answered at. **Two groups at the list's foot,
+  each folding to one line** (remembered in the browser): Snoozed, and Decided, which holds an
+  ask he has answered until the runner is through with it, tagged "Runner's turn" until a
+  lane's job is on it (same repo and ref or PR) and "Working", pulsing amber, while one is. So
+  "handled" and "still held" can be told apart. The up and down arrow keys walk the list. The Inbox
+  takes all the width there is (Stefan, 2026-11-15; the other pages keep their 1120px column),
+  its briefing keeps a readable measure inside that, and under 2000px its right panel steps
+  aside behind the Usage button. A decided ask's line says what he said and what the runner
+  is doing with it ("You said "fix on". Claude is fixing PR #209, 4 min in."). A lane has one
+  Stop button, which asks which stop is meant while a job runs.
+- **The Overview only summarises, in three cards read top to bottom** (ticket 20, proposed and not agreed;
+  `overview()` in `dashboard/index.html`). **Inbox** (`plate()`): blue while something waits.
+  The count in the Inbox's own words ("3 waiting on you", unread, oldest), a row per kind with
+  a cell per ask (Stuck, Your decision, Ready to merge, Broken; a kind's row opens the Inbox at
+  its first ask), and "First in line": the ask the runner lists first, its situation in a
+  sentence, which opens that ask. With nothing waiting the card is plain and says so.
+  **Running now** (`running()`, `lane()`, `stopButton()`): a line per lane: what it's doing and
+  for how long, or why it isn't, its Stop button, and **the one thing it takes up next** with
+  "then N more" opening the Queue. A lane's whole queue belongs to the Queue page (ticket 21);
+  its old markup is in `dashboard/earlier/take-8.html`. **Progress** (`progress()`): the first
+  three features with open work, in the snapshot's order, each with its bar, the one ticket
+  that says where it stands (what waits on him first, which opens that ask; else the next
+  ready one; else what's moving) and "N of M done". A line under them counts the features and
+  the featureless tickets it doesn't show. Each card's head opens its page; Running now has no
+  page of its own.
+- **The Queue page is a prototype in three variants** (ticket 21; `queue()` in
+  `dashboard/index.html`, sample data only, none agreed). `?page=queue&variant=a|b|c`; the pill
+  over the sidebar's foot and the left and right arrow keys turn between them (the pill shows
+  with `--sample` only), and the last one looked at is remembered in the browser. **A, features
+  first** (`queueA`): a card per feature in build order, with its bar, what's left in a sentence
+  ("4 to go: 2 wait on you, 1 merged but not live, 1 blocked.") and its tickets as rows in the
+  order they're built; a chip or a feature's name narrows the page to it (`?feature=<id>`,
+  `none` for the work that belongs to no feature); "What blocks what" draws the same scope as
+  the pyramid; each lane's queue is the last card. **B, the page you land on** (`queueB`):
+  three bands, what waits on him (a tile per ask, opening it in the Inbox), what's running
+  (each lane with its Stop button and its whole queue), then the features folded to a line
+  each, which unfolds to the ticket rows. **C, tracks** (`queueC`): every row runs left to
+  right; a lane's row is what it's on and then its queue, numbered; a feature's row is its
+  tickets one after another, the cells along its top being its bar, ending in "Usable";
+  picking a ticket lights up what it waits on and what it holds up in every row. All three
+  read `queueModel()` (each feature's tickets in the snapshot's order, each ticket's place in
+  a lane's queue, the lane on it now) and `standing(ticket)` (its state's word and what comes
+  next for it: "3rd in Claude's queue", "After #226"). Work with no feature is shown as a
+  feature of its own, "No feature", without an end; a finished feature says "Usable". A
+  ticket that waits on him carries the Inbox's own tag and opens its ask. **Reordering
+  features or tickets from the page is not built: it's Stefan's to decide** (a new control
+  the runner would have to obey). Once he picks, fold the winner in, and move the other
+  variants and the pill to a throwaway branch (the `prototype` skill).
+- **A feature's bar** on the Overview is `featureBar(feature)`; the Queue's is
+  `ticketBar(title, tickets)`, the same cells in the order given: a cell per ticket, named on hover, in `SEGMENTS`' order: done (live), merged but
+  not live, in a PR, building, waiting on him, ready, blocked (`not-ready` counts as blocked).
+  Colour is the state's family and a hatched cell is the earlier step in it: green solid is
+  done and green hatched merged, amber solid is in a PR and amber hatched building, blue is
+  his, an outline is ready, a faint cell blocked. `--run-fill` is the amber for a cell (the
+  text amber is too dark to fill with in light mode).
+- **Read and snoozed** (Stefan, 2026-11-15: "like an IRL inbox"): an ask he hasn't opened is
+  unread (a dot, bold); opening it reads it, and Mark unread puts it back. Snooze takes an ask
+  out of the list and the count until a time he picks (3 hours, tomorrow 9:00, next Monday
+  9:00); it sits in the Snoozed group, still holding its work up, and its row's Unsnooze
+  button (or the briefing's) undoes it. Choosing the snooze times in Settings is pinned (ticket 24).
+  **Both live in the browser's localStorage while the page is a prototype**, so Firefox and
+  Chrome disagree; the real ones go through `control.json` (not built), so every browser agrees
+  and the runner can hold a snoozed ask's toast.
+- **A point in time is written whole** (Stefan, 2026-11-15): `stamp()` gives "November 15, 2026
+  Sunday 1:14pm", for when an ask began waiting, a usage window's reset, the runner's start and
+  a snooze's end. A list row keeps the short age ("2 h") with the whole time on hover. Choosing
+  the format is pinned (ticket 22).
+- **The runner's status lists its sources by group,** in his order: Providers (Claude, ChatGPT),
+  Local (T3 Code, Stop now), External (GitHub).
+  Nothing on the page moves by itself (Stefan). Colour is state only: blue is Stefan's, amber
+  is working, green is done or healthy, red is broken; a usage bar turns amber from 85% and red
+  at the limit, and its blue end is the share kept for him; Claude's clay and OpenAI's black or
+  white are on their marks and names only (the marks are Simple Icons', CC0, inline). Fonts are
+  ones Windows ships (Segoe UI Variable, Sitka for an ask's question, Cascadia Mono), 16px and up.
+- **Stop all** (the top bar) is one `{"lane", "stop"}` request per lane; a lane whose Stop now is
+  unavailable is asked to stop after its job instead.
+- `?page=inbox|queue|activity|usage|settings` (none is the Overview), `?ask=<id>` (the ask open
+  in the Inbox), `?repo=<name>` (the switcher's choice, which narrows every page),
+  `?variant=a|b|c` and `?feature=<id>` (the Queue's arrangement, and the feature A is narrowed
+  to), `?view=pyramid` and `?pr=<repo>:<n>` open the page there.
+- **Earlier takes, while the look is being agreed:** `dashboard/earlier/take-N.html` is the page
+  as it was before a rework, served at `/earlier/take-N.html` with `--sample` only and linked
+  from the sidebar's sample menu (`sample.EARLIER`). Before reworking the page again, copy it
+  there as the next take (take 8 is the page before the Overview was built, take 9 the page
+  before the Queue was), add it to
+  `sample.EARLIER` and to the route's test. Delete the folder, its route and its test once
+  Stefan agrees the page.
+- **A dashboard started before a change to `sample.py` keeps serving the old sample** (the page
+  itself is read afresh on every request). Stop it and start it again, or use `--port`.
+- The earlier React prototype is `.scratch/queue-runner/prototype-app/` (history only).
+
 ## Sol, as a script sees it
 
-- **Sol runs through `~/codex-sol.sh`, not a T3 thread** (`queue_runner/sol.py`). Checked
+- **Sol runs through `~/Code/tools/codex-sol/codex-sol.sh`, not a T3 thread** (`queue_runner/sol.py`). Checked
   2026-11-09: a thread from `t3 thread start --provider codex --model gpt-6.1-sol` ran at effort
   **low**: its rollout (`~/.codex/sessions/2026/11/09/rollout-2026-11-09T19-36-32-*.jsonl`) has
   a `configuration_update` record with `reasoning.effort: "low"`, though `~/.codex/config.toml`
@@ -663,6 +825,20 @@ bug with a failing test; CI still gates the merge.
 - **The sandbox user reads the cache through `~/.queue-runner`'s inherited ACL**
   (`CodexSandboxUsers` RX). An install folder made with `tempfile.mkdtemp` gets an owner-only ACL
   on Windows and can't be read (vitest "not recognized", EPERM on stat), so it's `os.makedirs`.
+- **Temp folders Sol's tests leave can't be deleted by Stefan** (ticket 45, 2026-11-16). Codex's
+  sandbox has no writable `%TEMP%`, so Sol sets `TEMP` to `<checkout>/.review-tmp` itself; a
+  folder made there with `mkdtemp` is owner-only, owned by the sandbox user, and Stefan's account
+  can neither delete it nor take it over without admin. `git worktree remove --force` then
+  unregisters the checkout but leaves its folder, and the next review's `worktree add` refused
+  the path (PR #4's and PR #6's failed reviews). So: **this repo's tests clean up every temp
+  folder they make** (`TemporaryDirectory` with `addCleanup`; `tests/test_no_temp_leftovers.py`
+  fails on a bare `mkdtemp(`), and a checkout git can't delete is moved aside to
+  `<checkout>.stale-<time>` (`GitCli.remove_checkout`, also at the next `checkout`), so the
+  review goes on. Before each checkout `GitCli.sweep_stale` deletes the folders moved aside
+  where it can; the log says once of each it can't. Pointing Sol's `TEMP` elsewhere wouldn't
+  help: a folder the sandbox user makes is owner-only wherever it is. Clearing one by hand needs
+  an elevated shell: `takeown /f <folder> /r /d y`, `icacls <folder> /grant Anon:(OI)(CI)F /t`,
+  then delete it.
 - **The brief** (step 4, `review._tests`) tells Sol what it can run: `npm test`, a failing test it
   adds, each command named with its summary line quoted; a failure the change doesn't explain
   (Windows only) is no finding. leads-dashboard's `src/test/callsling-relay.test.ts` has one
@@ -774,7 +950,7 @@ network: GitHub is the `GhCli` adapter in `queue_runner/github.py`, faked in tes
 (`tests/test_run.py`). The Sol lane is tested against `FakeGitHubForReviews` (every write goes to its `posts`, in
 order; a call named in `fail` raises), `FakeReviewGit` and `FakeSol` (`tests/test_review.py`); `decide()` and the marker formats in
 `tests/test_ledger.py`; the codex-sol.sh adapter in `tests/test_sol.py`; dependencies in `tests/test_deps.py` (a
-fake install) and the junction kept on removal in `tests/test_git.py`. Stops and toasts are in `tests/test_stops.py` (a fake toaster). Merging
+fake install) and the junction kept on removal and a checkout git can't delete (a deny-delete ACL) in `tests/test_git.py`. Stops and toasts are in `tests/test_stops.py` (a fake toaster). Merging
 (`tests/test_merge.py`) plays GitHub moving on through `FakeGitHubForReviews.now` (a PR's fields
 now), `threads` and `push_before_merge`; fix rounds (`tests/test_fix.py`) run the real `Runner`
 with a T3 fake whose thread pushes; `AdoptedReviewTest` runs them all again with a cutover
@@ -798,14 +974,16 @@ Live steps: `tests/test_live.py` (the answer block, the batch from `FakeLiveGit`
 each outcome and its stop, a restart through the real `Runner`); `GitCli`'s first-parent log and
 changed files in `tests/test_git.py`.
 Stefan merges: `StefanMergesTest` in `tests/test_merge.py` (marked once, unmarked on a new head
-or a stop, his merge noticed once, a closed PR, a failed label) and `tests/test_needs_me.py`
-(`--needs-me` through `main`, and the `merge` setting).
+or a stop, his merge noticed once, a closed PR, a failed label) and `tests/test_inbox.py`
+(`--inbox` through `main`, and the `merge` setting).
 Serving itself: `tests/test_restart.py` (`SelfUpdate` on a real checkout with a bare origin,
 `relaunch` with a fake process and toaster, the loop through `main`).
 Running unattended: `tests/test_wake.py` (`Waker` against `FakeScheduler` in `fakes.py`, the
 task XML, `Schtasks` on canned calls, `wall_sleep`, a second start, waiting for T3, `--stop`
 with a fake kill); every test that runs `main` continuously passes a waker, so none touches the
 real Task Scheduler.
+The dashboard: `tests/test_dashboard.py` (control requests, the server on a free port, every
+sample state, and that the page loads nothing from outside itself).
 `tests/test_git.py` runs `GitCli` on a real local repo in a
 temp folder.
 
@@ -836,7 +1014,7 @@ temp folder.
   land, the brief, the answer and its stops.
 - `queue_runner/merge.py`: the pre-merge re-check, the expected-head merge and the worktrees
   removed after; in a repo Stefan merges, the `ready-for-stefan` mark and noticing his merge.
-- `queue_runner/needs_me.py`: `--needs-me`, everything waiting on Stefan. A fix round's local branch name (`fix_branch`) is `fix.py`'s.
+- `queue_runner/inbox.py`: `--inbox`, everything waiting on Stefan. A fix round's local branch name (`fix_branch`) is `fix.py`'s.
 - `queue_runner/review.py` and `templates/review.md`: the Sol lane: adoption, the brief, a review.
 - `queue_runner/ledger.py`: earlier reviews from a PR's comments, and `decide()`.
 - `queue_runner/stops.py`: stops for Stefan: which, the `needs-info` issue, the PR comment, the
@@ -855,6 +1033,9 @@ temp folder.
 - `queue_runner/wake.py`: the wake tasks: `Waker.sync` and the `schtasks` adapter.
 - `queue_runner/restart.py`: restarting on its own new code after main moves (ticket 14).
 - `queue_runner/cli.py`: the command line.
+- `dashboard/`: the dashboard, apart from the runner: `index.html` (the page), `serve.py` (its
+  server and the control file), `sample.py` (the snapshot's shape, in every state), `earlier/`
+  (the page before each rework, until its look is agreed).
 - `scripts/live_sandbox.py`, `scripts/live_review.py`, `scripts/live_fix_brief.py` and
   `scripts/live_merge.py`: the live checks.
 - `scripts/make_icon.py`: draws the toast icon, `queue_runner/assets/icon.png`.

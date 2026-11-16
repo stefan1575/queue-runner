@@ -46,7 +46,7 @@ class Config:
     runs_dir: str = ''        # a review's run folder: brief, inputs, reply, would-be comment
     checkouts_dir: str = ''   # Sol's detached checkout of the PR's head, removed after
     deps_dir: str = ''        # node_modules per lockfile, linked into Sol's checkout (ticket 16)
-    sol_script: str = ''      # ~/codex-sol.sh
+    sol_script: str = ''      # ~/Code/tools/codex-sol/codex-sol.sh
     sol_bash: str = ''        # Git's bash, which runs it
     # The runner's cutover (issue 3): a blocking review it didn't run, posted on GitHub before
     # this date (GitHub's UTC time, `YYYY-MM-DD`), counts as its own for the fix lane. '' adopts
