@@ -220,6 +220,41 @@ class MergeTest(unittest.TestCase):
         self.assertEqual(self.merges(), [(20, H2)])
         self.assertEqual(t3.settles, ['mcp:build', 'mcp:fix'])
 
+    def test_the_prs_decision_and_fallback_review_threads_are_settled_after_it_merges(self):
+        """Review 1's F1: a decision thread that asked back, one whose settle failed, and an Opus
+        fallback review thread that asked are left at their end; the merge settles them. Ask
+        threads (a decision acted on from one carries its id) stay, as everywhere."""
+        t3 = FakeT3()
+        build = self.jobs.started(kind='build', repo='first', issue=5, branch='claude/red-5',
+                                  title='Queue runner build: first#5')
+        self.jobs.ended(build.id, exit_code=1, outcome='failed', thread_id='mcp:build')
+        on_build = self.jobs.started(kind='decision', repo='first', issue=5, branch=None,
+                                     title='Queue runner decision: first#5', about=build.id,
+                                     question='failed')
+        self.jobs.ended(on_build.id, exit_code=0, outcome='retry', thread_id='mcp:dec5')
+        on_pr = self.jobs.started(kind='decision', repo='first', issue=20, branch=None,
+                                  title='Queue runner decision: first#20', sha=H3,
+                                  question='reply')
+        self.jobs.ended(on_pr.id, exit_code=2, outcome='stop', thread_id='mcp:dec')
+        review = self.jobs.started(kind='review', repo='first', issue=20, branch='claude/red-5',
+                                   title='Queue runner review: first#20', sha=H3,
+                                   reviewer='opus-fallback')
+        self.jobs.ended(review.id, exit_code=None, outcome='failed', thread_id='mcp:review')
+        ask = self.jobs.started(kind='ask', repo='first', issue=20, branch=None,
+                                title='Queue runner ask: first#20', sha=H3, question='reply')
+        self.jobs.ended(ask.id, exit_code=None, outcome='opened', thread_id='mcp:ask')
+        from_ask = self.jobs.started(kind='decision', repo='first', issue=20, branch=None,
+                                     title='Queue runner ask: first#20', sha=H3,
+                                     question='reply')
+        self.jobs.ended(from_ask.id, exit_code=0, outcome='carry-on', thread_id='mcp:ask')
+        elsewhere = self.jobs.started(kind='decision', repo='first', issue=21, branch=None,
+                                      title='Queue runner decision: first#21', question='reply')
+        self.jobs.ended(elsewhere.id, exit_code=2, outcome='stop', thread_id='mcp:dec21')
+        Reviewer(self.config, github=self.gh, git=self.git, sol=FakeSol([reply()]),
+                 jobs=self.jobs, say=self.said.append, now=lambda: NOW, t3=t3).review_pass()
+        self.assertEqual(self.merges(), [(20, H2)])
+        self.assertEqual(t3.settles, ['mcp:build', 'mcp:dec5', 'mcp:dec', 'mcp:review'])
+
     def test_a_merge_whose_settle_fails_is_still_merged(self):
         from queue_runner.t3 import T3Error
         t3 = FakeT3()

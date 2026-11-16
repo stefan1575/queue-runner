@@ -271,6 +271,26 @@ class JobLog:
         return [j for j in self.jobs() if j.repo == repo and (
             (j.kind == 'build' and j.branch == branch) or (j.kind == 'fix' and j.issue == number))]
 
+    def pr_threads(self, repo: str, number: int, branch: str) -> list[str]:
+        """The T3 threads the runner started for a PR, oldest first, each once (ticket 70's
+        settle at its merge): its build and fix threads, the decisions on it or on one of
+        those jobs (a failed build's, before the PR existed), and its Opus fallback reviews.
+        Never an ask thread, which stays Stefan's (a decision acted on from one carries its
+        id), nor a live run's, which isn't the PR's."""
+        jobs = self.jobs()
+        writers = self.pr_jobs(repo, number, branch)
+        ids = {j.id for j in writers}
+        asks = {j.thread_id for j in jobs if j.kind == 'ask' and j.repo == repo}
+        mine = [j for j in jobs if j.repo == repo and (
+            j.id in ids
+            or (j.kind == 'decision' and (j.issue == number or j.about in ids))
+            or (j.kind == 'review' and j.issue == number))]
+        out = []
+        for j in mine:
+            if j.thread_id and j.thread_id not in asks and j.thread_id not in out:
+                out.append(j.thread_id)
+        return out
+
     def writer(self, repo: str, branch: str) -> Job | None:
         """A Claude job that is writing to this branch, or may again: a build or fix still
         open, waiting for an answer, or cut off by a usage limit and not yet recovered (until

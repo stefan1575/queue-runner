@@ -295,14 +295,12 @@ class Merger:
         self.settle_threads(repo, pr)
 
     def settle_threads(self, repo, pr) -> None:
-        """The threads of the PR's build and fix jobs, settled once it merged: the latest point
-        one of them can still be open (ticket 70). Each was settled when its end was recorded,
-        unless that failed; settling one again changes nothing."""
-        done = set()
-        for j in self.jobs.pr_jobs(repo.name, pr.number, pr.branch):
-            if j.thread_id and j.thread_id not in done:
-                done.add(j.thread_id)
-                settle_quietly(self.t3, j.thread_id, f'merge {repo.name}#{pr.number}', self.say)
+        """Every thread the runner started for the PR (`JobLog.pr_threads`: its builds, fixes,
+        decisions and Opus fallback reviews), settled once it merged: the latest point one of
+        them can still be open (ticket 70). Most were settled at their end; this catches one
+        that waited, asked back or whose settle failed. Settling one again changes nothing."""
+        for thread_id in self.jobs.pr_threads(repo.name, pr.number, pr.branch):
+            settle_quietly(self.t3, thread_id, f'merge {repo.name}#{pr.number}', self.say)
 
     def remove_worktrees(self, repo, pr) -> None:
         """The worktrees and local branches of the PR's build and fix jobs, once it merged."""
