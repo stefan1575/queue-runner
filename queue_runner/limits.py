@@ -279,6 +279,40 @@ class T3Store:
     def context_tokens(self, thread_id: str) -> int | None:
         return self.last_call(thread_id).tokens
 
+    def cache_expires_at(self, thread_id: str) -> datetime.datetime | None:
+        """When the thread's prompt cache expires, as T3 reports it (issue #72): the newest
+        `tokenUsage.promptCacheExpiresAt` on its provider turns (T3's projection; its own
+        `IdleCompactionService` reads the same). T3 sets it on a Claude turn from its request's
+        start plus the cache's TTL (`claudeProviderTurnTokenUsage`, read 2026-11-16 in T3
+        0.1.9's `server.asar`). None when T3 reports none or it can't be read."""
+        newest = None
+        for (payload,) in self._rows(
+                "select payload_json from orchestration_v2_projection_provider_turns "
+                "where thread_id = ?", (thread_id,)):
+            try:
+                usage = json.loads(payload).get('tokenUsage') or {}
+                at = usage.get('updatedAt') or ''
+            except (ValueError, AttributeError):
+                continue
+            if isinstance(usage, dict) and (newest is None or at > newest[0]):
+                newest = (at, usage.get('promptCacheExpiresAt'))
+        if newest is None or not isinstance(newest[1], str):
+            return None
+        try:
+            return _when(newest[1])
+        except ValueError:
+            return None
+
+
+def stale(store, thread_id: str | None, now: datetime.datetime) -> datetime.datetime | None:
+    """When the thread's prompt cache expired, if it has (issue #72): a thread waiting on Stefan
+    past that is cold, and the runner settles it and opens a fresh one from the Inbox. None when
+    it hasn't, or when T3 reports no expiry for it (never stale then)."""
+    if store is None or not thread_id or not hasattr(store, 'cache_expires_at'):
+        return None
+    at = store.cache_expires_at(thread_id)
+    return at if at is not None and now >= at else None
+
 
 @dataclass(frozen=True)
 class LimitStop:
