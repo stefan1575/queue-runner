@@ -83,11 +83,11 @@ def _print_gate(gate, out, config) -> None:
     """Each lane's switch, the knob, Claude's windows now and each job kind's verdict (reads
     usage once)."""
     from . import control
-    from .gate import CLAUDE_KINDS, CostBook, decide
+    from .gate import FALLBACK_REVIEW, GATED_KINDS, CostBook, decide
     from .usage import UsageError
     for line in _switch_lines(config):
         print(line, file=out)
-    held = control.read(config.state_dir).holds('claude')
+    switch = control.read(config.state_dir)
     try:
         knob = gate.knob()
     except (OSError, ValueError) as e:
@@ -104,14 +104,18 @@ def _print_gate(gate, out, config) -> None:
         resets = (f', resets {w.resets_at.astimezone().isoformat(timespec="minutes")}'
                   if w.resets_at else ', not started')
         print(f'  {name}: {w.used:g}% used{resets}', file=out)
-    for kind in CLAUDE_KINDS:
+    for kind in GATED_KINDS:
         cost = gate.book.expected(kind)
         learned = ' (the cautious default)' if cost == CostBook.default(kind) else ''
-        if held:
-            print(f'  {kind}: waits: the Claude lane is stopped by Stefan', file=out)
+        # The Opus review while Sol is out of usage (issue #69) runs in the reviewing lane.
+        lane = 'sol' if kind == FALLBACK_REVIEW else 'claude'
+        name = 'review (Opus, while Sol is out)' if kind == FALLBACK_REVIEW else kind
+        if switch.holds(lane):
+            print(f'  {name}: waits: the {control.NAMES[lane]} lane is stopped by Stefan',
+                  file=out)
             continue
         v = decide(usage, kind, cost, knob, gate.clock())
-        print(f'  {kind}: {"starts" if v.go else "waits"}: {v.text}{learned}', file=out)
+        print(f'  {name}: {"starts" if v.go else "waits"}: {v.text}{learned}', file=out)
 
 
 def _now_iso() -> str:

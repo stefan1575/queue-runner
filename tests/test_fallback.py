@@ -200,6 +200,19 @@ class FallbackTest(unittest.TestCase):
         self.assertEqual((rec['kind'], rec['jobs']), ('review', [job.id]))
         self.assertEqual(rec['spent'], {'five_hour': 12, 'seven_day': 3})
 
+    def test_gate_prints_the_fallback_review_and_the_reviewing_lanes_stop(self):
+        from queue_runner import cli, control
+        out = io.StringIO()
+        cli._print_gate(self.gate(usage(10)), out, self.config)
+        self.assertIn('  review (Opus, while Sol is out): starts: review fits', out.getvalue())
+        control.ask(self.config.state_dir, ['sol'], 'after-job',
+                    now=NOW.astimezone().isoformat(timespec='seconds'))
+        out = io.StringIO()
+        cli._print_gate(self.gate(usage(10)), out, self.config)
+        self.assertIn('  review (Opus, while Sol is out): waits: the reviewing lane is stopped',
+                      out.getvalue())
+        self.assertIn('  build: starts', out.getvalue())
+
     def test_sols_own_review_is_not_gated(self):
         r = self.reviewer(sol=[reply()], gate=self.gate(usage(100, 100)))
         self.assertEqual(r.review_pass(), 'started')
