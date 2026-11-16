@@ -22,6 +22,9 @@ class FakeT3:
         self.messages: dict[str, list] = {}   # thread id -> its last messages (Message)
         self.launches = []        # threads started without waiting (ticket 35's ask threads)
         self.launch_error = None  # a T3Error the next launch raises
+        self.settles = []         # thread ids settled, in order (ticket 70)
+        self.settle_error = None  # an exception every settle raises
+        self.renames = []
         import threading          # the Claude lane's workers call it at once (#50)
         self.lock = threading.RLock()
 
@@ -75,13 +78,29 @@ class FakeT3:
             outcome = self.outcomes.pop(0)
             if isinstance(outcome, Exception):
                 raise outcome
-            self.set_status(thread_id, outcome[1])
+            from dataclasses import replace   # a new turn unsettles a settled thread, as in T3
+            self.threads[thread_id] = replace(self.threads[thread_id], status=outcome[1],
+                                              settled=False)
         return self._result(thread_id, outcome)
 
     def show(self, thread_id, messages=3):
         if thread_id not in self.threads:
             raise T3Error(f'no thread {thread_id}')
         return self.threads[thread_id], list(self.messages.get(thread_id, []))[-messages:]
+
+    def settle(self, thread_id):
+        """Settled threads stay readable (`show`, `list`), as in T3 (checked 2026-11-16)."""
+        from dataclasses import replace
+        with self.lock:
+            if self.settle_error is not None:
+                raise self.settle_error
+            self.settles.append(thread_id)
+            if thread_id in self.threads:
+                self.threads[thread_id] = replace(self.threads[thread_id], settled=True)
+
+    def rename(self, thread_id, title):
+        with self.lock:
+            self.renames.append((thread_id, title))
 
     def list(self, project):
         return sorted(self.threads.values(), key=lambda t: t.created_at, reverse=True)

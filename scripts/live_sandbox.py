@@ -21,6 +21,7 @@ from queue_runner.github import Issue  # noqa: E402
 from queue_runner.picker import BuildJob, slug  # noqa: E402
 from queue_runner.run import Runner  # noqa: E402
 from queue_runner.t3 import T3Cli  # noqa: E402
+from queue_runner.t3_mcp import T3Mcp  # noqa: E402
 
 SANDBOX = os.path.join(os.path.expanduser('~'), '.queue-runner', 'sandbox')
 
@@ -49,8 +50,10 @@ def main() -> int:
     # The effort (ticket 39): it starts on the sandbox project's default when that is Haiku at
     # high, else with --model (and says so), and the record's `effort` is read back from T3.
     effort = Effort(config, files=T3Files())
-    runner = Runner(config, github=NoGitHub(), t3=T3Cli(), git=GitCli(), out=sys.stdout,
-                    log_line=log_line, effort=effort)
+    # Its thread is settled at its end, as the runner's are (ticket 70; review 1's N5): signing in
+    # revokes the running runner's older session, and it signs in again on its next settle.
+    runner = Runner(config, github=NoGitHub(), t3=T3Cli(mcp=T3Mcp()), git=GitCli(),
+                    out=sys.stdout, log_line=log_line, effort=effort)
     effort.check(config.repos)
     build = BuildJob(repo=repo, issue=ISSUE, base='origin/main',
                      branch=f'claude/{slug(ISSUE.title)}-{ISSUE.number}')

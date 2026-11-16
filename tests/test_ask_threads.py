@@ -283,6 +283,10 @@ class AnswerTest(ThreadCase):
         self.assertIn('## Direction first', start['message'])
         self.assertIn('fix F7 only', start['message'])
         self.assertIsNone(self.r.decider.next_case())   # decided once
+        # The fix round's thread is settled at its end; the ask thread is left (ticket 70).
+        self.assertTrue(ask.thread_id)
+        self.assertNotIn(ask.thread_id, self.t3.settles)
+        self.assertEqual(self.t3.settles[-1], self.jobs('fix')[-1].thread_id)
 
     def test_hold_answered_in_the_thread(self):
         ask = self.opened()

@@ -40,7 +40,7 @@ from .ledger import OPEN, RUNNER_MARK, norm, read_reviews, said_since, state
 from .review import _open_line
 from .state import NOT_SENT, NOT_STARTED, Job
 from .stops import KINDS, approach_review, number_of, undecided_replies, utc
-from .t3 import T3Error
+from .t3 import T3Error, settle_quietly
 
 VERSION = 1
 FENCE = re.compile(r'^[ \t]*```+[ \t]*queue-runner-decision[ \t]*\r?\n(.*?)^[ \t]*```+[ \t]*$',
@@ -426,6 +426,8 @@ class Decider:
                    + (f': {_clip(result.reply or result.error, 600)}'
                       if result.reply or result.error else ''))
             answer = Answer('stop', {'question': why}, unreadable=why)
+        if result.exit_code != 2:   # read: settled (ticket 70); one that asked back is left
+            settle_quietly(self.t3, result.thread_id, case.name, self.say)
         return self.act(case, job, answer, result, continue_thread)
 
     def act(self, case: Case, job: Job, answer: Answer, result, continue_thread) -> str:

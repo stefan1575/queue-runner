@@ -76,6 +76,17 @@ class GhCliTest(unittest.TestCase):
         self.assertIn('owner=owner', query)
         self.assertIn('name=demo', query)
 
+    def test_ready_issues_with_every_native_blocker_closed_count_none_open(self):
+        # #73, checked live on 2026-11-16: `blocked_by` is the open count (queue-runner #50 has
+        # `{"blocked_by": 0, "total_blocked_by": 3}` with its three blockers closed).
+        gh = FakeGh({'repos/owner/demo/issues?state=open&labels=ready-for-agent&per_page=100': [
+            {'number': 50, 'title': 'T', 'body': '',
+             'issue_dependencies_summary': {'blocked_by': 0, 'blocking': 0,
+                                            'total_blocked_by': 3, 'total_blocking': 0}},
+        ], 'graphql': {'data': {'repository': {'issues': {
+            'pageInfo': {'hasNextPage': False, 'endCursor': None}, 'nodes': []}}}}})
+        self.assertEqual(GhCli(gh).ready_issues(REPO), [Issue(50, 'T', '')])
+
     def test_issue_state(self):
         gh = FakeGh({'repos/owner/demo/issues/3': {'number': 3, 'state': 'closed'}})
         self.assertEqual(GhCli(gh).issue_state('owner/demo', 3), 'closed')

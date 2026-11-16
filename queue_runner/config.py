@@ -55,6 +55,10 @@ class Config:
     # this date (GitHub's UTC time, `YYYY-MM-DD`), counts as its own for the fix lane. '' adopts
     # none.
     adopt_reviews_before: str = ''
+    # Who reviews every PR (issue #76): 'chatgpt' (Sol, through codex-sol.sh; the Opus fallback
+    # steps in only while Sol is out of usage, #69) or 'claude' (an Opus thread in T3 at
+    # [claude]'s model and effort, through the usage gate). `[review] provider` in config.toml.
+    review_provider: str = 'chatgpt'
 
 
 def set_stopped(config: Config, names) -> None:
@@ -104,6 +108,17 @@ def _effort(claude: dict) -> str:
     return effort
 
 
+REVIEW_PROVIDERS = ('chatgpt', 'claude')
+
+
+def _review_provider(review: dict) -> str:
+    provider = review.get('provider', 'chatgpt')
+    if provider not in REVIEW_PROVIDERS:
+        raise ValueError(f"[review] provider must be one of {', '.join(REVIEW_PROVIDERS)}, "
+                         f"not {provider!r}")
+    return provider
+
+
 def load_config(path: str = DEFAULT_CONFIG) -> Config:
     with open(path, 'rb') as f:
         raw = tomllib.load(f)
@@ -128,4 +143,5 @@ def load_config(path: str = DEFAULT_CONFIG) -> Config:
                   deps_dir=_path(raw.get('deps_dir') or os.path.join(home, 'deps')),
                   sol_script=_path(sol.get('script') or SOL_SCRIPT),
                   sol_bash=sol.get('bash') or GIT_BASH,
-                  adopt_reviews_before=str(raw.get('adopt_reviews_before') or ''))
+                  adopt_reviews_before=str(raw.get('adopt_reviews_before') or ''),
+                  review_provider=_review_provider(raw.get('review', {})))

@@ -116,7 +116,8 @@ def _print_gate(gate, out, config) -> None:
         learned = ' (the cautious default)' if cost == CostBook.default(kind) else ''
         # The Opus review while Sol is out of usage (issue #69) runs in the reviewing lane.
         lane = 'sol' if kind == FALLBACK_REVIEW else 'claude'
-        name = 'review (Opus, while Sol is out)' if kind == FALLBACK_REVIEW else kind
+        name = (('review (Opus, set in config.toml)' if config.review_provider == 'claude'
+                 else 'review (Opus, while Sol is out)') if kind == FALLBACK_REVIEW else kind)
         if switch.holds(lane):
             print(f'  {name}: waits: the {control.NAMES[lane]} lane is stopped by Stefan',
                   file=out)
@@ -749,9 +750,10 @@ def main(argv=None, github=None, out=None, t3=None, git=None, sleep=None,
     if args.review:
         return _review(config, github, git, sol, args.review, out, log_line, toaster, deps)
 
-    if t3 is None:
+    if t3 is None:   # settle and rename go to T3's MCP endpoint (ticket 70)
         from .t3 import T3Cli
-        t3 = T3Cli()
+        from .t3_mcp import T3Mcp
+        t3 = T3Cli(mcp=T3Mcp())
     from .limits import T3Store, auto_resume_warning
     if limits is None:
         limits = T3Store()

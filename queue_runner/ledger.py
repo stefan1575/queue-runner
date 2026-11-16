@@ -318,7 +318,8 @@ def decide(repo: str, n: int, sha: str, rnd: int, earlier: list[dict], has_revie
     it stops: [{signal, ids, text}]), findings (the PR's whole state, as the ledger holds it), kept
     (declines Sol kept), unaddressed (earlier open findings Sol gave no status), status (for
     `sol-review` on H), issues (new Pre-existing findings to file), body (the comment) and
-    reviewer. `reviewer` names who reviewed when it wasn't Sol (the Opus fallback, issue #69):
+    reviewer. `reviewer` names who reviewed when it wasn't Sol, and why (the Opus fallback, #69,
+    or config.toml's choice, #76):
     the comment's heading and byline and the status say so. An unreadable reply raises
     SolFailed."""
     found, prose = parse_findings(reply)
@@ -473,8 +474,8 @@ def decide(repo: str, n: int, sha: str, rnd: int, earlier: list[dict], has_revie
     scope = f', the change since {last[:7]}' if last and not gone else ''
     text = github_links(prose, wt, rundir, repo, sha) if wt and rundir else prose
     # The heading keeps its `## Sol review N · V` start (the review loop's name, and HEADING's).
-    byline = (f'Reviewed by {reviewer}: Sol is out of usage, so Claude reviewed in its place, '
-              f'in a T3 thread, from the same brief, on {sha[:7]}{scope}{guide}' if reviewer else
+    byline = (f"Reviewed by {reviewer}: Claude reviewed in Sol's place, in a T3 thread, from "
+              f'the same brief, on {sha[:7]}{scope}{guide}' if reviewer else
               f'GPT-6.1 Sol at effort high, read-only, on {sha[:7]}{scope}{guide}')
     body = (f'## Sol review {rnd} · {verdict.capitalize()}'
             + (f' · {reviewer}' if reviewer else '') + '\n\n'

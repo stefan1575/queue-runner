@@ -27,6 +27,11 @@ effort = "high"
 [sol]
 script = "~/Code/tools/codex-sol/codex-sol.sh"
 bash = "C:/Program Files/Git/bin/bash.exe"
+# Who reviews every PR (issue #76): "claude" (an Opus thread in T3 at [claude]'s model and effort,
+# through the usage gate) or "chatgpt" (Sol, the default; Opus steps in only while Sol is out of
+# usage). Stefan, 2026-11-16: "Claude for now, until I say so, a full override."
+[review]
+provider = "claude"
 
 # First in the build order (Stefan, 2026-11-15: "prioritize game backdrop full stop", its first
 # run under the dashboard). Stefan merges its PRs himself (2026-11-15: "no auto merge, just

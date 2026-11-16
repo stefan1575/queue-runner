@@ -88,10 +88,13 @@ def _thread(raw: dict) -> Thread:
 
 
 class T3Cli:
-    """`run(args, stdin)` returns the CLI's (exit code, stdout, stderr)."""
+    """`run(args, stdin)` returns the CLI's (exit code, stdout, stderr). The CLI has no settle
+    or rename command, so those go to `mcp`, T3's MCP endpoint called directly
+    (`t3_mcp.T3Mcp`, ticket 70); with none, they raise T3Error."""
 
-    def __init__(self, run=run_t3):
+    def __init__(self, run=run_t3, mcp=None):
         self._run = run
+        self.mcp = mcp
 
     def _call(self, args, stdin=None):
         for a in args:
@@ -149,3 +152,29 @@ class T3Cli:
 
     def list(self, project: str) -> list[Thread]:
         return [_thread(t) for t in self._json(['thread', 'list', '--json', '--project', project])]
+
+    def settle(self, thread_id: str) -> None:
+        """Settles a thread the runner started: it leaves T3's sidebar and stays readable."""
+        if self.mcp is None:
+            raise T3Error("settling a thread needs T3's MCP endpoint (no MCP client given)")
+        self.mcp.settle(thread_id)
+
+    def rename(self, thread_id: str, title: str) -> None:
+        if self.mcp is None:
+            raise T3Error("renaming a thread needs T3's MCP endpoint (no MCP client given)")
+        self.mcp.rename(thread_id, title)
+
+
+def settle_quietly(t3, thread_id: str | None, name: str, say) -> bool:
+    """Settles a thread the runner started, once it's done with it (ticket 70): it leaves
+    Stefan's sidebar and stays readable. A failure is said and never raised: a thread left in
+    the sidebar stops no lane. False if it wasn't settled."""
+    if not thread_id or t3 is None:
+        return False
+    try:
+        t3.settle(thread_id)
+    except Exception as e:   # noqa: BLE001 - T3 down, refused, or no MCP client
+        say(f'{name}: settling its thread {thread_id} in T3 failed '
+            f'({type(e).__name__}: {e}); left as it is')
+        return False
+    return True

@@ -1,7 +1,7 @@
 import unittest
 
 from queue_runner.config import Repo
-from queue_runner.picker import pick
+from queue_runner.picker import pick, pickable
 from tests.fakes import FakeGitHub, issue, pr
 
 REPO = Repo(name='demo', github='owner/demo', path='C:/demo')
@@ -41,6 +41,31 @@ class PickerTest(unittest.TestCase):
     def test_skips_an_issue_with_an_open_native_blocker(self):
         gh = FakeGitHub(issues=[issue(5, open_blockers=1), issue(9)])
         self.assertEqual(pick(REPO, gh).issue.number, 9)
+
+    def test_an_issue_whose_native_blockers_are_all_closed_is_picked(self):
+        # GitHub's summary counts only open blockers: closed ones leave open_blockers at 0.
+        gh = FakeGitHub(issues=[issue(5, open_blockers=0), issue(9)])
+        self.assertEqual(pick(REPO, gh).issue.number, 5)
+
+    def test_an_issue_blocked_either_way_waits(self):
+        # #73: GitHub's native links and `Blocked by:` lines both count; either one open blocks.
+        cases = {
+            'native open, line closed': (1, 'Blocked by: #3', 'closed', 9),
+            'native closed, line open': (0, 'Blocked by: #3', 'open', 9),
+            'both open': (2, 'Blocked by: #3', 'open', 9),
+            'both closed': (0, 'Blocked by: #3', 'closed', 5),
+        }
+        for name, (native, body, state, want) in cases.items():
+            with self.subTest(name):
+                gh = FakeGitHub(issues=[issue(5, body=body, open_blockers=native), issue(9)],
+                                states={3: state})
+                self.assertEqual(pick(REPO, gh).issue.number, want)
+
+    def test_the_queue_leaves_out_natively_blocked_issues(self):
+        # `pickable` is the dashboard's queue of builds: a natively blocked issue isn't in it.
+        gh = FakeGitHub(issues=[issue(5, open_blockers=1), issue(7, body='Blocked by: #3'),
+                                issue(9)], states={3: 'open'})
+        self.assertEqual([j.issue.number for j in pickable(REPO, gh)], [9])
 
     def test_skips_an_issue_with_an_open_pr_on_its_branch(self):
         gh = FakeGitHub(issues=[issue(5), issue(9)], prs=[pr(20, 'claude/thing-5')],
