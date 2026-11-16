@@ -534,7 +534,9 @@ head. A blocking review on H gets its ordinary fix round first.
     conflict round on an earlier head merged (that round's `base` equals GitHub's base sha for
     the PR now, `PullRequest.base_sha`), so its push didn't resolve it. A record without
     `base` (before #91), or GitHub not giving the base sha, counts as a different base;
-  - **the ceiling:** after `MAX_CONFLICT_ROUNDS` (5) conflict rounds since the last release, the
+  - **the ceiling:** after `MAX_CONFLICT_ROUNDS` (5) conflict rounds since the last release (a
+    round a limit's recovery or a decision's retry or answer carried on is one round:
+    `stops.rounds_counted`), the
     PR stops anyway ("5 conflict rounds, main keeps moving under it"), so a PR that never lands
     doesn't burn usage.
 

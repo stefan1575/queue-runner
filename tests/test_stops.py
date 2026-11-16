@@ -150,6 +150,25 @@ class StopsTest(unittest.TestCase):
         self.assertEqual(stop.stop, 'conflict')
         self.assertIn('5 conflict rounds, main keeps moving under it', stop.reason)
 
+    def test_a_continued_conflict_round_is_the_same_round(self):
+        # Four rounds, the last cut off by a usage limit and picked up (in place or fresh, or by
+        # a decision's retry or answer): five records, four rounds (Sol's review 1 of PR #101).
+        self.conflict_rounds(BASE1, BASE2, BASE1)
+        cut = self.jobs.started(kind='fix', repo='first', issue=20, branch='claude/red-5',
+                                title='Queue runner conflict: first#20', sha='4' * 40,
+                                cause='conflict', base=BASE2)
+        self.jobs.ended(cut.id, exit_code=1, outcome='usage-limit')
+        again = self.jobs.started(kind='fix', repo='first', issue=20, branch='claude/red-5',
+                                  title='Queue runner conflict: first#20', sha='4' * 40,
+                                  cause='conflict', base=BASE2, about=cut.id)
+        self.jobs.ended(again.id, exit_code=0, outcome='pushed')
+        self.gh.now[20] = {'base_sha': '6' * 40}   # main moved again: the fifth round
+        self.gh.conflicts.add(20)
+        self.assertIsNone(self.conflict_says())
+        self.conflict_rounds('7' * 40)             # that fifth round; main moves once more
+        self.gh.now[20] = {'base_sha': '8' * 40}
+        self.assertIn('5 conflict rounds, main keeps moving under it', self.conflict_says()[0])
+
     def test_a_release_resets_the_count(self):
         self.conflict_rounds(BASE1, BASE2, BASE1, BASE2, BASE1)
         self.gh.now[20] = {'base_sha': BASE1}   # the same base, too
