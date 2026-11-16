@@ -15,14 +15,16 @@
     it builds first, is it up. The column between them is centred in the space they leave.
   - Three pages do three jobs. Overview is the first glance. Inbox is what waits on you. Queue is
     the work.
-  - PROTOTYPE, with sample data only (ticket 21): the Queue is three arrangements of the same
-    work, ?variant=a|b|c, switched from the pill over the sidebar's foot or with the left and
-    right arrow keys. A, features first: a card per feature in build order, its bar, its
-    tickets as rows in the order they're built; picking a feature narrows the page to it; then
-    each lane's queue. B, the page you land on: what waits on you and what's running on top,
-    the features folded to a line each under them. C, tracks: every row runs left to right; a
-    lane's row is what it takes up next, a feature's row is its tickets one after another
-    until it's usable. All three read the same things from the snapshot (queueModel).
+  - PROTOTYPE, with sample data only (#30, take 11): the Queue as #107 and #109 decide it,
+    three ways, ?variant=a|b|c, switched from the pill over the sidebar's foot or with the left
+    and right arrow keys. Every one shows one queue per repo with a reason on each entry, every
+    open ticket's state (ready-for-human and needs-triage by name, a blocked one naming the
+    root of its chain), efforts as a tree with a "No effort" group, a stuck item as "fixing
+    itself: #N", and the order changed by dragging. A, repo by repo: a card per repository,
+    its queue, then its build order as an outline. B, side by side: a column per repository,
+    as they run. C, one numbered list: a tab per repository, the build order is the queue
+    (each build numbered in place), the picked row opens on the right. All three read one
+    model (work()); the dragged order lives in the page only. Take 10 is earlier/take-10.html.
   - The Overview only summarises, in three cards read top to bottom: what's on your plate (the
     Inbox in counts by kind, and the ask that's first in line), what's running (a line per lane,
     with its Stop button and the one thing it takes up next), and what's next (a bar per
@@ -776,6 +778,11 @@ dialog.sheet::backdrop { background: rgba(4, 6, 10, .55); }
   body.page-inbox .only-mid { display: inline-flex; }
   body.page-inbox .rail { display: none; }
   body.page-inbox.rail-open .rail { display: grid; position: fixed; right: 16px; top: 70px; z-index: 40; width: min(380px, calc(100vw - 32px)); max-height: calc(100vh - 86px); }
+  body.page-wide .top-in, body.page-wide .stage { grid-template-columns: minmax(0, 1fr); }
+  body.page-wide .top-gap { display: none; }
+  body.page-wide .only-mid { display: inline-flex; }
+  body.page-wide .rail { display: none; }
+  body.page-wide.rail-open .rail { display: grid; position: fixed; right: 16px; top: 70px; z-index: 40; width: min(380px, calc(100vw - 32px)); max-height: calc(100vh - 86px); }
 }
 @media (max-width: 1040px) {
   .mail { grid-template-columns: minmax(0, 1fr); height: auto; min-height: 0; overflow: visible; }
@@ -804,6 +811,166 @@ dialog.sheet::backdrop { background: rgba(4, 6, 10, .55); }
 @media (prefers-reduced-motion: reduce) {
   .side { transition: none; }
 }
+/* ---------------------------------------------------------------- queue, take 11 (PROTOTYPE: three variants) */
+body.page-wide .top-col, body.page-wide main { max-width: none; }
+.q11 h3 { font: 600 13px/1.2 var(--sans); letter-spacing: .06em; text-transform: uppercase; color: var(--dim); display: flex; align-items: baseline; gap: 12px; margin-bottom: 10px; }
+.q11 h3 .mute { text-transform: none; letter-spacing: 0; font-weight: 400; font-size: 14px; }
+.q11 .t-n { color: var(--mute); font-weight: 400; margin-right: 7px; }
+.q-repo { display: flex; align-items: center; gap: 10px; min-height: 56px; padding: 10px 20px; border-bottom: 1px solid var(--line-soft); flex-wrap: wrap; }
+.q-repo h2 { font: 600 18px/1.2 var(--display); }
+.q-repo .rlogo { width: 26px; height: 26px; font-size: 12px; border-radius: 7px; }
+.q-repo > .mute { font-size: 14px; }
+.q-yours { margin-left: auto; font-size: 14px; font-weight: 600; color: var(--you); background: var(--you-wash); border: 1px solid var(--you-line); border-radius: 999px; padding: 1px 10px; }
+.q-now { display: flex; align-items: baseline; gap: 8px; padding: 8px 12px; border-radius: 10px; background: var(--run-wash); margin-bottom: 8px; }
+.q-now .dot { align-self: center; }
+.q-now b { font-weight: 600; }
+.q-now.quiet { background: var(--sunk); color: var(--mute); }
+.q-moved { position: sticky; top: 72px; z-index: 20; display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-radius: 12px; border: 1px solid var(--line); background: var(--raised); box-shadow: var(--float); }
+.q-moved.has { border-color: var(--run); }
+.q-moved ul { display: grid; gap: 2px; flex: 1; }
+.q-moved p { flex: 1; }
+.q-moved li::before { content: "↑ "; color: var(--run); font-weight: 700; }
+.q-tools { display: flex; gap: 8px; margin-left: auto; flex: none; }
+.q-finished { display: flex; align-items: center; gap: 8px; margin-top: 12px; color: var(--mute); font-size: 14px; }
+.q-finished .i { color: var(--ok); width: 16px; height: 16px; }
+
+/* the queue: numbered, each with why */
+.jobs { display: grid; gap: 2px; }
+.jobs li { display: grid; grid-template-columns: 26px minmax(0, 1fr); column-gap: 8px; padding: 6px 8px; border-radius: 8px; }
+.jobs li:hover { background: var(--hover); }
+.jobs .n { grid-row: span 2; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-size: 13px; font-weight: 700; box-shadow: inset 0 0 0 1.5px var(--ink-2); margin-top: 1px; }
+.jobs li.pre .n { background: var(--run-fill); color: #1a1405; box-shadow: none; }
+.jobs .j { min-width: 0; }
+.jobs .j b { font-weight: 600; margin-right: 4px; }
+.jobs .why { color: var(--mute); font-size: 14px; }
+.jobs.compact .j { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* state tags: blue is yours, amber is moving, and the two labels keep their names */
+.st { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 8px; border-radius: 6px; font-size: 13px; font-weight: 600; white-space: nowrap; text-decoration: none; border: 1px solid var(--line); color: var(--ink-2); }
+.st .i { width: 14px; height: 14px; }
+.st.you { background: var(--you-wash); border-color: var(--you-line); color: var(--you); }
+a.st.you:hover { border-color: var(--you); }
+.st.lbl { font: 600 12.5px/1 var(--mono); }
+.st.run { background: var(--run-wash); border-color: transparent; color: var(--run); }
+.st.ok { color: var(--ok); border-color: transparent; }
+.st.blocked { color: var(--mute); border-style: dashed; }
+.st.ready { color: var(--ink); }
+.fix-ref { font: 600 12.5px var(--mono); color: var(--run); margin-left: 6px; }
+.lbl-tag { font: 500 12px var(--mono); color: var(--mute); border: 1px solid var(--line); border-radius: 5px; padding: 0 5px; margin-left: 8px; }
+.pr-ref, .tq-main .link { font-size: 14px; color: var(--mute); margin-left: 8px; }
+
+/* the order as an outline */
+.otree, .eq-kids { display: grid; gap: 4px; }
+.eq { border: 1px solid var(--line-soft); border-radius: 12px; padding: 8px 10px 10px; background: var(--surface); position: relative; }
+.eq.d0 { background: var(--sunk); }
+.eq.d1 { background: var(--surface); }
+.eq.d2 { background: var(--sunk); }
+.eq.none { border-style: dashed; }
+.eq-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.eq-head .kind { font: 600 11.5px/1 var(--sans); letter-spacing: .05em; text-transform: uppercase; color: var(--dim); border: 1px solid var(--line); border-radius: 5px; padding: 3px 5px; flex: none; }
+.e-name { font-weight: 600; min-width: 5em; flex: 0 1 auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; background: none; border: 0; padding: 0; text-align: left; }
+button.e-name { cursor: pointer; }
+button.e-name:hover { text-decoration: underline; text-underline-offset: 3px; }
+.eq-head > .mute { flex-shrink: 20; min-width: 0; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.eq-bar { margin-left: auto; width: 150px; flex: 0 1 150px; min-width: 56px; }
+.eq-bar .fbar { height: 10px; }
+.eq-count { font-size: 13px; color: var(--mute); white-space: nowrap; width: 84px; text-align: right; flex: none; }
+.eq-say { font-size: 14px; color: var(--mute); margin: 2px 0 6px 26px; }
+.eq-say b { color: var(--ink-2); font-weight: 600; }
+.eq-say .mine { color: var(--you); font-weight: 600; }
+.held { display: inline-flex; align-items: center; gap: 5px; color: var(--ink-2); }
+.held .i { width: 15px; height: 15px; color: var(--mute); }
+.eq-kids { margin-left: 18px; }
+.eq-shut { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--dim); margin: 6px 0 0 26px; }
+.eq-shut .i { width: 14px; height: 14px; color: var(--ok); }
+
+.tq { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; column-gap: 8px; align-items: center; padding: 5px 8px; border-radius: 8px; background: var(--surface); border: 1px solid transparent; }
+.tq:hover { border-color: var(--line); }
+.tq .grip { grid-row: span 2; }
+.tq-main { min-width: 0; display: flex; align-items: baseline; }
+.tq-pick { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; background: none; border: 0; padding: 0; text-align: left; font-weight: 500; }
+button.tq-pick { cursor: pointer; }
+button.tq-pick:hover .t-t { text-decoration: underline; text-underline-offset: 3px; }
+.tq-state { display: flex; align-items: center; justify-content: flex-end; }
+.tq-why { grid-column: 2 / -1; font-size: 14px; color: var(--mute); }
+.tq.sel, .eq.sel > .eq-head { box-shadow: inset 0 0 0 2px var(--you); border-radius: 8px; }
+
+/* dragging */
+.grip { width: 16px; height: 22px; display: grid; place-items: center; color: var(--dim); cursor: grab; flex: none; opacity: .55; }
+.grip svg { width: 8px; height: 13px; fill: currentColor; }
+[data-drag]:hover > .grip, [data-drag]:hover > .eq-head > .grip, [data-drag]:focus-visible .grip { opacity: 1; }
+[data-drag] { cursor: grab; }
+[data-drag]:active { cursor: grabbing; }
+.dragging { opacity: .4; }
+body.q-dragging .can-drop { outline: 1px dashed var(--btn-line); outline-offset: 1px; }
+.drop-before, .drop-after { position: relative; }
+.drop-before::before, .drop-after::after { content: ""; position: absolute; left: 0; right: 0; height: 3px; border-radius: 2px; background: var(--you); z-index: 5; pointer-events: none; }
+.drop-before::before { top: -4px; }
+.drop-after::after { bottom: -4px; }
+@keyframes q-flash { from { box-shadow: 0 0 0 2px var(--run), 0 0 0 7px color-mix(in srgb, var(--run) 30%, transparent); } to { box-shadow: 0 0 0 2px transparent; } }
+.flash { animation: q-flash 2.4s ease-out 1; }
+
+/* A: repo by repo */
+.qa-next, .qa-order { padding: 16px 20px; }
+.qa-next { border-bottom: 1px solid var(--line-soft); }
+.qa-order h3 { margin-bottom: 12px; }
+
+/* B: side by side, a column per repository */
+.qb-cols { display: grid; grid-template-columns: repeat(var(--cols), minmax(320px, 1fr)); gap: 14px; align-items: start; overflow-x: auto; }
+.otree > *, .eq-kids > *, .jobs > * { min-width: 0; }
+.qb-col .q-now { display: block; }
+.qb-col { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; min-width: 0; }
+.qb-col .q-repo { min-height: 52px; padding: 8px 14px; }
+.qb-col .q-repo > .mute { display: none; }
+.qb-sec { padding: 12px 14px; border-top: 1px solid var(--line-soft); }
+.qb-col .q-repo + .qb-sec { border-top: 0; }
+.qb-yours { margin: 12px 14px 0; padding: 10px 12px; border-radius: 10px; background: var(--you-wash); border: 1px solid var(--you-line); }
+.qb-yours h3 { color: var(--you); margin-bottom: 6px; }
+.qb-yours ul { display: grid; gap: 4px; }
+.qb-yours li { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 14.5px; }
+.qb-yours .t-t { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.qb-yours .st { flex: none; }
+.otree.compact .eq { padding: 6px 6px 8px; }
+.otree.compact .eq-bar { width: 72px; flex-basis: 72px; }
+.otree.compact .eq-count { display: none; }
+.otree.compact .eq-say { margin-left: 22px; font-size: 13.5px; }
+.otree.compact .eq-kids { margin-left: 8px; }
+.otree.compact .tq { padding: 4px 6px; }
+.otree.compact .tq-why { font-size: 13.5px; }
+.otree.compact .pr-ref, .otree.compact .tq-main .link { display: none; }
+@media (max-width: 1000px) { .qb-cols { grid-template-columns: minmax(0, 1fr); } }
+
+/* C: one numbered list, the picked row on the right */
+.qc-tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+.qc-tabs button { display: inline-flex; align-items: center; gap: 8px; height: 40px; padding: 0 14px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); cursor: pointer; font-weight: 600; color: var(--ink-2); }
+.qc-tabs button[aria-selected="true"] { color: var(--ink); border-color: var(--ink-2); box-shadow: inset 0 -2px 0 var(--ink); }
+.qc-grid { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 16px; align-items: start; }
+.qc-list .otree { padding: 0 16px 16px; }
+.qc-list .q-finished { padding: 0 20px 16px; }
+.qc-pin { margin: 14px 16px 12px; padding: 10px; border-radius: 12px; border: 1px solid var(--line-soft); background: var(--sunk); }
+.qc-pin .small { margin: 4px 8px 0; }
+.qn { grid-row: span 2; width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; font-size: 13px; font-weight: 700; box-shadow: inset 0 0 0 1.5px var(--ink-2); }
+.qn.none { box-shadow: none; }
+.qc-list .tq { grid-template-columns: 16px 24px minmax(0, 1fr) auto; }
+.qc-side { position: sticky; top: 84px; }
+.qc-d { padding: 16px 18px 18px; display: grid; gap: 10px; }
+.qc-d h2 { font: 600 19px/1.3 var(--display); }
+.qc-d h3 { margin: 6px 0 0; }
+.qc-path { font-size: 13.5px; color: var(--dim); }
+.qc-st { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; }
+.qc-why { font: 400 19px/1.35 var(--serif); }
+.qc-mini { display: grid; gap: 6px; font-size: 14.5px; }
+.qc-mini li { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.chain { display: grid; gap: 0; counter-reset: c; }
+.chain li { position: relative; padding: 6px 0 8px 22px; border-left: 2px solid var(--line); margin-left: 6px; font-size: 14.5px; }
+.chain li::before { content: ""; position: absolute; left: -6px; top: 11px; width: 10px; height: 10px; border-radius: 50%; background: var(--surface); box-shadow: inset 0 0 0 2px var(--dim); }
+.chain li.held::before { background: var(--you); box-shadow: none; }
+.chain li:last-child { border-left-color: transparent; }
+.chain .why { display: block; color: var(--mute); font-size: 13.5px; }
+.chain li.held .why { color: var(--you); font-weight: 600; }
+@media (max-width: 1100px) { .qc-grid { grid-template-columns: minmax(0, 1fr); } .qc-side { position: static; } }
+@media (max-width: 700px) { .eq-bar { width: 70px; } .eq-count { display: none; } .tq { grid-template-columns: 16px minmax(0, 1fr); } .tq-state { justify-content: flex-start; grid-column: 2; } }
+.qc-list .tq-why { grid-column: 3 / -1; }
 </style>
 </head>
 <body>
@@ -872,10 +1039,10 @@ let faultStart = ""; // with "missing": how to start the runner, as the server s
 const PAGES = [["overview", "Overview"], ["inbox", "Inbox"], ["queue", "Queue"], ["activity", "Activity"], ["usage", "Usage"], ["settings", "Settings"]];
 const UNBUILT = [];   // pages still as they were before the split
 // PROTOTYPE (ticket 21): the Queue page's three arrangements, ?variant=a|b|c
-const VARIANTS = [["a", "Features first"], ["b", "The page you land on"], ["c", "Tracks"]];
+const VARIANTS = [["a", "Repo by repo"], ["b", "Side by side"], ["c", "One numbered list"]];   // take 11 (#30)
 const sampleName = new URLSearchParams(location.search).get("sample");
 const ui = { page: "overview", repo: "", view: "list", pr: null, ask: null, hold: null, sel: null, pop: null, nav: false, rail: false,
-  variant: "a", feature: "", open: [] };   // the Queue: which arrangement, the feature it's narrowed to (A), the features unfolded (B)
+  variant: "a", feature: "", open: [], qrepo: "", qsel: null };   // qrepo, qsel: the Queue, C (take 11)   // the Queue: which arrangement, the feature it's narrowed to (A), the features unfolded (B)
 
 function recall(k) { try { return localStorage.getItem("qr." + k); } catch { return null; } }
 function remember(k, v) { try { localStorage.setItem("qr." + k, v); } catch { /* a private window */ } }
@@ -966,6 +1133,7 @@ const STATE = {
   ready: ["Ready", "ready"], building: ["Building", "moving"], review: ["In review", "moving"], fixing: ["Fixing", "moving"],
   you: ["Waiting on you", "yours"], blocked: ["Blocked", "blocked"], "not-ready": ["Not ready", "blocked"], done: ["Done", "done"],
   merged: ["Merged, not live", "moving"],
+  "ready-for-human": ["ready-for-human", "yours"], "needs-triage": ["needs-triage", "yours"], "fixing-itself": ["Fixing itself", "moving"],
 };
 const stateOf = (i) => STATE[i.state] || [i.state, "blocked"];
 const ACTOR = { claude: ["Claude", "claude"], sol: ["ChatGPT", "chatgpt"], chatgpt: ["ChatGPT", "chatgpt"], runner: ["Runner", ""], you: ["You", ""], github: ["GitHub", ""] };
@@ -1389,8 +1557,8 @@ function lane(l) {
 // ---- what's next: a feature's progress as one bar.
 // Left to right, and done means live. Each: its class, its name, the issue states it covers.
 const SEGMENTS = [
-  ["done", "Done", ["done"]], ["merged", "Merged, not live", ["merged"]], ["pr", "In a PR", ["review", "fixing"]],
-  ["building", "Building", ["building"]], ["yours", "Waiting on you", ["you"]], ["ready", "Ready", ["ready"]],
+  ["done", "Done", ["done"]], ["merged", "Merged, not live", ["merged"]], ["pr", "In a PR", ["review", "fixing", "fixing-itself"]],
+  ["building", "Building", ["building"]], ["yours", "Waiting on you", ["you", "ready-for-human", "needs-triage"]], ["ready", "Ready", ["ready"]],
   ["blocked", "Blocked", ["blocked", "not-ready"]],
 ];
 const segmentOf = (i) => { const k = SEGMENTS.findIndex((s) => s[2].includes(i.state)); return k < 0 ? SEGMENTS.length - 1 : k; };
@@ -1467,53 +1635,7 @@ function model() {
 }
 
 // ------------------------------------------------------------------ queue
-// PROTOTYPE (ticket 21), on sample data: the same work arranged three ways, for Stefan to judge
-// by eye. All three read one model: each feature's tickets in the order they're built (the
-// snapshot's `tickets`), each ticket's place in a lane's queue, and the lane that's on it now.
-function queueModel() {
-  const m = model(), lanes = snap.lanes || [];
-  const issueOf = (j) => m.issues.find((i) => i.repo === j.repo && (j.ref === `#${i.n}` || (i.pr && j.ref === `PR #${i.pr}`)));
-  const line = new Map(), now = new Map();
-  for (const l of lanes) {
-    (l.queue || []).forEach((j, k) => { const i = issueOf(j); if (i && !line.has(key(i))) line.set(key(i), { lane: l, n: k + 1 }); });
-    const i = l.job && (l.state === "working" || l.state === "stopping") ? issueOf(l.job) : null;
-    if (i) now.set(key(i), l);
-  }
-  const view = (f) => {
-    const its = (f.tickets || featureCells(f).map((c) => key(c[0]))).map((k) => m.byKey.get(k)).filter(Boolean);
-    const done = its.filter((i) => i.state === "done").length;
-    return { id: f.id, title: f.title, repo: f.repo, its, done, left: its.length - done };
-  };
-  const all = scoped(snap.features || []).map(view).filter((v) => v.its.length);
-  // Work that belongs to no feature is shown as a feature of its own, without an end.
-  const loose = m.shown.filter((i) => !i.feature && i.state !== "done").sort((a, b) => segmentOf(a) - segmentOf(b) || m.order(a, b));
-  const none = loose.length ? [{ id: "none", title: "No feature", repo: "", its: loose, done: 0, left: loose.length, loose: true }] : [];
-  // Features with open work in build order, then the work that belongs to none, then the finished.
-  return { m, lanes, issueOf, line, now, views: [...all.filter((v) => v.left), ...none, ...all.filter((v) => !v.left)] };
-}
-
 const nth = (n) => `${n}${n % 100 > 10 && n % 100 < 14 ? "th" : ["th", "st", "nd", "rd"][n % 10] || "th"}`;
-// Where one ticket stands: its state's word, the cell it is in a bar, and what comes next for it,
-// at length (`more`, for a row) and in a few words (`short`, for a cell on a track).
-function standing(i, q) {
-  const said = stateOf(i)[0], seg = SEGMENTS[segmentOf(i)][0], k = key(i);
-  const on = q.now.get(k), at = q.line.get(k), ask = i.state === "you" ? askFor(i) : null, waits = q.m.waitsOn(i);
-  let word = said, more = i.note || "", short = said;
-  if (on) {
-    const t = ago(on.job.started_at);
-    more = frozen() ? `${on.name} was on it` : `${on.name} is on it, ${t} in`;
-    short = frozen() ? said : `${said}, ${t}`;
-  } else if (at) {
-    word = { fixing: "Fix round due", review: "Waits for review", building: "Build paused" }[i.state] || said;
-    more = at.n === 1 ? `Next for ${at.lane.name}` : `${nth(at.n)} in ${at.lane.name}'s queue`;
-    short = i.state === "ready" ? (at.n === 1 ? "Next in line" : `${nth(at.n)} in line`) : `${word}, ${at.n === 1 ? "next" : nth(at.n)} in line`;
-  } else if (ask) more = short = askWords(ask)[0];
-  else if (repoOff(i.repo) && i.state !== "done") more = short = "Its repository is stopped";
-  else if (i.state === "blocked" && waits.length) more = short = `After ${waits.map((w) => `#${w.n}`).join(" and ")}`;
-  else if (i.state === "not-ready") { more = "Not marked ready for the runner"; short = "Not marked ready"; }
-  return { word, seg, on, at, ask, more, short };
-}
-
 // A bar for any list of tickets, in the order given: a cell per ticket, named on hover.
 function ticketBar(title, its) {
   const said = SEGMENTS.map(([, label], k) => [its.filter((i) => segmentOf(i) === k).length, label]).filter((x) => x[0]).map(([n, label]) => `${n} ${label.toLowerCase()}`).join(", ");
@@ -1536,184 +1658,399 @@ function leftSay(v, link = true) {
 }
 const countSay = (v) => (v.loose ? plural(v.left, "open ticket", "open tickets") : `${v.done} of ${v.its.length} done`);
 
-// A ticket as a row: its cell from the bar, what it is, where it stands. One that waits on you
-// carries the Inbox's own tag and opens its ask there.
-function ticketRow(i, q) {
-  const s = standing(i, q);
-  const say = s.ask ? `<a class="t-ask" ${goto("inbox", s.ask)} title="Opens it in the Inbox">${kindTag(s.ask)}<span>Waits on you</span></a>`
-    : `<b>${esc(s.word)}</b>${esc(s.more)}`;
-  return `<li class="trow ${s.seg}${s.on && !frozen() ? " on" : ""}"><i class="sg ${s.seg}" aria-hidden="true"></i>
-    <span class="t-what"><span class="t-n">#${i.n}</span>${esc(i.title)}${i.pr ? prLink(i.repo, i.pr, `PR #${i.pr}`) : ""}${i.feature ? "" : repoTag(i.repo)}</span>
-    <span class="t-say">${say}</span></li>`;
-}
-const ticketRows = (v, q) => `<ol class="trows" aria-label="${esc(v.title)}: its tickets, in the order they're built">${v.its.map((i) => ticketRow(i, q)).join("")}</ol>`;
+// ------------------------------------------------------------------ queue
+// PROTOTYPE (#30, take 11), on sample data: the Queue as #107 and #109 decide it, three ways.
+// One queue per repo, each entry with the sentence that says why; every open ticket's state,
+// ready-for-human and needs-triage by those names; efforts as a tree with a "No effort" group per
+// repo; a stuck item as "fixing itself: #N"; and each repo's order changed by dragging (or Alt+Up
+// and Alt+Down on a focused row). The order lives in this page only: a reload forgets it.
+// The real runner would write the reasons; here `work()` works them out from the sample.
+const CLOSED = new Set(["done", "merged"]);   // closed on GitHub: out of the order
+const isOpen = (i) => !CLOSED.has(i.state);
+const ord = { kids: {}, touched: new Set() };   // what Stefan dragged: a parent's id -> its children's ids
+const undo = [];                                 // the orders before each drop
+let lastMove = null;                             // { at, ids, says }: what the last drop moved
+let dragging = null;                             // { id, parent } while a row is held
 
-// A lane with its queue: what it's on, its Stop button, then what it takes up next, in order.
-// A lane is one across repositories, so its queue is never narrowed; with a feature picked,
-// the jobs that aren't that feature's step back.
-function laneQueue(l, q, picked) {
-  const s = laneSays(l), queue = l.queue || [];
-  const rows = queue.map((j, k) => {
-    const i = q.issueOf(j), f = i && q.m.feature(i);
-    return `<li${picked && !(i && picked.its.includes(i)) ? ' class="off"' : ""}><span class="n">${k + 1}</span>
-      <span class="j" title="${esc(j.title)}"><b>${esc(QUEUED[j.kind] || j.kind)} ${esc(j.ref)}</b>${esc(j.title)}</span><span class="f">${esc(f ? f.title : "No feature")}</span></li>`;
-  }).join("");
-  return `<article class="lq" aria-label="${esc(l.name)}">
-    <header class="lq-head"><p>${who(l.provider, l.name)}<span class="does" title="With ${esc(l.model)}">${esc(l.does || "")}</span></p>
-      <span class="l-for${s.moving ? " run" : ""}"${s.moving ? ` title="Started ${esc(stamp(s.job.started_at))}"` : ""}>${s.moving ? `<i class="dot run"></i>` : ""}${s.how}</span>
-      <span class="l-stop">${stopButton(l)}</span></header>
-    <p class="doing${s.moving ? "" : " quiet"}">${s.head}</p>
-    ${s.sub ? `<p class="lane-sub">${s.sub}</p>` : ""}${s.note ? `<p class="lane-note">${s.note}</p>` : ""}
-    <p class="lq-label">${rows ? (s.moving ? "Then, in this order" : "Next, in this order") : esc(l.queue_empty || "Nothing is waiting for it.")}</p>
-    ${rows ? `<ol class="lq-list">${rows}</ol>` : ""}</article>`;
+function work() {
+  const issues = snap.issues || [], repos = (snap.repos || []).map((r) => r.name);
+  const byKey = new Map(issues.map((i) => [key(i), i]));
+  const outside = new Map((snap.outside || []).map((o) => [o.key, o]));
+  const nodes = new Map();
+  for (const r of repos) nodes.set(`repo:${r}`, { t: "repo", id: `repo:${r}`, repo: r, kids: [] });
+  for (const e of snap.efforts || []) nodes.set(e.id, { t: "effort", ...e, parent: e.parent || `repo:${e.repo}`, kids: [] });
+  for (const r of repos) nodes.set(`none:${r}`, { t: "none", id: `none:${r}`, repo: r, n: null, title: "No effort", parent: `repo:${r}`, blocked_by: [], kids: [] });
+  for (const i of issues) nodes.set(key(i), { t: "ticket", id: key(i), i, repo: i.repo, parent: i.feature && nodes.has(i.feature) ? i.feature : `none:${i.repo}` });
+  for (const n of nodes.values()) if (n.parent && nodes.has(n.parent)) nodes.get(n.parent).kids.push(n.id);
+  const tickets = (id) => { const n = nodes.get(id); return n.t === "ticket" ? [n.i] : n.kids.flatMap(tickets); };
+  const openIn = (id) => tickets(id).filter(isOpen);
+  const low = (id) => Math.min(Infinity, ...openIn(id).map((i) => i.n));
+  // The order: open children only. Stefan's where he dragged, a newcomer at the end; else effort
+  // by effort, each by its lowest open ticket (#107).
+  for (const n of nodes.values()) {
+    if (n.t === "ticket") continue;
+    const live = n.kids.filter((k) => openIn(k).length);
+    const mine = (ord.kids[n.id] || []).filter((k) => live.includes(k));
+    n.order = [...mine, ...live.filter((k) => !mine.includes(k)).sort((a, b) => low(a) - low(b))];
+    n.closed = n.kids.filter((k) => !live.includes(k));
+  }
+  const flat = (id) => { const n = nodes.get(id); return n.t === "ticket" ? [id] : n.order.flatMap(flat); };
+  const pos = new Map();
+  for (const r of repos) flat(`repo:${r}`).forEach((k, x) => pos.set(k, x));
+  const ancestors = (id) => { const out = []; let n = nodes.get(id); while (n && n.parent) { out.push(n.parent); n = nodes.get(n.parent); } return out; };
+  const top = (id) => { const a = [id, ...ancestors(id)]; return a[a.length - 2]; };   // its branch at the repo's top
+  // What holds a ticket: its own open blockers, then each open blocker of an effort above it.
+  const blockersOf = (i) => [
+    ...(i.blocked_by || []).map((b) => ({ b, via: null })),
+    ...ancestors(key(i)).map((a) => nodes.get(a)).filter((n) => n.t === "effort").flatMap((e) => (e.blocked_by || []).map((b) => ({ b, via: e }))),
+  ].filter(({ b }) => outside.has(b) || (byKey.has(b) && isOpen(byKey.get(b))));
+
+  const claude = (snap.lanes || []).find((l) => l.id === "claude") || {};
+  const doing = new Map((claude.jobs || []).map((j) => [j.repo, j]));
+  const queues = new Map(), qpos = new Map();
+  for (const r of repos) {
+    const given = (snap.repo_queues || []).find((q) => q.repo === r) || { jobs: [] }, root = nodes.get(`repo:${r}`);
+    const jobs = repoOff(r) ? [] : given.jobs.map((j) => ({ ...j }));
+    if (!repoOff(r)) {
+      let prev = null;
+      for (const k of flat(`repo:${r}`)) {
+        const i = byKey.get(k);
+        if (i.state !== "ready" || blockersOf(i).length) continue;
+        const e = nodes.get(nodes.get(k).parent), t = top(k), mine = ord.touched.has(t) ? ", where you put it" : "";
+        let why;
+        if (i.runner_filed) why = `${i.note}. The fix is built like any ticket, and the stuck item tries again once it closes`;
+        else if (!prev) why = t === root.order[0] ? `The first ready ticket in ${nameOf(nodes.get(t))}, the top of the order${mine}`
+          : `${nameOf(nodes.get(root.order[0]))} has nothing ready to build, so it builds from ${nameOf(nodes.get(t))}${mine}`;
+        else if (nodes.get(prev).parent === e.id) why = `Next in ${nameOf(e)}, ${ord.kids[e.id] ? "in the order you set" : "lowest number first"}`;
+        else if (top(prev) === t) why = `${nameOf(e)} is next inside ${nameOf(nodes.get(t))}`;
+        else why = `${nameOf(nodes.get(t))} comes next in the order${mine}`;
+        jobs.push({ kind: "build", ref: `#${i.n}`, title: i.title, why, key: k });
+        prev = k;
+      }
+    }
+    jobs.forEach((j, x) => { const i = j.key ? byKey.get(j.key) : issues.find((i) => i.repo === r && i.pr && j.ref === `PR #${i.pr}`); if (i) qpos.set(key(i), x + 1); });
+    queues.set(r, { repo: r, doing: doing.get(r) || null, jobs, starts: given.starts || null });
+  }
+  return { repos: scoped(repos.map((r) => ({ repo: r }))).map((x) => x.repo), allRepos: repos, byKey, outside, nodes, tickets, openIn, flat, pos, ancestors, top, blockersOf, queues, qpos, doing };
 }
-const noLanes = `<p class="empty">The snapshot names no lane.</p>`;
-const viewSeg = () => `<span class="seg" role="group" aria-label="View">
-    <button data-act="view" data-view="list" aria-pressed="${ui.view === "list"}">In build order</button>
-    <button data-act="view" data-view="pyramid" aria-pressed="${ui.view === "pyramid"}">What blocks what</button></span>`;
+const nameOf = (n) => (!n ? "" : n.t === "none" ? "No effort" : n.t === "ticket" ? `#${n.i.n}` : n.title);
+const refOf = (x, from) => (x.repo === from ? `#${x.n}` : `${x.repo}#${x.n}`);
+
+// Why a ticket stands where it does, in one sentence (#107). A blocked one names the root of its
+// chain: the blocker that won't move without you.
+function heldSay(x) {
+  if (!x) return "";
+  if (x.outside) return `is in ${x.repo}, which the runner doesn't serve`;
+  return { you: "waits on you", "ready-for-human": "is ready-for-human", "needs-triage": "is needs-triage",
+    "fixing-itself": `is fixing itself: ${x.fix ? refOf({ repo: x.fix.split("#")[0], n: x.fix.split("#")[1] }, x.repo) : ""}` }[x.state]
+    || (repoOff(x.repo) ? "is in a stopped repository" : "");
+}
+function rootOf(x, W, seen = new Set()) {
+  if (x.outside || seen.has(key(x))) return x;
+  seen.add(key(x));
+  if (heldSay(x)) return x;
+  const roots = W.blockersOf(x).map(({ b }) => (W.outside.has(b) ? { ...W.outside.get(b), outside: true } : rootOf(W.byKey.get(b), W, seen)));
+  return roots.find((r) => heldSay(r)) || roots[0] || x;
+}
+function whyOf(i, W) {
+  const at = W.qpos.get(key(i)), ask = i.state === "you" ? askFor(i) : null, job = W.doing.get(i.repo);
+  switch (i.state) {
+    case "done": return "Live";
+    case "building": return job && job.ref === `#${i.n}` ? `Claude is building it, ${ago(job.started_at)} in` : "Claude is on it";
+    case "you": return ask ? ask.situation : i.note || "Waits on you";
+    case "ready-for-human": return "Yours to build. The runner never builds it";
+    case "needs-triage": return "Yours to triage: you decide what it becomes";
+    case "fixing-itself": return `${i.note}. The runner filed ${refOf({ repo: i.fix.split("#")[0], n: i.fix.split("#")[1] }, i.repo)} to fix that, and tries again once it closes`;
+    case "ready": return repoOff(i.repo) ? "Its repository is stopped" : at ? (at === 1 ? `Next for ${i.repo}` : `${nth(at)} in ${i.repo}'s queue`) : "Ready";
+    case "blocked": {
+      const bs = W.blockersOf(i).map((x) => ({ ...x, it: W.outside.has(x.b) ? { ...W.outside.get(x.b), outside: true } : W.byKey.get(x.b) }));
+      if (!bs.length) return "Blocked";
+      bs.sort((a, b) => !!heldSay(rootOf(b.it, W)) - !!heldSay(rootOf(a.it, W)));
+      const { it, via } = bs[0], others = bs.slice(1).map((x) => refOf(x.it, i.repo));
+      const and = others.length ? ` (and ${others.join(", ")})` : "";
+      const pre = via ? `${via.title} waits on ${refOf(it, i.repo)}` : `After ${refOf(it, i.repo)}`;
+      if (heldSay(it)) return `${pre}, which ${heldSay(it)}${and}`;
+      const root = rootOf(it, W);
+      if (root !== it && heldSay(root)) return `${pre}, behind ${refOf(root, i.repo)}, which ${heldSay(root)}${and}`;
+      const rq = W.qpos.get(key(root));
+      const where = root.state === "ready" && rq ? `${rq === 1 ? "next" : nth(rq)} in ${root.repo === i.repo ? "the queue" : `${root.repo}'s queue`}` : (STATE[root.state] || [root.state])[0].toLowerCase();
+      return root !== it ? `${pre}, behind ${refOf(root, i.repo)}, ${where}${and}` : `${pre}, ${where}${and}`;
+    }
+    default: return i.note || (STATE[i.state] || [i.state])[0];
+  }
+}
+// A ticket's state by its name. Waiting on you is blue; the two labels keep their names (#107).
+function stateTag(i) {
+  const ask = i.state === "you" ? askFor(i) : null;
+  if (ask) return `<a class="st you" ${goto("inbox", ask)} title="Opens it in the Inbox">${ICON[ask.kind] || ""}${esc(askWords(ask)[0])}</a>`;
+  const [label, cls] = {
+    "ready-for-human": ["ready-for-human", "you lbl"], "needs-triage": ["needs-triage", "you lbl"],
+    "fixing-itself": ["Fixing itself", "run"], building: ["Building", "run"], review: ["In review", "run"], fixing: ["Fixing", "run"],
+    ready: ["Ready", "ready"], blocked: ["Blocked", "blocked"], merged: ["Merged, not live", "ok"], done: ["Done", "ok"], you: ["Waits on you", "you"],
+  }[i.state] || [i.state, "blocked"];
+  return `<span class="st ${cls}">${i.state === "fixing-itself" ? ICON.stuck : ""}${esc(label)}</span>`;
+}
+const fixTag = (i) => (i.state === "fixing-itself" && i.fix ? `<span class="fix-ref">fixing itself: ${esc(refOf({ repo: i.fix.split("#")[0], n: i.fix.split("#")[1] }, i.repo))}</span>` : "");
+const filedTag = (i) => (i.runner_filed ? `<span class="lbl-tag" title="Filed by the runner (#108)">runner-filed</span>` : "");
+const prText = (i) => (!i.pr ? "" : (snap.prs || []).some((p) => p.repo === i.repo && p.n === i.pr) ? prLink(i.repo, i.pr, `PR #${i.pr}`) : `<span class="pr-ref">PR #${i.pr}</span>`);
+// An effort's bar and its "what's left" sentence: ready-for-human and needs-triage wait on you.
+function effortSum(n, W) {
+  const its = W.tickets(n.id).sort((a, b) => segmentOf(a) - segmentOf(b) || a.n - b.n);
+  const v = { its, left: its.filter((i) => i.state !== "done").length, loose: n.t === "none" };
+  return { its, v, bar: ticketBar(nameOf(n), its), say: leftSay(v, false), count: v.loose ? plural(v.left, "open", "open") : `${its.length - v.left} of ${its.length} done` };
+}
+const closedSay = (n, W) => {
+  const shut = n.closed.flatMap((k) => W.tickets(k));
+  const done = shut.filter((i) => i.state === "done").length, merged = shut.filter((i) => i.state === "merged").length;
+  return [done ? `${done} done` : "", merged ? `${merged} merged, not live` : ""].filter(Boolean).join(", ");
+};
+const yoursIn = (r, W) => (snap.issues || []).filter((i) => i.repo === r && ["you", "ready-for-human", "needs-triage"].includes(i.state));
+const isFlash = (id) => lastMove && Date.now() - lastMove.at < 4000 && lastMove.ids.has(id);
+const GRIP = `<span class="grip" aria-hidden="true"><svg viewBox="0 0 10 16"><circle cx="2.5" cy="3" r="1.3"/><circle cx="7.5" cy="3" r="1.3"/><circle cx="2.5" cy="8" r="1.3"/><circle cx="7.5" cy="8" r="1.3"/><circle cx="2.5" cy="13" r="1.3"/><circle cx="7.5" cy="13" r="1.3"/></svg></span>`;
+const dragAttrs = (n) => (repoOff(n.repo) ? "" : `draggable="true" tabindex="0" data-drag="${esc(n.id)}" data-parent="${esc(n.parent)}" aria-roledescription="${n.t === "ticket" ? "ticket" : "effort"}, drag to reorder"`);
+const KINDNAME = { map: "Map", spec: "Spec" };
+
+// What a repo is doing now and takes up next, in order, each with why.
+function nowLine(q) {
+  if (repoOff(q.repo)) return `<p class="q-now quiet">Stopped by you: nothing starts here until you resume it.</p>`;
+  if (q.doing) return `<p class="q-now"><i class="dot run"></i><b>${esc(kind(q.doing.kind)[0])} ${esc(q.doing.ref)}</b> ${esc(q.doing.title)}<span class="mute">, ${esc(ago(q.doing.started_at))} in</span></p>`;
+  return `<p class="q-now quiet">Nothing running here. ${esc(q.starts || "The next job starts when the gate admits it.")}</p>`;
+}
+const jobLabel = (j) => `${QUEUED[j.kind] || j.kind} ${j.ref}`;
+function queueList(q, cls = "") {
+  if (!q.jobs.length) return `<p class="empty small">${repoOff(q.repo) ? "Nothing: the repository is stopped." : "Nothing is ready to start."}</p>`;
+  return `<ol class="jobs ${cls}">${q.jobs.map((j, x) => `<li class="${j.kind === "build" ? "" : "pre"}${j.key && isFlash(j.key) ? " flash" : ""}"><span class="n">${x + 1}</span>
+    <span class="j"><b>${esc(jobLabel(j))}</b> ${esc(j.title)}</span><span class="why">${esc(j.why)}</span></li>`).join("")}</ol>`;
+}
+function moveNote() {
+  const ago4 = lastMove && Date.now() - lastMove.at < 60000;
+  const tools = `${undo.length ? `<button class="btn sm" data-act="q-undo">Undo</button>` : ""}${Object.keys(ord.kids).length ? `<button class="btn sm" data-act="q-reset">Back to the default order</button>` : ""}`;
+  if (!tools && !ago4) return "";
+  const says = ago4 && lastMove.says.length ? lastMove.says.map((s) => `<li>${s}</li>`).join("") : "";
+  return `<div class="q-moved${says ? " has" : ""}" role="status">${says ? `<ul>${says}</ul>` : `<p class="mute">The order you set holds in this page until you reload it (prototype).</p>`}<span class="q-tools">${tools}</span></div>`;
+}
+
+// A ticket as a row, and an effort as a block holding its children, for A and C.
+function ticketRowQ(n, W, opt = {}) {
+  const i = n.i, at = W.qpos.get(n.id);
+  const num = opt.numbered ? (i.state === "ready" && at ? `<span class="qn" title="${nth(at)} in ${esc(i.repo)}'s queue">${at}</span>` : `<span class="qn none"></span>`) : "";
+  return `<li class="tq${opt.sel === n.id ? " sel" : ""}${isFlash(n.id) ? " flash" : ""}" ${dragAttrs(n)}>${GRIP}${num}
+    <span class="tq-main">${opt.pick ? `<button class="tq-pick" data-act="q-sel" data-id="${esc(n.id)}">` : "<span class=\"tq-pick\">"}<span class="t-n">#${i.n}</span><span class="t-t">${esc(i.title)}</span>${opt.pick ? "</button>" : "</span>"}${prText(i)}${filedTag(i)}</span>
+    <span class="tq-state">${stateTag(i)}${fixTag(i)}</span>
+    ${opt.why === false ? "" : `<span class="tq-why">${esc(whyOf(i, W))}</span>`}</li>`;
+}
+function effortBlock(n, W, depth, opt = {}) {
+  const s = effortSum(n, W), shut = closedSay(n, W);
+  const held = (n.blocked_by || []).map((b) => W.byKey.get(b)).filter((b) => b && isOpen(b));
+  const kids = n.order.map((k) => (W.nodes.get(k).t === "ticket" ? ticketRowQ(W.nodes.get(k), W, opt) : effortBlock(W.nodes.get(k), W, depth + 1, opt))).join("");
+  const name = n.t === "none" ? `<b class="e-name">No effort</b><span class="mute">tickets with no spec or map</span>`
+    : `<span class="kind">${esc(KINDNAME[n.kind] || "Effort")}</span>${opt.pick ? `<button class="e-name" data-act="q-sel" data-id="${esc(n.id)}">` : `<b class="e-name">`}<span class="t-n">#${n.n}</span>${esc(n.title)}${opt.pick ? "</button>" : "</b>"}`;
+  return `<li class="eq d${depth}${n.t === "none" ? " none" : ""}${opt.sel === n.id ? " sel" : ""}${isFlash(n.id) ? " flash" : ""}" ${dragAttrs(n)}>
+    <div class="eq-head">${GRIP}${name}<span class="eq-bar">${s.bar}</span><span class="eq-count">${esc(s.count)}</span></div>
+    <p class="eq-say">${s.say}${held.length ? ` <span class="held">${ICON.pause}Waits on ${held.map((b) => `${refOf(b, n.repo)} ${esc(b.title)}`).join(", ")}: every ticket under it is held.</span>` : ""}</p>
+    <ol class="eq-kids">${kids}</ol>${shut ? `<p class="eq-shut">${ICON.check}${esc(shut)}</p>` : ""}</li>`;
+}
+function finished(r, W) {
+  const root = W.nodes.get(`repo:${r}`), done = root.closed.map((k) => W.nodes.get(k)).filter((n) => n.t !== "none");
+  return done.length ? `<p class="q-finished">${ICON.done}Finished: ${done.map((n) => `${esc(n.title)} <span class="mute">#${n.n}</span>`).join(", ")}. A finished effort leaves the order.</p>` : "";
+}
+const repoHead = (r, W, extra = "") => {
+  const mine = yoursIn(r, W).length, meta = (snap.repos || []).find((x) => x.name === r) || {};
+  return `<header class="q-repo">${repoLogo(r)}<h2>${esc(r)}</h2>${offTag(r)}<span class="mute">${meta.merge === "stefan" ? "You merge its PRs" : "The runner merges its PRs"}</span>
+    ${mine ? `<span class="q-yours" title="Asks, ready-for-human and needs-triage">${plural(mine, "waits on you", "wait on you")}</span>` : ""}${extra}</header>`;
+};
 
 function queue() {
-  const q = queueModel();
-  return `<div class="q q-${ui.variant}">${{ a: queueA, b: queueB, c: queueC }[ui.variant](q)}</div>${protoBar()}`;
+  const W = work();
+  return `<div class="q11 q11-${ui.variant}">${moveNote()}${{ a: queueA, b: queueB, c: queueC }[ui.variant](W)}</div>${protoBar()}`;
 }
 
-// ---- A, features first. A card per feature, in build order: its bar, what stands between it and
-// usable, and its tickets as rows in the order they're built. A chip (or a feature's name) narrows
-// the page to that feature; "What blocks what" draws the same scope as the pyramid. Each lane's
-// queue follows the features.
-function queueA(q) {
-  const picked = q.views.find((v) => v.id === ui.feature) || null;
-  const chip = (id, label, usable) => `<button class="chip" data-act="feature" data-id="${esc(id)}" aria-pressed="${(picked ? picked.id : "") === id}"${usable ? ' title="Usable: every ticket is live"' : ""}>${usable ? ICON.check : ""}${esc(label)}</button>`;
-  const bar = `<section class="card qa-bar" aria-label="What to show">
-      <div class="chips" role="group" aria-label="Feature">${chip("", "All features")}${q.views.map((v) => chip(v.id, v.title, !v.left)).join("")}</div>${viewSeg()}</section>`;
-  const card = (v) => `<section class="card" aria-label="${esc(v.title)}"><header class="qa-head">
-      <h2><button class="qa-name" data-act="feature" data-id="${esc(v.id)}" title="${picked ? "Show every feature" : "Show only this feature"}">${esc(v.title)}</button>${v.repo && !ui.repo ? `<span class="repo">${esc(v.repo)}</span>` : ""}</h2>
-      <span class="count" title="Done means live">${countSay(v)}</span>${ticketBar(v.title, v.its)}<p class="say">${leftSay(v)}</p></header>
-    ${ticketRows(v, q)}</section>`;
-  let body;
-  if (ui.view === "pyramid") body = `<section class="card" aria-label="What blocks what">${pyramid({ ...q.m, shown: picked ? picked.its : q.m.shown })}</section>`;
-  else if (picked) body = card(picked);
-  else {
-    const usable = q.views.filter((v) => !v.left);
-    body = q.views.filter((v) => v.left).map(card).join("") + (usable.length ? `<section class="card" aria-label="Usable"><header class="card-head"><h2>Usable</h2><span class="head-note">Every ticket is live</span></header>
-      <ul class="qa-usable">${usable.map((v) => `<li><button data-act="feature" data-id="${esc(v.id)}">${ICON.check}<span><b>${esc(v.title)}</b>${ui.repo ? "" : `<span>${esc(v.repo)}</span>`}</span><span class="count">${countSay(v)}</span></button></li>`).join("")}</ul></section>` : "");
-    if (!q.views.length) body = `<section class="card"><p class="empty">Nothing is open${ui.repo ? ` in ${esc(ui.repo)}` : ""}.</p></section>`;
-  }
-  return `${bar}${body}<section class="card" aria-label="Each lane's queue"><header class="card-head"><h2>What each lane takes up next</h2>
-      <span class="head-note">${picked ? "Jobs that belong to other features are dimmed" : "One job at a time in each lane"}</span></header>
-    ${q.lanes.length ? `<div class="lqs">${q.lanes.map((l) => laneQueue(l, q, picked)).join("")}</div>` : noLanes}</section>`;
-}
-
-// ---- B, the page you land on. Three bands, top to bottom. First what an Overview would say:
-// what waits on you (each ask a tile that opens it in the Inbox), then what's running (each lane
-// with its Stop button and its queue). Under them the features, folded to a line each: its bar,
-// how far, what's left. A line unfolds to its tickets.
-function queueB(q) {
-  const { all, open, snoozed, answered } = inboxLists();
-  const aside = [snoozed.length ? `${snoozed.length} snoozed` : "", answered.length ? `${answered.length} decided, now with the runner` : ""].filter(Boolean).join(". ");
-  let you;
-  if (!open.length) {
-    const blind = (snap.sources || []).find((s) => s.id === "github" && !s.ok);
-    const elsewhere = ui.repo ? all.filter((a) => a.repo !== ui.repo && !snoozedUntil(a)).length : 0;
-    const calm = blind ? ["Nothing seen that waits on you", "GitHub can't be read, so something may be missing."]
-      : elsewhere ? [`Nothing in ${esc(ui.repo)} waits on you`, `${plural(elsewhere, "thing waits", "things wait")} in another repository.`]
-      : ["Nothing waits on you", "The runner carries on by itself."];
-    you = `<section class="card qb-you" aria-label="Waiting on you"><div class="ov-calm">${ICON.done}<p><b>${calm[0]}</b><span>${calm[1]}${aside ? ` ${aside}.` : ""}</span></p></div></section>`;
-  } else {
-    const SHOWN = 6, oldest = open.reduce((m, a) => (ms(a.since) < ms(m.since) ? a : m));
-    const rest = open.length > SHOWN ? `${open.length - SHOWN} more in the Inbox` : "";
-    you = `<section class="card qb-you has" aria-label="Waiting on you">
-      <header class="qb-head"><h2>${open.length} waiting on you</h2><span title="Waiting since ${esc(stamp(oldest.since))}">oldest ${esc(ago(oldest.since))}</span>
-        <a class="btn go" ${goto("inbox")}>${ICON.inbox}Open the Inbox</a></header>
-      <ol class="qb-asks">${open.slice(0, SHOWN).map((a) => `<li><a class="mrow${isRead(a) ? "" : " unread"}" ${goto("inbox", a)}>
-        <span class="m1">${repoMark(a.repo)}${kindTag(a)}<span class="ma" title="Waiting since ${esc(stamp(a.since))}">${esc(ago(a.since))}</span></span>
-        <span class="m2">${isRead(a) ? "" : `<i class="dot" title="Unread"></i>`}<b>${esc(a.subject)}</b><span>${esc(a.ref)}</span></span>
-        <span class="m3">${esc(a.situation || a.question)}</span></a></li>`).join("")}</ol>
-      ${rest || aside ? `<p class="qb-aside">${[rest, aside].filter(Boolean).join(". ")}.</p>` : ""}</section>`;
-  }
-  const run = `<section class="card" aria-label="Running now"><header class="card-head"><h2>Running now</h2><span class="head-note">and what each lane takes up next</span></header>
-    ${q.lanes.length ? `<div class="lqs">${q.lanes.map((l) => laneQueue(l, q, null)).join("")}</div>` : noLanes}</section>`;
-  const rows = q.views.map((v) => {
-    const open = ui.open.includes(v.id);
-    return `<li><button class="fb-row" data-act="open" data-id="${esc(v.id)}" aria-expanded="${open}">${ICON.chevron}
-        <span class="fb-name"><b>${esc(v.title)}</b>${v.repo && !ui.repo ? `<span>${esc(v.repo)}</span>` : ""}</span>
-        ${ticketBar(v.title, v.its)}<span class="fb-count" title="Done means live">${countSay(v)}</span><span class="fb-say">${leftSay(v, false)}</span></button>
-      ${open ? ticketRows(v, q) : ""}</li>`;
+// ---- A, repo by repo. A card per repository, one under another: what's running, what it takes
+// up next with why, then its build order as an outline you drag.
+function queueA(W) {
+  if (!W.repos.length) return `<section class="card"><p class="empty">No repository.</p></section>`;
+  return W.repos.map((r) => {
+    const q = W.queues.get(r), root = W.nodes.get(`repo:${r}`);
+    return `<section class="card qa" aria-label="${esc(r)}">${repoHead(r, W)}
+      <div class="qa-next"><h3>Takes up next</h3>${nowLine(q)}${queueList(q)}</div>
+      <div class="qa-order"><h3>Build order<span class="mute">drag an effort among its siblings, a ticket within its effort</span></h3>
+        <ol class="otree">${root.order.map((k) => effortBlock(W.nodes.get(k), W, 0)).join("")}</ol>${finished(r, W)}</div></section>`;
   }).join("");
-  const going = q.views.filter((v) => v.left && !v.loose).length;
-  const feats = `<section class="card" aria-label="Features"><header class="card-head"><h2>Features</h2>
-      <span class="mute">${going ? `${going} with open work, in build order` : "none with open work"}</span>${viewSeg()}</header>
-    ${ui.view === "pyramid" ? pyramid(q.m) : rows ? `<ol class="fb">${rows}</ol>
-      <div class="ov-foot"><p class="ov-legend" aria-label="What a cell's fill means">${SEGMENTS.map(([cls, label]) => `<span><i class="sg ${cls}"></i>${label}</span>`).join("")}</p></div>`
-      : `<p class="empty">Nothing is open${ui.repo ? ` in ${esc(ui.repo)}` : ""}.</p>`}</section>`;
-  return `${you}${run}${feats}`;
 }
 
-// ---- C, tracks. Every row runs left to right. A lane's row is what it's on now and what it
-// takes up next, numbered. A feature's row is its tickets one after another until it's usable:
-// the cells along its top are its bar, each with its ticket under it, and the last cell is the
-// end. Picking a ticket lights up what it waits on and what it holds up, in every row.
-function queueC(q) {
-  const m = q.m;
-  let lit = null;
-  if (ui.sel && m.byKey.has(ui.sel)) {
-    lit = new Set([ui.sel]);
-    const up = (k) => (m.byKey.get(k).blocked_by || []).forEach((b) => { if (m.byKey.has(b) && !lit.has(b)) { lit.add(b); up(b); } });
-    const down = (k) => (m.dependents.get(k) || []).forEach((d) => { if (!lit.has(d)) { lit.add(d); down(d); } });
-    up(ui.sel); down(ui.sel);
+// ---- B, side by side. A column per repository, as they run: side by side. Each column reads down:
+// what waits on you there, what's running, the queue, then the build order, compact.
+function queueB(W) {
+  const col = (r) => {
+    const q = W.queues.get(r), root = W.nodes.get(`repo:${r}`), mine = yoursIn(r, W);
+    const yours = mine.length ? `<div class="qb-yours"><h3>${plural(mine.length, "waits on you", "wait on you")}</h3><ul>${mine.map((i) =>
+      `<li>${stateTag(i)}<span class="t-n">#${i.n}</span><span class="t-t">${esc(i.title)}</span></li>`).join("")}</ul></div>` : "";
+    return `<section class="qb-col" aria-label="${esc(r)}">${repoHead(r, W)}${yours}
+      <div class="qb-sec"><h3>Now</h3>${nowLine(q)}</div>
+      <div class="qb-sec"><h3>Then, in this order</h3>${queueList(q, "compact")}</div>
+      <div class="qb-sec"><h3>Build order</h3><ol class="otree compact">${root.order.map((k) => effortBlock(W.nodes.get(k), W, 0)).join("")}</ol>${finished(r, W)}</div></section>`;
+  };
+  return `<div class="qb-cols" style="--cols:${Math.max(1, W.repos.length)}">${W.repos.map(col).join("")}</div>`;
+}
+
+// ---- C, one numbered list. A tab per repository. The build order is the queue: each ticket the
+// runner will build carries its number in line, what goes before any build is pinned above it,
+// and the picked row opens on the right: why, its chain, what it holds up.
+function queueC(W) {
+  const r = W.repos.includes(ui.qrepo) ? ui.qrepo : W.repos[0];
+  if (!r) return `<section class="card"><p class="empty">No repository.</p></section>`;
+  const q = W.queues.get(r), root = W.nodes.get(`repo:${r}`);
+  const tabs = W.repos.length > 1 ? `<div class="qc-tabs" role="tablist">${W.repos.map((x) => {
+    const n = yoursIn(x, W).length;
+    return `<button role="tab" aria-selected="${x === r}" data-act="q-repo" data-repo="${esc(x)}">${repoLogo(x)}${esc(x)}${n ? `<span class="badge you" title="${n} waiting on you">${n}</span>` : ""}</button>`;
+  }).join("")}</div>` : "";
+  const pre = q.jobs.filter((j) => j.kind !== "build");
+  const pinned = `<div class="qc-pin">${nowLine(q)}${pre.length ? `<ol class="jobs">${pre.map((j, x) => `<li class="pre"><span class="n">${x + 1}</span><span class="j"><b>${esc(jobLabel(j))}</b> ${esc(j.title)}</span><span class="why">${esc(j.why)}</span></li>`).join("")}</ol>` : ""}
+    <p class="mute small">${pre.length ? `Then the builds, numbered in the order below from ${pre.length + 1}.` : "The builds follow, numbered in the order below."}</p></div>`;
+  const sel = W.nodes.has(ui.qsel) && W.nodes.get(ui.qsel).repo === r ? ui.qsel : null;
+  return `${tabs}<div class="qc-grid"><section class="card qc-list" aria-label="${esc(r)}">${repoHead(r, W)}${pinned}
+      <ol class="otree">${root.order.map((k) => effortBlock(W.nodes.get(k), W, 0, { numbered: true, pick: true, sel, why: true })).join("")}</ol>${finished(r, W)}</section>
+    <aside class="card qc-side" aria-label="The picked row">${sel ? detail(W.nodes.get(sel), W) : sideSummary(r, W)}</aside></div>`;
+}
+function sideSummary(r, W) {
+  const mine = yoursIn(r, W), stuck = (snap.issues || []).filter((i) => i.repo === r && i.state === "fixing-itself");
+  return `<div class="qc-d"><p class="mute">Pick a row to see why it stands where it does, what it waits on and what it holds up.</p>
+    ${mine.length ? `<h3>Waits on you in ${esc(r)}</h3><ul class="qc-mini">${mine.map((i) => `<li><button class="link" data-act="q-sel" data-id="${esc(key(i))}">#${i.n} ${esc(i.title)}</button> ${stateTag(i)}</li>`).join("")}</ul>` : ""}
+    ${stuck.length ? `<h3>Fixing itself</h3><ul class="qc-mini">${stuck.map((i) => `<li><button class="link" data-act="q-sel" data-id="${esc(key(i))}">#${i.n} ${esc(i.title)}</button> ${fixTag(i)}</li>`).join("")}</ul>` : ""}</div>`;
+}
+function detail(n, W) {
+  const path = W.ancestors(n.id).reverse().slice(1).map((a) => nameOf(W.nodes.get(a)));
+  const crumbs = `<p class="qc-path">${esc(n.repo)}${path.map((p) => ` › ${esc(p)}`).join("")}</p>`;
+  if (n.t !== "ticket") {
+    const s = effortSum(n, W), open = W.openIn(n.id), next = open.filter((i) => W.qpos.get(key(i))).sort((a, b) => W.qpos.get(key(a)) - W.qpos.get(key(b)))[0];
+    return `<div class="qc-d">${crumbs}<h2>${n.t === "none" ? "No effort" : `${esc(KINDNAME[n.kind] || "")} #${n.n} ${esc(n.title)}`}</h2>${s.bar}<p>${s.say}</p>
+      <p>${next ? `Its next build is #${next.n} ${esc(next.title)}, ${nth(W.qpos.get(key(next)))} in line.` : "Nothing in it is ready to build."}</p>
+      <p class="mute">Drag it among its siblings to build it sooner or later. Anything it waits on comes up with it.</p></div>`;
   }
-  const cls = (i) => `${lit && !(i && lit.has(key(i))) ? " fade" : ""}${i && ui.sel === key(i) ? " sel" : ""}`;
-  const pick = (i) => (i ? `button class="stn-in" data-act="sel" data-key="${esc(key(i))}" aria-pressed="${ui.sel === key(i)}"` : `div class="stn-in"`);
-  const end = (i) => (i ? "button" : "div");
-
-  const laneRow = (l) => {
-    const s = laneSays(l), cur = s.moving ? q.issueOf(s.job) : null;
-    const first = s.moving
-      ? `<li class="stn on${cls(cur)}"><${pick(cur)} title="${esc(s.job.title)}"><i class="sg ${cur ? SEGMENTS[segmentOf(cur)][0] : "pr"}"></i>
-          <span class="s-top run"><i class="dot run"></i>Now, ${esc(ago(s.job.started_at))}</span><b class="s-t">${esc(kind(s.job.kind)[0])} ${esc(s.job.ref)}</b><span class="s-d">${esc(s.job.title)}</span></${end(cur)}></li>`
-      : `<li class="stn wide${lit ? " fade" : ""}"><div class="stn-in"><i class="sg blocked"></i><span class="s-top">${s.how}</span><b class="s-t">${s.head}</b>${s.sub ? `<span class="s-d">${s.sub}</span>` : ""}</div></li>`;
-    const rest = (l.queue || []).map((j, k) => {
-      const i = q.issueOf(j);
-      return `<li class="stn${cls(i)}"><${pick(i)} title="${esc(j.title)}"><i class="sg ready"></i>
-        <span class="s-top">${k + 1}</span><b class="s-t">${esc(QUEUED[j.kind] || j.kind)} ${esc(j.ref)}</b><span class="s-d">${esc(j.title)}</span></${end(i)}></li>`;
-    }).join("");
-    return `<article class="qc-row" aria-label="${esc(l.name)}">
-      <header class="qc-head">${who(l.provider, l.name)}<span class="does" title="With ${esc(l.model)}">${esc(l.does || "")}</span>
-        ${s.moving && s.sub ? `<span class="lane-sub">${s.sub}</span>` : ""}<span class="l-stop">${stopButton(l)}</span></header>
-      <ol class="track" aria-label="What ${esc(l.name)} is on, then what it takes up next, in order">${first}${rest}
-        ${rest ? "" : `<li class="track-none">${esc(l.queue_empty || "Nothing is waiting for it.")}</li>`}</ol>
-      ${s.note ? `<p class="lane-note">${s.note}</p>` : ""}</article>`;
-  };
-
-  const featureRow = (v) => {
-    const cells = v.its.map((i) => {
-      const s = standing(i, q);
-      if (i.state === "done") return `<li class="stn slim${cls(i)}"><${pick(i)} title="#${i.n} ${esc(i.title)}: done" aria-label="#${i.n} ${esc(i.title)}: done"><i class="sg done"></i>${ICON.check}</button></li>`;
-      return `<li class="stn ${s.seg}${s.on && !frozen() ? " on" : ""}${cls(i)}"><${pick(i)} title="${esc(i.title)}"><i class="sg ${s.seg}"></i>
-        <span class="s-top">#${i.n}${i.feature || ui.repo ? "" : `<span class="tag">${esc(i.repo)}</span>`}</span><b class="s-t">${esc(i.title)}</b><span class="s-s">${esc(s.short)}</span></button></li>`;
-    }).join("");
-    const last = v.loose ? "" : `<li class="stn end${v.left ? "" : " ok"}"><div class="stn-in"><i class="sg ${v.left ? "ready" : "done"}"></i>
-        <b class="s-t">Usable</b><span class="s-d">${v.left ? `after ${v.left} more` : "every ticket is live"}</span></div></li>`;
-    const sel = lit && v.its.find((i) => key(i) === ui.sel);
-    let picked = "";
-    if (sel) {
-      const waits = m.waitsOn(sel), under = m.below(ui.sel).map((k) => m.byKey.get(k)), s = standing(sel, q);
-      picked = `<p class="qc-picked"><b>#${sel.n} ${esc(sel.title)}</b>. ${esc(s.word)}${s.more && s.more !== s.word && !waits.length ? `: ${esc(s.more.replace(/^./, (c) => c.toLowerCase()))}` : ""}.
-        ${waits.length ? `Waits on ${waits.map((w) => `#${w.n} ${esc(w.title)}`).join(" and ")}.` : ""}
-        ${under.length ? `Holds up ${under.sort(m.order).map((w) => `#${w.n} ${esc(w.title)}`).join(", ")}.` : "Holds nothing up."}
-        ${s.ask ? `<a class="mine" ${goto("inbox", s.ask)}>Open it in the Inbox</a>` : ""} ${sel.pr ? prLink(sel.repo, sel.pr, "PR history") : ""}</p>`;
-    }
-    return `<article class="qc-row" aria-label="${esc(v.title)}">
-      <header class="qc-head"><span class="name">${esc(v.title)}</span>${v.repo && !ui.repo ? `<span class="repo">${esc(v.repo)}</span>` : ""}
-        <span class="say">${leftSay(v)}</span>${v.loose ? "" : `<span class="count" title="Done means live">${countSay(v)}</span>`}</header>
-      <ol class="track feat" aria-label="${esc(v.title)}: its tickets, in the order they're built">${cells}${last}</ol>${picked}</article>`;
-  };
-
-  return `<section class="card" aria-label="Next in line"><header class="card-head"><h2>Next in line</h2><span class="head-note">One job at a time in each lane, left to right</span></header>
-      ${q.lanes.length ? q.lanes.map(laneRow).join("") : noLanes}</section>
-    <section class="card" aria-label="Features"><header class="card-head"><h2>Features</h2><span class="head-note">In build order. Each runs left to right until it's usable</span></header>
-      ${q.views.length ? q.views.map(featureRow).join("") : `<p class="empty">Nothing is open${ui.repo ? ` in ${esc(ui.repo)}` : ""}.</p>`}</section>`;
+  const i = n.i, k = n.id;
+  // the chain: each blocker in turn, down to the root
+  const chain = [];
+  let cur = i;
+  const seen = new Set([k]);
+  while (cur && !cur.outside) {
+    const bs = W.blockersOf(cur);
+    if (!bs.length) break;
+    const pick = bs.map((x) => (W.outside.has(x.b) ? { ...W.outside.get(x.b), outside: true, via: x.via } : { ...W.byKey.get(x.b), via: x.via }))
+      .sort((a, b) => !!heldSay(rootOf(b, W)) - !!heldSay(rootOf(a, W)))[0];
+    if (!pick || seen.has(`${pick.repo}#${pick.n}`)) break;
+    seen.add(`${pick.repo}#${pick.n}`); chain.push(pick); cur = pick.outside ? null : W.byKey.get(`${pick.repo}#${pick.n}`);
+  }
+  const deps = (snap.issues || []).filter((d) => isOpen(d) && W.blockersOf(d).some(({ b }) => b === k));
+  const ask = i.state === "you" ? askFor(i) : null;
+  return `<div class="qc-d">${crumbs}<h2>#${i.n} ${esc(i.title)}</h2><p class="qc-st">${stateTag(i)}${fixTag(i)}${filedTag(i)}${prText(i)}</p>
+    <p class="qc-why">${esc(whyOf(i, W))}.</p>
+    ${ask ? `<p><a class="btn go sm" ${goto("inbox", ask)}>${ICON.inbox}Open it in the Inbox</a></p>` : ""}
+    ${chain.length ? `<h3>Waits on, down to the root</h3><ol class="chain">${chain.map((c) => `<li class="${heldSay(c) ? "held" : ""}"><b>${esc(refOf(c, i.repo))}</b> ${esc(c.title)}${c.via ? ` <span class="mute">(through ${esc(c.via.title)})</span>` : ""}<span class="why">${esc(c.outside ? heldSay(c) : heldSay(c) || (STATE[c.state] || [c.state])[0])}</span></li>`).join("")}</ol>` : ""}
+    ${deps.length ? `<h3>Holds up</h3><ul class="qc-mini">${deps.map((d) => `<li>${esc(refOf(d, i.repo))} ${esc(d.title)}</li>`).join("")}</ul>` : `<p class="mute">Holds nothing up.</p>`}
+    <p class="mute">It moves only within ${esc(nameOf(W.nodes.get(n.parent)))}. To build it sooner, move its effort.</p></div>`;
 }
+
+// ---- dragging (#109): an effort among its siblings, a ticket within its effort; whatever it
+// waits on comes up with it, in another repository too.
+function moveTo(id, parent, target, before) {
+  undo.push(JSON.stringify({ kids: ord.kids, touched: [...ord.touched] }));
+  const W = work(), was = W.nodes.get(parent).order.join(), list = W.nodes.get(parent).order.filter((k) => k !== id);
+  list.splice(list.indexOf(target) + (before ? 0 : 1), 0, id);
+  ord.kids[parent] = list; ord.touched.add(id);
+  lastMove = { at: Date.now(), ...bringUp(id) };
+  if (work().nodes.get(parent).order.join() === was) lastMove.says.push("So the order is as it was: what it waits on has to come first.");
+}
+function bringUp(id) {
+  const ids = new Set([id]), says = [], seen = new Set();
+  const label = (W, k) => { const n = W.nodes.get(k); return n.t === "ticket" ? `#${n.i.n}` : `<b>${esc(nameOf(n))}</b>`; };
+  const need = (bk, tk, via, depth) => {   // bk must be built before tk
+    if (depth > 24 || seen.has(`${bk}>${tk}`)) return;
+    seen.add(`${bk}>${tk}`);
+    let W = work();
+    const t = W.byKey.get(tk), waiter = via ? `<b>${esc(via.title)}</b>` : `#${t.n}`;
+    if (W.outside.has(bk)) { says.push(`${waiter} waits on ${esc(bk)}, in a repository the runner doesn't serve: it can't be moved.`); return; }
+    const b = W.byKey.get(bk);
+    if (b.repo === t.repo) {
+      if (W.pos.get(bk) > W.pos.get(tk)) {
+        const ab = [bk, ...W.ancestors(bk)], at = [tk, ...W.ancestors(tk)], lca = ab.find((x) => at.includes(x));
+        const bb = ab[ab.indexOf(lca) - 1], tb = at[at.indexOf(lca) - 1];
+        const list = W.nodes.get(lca).order.filter((k) => k !== bb);
+        list.splice(list.indexOf(tb), 0, bb);
+        ord.kids[lca] = list; ids.add(bb);
+        says.push(`${label(W, bb)} came up with it: ${waiter} waits on #${b.n}${bb === bk ? "" : `, which is in ${esc(nameOf(W.nodes.get(bb)))}`}.`);
+      }
+    } else {
+      const chain = [bk, ...W.ancestors(bk)];
+      let moved = null;
+      for (let x = chain.length - 1; x > 0; x--) {
+        const order = W.nodes.get(chain[x]).order, kid = chain[x - 1];
+        if (order[0] !== kid) { ord.kids[chain[x]] = [kid, ...order.filter((k) => k !== kid)]; ids.add(kid); moved = moved || kid; }
+      }
+      if (moved) says.push(`In ${esc(b.repo)}, ${label(W, moved)} went to the top: ${t.repo}#${t.n}${via ? ` (${esc(via.title)})` : ""} waits on ${b.repo}#${b.n}.`);
+    }
+    W = work();
+    for (const x of W.blockersOf(b)) need(x.b, bk, x.via, depth + 1);
+  };
+  const W = work();
+  for (const t of W.openIn(id)) for (const x of W.blockersOf(t)) need(x.b, key(t), x.via, 0);
+  return { ids, says };
+}
+const clearMarks = () => document.querySelectorAll(".drop-before, .drop-after").forEach((el) => el.classList.remove("drop-before", "drop-after"));
+function dropTarget(e) {
+  if (!dragging) return null;
+  let el = e.target.closest ? e.target.closest("[data-drag]") : null;
+  while (el && el.dataset.parent !== dragging.parent) el = el.parentElement ? el.parentElement.closest("[data-drag]") : null;
+  if (!el || el.dataset.drag === dragging.id) return null;
+  const r = el.getBoundingClientRect();
+  return { el, before: e.clientY < r.top + r.height / 2 };
+}
+document.addEventListener("dragstart", (e) => {
+  const el = e.target.closest ? e.target.closest("[data-drag]") : null;
+  if (!el) return;
+  dragging = { id: el.dataset.drag, parent: el.dataset.parent };
+  e.dataTransfer.effectAllowed = "move";
+  e.dataTransfer.setData("text/plain", dragging.id);
+  document.body.classList.add("q-dragging");
+  requestAnimationFrame(() => {
+    el.classList.add("dragging");
+    document.querySelectorAll("[data-drag]").forEach((x) => { if (x.dataset.parent === dragging.parent && x !== el) x.classList.add("can-drop"); });
+  });
+});
+document.addEventListener("dragover", (e) => {
+  const t = dropTarget(e);
+  clearMarks();
+  if (!t) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = "move";
+  t.el.classList.add(t.before ? "drop-before" : "drop-after");
+});
+document.addEventListener("drop", (e) => {
+  const t = dropTarget(e);
+  clearMarks();
+  if (!t) return;
+  e.preventDefault();
+  moveTo(dragging.id, dragging.parent, t.el.dataset.drag, t.before);
+});
+document.addEventListener("dragend", () => {
+  clearMarks();
+  dragging = null;
+  document.body.classList.remove("q-dragging");
+  draw();
+});
+// Alt+Up and Alt+Down move the focused row among its siblings, the same rules as a drag.
+document.addEventListener("keydown", (e) => {
+  if (ui.page !== "queue" || !e.altKey || !["ArrowUp", "ArrowDown"].includes(e.key)) return;
+  const el = e.target.closest ? e.target.closest("[data-drag]") : null;
+  if (!el) return;
+  e.preventDefault();
+  const id = el.dataset.drag, parent = el.dataset.parent, order = work().nodes.get(parent).order, at = order.indexOf(id);
+  const to = order[at + (e.key === "ArrowUp" ? -1 : 1)];
+  if (!to) return;
+  moveTo(id, parent, to, e.key === "ArrowUp");
+  draw();
+  const back = [...document.querySelectorAll("[data-drag]")].find((x) => x.dataset.drag === id);
+  if (back) back.focus();
+});
 
 // ---- the switcher between the three. Sample data only, so it can never reach the real page.
 function protoBar() {
@@ -1997,6 +2334,8 @@ function beat() {
 }
 
 function draw() {
+  if (dragging) return;   // a row is held (the Queue, take 11): redrawing would drop it
+  document.body.classList.toggle("page-wide", ui.page === "queue" && ui.variant !== "a");
   document.body.classList.toggle("nav-open", ui.nav);
   document.body.classList.toggle("rail-open", ui.rail);
   document.body.classList.toggle("page-inbox", ui.page === "inbox");
@@ -2089,6 +2428,10 @@ document.addEventListener("click", (e) => {
     case "feature": ui.feature = ui.feature === d.id ? "" : d.id; ui.sel = null; scrollTo(0, 0); break;   // the Queue, A
     case "open": ui.open = ui.open.includes(d.id) ? ui.open.filter((x) => x !== d.id) : [...ui.open, d.id]; break;   // the Queue, B
     case "variant": turnVariant(Number(d.by)); break;   // PROTOTYPE
+    case "q-sel": ui.qsel = ui.qsel === d.id ? null : d.id; break;   // PROTOTYPE (#30, take 11)
+    case "q-repo": ui.qrepo = d.repo; ui.qsel = null; break;
+    case "q-undo": { const was = JSON.parse(undo.pop() || "null"); if (was) { ord.kids = was.kids; ord.touched = new Set(was.touched); } lastMove = null; break; }
+    case "q-reset": undo.push(JSON.stringify({ kids: ord.kids, touched: [...ord.touched] })); ord.kids = {}; ord.touched = new Set(); lastMove = null; break;
     case "stop": ui.pop = null; send([{ lane: d.lane, stop: d.how || null }]); return;
     case "repostop": send([{ repo: d.repo, stop: d.how || null }]); return;   // one repository (ticket 37)
     case "decide": send([{ ask: d.id, open: true }]); return;   // a T3 thread for this ask (ticket 35)
