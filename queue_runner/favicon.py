@@ -44,7 +44,7 @@ _lock = threading.Lock()
 def repo_icon(path: str, clock=time.monotonic) -> str | None:
     """The repo's favicon as a data: URL, or None (none found, unreadable, a type a browser
     can't draw, or over `MAX_BYTES`). Never raises."""
-    root = os.path.abspath(os.path.expanduser(path))
+    root = os.path.realpath(os.path.expanduser(path))
     now = clock()
     with _lock:
         kept = _kept.get(root)
@@ -89,9 +89,15 @@ def _href(source: str) -> str | None:
 
 
 def _inside(root: str, rel: str) -> str | None:
-    """`rel` under `root` when it's a file there; never a path that leads out of the repo."""
-    path = os.path.abspath(os.path.join(root, rel))
-    if os.path.commonpath([root, path]) != root or not os.path.isfile(path):
+    """`rel` under `root` when it's a file there; never a path that leads out of the repo, by
+    `..` or through a link (a symlink or a Windows junction, at any step): the path is resolved
+    before it's compared with the resolved root (Sol's review 1 of PR #103, F1)."""
+    path = os.path.realpath(os.path.join(root, rel))
+    try:
+        inside = os.path.commonpath([os.path.normcase(root), os.path.normcase(path)]) == os.path.normcase(root)
+    except ValueError:   # another drive
+        return None
+    if not inside or not os.path.isfile(path):
         return None
     return path
 

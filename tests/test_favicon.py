@@ -3,6 +3,7 @@ finds a project's: its well-known paths in order, then a `<link rel="icon">` in 
 
 import base64
 import os
+import sys
 import tempfile
 import unittest
 
@@ -85,6 +86,60 @@ class RepoIconTest(unittest.TestCase):
         self.assertEqual(self.icon(), found)   # the find is still kept
         self.clock.t += 2
         self.assertIsNone(self.icon())
+
+
+def link_dir(link, target):
+    """A directory link: a junction on Windows (no admin needed), a symlink elsewhere."""
+    if sys.platform == 'win32':
+        import _winapi
+        _winapi.CreateJunction(target, link)
+    else:
+        os.symlink(target, link, target_is_directory=True)
+
+
+class LinkedOutTest(unittest.TestCase):
+    """Sol's review 1 of PR #103, F1: a link inside the repo must not lead the lookup out of it."""
+
+    def setUp(self):
+        favicon._kept.clear()
+        self.addCleanup(favicon._kept.clear)
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = os.path.join(tmp.name, 'repo')
+        self.outside = os.path.join(tmp.name, 'outside')
+        os.makedirs(self.root)
+        os.makedirs(self.outside)
+
+    def put(self, folder, rel, data):
+        path = os.path.join(folder, rel)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, 'wb') as f:
+            f.write(data)
+
+    def icon(self):
+        return favicon.repo_icon(self.root, clock=lambda: 0.0)
+
+    def test_a_linked_public_folder_is_not_read(self):
+        self.put(self.outside, 'favicon.svg', b'<svg id="outside"/>')
+        link_dir(os.path.join(self.root, 'public'), self.outside)
+        self.assertIsNone(self.icon())
+
+    def test_a_linked_source_and_its_icon_are_not_read(self):
+        self.put(self.outside, 'index.html', b'<link rel="icon" href="/mark.svg">')
+        self.put(self.outside, 'mark.svg', b'<svg id="outside"/>')
+        link_dir(os.path.join(self.root, 'public'), self.outside)
+        self.assertIsNone(self.icon())
+
+    def test_a_link_inside_the_repo_to_its_own_folder_still_counts(self):
+        self.put(self.root, 'brand/favicon.svg', b'<svg id="inside"/>')
+        link_dir(os.path.join(self.root, 'public'), os.path.join(self.root, 'brand'))
+        self.assertIsNotNone(self.icon())
+
+    def test_a_repo_reached_through_a_link_still_finds_its_icon(self):
+        self.put(self.outside, 'favicon.svg', b'<svg id="repo"/>')
+        linked = os.path.join(self.root, 'via')
+        link_dir(linked, self.outside)
+        self.assertIsNotNone(favicon.repo_icon(linked, clock=lambda: 0.0))
 
 
 if __name__ == '__main__':

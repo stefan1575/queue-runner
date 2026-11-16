@@ -1057,7 +1057,9 @@ python3 -m dashboard    # http://queue.localhost/ is the runner's; http://localh
   then a `<link rel="icon">` in index.html or a root route, under `public/` then the root; read
   from T3 Code's server bundle 2026-11-16), and the snapshot carries it as a data: URL, so the
   page stays one file reading one file; one over 64 KB, or a type a browser can't draw, is left
-  out. An answer is kept 10 minutes, a miss 1, as T3 keeps them (`tests/test_favicon.py`).
+  out, and so is any file outside the repo, by `..` or through a link (a symlink or junction:
+  each path is resolved before it's compared with the resolved root; PR #103's review 1, F1).
+  An answer is kept 10 minutes, a miss 1, as T3 keeps them (`tests/test_favicon.py`).
   `tests/test_repo_rows.py` runs `repoRows()` in node on the
   sample's states. A lane running several jobs says "2 at once" and lists each with its thread
   (`laneSays`); `laneOn` finds an ask's job among a lane's `jobs`. The sample's `side-by-side`
