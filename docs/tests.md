@@ -2,8 +2,6 @@
 
 What each test file covers, and the fakes.
 
-## Tests
-
 ```
 python3 -m unittest
 ```
@@ -12,7 +10,7 @@ Standard library only (Python 3.15 from scoop; `python3` is its shim). Tests nev
 network: GitHub is the `GhCli` adapter in `queue_runner/github.py`, faked in tests with
 `tests/fakes.py` (`FakeGitHub`) or with canned `gh api` JSON (`tests/test_github.py`). T3 is the
 `T3Cli` adapter (`queue_runner/t3.py`), tested on output captured from the real CLI
-(`tests/fixtures/t3/`), and faked with git in `tests/fakes_t3.py` for the run loop
+(`tests/fixtures/t3/`, `tests/test_t3.py`), and faked with git in `tests/fakes_t3.py` for the run loop
 (`tests/test_run.py`). The Sol lane is tested against `FakeGitHubForReviews` (every write goes to its `posts`, in
 order; a call named in `fail` raises), `FakeReviewGit` and `FakeSol` (`tests/test_review.py`); `decide()` and the marker formats in
 `tests/test_ledger.py`; the codex-sol.sh adapter in `tests/test_sol.py`; dependencies in `tests/test_deps.py` (a
@@ -160,3 +158,9 @@ once, an unserved name, an unreadable entry, wake tasks, the Inbox, the snapshot
 dry run, and the sample's `repo-stopped` state).
 `tests/test_git.py` runs `GitCli` on a real local repo in a
 temp folder.
+The picker and a build job's start: `tests/test_picker.py`; a build's brief:
+`tests/test_brief.py`; the job log read back as a restarted runner reads it:
+`tests/test_state.py`; no bare `mkdtemp(` in the tests: `tests/test_no_temp_leftovers.py`
+(`docs/reviews.md`, Sol runs tests); the dashboard's favicons, meter and repository rows:
+`tests/test_favicon.py`, `tests/test_meter.py` and `tests/test_repo_rows.py`
+(`docs/dashboard.md`).
