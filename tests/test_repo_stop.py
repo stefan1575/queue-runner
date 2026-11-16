@@ -252,8 +252,7 @@ class PageControlTest(unittest.TestCase):
 
     def test_a_repo_is_stopped_and_resumed_and_the_rest_is_kept(self):
         from dashboard.serve import apply_control
-        c = apply_control({}, {'lane': 'claude', 'stop': 'after-job'}, WRITTEN)
-        c = apply_control(c, {'repo_order': [GB, LD]}, WRITTEN)
+        c = apply_control({'repo_order': [GB, LD]}, {'lane': 'claude', 'stop': 'after-job'}, WRITTEN)
         c = apply_control(c, {'repo': LD, 'stop': 'after-job'}, '2026-11-15T20:00:00+08:00')
         self.assertEqual(c['repos'], {LD: {'stop': 'after-job', 'at': '2026-11-15T20:00:00+08:00'}})
         self.assertEqual((c['lanes']['claude']['stop'], c['repo_order']), ('after-job', [GB, LD]))
