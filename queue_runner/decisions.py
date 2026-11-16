@@ -240,8 +240,9 @@ class Decider:
                          waiting[-1])
                 yield Case('reply', repo, n, s, prs[n], tuple(self._said(repo, n, s)))
         newest = {}   # each issue's newest build and each PR's newest fix: earlier ones are past
-        for j in jobs.jobs():
-            if j.kind in ('build', 'fix') and j.repo == repo.name and j.outcome != NOT_SENT:
+        for j in jobs.jobs():   # one that never reached a thread is no newer job: it never ran
+            if (j.kind in ('build', 'fix') and j.repo == repo.name
+                    and j.outcome not in (NOT_SENT, NOT_STARTED)):
                 newest[(j.kind, j.issue)] = j
         for (kind, n), j in sorted(newest.items(), key=lambda kv: kv[0][1]):
             if (j.open or j.outcome not in ENDED or not j.thread_id or jobs.decided(j.id)
@@ -474,7 +475,7 @@ class Decider:
                    f"{text}\n\nCarry on, and end as the job's brief says.")
         if continue_thread(case.about, message) == 'idle':   # never reached the thread
             self.jobs.ended(job.id, exit_code=code, outcome=NOT_STARTED, link=link,
-                            reason=text or None, error='sending to the earlier thread failed')
+                            reason=text or None, error='the earlier job was not continued')
             return 'idle'
         return 'started'
 

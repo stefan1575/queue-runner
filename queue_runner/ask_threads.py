@@ -16,8 +16,9 @@ Stefan has decided.
   (not still running) and holds a readable block, the stop is recorded `answered` (`answer`
   `thread`) and a `reply` decision (`about` the stop, `link` the thread) acts on it as a decision
   thread on Stefan's reply does (`Decider.act`). No block yet changes nothing.
-- **An answer on GitHub meanwhile still counts:** a stop no longer `filed` (closed, replied,
-  released), or already decided, is the other answer's; the thread's is never acted on then.
+- **An answer on GitHub meanwhile still counts:** a stop no longer `filed` (closed, replied),
+  released (`JobLog.released_ids`: its outcome stays `filed`), or already decided, is the other
+  answer's; the thread's is never acted on then, and a request to open one is dropped.
 
 Asks that can be opened are the PR stops a reply would answer (`OPENS`): not a live run's.
 """
@@ -108,11 +109,11 @@ class AskThreads:
         request first, whose stop still waits on him and has no thread yet; or None."""
         from .config import working
         repos = {r.name: r for r in working(self.config) if r.github}
-        all_jobs = self.jobs.jobs()
+        all_jobs, gone = self.jobs.jobs(), self.jobs.released_ids()
         by_id = {j.id: j for j in all_jobs}
         for ask_id, _ in sorted(switch.opened.items(), key=lambda kv: kv[1]):
             s = self._stop_of(ask_id, by_id)
-            if (s is None or s.repo not in repos or s.outcome != 'filed'
+            if (s is None or s.repo not in repos or s.outcome != 'filed' or s.id in gone
                     or opened(all_jobs, s.id) or self.jobs.decided(s.id)):
                 continue
             repo = repos[s.repo]
@@ -193,12 +194,13 @@ class AskThreads:
         """Each open ask thread's newest reply: a readable block is acted on, once."""
         from .config import working
         repos = {r.name: r for r in working(self.config) if r.github}
-        all_jobs = self.jobs.jobs()
+        all_jobs, gone = self.jobs.jobs(), self.jobs.released_ids()
         by_id = {j.id: j for j in all_jobs}
         for j in all_jobs:
             stop = by_id.get(j.about) if j.kind == KIND and j.outcome == OPENED else None
             if (stop is None or stop.repo not in repos or stop.outcome != 'filed'
-                    or self.jobs.decided(stop.id) or opened(all_jobs, stop.id) is not j):
+                    or stop.id in gone or self.jobs.decided(stop.id)
+                    or opened(all_jobs, stop.id) is not j):
                 continue   # answered on GitHub, released or decided: that answer counts
             try:
                 self._read(repos[stop.repo], stop, j)
@@ -250,15 +252,16 @@ def _iso(t) -> str | None:
     return t.astimezone().isoformat(timespec='seconds')
 
 
-def mark(asks: list, answered: list, jobs, opened_at: dict, waits) -> None:
+def mark(asks: list, answered: list, jobs, opened_at: dict, waits, released=frozenset()) -> None:
     """Each ask's `decide` (whether it can be decided in a T3 thread, and where that stands) and
     `also` (the other place to answer it), in place. `opened_at`: control.json's requests (ask id:
-    when); `waits(repo)`: why the Claude lane wouldn't start the thread now, or None."""
+    when); `waits(repo)`: why the Claude lane wouldn't start the thread now, or None;
+    `released`: the jobs a release settled (`JobLog.released_ids`), whose asks offer no thread."""
     by_id = {j.id: j for j in jobs}
 
     def stop_of(a):
         s = by_id.get(a['id'][len(PREFIX):]) if a['id'].startswith(PREFIX) else None
-        return s if opens(s) else None
+        return s if opens(s) and s.id not in released else None
     for a in asks:
         a['decide'], a['also'] = None, None
         s = stop_of(a)

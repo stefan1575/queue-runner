@@ -70,6 +70,7 @@ class WorkCase(unittest.TestCase):
             reader = self.reader()
             reader.read()
         kw.setdefault('repos', self.config.repos)
+        kw.setdefault('released', frozenset(self.jobs.released_ids()))
         return snapshot.build(snapshot.Facts(now=NOW, jobs=self.jobs.jobs(), work=reader.last(),
                                              work_stale=reader.stale(), **kw))
 
@@ -199,6 +200,44 @@ class IssuesTest(WorkCase):
         self.job('build', 4, None, branch='claude/four-4')
         got = by_n(self.snap())
         self.assertEqual((got[4]['state'], got[4]['note']), ('building', 'Claude is building it'))
+
+
+class ReleasedBuildTest(WorkCase):
+    """A release settles an issue's builds: it stands as the picker sees it, not as a build
+    before the release left it (review 1's F8)."""
+
+    def test_a_released_failed_build_is_ready_again_and_queued(self):
+        self.gh.work_list = [wi(10, 'Ten')]
+        self.gh.issues = [ready(10, 'Ten')]
+        self.job('build', 10, 'failed', branch='claude/ten-10')
+        self.jobs.released('first', 10)
+        got = self.snap(releases=self.jobs.releases())
+        self.assertEqual(lane(got, 'claude')['queue'][0]['ref'], '#10')
+        self.assertEqual((got['issues'][0]['state'], got['issues'][0]['note']), ('ready', None))
+
+    def test_every_held_outcome_released_stands_as_the_picker_sees_it(self):
+        for outcome in ('failed', 'waiting', 'done-no-pr', 'usage-limit', 'continued', 'done',
+                        'branch-exists', 'restart-failed'):
+            with self.subTest(outcome):
+                self.setUp()
+                self.gh.work_list = [wi(10, 'Ten')]
+                self.gh.issues = [ready(10, 'Ten')]
+                self.job('build', 10, outcome, branch='claude/ten-10')
+                held = self.snap()['issues'][0]['state']
+                self.assertIn(held, ('building', 'you'))
+                self.jobs.released('first', 10)
+                got = self.snap(releases=self.jobs.releases())
+                self.assertEqual(got['issues'][0]['state'], 'ready')
+
+    def test_a_build_after_the_release_holds_it_again(self):
+        self.gh.work_list = [wi(10, 'Ten')]
+        self.gh.issues = [ready(10, 'Ten')]
+        self.job('build', 10, 'failed', branch='claude/ten-10')
+        self.jobs.released('first', 10)
+        self.job('build', 10, 'waiting', branch='claude/ten-10')
+        got = self.snap(releases=self.jobs.releases())
+        self.assertEqual(got['issues'][0]['state'], 'building')
+        self.assertIn('waits for an answer', got['issues'][0]['note'])
 
 
 class FeaturesTest(IssuesTest):
@@ -381,6 +420,102 @@ class GitHubDownTest(WorkCase):
         self.assertIn('HTTP 503', src['note'])
         self.assertEqual(src['affects'], 'The queues, issues and PRs are as GitHub last showed '
                                          'them for first: some may have changed since.')
+
+    def test_a_part_that_fails_keeps_its_last_good_read_and_marks_the_work_stale(self):
+        # Review 1's F6: the ready issues fail while the issues and PRs are read.
+        self.gh.work_list = [wi(10, 'Ten')]
+        self.gh.issues = [ready(10, 'Ten')]
+        times = iter([NOW + datetime.timedelta(minutes=k) for k in (0, 5, 9)])
+        reader = self.reader(clock=lambda: next(times))
+        reader.read()
+        before = self.snap(reader)
+
+        def fail(repo):
+            raise RuntimeError('HTTP 503')
+        self.gh.ready_issues = fail
+        reader.read()
+        got = self.snap(reader, calls={'github': snapshot.Call(NOW, True, None, NOW)})
+        self.assertEqual(lane(got, 'claude')['queue'], lane(before, 'claude')['queue'])
+        self.assertEqual(got['issues'][0]['state'], 'ready')
+        self.assertIn('first', reader.stale())
+        src = next(s for s in got['sources'] if s['id'] == 'github')
+        self.assertFalse(src['ok'])
+        self.assertEqual(datetime.datetime.fromisoformat(src['checked_at']), NOW)
+        self.assertIn('HTTP 503', src['note'])
+        del self.gh.ready_issues   # back: the next read is whole, and fresh
+        reader.read()
+        self.assertEqual(reader.stale(), {})
+
+    def test_each_part_of_a_read_keeps_its_last_good_read_when_it_fails(self):
+        from dataclasses import replace
+        pr = full_pr(6, 'claude/blue-4', H2, title='Blue')
+        old = work.RepoRead(at=NOW, prs=(work.PrRead(pr=pr, issue=4, review_why=None,
+                                                      fix=('fix', None), merge=(('x', None),),
+                                                      reviews=({'round': 1},)),),
+                            decisions=(('failed', 4, False),), live=(6, (6,)), pending=(5,),
+                            pending_issues=(3,), builds=((10, 'Ten'),),
+                            in_flight=frozenset({4}), findings={'r1': {}})
+        bare = work.RepoRead(at=None, prs=(work.PrRead(pr=pr, issue=4,
+                                                       review_why='it could not be read'),))
+        parts = {'fix': lambda r: r.prs[0].fix, 'review_why': lambda r: r.prs[0].review_why,
+                 ('merge', 6): lambda r: r.prs[0].merge,
+                 ('reviews', 6): lambda r: r.prs[0].reviews,
+                 'decisions': lambda r: r.decisions, 'live': lambda r: r.live,
+                 'pending': lambda r: (r.pending, r.pending_issues), 'builds': lambda r: r.builds,
+                 'in_flight': lambda r: r.in_flight, 'findings': lambda r: r.findings}
+        for key, of in parts.items():
+            with self.subTest(key):
+                got = work.kept(replace(bare, failed=frozenset({key})), old)
+                self.assertEqual(of(got), of(old))
+        moved = replace(bare, prs=(replace(bare.prs[0], pr=replace(pr, head_sha=H3)),),
+                        failed=frozenset({'fix'}))
+        self.assertIsNone(work.kept(moved, old).prs[0].fix)   # another head: nothing kept
+
+    def test_one_prs_failed_reading_is_kept_from_the_last_good_read_not_shown_as_its_state(self):
+        # The lanes' own readers say a PR they couldn't read as its why: a part that failed.
+        self.gh.prs = [full_pr(6, 'claude/blue-4', H2, title='Blue')]
+        reader = self.reader(clock=lambda: NOW)
+        reader.read()
+        before = self.snap(reader)
+        self.assertEqual(refs(lane(before, 'sol')['queue']), [('review', 'PR #6')])
+
+        def fail(repo, sha):
+            raise RuntimeError('HTTP 503')
+        self.gh.checks = fail
+        reader.read()
+        got = self.snap(reader)
+        self.assertEqual(refs(lane(got, 'sol')['queue']), [('review', 'PR #6')])
+        self.assertEqual(got['prs'][0]['status'], before['prs'][0]['status'])
+        self.assertIn('first', reader.stale())
+        self.assertIn('the review of #6', reader.stale()['first'][1])
+
+    def test_a_conflict_check_that_fails_is_no_conflict_round(self):
+        self.gh.prs = [full_pr(6, 'claude/blue-4', H2, title='Blue')]
+
+        def fail(repo, number):
+            raise RuntimeError('HTTP 503')
+        self.gh.has_conflict = fail
+        got = work.read_repo(self.config, self.gh, None, self.jobs, self.repo)
+        self.assertIsNone(got.prs[0].fix)
+        self.assertIn(('fix', 6), got.failed)
+
+    def test_every_part_read_repo_reads_is_named_when_it_fails(self):
+        # Each part `kept` knows, failing in a real read, is named in `failed`.
+        self.gh.prs = [full_pr(6, 'claude/blue-4', H2, title='Blue')]
+        self.gh.work_list = [wi(10, 'Ten')]
+        self.gh.issues = [ready(10, 'Ten')]
+        self.reviewed(6, H2, 'clean')
+
+        def fail(*args):
+            raise RuntimeError('HTTP 503')
+        for call, keys in (('ready_issues', {'builds'}), ('branches', {'in_flight'}),
+                           ('issue_comments', {('reviews', 6), ('merge', 6)})):
+            with self.subTest(call):
+                setattr(self.gh, call, fail)
+                got = work.read_repo(self.config, self.gh, None, self.jobs, self.repo)
+                delattr(self.gh, call)
+                self.assertTrue(keys <= got.failed, got.failed)
+                self.assertTrue(got.errors)
 
     def test_a_repo_never_read_has_no_lists_and_says_so(self):
         self.gh.fail.add('work_issues')

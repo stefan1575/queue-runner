@@ -16,8 +16,9 @@ NOW = '2026-11-15T13:00:00+08:00'
 
 class ControlFileTest(unittest.TestCase):
     def setUp(self):
-        self.dir = tempfile.mkdtemp(prefix='qr-read-snoozed-')
-        self.addCleanup(shutil.rmtree, self.dir, True)
+        _dir = tempfile.TemporaryDirectory(prefix='qr-read-snoozed-')
+        self.addCleanup(_dir.cleanup)
+        self.dir = _dir.name
 
     def put(self, data):
         with open(control.path(self.dir), 'w', encoding='utf-8') as f:

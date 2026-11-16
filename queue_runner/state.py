@@ -204,7 +204,9 @@ class JobLog:
                 job = replace(jobs[e['job']], ended_at=e['at'],
                               **{k: e[k] for k in _END_FIELDS if k in e})
                 jobs[job.id] = job
-                if job.kind == 'build' and job.outcome == NOT_STARTED:
+                # A fresh build that never started holds nothing; one picking up an earlier
+                # build (`about`) leaves the issue held, as that build holds it.
+                if job.kind == 'build' and job.outcome == NOT_STARTED and not job.about:
                     held[(job.repo, job.issue)] = False
             elif kind == 'release':
                 held[(e['repo'], e['issue'])] = False
@@ -214,6 +216,12 @@ class JobLog:
 
     def jobs(self) -> list[Job]:
         return self._fold()[0]
+
+    def released_ids(self) -> set[str]:
+        """The ids of the jobs a `--release` settled: each job on that issue or PR started
+        before it. What reads the log's history to act on it, or to say where work stands,
+        leaves them out."""
+        return self._fold()[2]
 
     def releases(self) -> list[tuple[str, int, str]]:
         """Each `--release`, oldest first: (repo, issue or PR, when)."""

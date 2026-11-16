@@ -17,7 +17,7 @@ import json
 import os
 import re
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 HOME = os.path.expanduser('~')
 T3_DB = os.path.join(HOME, '.t3', 'userdata', 'statev2.sqlite')
@@ -128,6 +128,9 @@ def resume_at(stopped: datetime.datetime,
     return (reset or stopped + RESET_UNKNOWN) + RESUME_AFTER
 
 
+_EARLIEST = datetime.datetime.min.replace(tzinfo=datetime.timezone.utc)   # a call with no time
+
+
 def _when(stamp: str) -> datetime.datetime:
     return datetime.datetime.fromisoformat(stamp.replace('Z', '+00:00'))
 
@@ -145,6 +148,9 @@ class LastCall:
     names it) and its context in tokens (None: no call)."""
     started: datetime.datetime | None
     tokens: int | None
+    # When the call's reply was recorded (its own timestamp): which of a session's transcripts
+    # holds its last call. Not part of what a LastCall says, so not compared.
+    at: datetime.datetime | None = field(default=None, compare=False)
 
 
 def last_call(transcript: str) -> LastCall:
@@ -153,7 +159,7 @@ def last_call(transcript: str) -> LastCall:
     from a request's start). Claude Code's own `<synthetic>` messages, such as a limit stop's,
     don't count."""
     starts: dict[str, str] = {}
-    tokens = ref = None
+    tokens = ref = said_at = None
     try:
         with open(transcript, encoding='utf-8', errors='replace') as f:
             for line in f:
@@ -178,14 +184,18 @@ def last_call(transcript: str) -> LastCall:
                 tokens = sum(usage.get(k) or 0 for k in (
                     'input_tokens', 'cache_creation_input_tokens', 'cache_read_input_tokens',
                     'output_tokens'))
-                ref = rec.get('requestRef')
+                ref, said_at = rec.get('requestRef'), rec.get('timestamp')
     except OSError:
         return LastCall(None, None)
     try:
         started = _when(starts[ref]) if ref and starts.get(ref) else None
     except (TypeError, ValueError):
         started = None
-    return LastCall(started, tokens)
+    try:
+        at = _when(said_at) if isinstance(said_at, str) else None
+    except ValueError:
+        at = None
+    return LastCall(started, tokens, at)
 
 
 def context_tokens(transcript: str) -> int | None:
@@ -261,7 +271,10 @@ class T3Store:
         if not session or not re.fullmatch(r'[\w-]+', session):
             return LastCall(None, None)
         found = glob.glob(os.path.join(glob.escape(self.projects), '*', f'{session}.jsonl'))
-        return last_call(max(found, key=os.path.getmtime)) if found else LastCall(None, None)
+        # A session's transcript may be in more than one project folder: its last call is the
+        # one recorded last, whichever file was touched last.
+        calls = [last_call(p) for p in sorted(found, key=os.path.getmtime, reverse=True)]
+        return max(calls, key=lambda c: c.at or _EARLIEST, default=LastCall(None, None))
 
     def context_tokens(self, thread_id: str) -> int | None:
         return self.last_call(thread_id).tokens

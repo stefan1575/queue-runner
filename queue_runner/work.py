@@ -107,6 +107,11 @@ class RepoRead:
     in_flight: frozenset = frozenset()  # issues a branch or PR is on (`picker.in_flight`)
     errors: tuple = ()
     findings: dict = field(default_factory=dict)   # review job id: {findings, signals}
+    # The parts that couldn't be read (`read_repo`'s keys), which the Reader takes from the
+    # last good read: 'fix' and 'review_why' (every PR's, or one PR's as ('fix', n)...),
+    # ('merge', n), ('reviews', n), 'decisions', 'live', 'pending', 'builds', 'in_flight',
+    # 'findings'.
+    failed: frozenset = frozenset()
 
 
 _FROM_BRANCH = re.compile(r'\bfrom \S+?/claude/\S+-(\d+)\b')
@@ -125,21 +130,34 @@ def read_repo(config, github, git, jobs, repo, now=None) -> RepoRead:
     from .stops import held
     issues = tuple(github.work_issues(repo))
     pulls = sorted(github.open_pulls(repo), key=lambda p: p.number)
-    errors = []
+    errors, failed = [], set()
 
-    def part(label, fn, empty=()):
+    def part(label, fn, empty=(), key=None):
         try:
             return fn()
         except Exception as e:
             errors.append(f'{repo.name}: {label} ({type(e).__name__}: {e})')
+            failed.add(key or label)
             return empty
     merger = Merger(config, github=github, git=None, jobs=jobs, say=_noop)
     reviewer = Reviewer(config, github=github, git=None, sol=None, jobs=jobs, say=_noop,
                         poster=DryRunPoster(_noop))
     fixer = Fixer(config, github=github, git=git, jobs=jobs)
     fixes = part('fix rounds', lambda: {pr.number: ('fix' if review else 'conflict', why)
-                                        for pr, review, why in fixer.candidates(repo)}, {})
-    whys = part('reviews', lambda: {pr.number: why for pr, why in reviewer.candidates(repo)}, {})
+                                        for pr, review, why in fixer.candidates(repo)}, {}, 'fix')
+    whys = part('reviews', lambda: {pr.number: why for pr, why in reviewer.candidates(repo)}, {},
+                'review_why')
+    # Each lane's own reading of one PR failing is said as its why ("reading it failed (...)"):
+    # here, a part of the read that failed, kept from the last good read.
+    for k, (label, found) in {'fix': ('the fix round', fixes),
+                              'review_why': ('the review', whys)}.items():
+        for n, got in list(found.items()):
+            why = got[1] if k == 'fix' else got
+            if isinstance(why, str) and why.startswith(FAILED_READ):
+                errors.append(f'{repo.name}: {label} of #{n} {why[len(FAILED_READ):]}')
+                failed.add((k, n))
+                if k == 'fix':   # not a candidate it can say anything of
+                    del found[n]
     builds = {j.branch: j.issue for j in jobs.jobs() if j.kind == 'build' and j.repo == repo.name}
     here = repo.github.lower()
     prs = []
@@ -149,7 +167,8 @@ def read_repo(config, github, git, jobs, repo, now=None) -> RepoRead:
         merge = None
         if merger.clean_on_head(repo, pr):
             merge = part(f'the merge re-check of #{pr.number}',
-                         lambda: tuple(merger.steps(repo, pr.number, pr.head_sha)), None)
+                         lambda: tuple(merger.steps(repo, pr.number, pr.head_sha)), None,
+                         ('merge', pr.number))
         w = jobs.writer(repo.name, pr.branch)
         prs.append(PrRead(pr=pr, issue=closes or builds.get(pr.branch),
                           held=held(jobs, repo, pr.number),
@@ -157,37 +176,65 @@ def read_repo(config, github, git, jobs, repo, now=None) -> RepoRead:
                           review_why=whys.get(pr.number, 'it could not be read'),
                           fix=fixes.get(pr.number), merge=merge,
                           reviews=tuple(part(f'the reviews of #{pr.number}', lambda: read_reviews(
-                              github.issue_comments(repo, pr.number))))))
+                              github.issue_comments(repo, pr.number)), (),
+                              ('reviews', pr.number)))))
     decider = Decider(config, github=github, t3=None, jobs=jobs, say=_noop, stopper=None)
     decisions = part('decisions', lambda: tuple(
         (c.question, c.number, c.pr is not None or c.about.kind in ('fix', 'review'))
-        for c in decider.cases(repo)))
+        for c in decider.cases(repo)), (), 'decisions')
     live, pending, pending_issues = None, (), ()
     if repo.live_doc and git is not None:
         steps = LiveSteps(config, github=github, git=NoFetch(git), t3=None, jobs=jobs, say=_noop,
                           stopper=_NoStops(), merger=merger, now=now)
-        b = part('live steps', lambda: steps.batch(repo, record=False), None)
+        b = part('live steps', lambda: steps.batch(repo, record=False), None, 'live')
         if b is not None:
             live = (b.prs[-1], tuple(b.prs))
         last, _ = steps.reach(repo)
         if last is not None and last.head:
             commits = part('what is merged and not live', lambda: git.first_parent(
-                repo.path, last.head, f'origin/{repo.base}'))
+                repo.path, last.head, f'origin/{repo.base}'), (), 'pending')
             pending = tuple(pr_numbers(commits))
             pending_issues = tuple(int(m[1]) for c in commits
                                    if (m := _FROM_BRANCH.search(c['subject'])))
     picked = part('builds', lambda: tuple(
         (b.issue.number, b.issue.title)
-        for b in pickable(repo, github, held=jobs.held_issues(repo.name))))
-    flying = part('what is in flight', lambda: frozenset(in_flight(repo, github)), frozenset())
+        for b in pickable(repo, github, held=jobs.held_issues(repo.name))), (), 'builds')
+    flying = part('what is in flight', lambda: frozenset(in_flight(repo, github)), frozenset(),
+                  'in_flight')
     from .inbox import reviews
     # Each review's decision.json (its findings and signals), as `asks.Story` reads them.
     found = part("the reviews' findings", lambda: reviews(
-        jobs.jobs(), {(repo.name, p.number) for p in pulls}), {})
+        jobs.jobs(), {(repo.name, p.number) for p in pulls}), {}, 'findings')
     return RepoRead(at=None, issues=issues, prs=tuple(prs), decisions=decisions, live=live,
                     findings=found,
                     pending=pending, pending_issues=pending_issues, builds=picked,
-                    in_flight=flying, errors=tuple(errors))
+                    in_flight=flying, errors=tuple(errors), failed=frozenset(failed))
+
+
+_PARTS = ('decisions', 'live', 'builds', 'in_flight', 'findings')
+FAILED_READ = 'reading it failed '   # `Reviewer._candidates`' and `Fixer.candidates`' why
+
+
+def kept(got: RepoRead, last: RepoRead | None) -> RepoRead:
+    """`got` with each part it couldn't read taken from `last`, the last good read (a PR's own
+    parts only while its head is the same): a part GitHub failed on shows what it showed last,
+    not nothing."""
+    from dataclasses import replace
+    if last is None or not got.failed:
+        return got
+    f, old = got.failed, {p.pr.number: p for p in last.prs}
+    prs = []
+    for p in got.prs:
+        o = old.get(p.pr.number)
+        if o is not None and o.pr.head_sha == p.pr.head_sha:
+            n = p.pr.number
+            p = replace(p, **{k: getattr(o, k) for k in ('fix', 'review_why', 'merge', 'reviews')
+                              if k in f or (k, n) in f})
+        prs.append(p)
+    change = {k: getattr(last, k) for k in _PARTS if k in f}
+    if 'pending' in f:
+        change.update(pending=last.pending, pending_issues=last.pending_issues)
+    return replace(got, prs=tuple(prs), **change)
 
 
 def _writer(j) -> str:
@@ -210,6 +257,7 @@ class Reader:
         self._lock = threading.Lock()
         self._good: dict[str, RepoRead] = {}
         self._stale: dict[str, tuple] = {}
+        self._whole: dict[str, datetime.datetime] = {}   # repo: its last read with no part failed
 
     def read(self, github=None) -> dict:
         """Reads every served repo once (with `github`, a `Memo` the pass shares, else its own)."""
@@ -222,14 +270,20 @@ class Reader:
                 got = read_repo(self.config, gh, self.git, self.jobs, repo, now=self.clock)
             except Exception as e:
                 with self._lock:
-                    last = self._good.get(repo.name)
-                    self._stale[repo.name] = (last.at if last else None,
+                    self._stale[repo.name] = (self._whole.get(repo.name),
                                               f"{repo.name}: couldn't read its work "
                                               f'({type(e).__name__}: {e})')
                 continue
+            now = self.clock()
             with self._lock:
-                self._good[repo.name] = _at(got, self.clock())
-                self._stale.pop(repo.name, None)
+                # A part that failed keeps the last good read's, and the repo is stale (since
+                # its last whole read) until a read has every part.
+                self._good[repo.name] = _at(kept(got, self._good.get(repo.name)), now)
+                if got.failed:
+                    self._stale[repo.name] = (self._whole.get(repo.name), got.errors[0])
+                else:
+                    self._whole[repo.name] = now
+                    self._stale.pop(repo.name, None)
         return self.last()
 
     def last(self) -> dict | None:
@@ -259,6 +313,7 @@ class View:
     limited: list = field(default_factory=list)
     lane_jobs: dict = field(default_factory=dict)   # lane id: its open state.Job, or None
     titles: dict = field(default_factory=dict)      # (repo, n): a title the passes read
+    released: frozenset = frozenset()   # the jobs a release settled (`JobLog.released_ids`)
 
 
 def _title(read: RepoRead, n: int) -> str:
@@ -444,9 +499,10 @@ def _issue(repo, n, title, state, feature=None, pr=None, blocked_by=(), note=Non
 
 
 def _held_state(v: View, repo: str, n: int) -> tuple[str, str] | None:
-    """An issue the job log holds for a build: what its newest build left."""
+    """An issue the job log holds for a build: what its newest build left. A build a release
+    settled holds nothing: the picker takes the issue up again."""
     builds = [j for j in v.jobs if j.kind == 'build' and j.repo == repo and j.issue == n
-              and j.outcome not in ('not-started', 'not-sent')]
+              and j.outcome not in ('not-started', 'not-sent') and j.id not in v.released]
     if not builds:
         return None
     j = builds[-1]

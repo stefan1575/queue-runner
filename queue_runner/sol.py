@@ -109,12 +109,13 @@ def _window(raw) -> LimitWindow | None:
 
 
 def latest_limits(sessions: str = SESSIONS) -> tuple[datetime.datetime, Limits]:
-    """ChatGPT's plan windows as Codex last reported them, from the newest rollout that has a
-    `rate_limits` record with a window (any session: the plan is the account's), and when.
-    Raises LookupError if none has. Reads local files only."""
+    """ChatGPT's plan windows as Codex last reported them: the `rate_limits` record with a window
+    whose own timestamp is newest (any session: the plan is the account's), and when, among the
+    LIMITS_FILES rollouts touched last (file times only bound the search: a file touched last
+    may hold an older reading). Raises LookupError if none has. Reads local files only."""
     found = glob.glob(os.path.join(glob.escape(sessions), '*', '*', '*', 'rollout-*.jsonl'))
+    best = None
     for path in sorted(found, key=os.path.getmtime, reverse=True)[:LIMITS_FILES]:
-        last = None
         with open(path, encoding='utf-8', errors='replace') as f:
             for line in f:
                 if '"rate_limits"' not in line:
@@ -127,11 +128,11 @@ def latest_limits(sessions: str = SESSIONS) -> tuple[datetime.datetime, Limits]:
                     at = datetime.datetime.fromisoformat(rec['timestamp'].replace('Z', '+00:00'))
                 except (KeyError, TypeError, ValueError, AttributeError):
                     continue
-                if windows:
-                    last = at, Limits(raw.get('plan_type'), windows)
-        if last:
-            return last
-    raise LookupError('No Codex session has reported ChatGPT usage yet')
+                if windows and (best is None or at >= best[0]):
+                    best = at, Limits(raw.get('plan_type'), windows)
+    if best is None:
+        raise LookupError('No Codex session has reported ChatGPT usage yet')
+    return best
 
 
 def _slash(p: str) -> str:

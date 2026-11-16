@@ -51,4 +51,3 @@ flag, so a thread gets T3's default for the model (`config.toml`, `[claude]`).
   `settings.json` is T3's global settings): the first job after Stefan's step confirms it in
   its end record.
 - The sandbox project's own row default was left at Haiku, effort high (from live check B).
-
