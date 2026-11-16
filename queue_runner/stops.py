@@ -7,7 +7,9 @@ round or merge) until Stefan answers: he closes the issue, or replies on the PR 
 (a decision on his reply comes first, `decisions.py`), or `--release NAME#PR`.
 
 The kinds (KINDS): a review that stopped (a new Important finding in an earlier class, a fixed
-finding reopening, a decline Sol kept), a failed check on H, a conflict on H that a conflict round
+finding reopening, a decline Sol kept), a failed check on H (a failed GitHub Actions check is
+re-run once per head first, and is a stop only if it fails again: issue #93; a failed commit
+status can't be re-run and stops at once), a conflict on H that a conflict round
 couldn't resolve, that came back on the base its last round merged, or that came back after 5
 rounds (issue #91; a conflict first gets a conflict round,
 `fix.py`), and a fix round that ended without pushing (H was reviewed already): each found here,
@@ -35,6 +37,8 @@ MAX_CONFLICT_ROUNDS = 5
 # A conflict round on H that ended so, with the PR still at H and conflicting: it couldn't
 # resolve it. (`failed` and `waiting` get a decision first, `usage-limit` a restart.)
 UNRESOLVED = ('no-push', 'head-unknown', 'branch-exists')
+# A job re-running a failed Actions check on H once before it's a stop (issue #93).
+RERUN = 'rerun'
 KINDS = {
     'review': 'Sol\'s review stopped the loop',
     'approach-note': 'Still blocking after review 3',
@@ -65,6 +69,11 @@ def utc(stamp: str) -> str:
 
 def number_of(url: str) -> int:
     return int(url.rstrip('/').rsplit('/', 1)[-1])
+
+
+def _run_link(run) -> str:
+    """An Actions run's attempt, as a markdown link."""
+    return f'[run {run.id}]({run.url}/attempts/{run.attempt})'
 
 
 def _signal_texts(review) -> str:
@@ -110,12 +119,79 @@ class Stopper:
                           f'without pushing, so the PR is still at {h7}, which was reviewed',
                           fixes[-1].link))
         checks = self.github.checks(repo, h)
-        if checks.state == 'failed':
-            found.append(('failed-check', f'a check failed on {h7} '
-                          f'({", ".join(checks.failed)})', None))
+        if checks.state == 'failed' and (why := self._failed_check(repo, pr, checks)):
+            found.append(('failed-check', why, None))
         if self.github.has_conflict(repo, n) and (stop := conflict_stop(self.jobs, repo, pr)):
             found.append(('conflict', *stop))
         return found
+
+    def _failed_check(self, repo, pr, checks) -> str | None:
+        """Why a failed check on H is a stop, or None while its one re-run is due or running
+        (issue #93). A failed commit status can't be re-run; a run on an attempt past the first
+        that the runner didn't ask for was re-run already (by hand); one the runner re-ran is a
+        stop once that attempt ends failed too."""
+        h7 = pr.head_sha[:7]
+        why = f'a check failed on {h7} ({", ".join(checks.failed)})'
+        if not checks.runs:
+            return why
+        done = self.jobs.on(RERUN, repo.name, pr.number, pr.head_sha)
+        if done and done[-1].outcome == 'failed':
+            return f'{why}, and re-running it failed ({done[-1].error})'
+        runs = [self.github.workflow_run(repo, r) for r in checks.runs]
+        if not done:
+            again = [r for r in runs if r.attempt > 1]
+            return (f'{why} on attempt {again[0].attempt} of {_run_link(again[0])}, re-run '
+                    'already') if again else None
+        if all(r.status == 'completed' for r in runs) and any(r.attempt > 1 for r in runs):
+            return (f'{why} again after one re-run (' + ', '.join(
+                f'attempt {r.attempt} of {_run_link(r)}' for r in runs) + ')')
+        return None
+
+    def retry_checks(self, repo, pr) -> None:
+        """Issue #93: a failed Actions check on H that hasn't been re-run gets its failed jobs
+        re-run, once per head, so a GitHub hiccup never reaches Stefan; once that re-run has
+        passed, the PR says so in one line, so a flaky check stays visible."""
+        if self.jobs.writer(repo.name, pr.branch):
+            return
+        n, h, h7 = pr.number, pr.head_sha, pr.head_sha[:7]
+        name = f'stop {repo.name}#{n}'
+        checks = self.github.checks(repo, h)
+        done = self.jobs.on(RERUN, repo.name, n, h)
+        if checks.state == 'passed' and done and done[-1].outcome == RERUN:
+            job = done[-1]
+            failed = ', '.join(f'attempt {r["attempt"]} of [run {r["id"]}]'
+                               f'({r["url"]}/attempts/{r["attempt"]})' for r in job.runs)
+            try:
+                self.github.post_comment(repo, n, (
+                    f'**A check passed on a re-run.** {job.reason} failed on {h7} in {failed} '
+                    'and passed on a re-run, so the loop carries on. If it keeps happening, '
+                    f'the check is flaky.\n\n{RUNNER_MARK}rerun passed sha={h} -->\n'))
+            except Exception as e:
+                self.say(f'{name}: saying the re-run passed on the PR failed: {e}')
+            self.jobs.ended(job.id, exit_code=None, outcome='passed', reason=job.reason,
+                            runs=job.runs)
+            self.say(f'{name}: {job.reason} passed on its re-run at {h7}')
+            return
+        if checks.state != 'failed' or not checks.runs or done:
+            return
+        runs = [self.github.workflow_run(repo, r) for r in checks.runs]
+        if any(r.attempt > 1 or r.status != 'completed' for r in runs):
+            return   # re-run already (a stop), or GitHub is between attempts
+        what = ', '.join(checks.failed)
+        record = [{'id': r.id, 'attempt': r.attempt, 'url': r.url} for r in runs]
+        job = self.jobs.started(kind=RERUN, repo=repo.name, issue=n, branch=pr.branch,
+                                title=f'Queue runner rerun: {repo.name}#{n}', sha=h)
+        try:
+            for r in runs:
+                self.github.rerun_failed(repo, r.id)
+        except Exception as e:
+            self.jobs.ended(job.id, exit_code=None, outcome='failed', reason=what, runs=record,
+                            error=f'{type(e).__name__}: {e}')
+            self.say(f'{name}: re-running the failed check failed ({e}): a stop')
+            return
+        self.jobs.ended(job.id, exit_code=None, outcome=RERUN, reason=what, runs=record)
+        self.say(f'{name}: {what} failed on {h7}; re-running the failed jobs of '
+                 + ', '.join(f'run {r.id}' for r in runs) + ' once before it is a stop')
 
     def new_stops(self, repo, pr) -> list[tuple[str, str, str | None]]:
         """The stops on H not filed yet. A conflict stop filed on H before a conflict round on
@@ -158,6 +234,7 @@ class Stopper:
         """Files each stop on the PR's head that isn't filed yet. GitHub failing is said; the
         next pass tries again."""
         try:
+            self.retry_checks(repo, pr)
             for kind, why, link in self.new_stops(repo, pr):
                 self.file(repo, pr, kind, why, link)
         except Exception as e:

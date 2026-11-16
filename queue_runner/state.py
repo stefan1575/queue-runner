@@ -6,7 +6,9 @@ blocking PR, from H; `cause` `conflict` for a round that merges a conflicted PR'
 `ready` (in a repo Stefan merges, `merge.py`: the PR at H `marked` ready for him, or `unmarked`), `stop` (a stop filed for
 Stefan on a PR at H: `filed`, then `answered` once he closes its `needs-info` issue or replies on
 the PR or the issue; `failed` if the issue couldn't be filed, so the next pass files it) and
-`decision` (a one-off Claude decision thread, or Stefan's reply read directly, on a case the flow
+`rerun` (a failed Actions check on a PR's head H re-run once before it's a stop, `stops.py`:
+`rerun`, then `passed` once its re-run passed and that was said on the PR; `failed` if GitHub
+refused it) and `decision` (a one-off Claude decision thread, or Stefan's reply read directly, on a case the flow
 doesn't cover: `about` the job it decides on, its outcome the action taken) and `live` (a repo's
 live steps after merges, `live.py`: `sha` where the last live run reached, `head` the base's
 commit this one brings live).
@@ -139,6 +141,8 @@ class Job:
     effort: str | None = None      # a Claude job: the effort its run used, read back (ticket 39)
     reviewer: str | None = None    # a review: `opus-fallback` when Opus reviewed in Sol's place
     base: str | None = None        # a conflict round: the sha of origin/<base> it merged (#91)
+    runs: list = field(default_factory=list)   # a rerun: [{id, attempt, url}], each failed
+                                               # Actions run and the attempt that failed (#93)
 
     @property
     def open(self) -> bool:
@@ -147,7 +151,7 @@ class Job:
 
 _END_FIELDS = ('thread_id', 'link', 'run_id', 'exit_code', 'status', 'outcome', 'commits', 'pr',
                'worktree', 'error', 'verdict', 'signals', 'run_dir', 'resume_at', 'head',
-               'reason', 'answer', 'context', 'last_request', 'applied', 'prs', 'effort')
+               'reason', 'answer', 'context', 'last_request', 'applied', 'prs', 'effort', 'runs')
 
 
 class JobLog:

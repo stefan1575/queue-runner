@@ -87,6 +87,7 @@ class FakeGitHubForReviews(FakeGitHubWithPulls):
         self.now = {}                # PR number -> its fields now, where they changed
         self.threads = {}            # PR number -> unresolved review threads
         self.push_before_merge = {}  # PR number -> a head pushed just before the merge call
+        self.workflow_runs = {}      # Actions run id -> WorkflowRun now (issue #93)
 
     def checks(self, repo, sha):
         from queue_runner.github import Checks
@@ -94,6 +95,17 @@ class FakeGitHubForReviews(FakeGitHubWithPulls):
 
     def has_conflict(self, repo, number):
         return number in self.conflicts
+
+    def workflow_run(self, repo, run_id):
+        return self.workflow_runs[run_id]
+
+    def rerun_failed(self, repo, run_id):
+        """Re-runs the run's failed jobs: its next attempt is queued, its checks pending."""
+        from dataclasses import replace
+        self._write('rerun', run_id)
+        r = self.workflow_runs[run_id]
+        self.workflow_runs[run_id] = replace(r, attempt=r.attempt + 1, status='queued',
+                                             conclusion=None)
 
     def review_replies(self, repo, number):
         return list(self.replies.get(number, []))

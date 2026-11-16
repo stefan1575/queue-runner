@@ -8,8 +8,8 @@ import tempfile
 import unittest
 
 from queue_runner.config import Config, Repo
-from queue_runner.github import Checks, Comment
-from queue_runner.ledger import STOP_MARK
+from queue_runner.github import Checks, Comment, WorkflowRun
+from queue_runner.ledger import RUNNER_MARK, STOP_MARK
 from queue_runner.merge import Merger
 from queue_runner.review import Reviewer
 from queue_runner.run import Runner
@@ -106,6 +106,92 @@ class StopsTest(unittest.TestCase):
         [stop] = self.stops()
         self.assertEqual((stop.stop, stop.sha, stop.outcome, stop.link),
                          ('failed-check', H2, 'filed', ISSUE_URL))
+
+    # --- a failed Actions check is re-run once per head first (issue #93) ------------------
+
+    RUN = 'https://github.com/owner/first/actions/runs/437'
+
+    def fail_actions(self, sha=H2, attempt=1, status='completed'):
+        """CI's Actions run 437 failed on `sha`, its latest attempt `attempt`."""
+        self.gh.check_states[sha] = Checks('failed', failed=('tests',), runs=(437,))
+        self.gh.workflow_runs[437] = WorkflowRun(437, attempt, status, 'failure', self.RUN)
+
+    def test_a_first_failed_actions_check_is_re_run_and_is_no_stop(self):
+        self.fail_actions()
+        self.reviewer().review_pass()
+        self.assertEqual(self.calls('rerun'), [(437,)])
+        self.assertEqual(self.stops(), [])
+        self.assertEqual(self.calls('issue'), [])
+        self.assertTrue(any('re-running the failed jobs of run 437' in s for s in self.said),
+                        self.said)
+        # While the re-run runs (GitHub may still list the old failure), still no stop, and it
+        # isn't re-run twice.
+        self.reviewer().review_pass()
+        self.gh.check_states[H2] = Checks('pending', pending=('tests',))
+        self.reviewer().review_pass()
+        self.assertEqual((len(self.calls('rerun')), self.stops()), (1, []))
+
+    def test_a_check_that_fails_again_on_its_re_run_is_a_stop(self):
+        self.fail_actions()
+        self.reviewer().review_pass()
+        self.gh.workflow_runs[437] = WorkflowRun(437, 2, 'completed', 'failure', self.RUN)
+        self.reviewer().review_pass()
+        [stop] = self.stops()
+        self.assertEqual((stop.stop, stop.sha), ('failed-check', H2))
+        self.assertIn(f'a check failed on {H2[:7]} (tests) again after one re-run '
+                      f'(attempt 2 of [run 437]({self.RUN}/attempts/2))', stop.reason)
+        self.assertEqual(len(self.calls('rerun')), 1)
+
+    def test_a_re_run_that_passes_is_said_on_the_pr_and_the_loop_carries_on(self):
+        self.fail_actions()
+        self.reviewer().review_pass()
+        self.gh.check_states[H2] = Checks('passed')
+        self.gh.workflow_runs[437] = WorkflowRun(437, 2, 'completed', 'success', self.RUN)
+        self.reviewer(reply()).review_pass()
+        self.assertEqual(self.stops(), [])
+        said = [b for n, b in self.calls('comment') if 'passed on a re-run' in b]
+        self.assertEqual(len(said), 1, self.calls('comment'))
+        self.assertIn(f'tests failed on {H2[:7]} in attempt 1 of [run 437]'
+                      f'({self.RUN}/attempts/1) and passed on a re-run', said[0])
+        self.assertIn(RUNNER_MARK, said[0])   # not a reply from Stefan
+        self.assertEqual(len(self.sol.briefs), 1)   # Sol reviewed H2: the loop carried on
+        self.reviewer().review_pass()
+        self.assertEqual(len([1 for n, b in self.calls('comment')
+                              if 'passed on a re-run' in b]), 1)
+
+    def test_a_new_head_gets_its_own_re_run(self):
+        self.fail_actions()
+        self.reviewer().review_pass()
+        self.gh.prs = [full_pr(20, 'claude/red-5', H3, title='Red widget')]
+        self.git.heads[20] = H3
+        self.fail_actions(sha=H3, attempt=2)   # the same run's next attempt, on the new head
+        self.gh.check_states[H3] = Checks('failed', failed=('tests',), runs=(438,))
+        self.gh.workflow_runs[438] = WorkflowRun(438, 1, 'completed', 'failure', self.RUN)
+        self.reviewer().review_pass()
+        self.assertEqual(self.calls('rerun'), [(437,), (438,)])
+        self.assertEqual(self.stops(), [])
+
+    def test_a_run_already_re_run_by_hand_is_a_stop_at_once(self):
+        self.fail_actions(attempt=2)
+        self.reviewer().review_pass()
+        self.assertEqual(self.calls('rerun'), [])
+        [stop] = self.stops()
+        self.assertEqual(stop.stop, 'failed-check')
+
+    def test_a_failed_commit_status_can_t_be_re_run_and_stops_at_once(self):
+        self.gh.check_states[H2] = Checks('failed', failed=('deploy',))   # no Actions run
+        self.reviewer().review_pass()
+        self.assertEqual(self.calls('rerun'), [])
+        [stop] = self.stops()
+        self.assertEqual(stop.stop, 'failed-check')
+        self.assertIn(f'a check failed on {H2[:7]} (deploy)', stop.reason)
+
+    def test_a_re_run_github_refuses_is_a_stop(self):
+        self.fail_actions()
+        self.gh.fail.add('rerun')
+        self.reviewer().review_pass()
+        [stop] = self.stops()
+        self.assertIn('re-running it failed', stop.reason)
 
     def test_a_conflict_is_no_stop_until_a_conflict_round_tried(self):
         self.gh.conflicts.add(20)

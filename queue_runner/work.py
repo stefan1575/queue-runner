@@ -676,7 +676,7 @@ def _pr_list(v: View, statuses: dict, story, releases) -> list[dict]:
 # --- what happened ------------------------------------------------------------------------------
 
 ACTIVITY_MAX = 200
-_PR_KINDS = ('review', 'fix', 'merge', 'ready', 'stop', 'live')
+_PR_KINDS = ('review', 'fix', 'merge', 'ready', 'stop', 'live', 'rerun')
 
 
 def _h7(sha) -> str:
@@ -707,6 +707,11 @@ def _other(j) -> str | None:
             j.outcome, f'The runner started merging it at {h7}.' if j.open else None)
     if j.kind == 'stop' and j.outcome == 'failed':
         return 'Filing a stop for you failed; the next pass files it again.'
+    if j.kind == 'rerun':   # issue #93
+        what = j.reason or 'a check'
+        return {'rerun': f'{what} failed on {h7}, so the runner re-ran it once.',
+                'passed': f'{what} failed on {h7} and passed on its re-run.',
+                'failed': f'{what} failed on {h7}, and re-running it failed.'}.get(j.outcome)
     return None
 
 
@@ -749,6 +754,9 @@ def _event(story, j) -> list[tuple]:
     elif j.kind == 'decision':
         text, actor = story._decision(j) or f'A decision ended {j.outcome}.', 'claude'
         tone = 'you' if j.outcome == 'stop' else None
+    elif j.kind == 'rerun':
+        text, actor = _other(j), 'runner'
+        tone = 'ok' if j.outcome == 'passed' else 'bad' if j.outcome == 'failed' else None
     elif j.kind == 'stop':
         if j.outcome not in ('filed', 'answered'):
             return [(at, 'runner', 'stop', sha, _other(j), 'bad', [])] if _other(j) else []

@@ -406,6 +406,18 @@ class HistoryTest(HistoryCase):
         times = [r['at'] for r in rows]
         self.assertEqual(times, sorted(times, reverse=True))
 
+    def test_a_check_re_run_once_is_on_the_prs_timeline(self):
+        rerun = self.job('rerun', 5, None, sha=H2)
+        self.jobs.ended(rerun.id, exit_code=None, outcome='rerun', reason='tests')
+        tl = pr_of(self.snap(), 5)['timeline']
+        self.assertEqual((tl[-1]['actor'], tl[-1]['kind'], tl[-1]['title']),
+                         ('runner', 'rerun', 'tests failed on bbbbbbb, so the runner re-ran it '
+                                             'once.'))
+        self.jobs.ended(rerun.id, exit_code=None, outcome='passed', reason='tests')
+        tl = pr_of(self.snap(), 5)['timeline']
+        self.assertEqual((tl[-1]['title'], tl[-1]['tone']),
+                         ('tests failed on bbbbbbb and passed on its re-run.', 'ok'))
+
     def test_activity_keeps_the_latest_200(self):
         for k in range(205):
             self.job('review', 5, 'failed', sha=H2, round=3)
