@@ -2,6 +2,7 @@
 decision is "Decide: ...", a build or fix thread stopped on a question to him "Answer: ...", and
 once it no longer needs him the prefix comes off and the thread is settled. Through the real
 `Runner`, with T3 faked (`FakeT3`: a rename changes the thread's title)."""
+import datetime
 import io
 import unittest
 
@@ -137,6 +138,52 @@ class AskTitleTest(ta.ThreadCase):
         self.assertIn(ask.thread_id, self.t3.settles)
 
 
+PAST = datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc)
+AHEAD = datetime.datetime(2099, 1, 1, tzinfo=datetime.timezone.utc)
+
+
+class StaleAskTest(ta.ThreadCase):
+    """An ask thread whose prompt cache has expired is settled, and keeps its prefix (#72)."""
+
+    def test_a_stale_ask_thread_is_settled_with_its_prefix_once(self):
+        ask = self.opened()
+        self.says(ask, Message('assistant', 'The case: ...'), status='completed')
+        self.r.plan()
+        self.assertNotIn(ask.thread_id, self.t3.settles)   # T3 reports no expiry: never stale
+        self.limits.expires[ask.thread_id] = PAST
+        self.r.plan()
+        self.r.plan()
+        self.assertEqual(self.t3.settles.count(ask.thread_id), 1)
+        self.assertEqual(self.t3.threads[ask.thread_id].title, 'Decide: ' + ASK)
+        self.assertTrue(any('its prompt cache expired' in s and 'Inbox item stays' in s
+                            for s in self.said))
+        [s] = [s for s in self.jobs('stop') if s.outcome == 'filed']   # it still waits on him
+
+    def test_a_cache_not_yet_expired_or_a_running_thread_is_left(self):
+        ask = self.opened()   # running
+        self.limits.expires[ask.thread_id] = PAST
+        self.r.plan()
+        self.assertNotIn(ask.thread_id, self.t3.settles)
+        self.limits.expires[ask.thread_id] = AHEAD
+        self.t3.set_status(ask.thread_id, 'completed')
+        self.r.plan()
+        self.assertNotIn(ask.thread_id, self.t3.settles)
+
+    def test_warmed_again_it_is_settled_again_once_its_new_cache_expires(self):
+        ask = self.opened()
+        self.says(ask, Message('assistant', 'The case: ...'), status='completed')
+        self.limits.expires[ask.thread_id] = PAST
+        self.r.plan()
+        from dataclasses import replace   # Stefan writes in it again: T3 unsettles it
+        self.t3.threads[ask.thread_id] = replace(self.t3.threads[ask.thread_id], settled=False)
+        self.limits.expires[ask.thread_id] = AHEAD
+        self.r.plan()
+        self.assertEqual(self.t3.settles.count(ask.thread_id), 1)
+        self.limits.expires[ask.thread_id] = PAST + datetime.timedelta(hours=1)
+        self.r.plan()
+        self.assertEqual(self.t3.settles.count(ask.thread_id), 2)
+
+
 class AnswerTitleTest(unittest.TestCase):
     """The decision tests' build of #4 and PR #20."""
     D = td.DecisionTest
@@ -159,6 +206,18 @@ class AnswerTitleTest(unittest.TestCase):
         self.assertNotIn(build.thread_id, self.t3.settles)
         self.r.run_pass()
         self.assertEqual(self.t3.renames, [(build.thread_id, 'Answer: ' + BUILD)])
+
+    def test_a_stale_waiting_build_is_settled_and_still_waits_on_stefan(self):
+        build = self.stopped_build()
+        self.r.run_pass()
+        self.limits.expires[build.thread_id] = PAST
+        self.r.run_pass()
+        self.assertEqual(self.t3.settles.count(build.thread_id), 1)
+        self.assertEqual(self.title(build.thread_id), 'Answer: ' + BUILD)
+        self.assertEqual(self.jobs('build')[0].outcome, 'waiting')
+        from queue_runner.inbox import collect
+        self.assertIn(('thread', 4), [(w.kind, w.number) for w in collect(
+            self.config, self.gh, self.r.jobs).items])   # its Inbox item stays
 
     def test_a_question_a_decision_answers_gets_no_prefix(self):
         self.build((2, 'waiting'), (0, 'completed', decision_reply('answer', text='Use blue.')),

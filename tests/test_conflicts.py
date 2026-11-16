@@ -1,7 +1,7 @@
 """Conflict rounds (ticket 15): a PR that conflicts with its base gets a fix round that merges the
 base in, then Sol reviews its new head afresh; conflicted PRs go one at a time, lowest number
-first, each after the one before merged or stopped; a round that couldn't resolve it, or a third
-conflict, is a stop. GitHub, T3, git and Sol faked."""
+first, each after the one before merged or stopped; a round that couldn't resolve it, a conflict
+again with the base the last round merged, or a conflict after five rounds, is a stop. GitHub, T3, git and Sol faked."""
 import io
 import os
 import tempfile
@@ -18,6 +18,7 @@ from tests.test_ledger import H2, H3, important, reply
 H1 = 'a' * 40
 H4 = 'd' * 40
 H5 = 'e' * 40
+B1, B2, B3 = '4' * 40, '5' * 40, '6' * 40   # main's tip as it moves
 BASE_COMMITS = [{'sha': '7' * 40, 'subject': 'Rename the widget table'}]
 
 
@@ -177,21 +178,37 @@ class ConflictRoundTest(unittest.TestCase):
         self.assertIsNone(r.next_fix())
         self.assertEqual(len(self.t3.starts), 1)
 
-    def test_a_round_that_pushed_but_still_conflicts_gets_one_more_then_a_third_is_a_stop(self):
+    def main_at(self, sha):
+        """main's tip, as git and GitHub both see it."""
+        self.git.refs['origin/main'] = sha
+        for n in (20, 21):
+            self.gh.now.setdefault(n, {})['base_sha'] = sha
+
+    def test_a_conflict_after_main_moved_gets_another_round_on_the_same_base_a_stop(self):
+        # Issue #91: main moving under a PR is no reason to stop it; a round whose push still
+        # conflicts with the very base it merged is.
         self.only(20)
-        r = self.runner(outcomes=[(0, 'completed')] * 2, pushes={20: H3}, still={20})
-        r.run_pass()                      # round 1 on H2 pushes H3, still conflicting
+        r = self.runner(outcomes=[(0, 'completed')] * 4, pushes={20: H3}, still={20})
+        self.main_at(B1)
+        r.run_pass()                      # round 1 on H2 merges B1, pushes H3
+        self.main_at(B2)                  # main moves: H3 conflicts with B2
         self.t3.pushes[20] = H4
         r.reviewer.review_pass()
         self.assertEqual(self.jobs(r, 'stop'), [])
-        r.run_pass()                      # round 2 on H3 pushes H4, still conflicting
-        self.assertEqual([j.sha for j in self.jobs(r, 'fix')], [H2, H3])
-        r.reviewer.review_pass()          # a third conflict, on H4: a stop
+        r.run_pass()                      # round 2 on H3 merges B2, pushes H4
+        self.t3.pushes[20] = H5
+        self.main_at(B3)                  # main moves again: a third conflict, and a round
+        r.reviewer.review_pass()
+        self.assertEqual(self.jobs(r, 'stop'), [])
+        r.run_pass()                      # round 3 on H4 merges B3, pushes H5
+        self.assertEqual([(j.sha, j.base) for j in self.jobs(r, 'fix')],
+                         [(H2, B1), (H3, B2), (H4, B3)])
+        r.reviewer.review_pass()          # H5 conflicts, main still at B3: a stop
         [stop] = self.jobs(r, 'stop')
-        self.assertEqual((stop.stop, stop.sha), ('conflict', H4))
-        self.assertIn('a third conflict', stop.reason)
+        self.assertEqual((stop.stop, stop.sha), ('conflict', H5))
+        self.assertIn('main has not moved since', stop.reason)
         self.assertIsNone(r.next_fix())
-        self.assertEqual(len(self.t3.starts), 2)
+        self.assertEqual(len(self.t3.starts), 3)
 
     def test_a_conflict_stop_filed_before_a_round_on_the_same_head_does_not_hide_its_own(self):
         # Before ticket 15 a conflict on H2 was filed at once; Stefan releases it, the round on

@@ -175,9 +175,10 @@ class Runner:
                                stopper=stopper, effort=self.effort)
         from .ask_threads import AskThreads   # an ask decided in a T3 thread (ticket 35)
         self.asking = AskThreads(config, github=github, t3=t3, jobs=self.jobs, say=self.say,
-                                 decider=self.decider)
+                                 decider=self.decider, limits=limits, now=self.now)
         from .prefixes import Prefixes   # "Decide: " and "Answer: " on threads that need him (71)
-        self.prefixes = Prefixes(config, t3=t3, jobs=self.jobs, say=self.say)
+        self.prefixes = Prefixes(config, t3=t3, jobs=self.jobs, say=self.say,
+                                 limits=limits, now=self.now)   # and stale ones settled (#72)
         from .waiting import GitHubAnswers   # a waiting thread's question answered on GitHub
         self.answers = GitHubAnswers(config, github=github, jobs=self.jobs, say=self.say)
         self.live = LiveSteps(config, github=github, git=git, t3=t3, jobs=self.jobs,
@@ -316,9 +317,14 @@ class Runner:
             old = mine[0]
             return Start(name, old.kind, None, lambda: self.recover(old), self._name(old))
         if ask := self.asking.next(switch, only=only):   # Stefan's click (35)
-            return Start(name, 'decision', None, lambda: self.asking.open(*ask),
-                         f'ask {name}#{ask[2].number}')
+            return Start(name, 'decision', None, lambda: self.asking.open(ask),
+                         f'ask {name}#{ask.number}')
         if answered := self.answers.next(repos=only):   # Stefan's reply on GitHub (71)
+            old, text, marks = answered
+            return Start(name, old.kind, None,
+                         lambda: self.continue_job(old, text, marks=marks), self._name(old))
+        if answered := self.asking.reply(repos=only):   # his answer in a fresh thread (72);
+            # a GitHub reply read in the same pass goes first: answering there still counts
             old, text, marks = answered
             return Start(name, old.kind, None,
                          lambda: self.continue_job(old, text, marks=marks), self._name(old))
@@ -772,7 +778,7 @@ class Runner:
         job = self.jobs.started(kind=old.kind, repo=old.repo, issue=old.issue, branch=old.branch,
                                 title=old.title, sha=old.sha, round=old.round,
                                 thread_id=old.thread_id, about=old.id, cause=old.cause,
-                                resume=choice.record())
+                                resume=choice.record(), base=old.base)
         if old.outcome == 'waiting':
             self.jobs.ended(old.id, exit_code=old.exit_code, outcome='continued',
                             **(marks or {}))
@@ -828,9 +834,18 @@ class Runner:
             return IDLE
         work = fix_branch(n, h)
         cause = CONFLICT if review is None else None
+        # A conflict round records the base it merges (issue #91): the PR conflicting again
+        # with that same commit is a stop (`stops.conflict_stop`); unreadable, it's left out.
+        base = None
+        if cause == CONFLICT:
+            try:
+                base = self.git.sha(repo.path, f'origin/{pr.base}')
+            except Exception as e:
+                self.say(f'fix {repo.name}#{n}: reading origin/{pr.base} failed ({e}); '
+                         'the round records no base')
         job = self.jobs.started(kind='fix', repo=repo.name, issue=n, branch=pr.branch,
                                 title=fix_title(repo, n, cause), sha=h,
-                                round=review and review.round, cause=cause)
+                                round=review and review.round, cause=cause, base=base)
         if self.git.has_branch(repo.path, work):
             self.jobs.ended(job.id, exit_code=None, outcome='branch-exists',
                             error=f'A local branch {work} is left from an earlier run.')
@@ -984,7 +999,7 @@ class Runner:
         work = fix_branch(old.issue, old.sha) if old.kind == 'fix' else old.branch
         job = self.jobs.started(kind=old.kind, repo=old.repo, issue=old.issue, branch=old.branch,
                                 title=old.title, sha=old.sha, round=old.round, about=old.id,
-                                cause=old.cause, resume=choice.record())
+                                cause=old.cause, resume=choice.record(), base=old.base)
         after = 'after the usage limit' if direction is None else 'for the decision'
         try:
             brief = self._brief_again(repo, old)

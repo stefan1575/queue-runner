@@ -1,0 +1,27 @@
+{
+ "id": "provider-turn:provider:claudeAgent:native-turn:turn%3Arun-attempt%3Arun%3Arun%253Athread%253Amcp%25253A3a5576b6-2ffc-4d52-bb9a-40e94de90865%253Aordinal%253A1%3Aattempt%3A1",
+ "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Amcp%253A3a5576b6-2ffc-4d52-bb9a-40e94de90865%3Aordinal%3A1",
+ "nodeId": "node:run:run%3Athread%3Amcp%253A3a5576b6-2ffc-4d52-bb9a-40e94de90865%3Aordinal%3A1:root",
+ "runAttemptId": "run-attempt:run:run%3Athread%3Amcp%253A3a5576b6-2ffc-4d52-bb9a-40e94de90865%3Aordinal%3A1:attempt:1",
+ "nativeTurnRef": {
+  "driver": "claudeAgent",
+  "nativeId": "turn:run-attempt:run:run%3Athread%3Amcp%253A3a5576b6-2ffc-4d52-bb9a-40e94de90865%3Aordinal%3A1:attempt:1",
+  "strength": "strong"
+ },
+ "ordinal": 1,
+ "status": "running",
+ "startedAt": "2026-11-16T12:47:50.912Z",
+ "completedAt": null,
+ "tokenUsage": {
+  "usedTokens": 195572,
+  "maxTokens": 1000000,
+  "inputTokens": 195050,
+  "cachedInputTokens": 192705,
+  "outputTokens": 522,
+  "reasoningOutputTokens": 0,
+  "promptCacheTtlMs": 3600000,
+  "promptCacheExpiresAt": "2026-11-16T13:52:34.292Z",
+  "updatedAt": "2026-11-16T12:52:38.235Z"
+ },
+ "model": "claude-opus-5-5"
+}

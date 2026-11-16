@@ -40,6 +40,7 @@ class PullRequest:
     title: str = ''
     head_sha: str = ''     # H: the commit a review reviews
     base: str = ''         # the branch it merges into (not always main: PRs stack)
+    base_sha: str = ''     # that branch's tip, as GitHub last saw it (issue #91)
     url: str = ''
     labels: tuple = ()
     draft: bool = False
@@ -77,7 +78,8 @@ class GhError(RuntimeError):
 def _pull(p: dict) -> PullRequest:
     return PullRequest(number=p['number'], branch=p['head']['ref'], body=p.get('body') or '',
                        title=p.get('title') or '', head_sha=p['head'].get('sha') or '',
-                       base=(p.get('base') or {}).get('ref') or '', url=p.get('html_url') or '',
+                       base=(p.get('base') or {}).get('ref') or '',
+                       base_sha=(p.get('base') or {}).get('sha') or '', url=p.get('html_url') or '',
                        labels=tuple(lb['name'] for lb in p.get('labels') or ()),
                        draft=bool(p.get('draft')),
                        state='merged' if p.get('merged_at') else p.get('state') or 'open',

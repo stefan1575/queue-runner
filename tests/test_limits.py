@@ -186,6 +186,58 @@ class T3StoreTest(unittest.TestCase):
         self.assertEqual(store.last_call(THREAD), limits.LastCall(None, None))
 
 
+TURN_THREAD = 'mcp:3a5576b6-2ffc-4d52-bb9a-40e94de90865'
+
+
+class CacheExpiryTest(unittest.TestCase):
+    """When a thread's prompt cache expires, as T3 reports it (issue #72): a real provider
+    turn's `tokenUsage` (2026-11-16, T3 0.1.9), the newest turn's when there are several."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.path = os.path.join(tmp.name, 'statev2.sqlite')
+        db = sqlite3.connect(self.path)
+        db.execute('create table orchestration_v2_projection_provider_turns (provider_turn_id '
+                   'text, thread_id text, provider_thread_id text, node_id text, run_attempt_id '
+                   'text, ordinal integer, status text, started_at text, completed_at text, '
+                   'payload_json text)')
+        turn = json.loads(fixture('t3', 'provider-turn-claude.json'))
+        older = json.loads(json.dumps(turn))
+        older['tokenUsage'].update(updatedAt='2026-11-16T11:00:00.000Z',
+                                   promptCacheExpiresAt='2026-11-16T12:00:00.000Z')
+        no_usage = dict(turn, tokenUsage=None)
+        for t in (older, turn, no_usage):
+            db.execute('insert into orchestration_v2_projection_provider_turns (thread_id, '
+                       'payload_json) values (?, ?)', (TURN_THREAD, json.dumps(t)))
+        db.execute('insert into orchestration_v2_projection_provider_turns (thread_id, '
+                   "payload_json) values ('no-expiry', ?)",
+                   (json.dumps({'tokenUsage': {'usedTokens': 5, 'updatedAt': 'x'}}),))
+        db.commit()
+        db.close()
+        self.store = limits.T3Store(self.path, tmp.name)
+
+    def test_the_newest_turns_expiry(self):
+        self.assertEqual(self.store.cache_expires_at(TURN_THREAD),
+                         datetime.datetime(2026, 11, 16, 13, 52, 34, 292000, tzinfo=UTC))
+
+    def test_no_expiry_reported_is_none(self):
+        self.assertIsNone(self.store.cache_expires_at('no-expiry'))
+        self.assertIsNone(self.store.cache_expires_at('another-thread'))
+        self.assertIsNone(limits.T3Store(self.path + '-gone').cache_expires_at(TURN_THREAD))
+
+    def test_stale_only_once_it_has_expired(self):
+        at = datetime.datetime(2026, 11, 16, 13, 52, 34, 292000, tzinfo=UTC)
+        self.assertIsNone(limits.stale(self.store, TURN_THREAD, at - datetime.timedelta(seconds=1)))
+        self.assertEqual(limits.stale(self.store, TURN_THREAD, at), at)
+
+    def test_never_stale_without_an_expiry(self):
+        far = datetime.datetime(2030, 1, 1, tzinfo=UTC)
+        self.assertIsNone(limits.stale(self.store, 'no-expiry', far))
+        self.assertIsNone(limits.stale(None, TURN_THREAD, far))
+        self.assertIsNone(limits.stale(self.store, None, far))
+
+
 class LimitStopTest(unittest.TestCase):
     """Whether a failed run stopped on a usage limit, from T3's record or, failing that, what
     the thread said."""

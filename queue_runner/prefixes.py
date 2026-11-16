@@ -5,11 +5,20 @@ its own job records):
 - **"Decide: "** on an ask thread (`ask_threads.py`) while its stop waits on his decision: filed,
   not released, not decided. It's launched with it.
 - **"Answer: "** on a build or fix thread that waits for an answer a decision left to him (the
-  `waiting` question's `stop`), while it still waits and isn't released.
+  `waiting` question's `stop`), while it still waits and isn't released; once Stefan opened a
+  fresh thread to answer it in (issue #72: an `ask` job about the waiting job), on that one
+  instead.
 
 Once it no longer needs him (he decided in the thread or on GitHub, answered in the thread or on
 GitHub (`waiting.py`), or released it) the prefix comes off and the thread is settled.
 Everything else is settled without a prefix (ticket 70), so there's no "Done" or "Blocked".
+
+**A stale thread** (issue #72): one that still needs him but whose prompt cache T3 says has
+expired (`limits.stale`: about an hour after its last request on Claude) is settled, prefix and
+all, so cold threads don't pile up in the sidebar. Its Inbox item stays; opening it there starts
+a fresh thread (`ask_threads.py`), which takes the prefix while the old one's comes off. A
+thread T3 reports no expiry for is never stale, and one Stefan writes in again (T3 unsettles it)
+is settled again only once its new cache expires.
 
 `Prefixes.sync` runs in each Claude pass, right after settling (so also while a dead runner's
 job runs on, or the lane is stopped), and again after answers are read. It works from the job
@@ -20,6 +29,7 @@ once). A thread still running
 keeps its prefix until its run ends. What's in order is remembered for the process, so a quiet
 pass calls T3 for nothing.
 """
+from . import limits as lim
 from .state import NOT_STARTED
 
 DECIDE = 'Decide: '
@@ -63,29 +73,46 @@ def waiting_on_stefan(all_jobs, released) -> tuple[dict, dict]:
             continue
         if j.kind == KIND and j.outcome == OPENED:
             ever[j.thread_id] = j.repo
-            stop = by_id.get(j.about)
-            if (stop is not None and stop.outcome == 'filed' and stop.id not in released
-                    and stop.id not in decided and newest_ask.get(stop.id) is j):
-                now[j.thread_id] = (j.repo, DECIDE)
-        elif j.kind in ('build', 'fix'):
-            d = decided.get(j.id)
-            if d is None or d.question != 'waiting' or d.open or d.outcome != 'stop':
+            about = by_id.get(j.about)
+            if about is None or newest_ask.get(about.id) is not j:
                 continue
-            if j.outcome == 'waiting' and j.id not in released:
+            if about.kind == 'stop':
+                if (about.outcome == 'filed' and about.id not in released
+                        and about.id not in decided):
+                    now[j.thread_id] = (j.repo, DECIDE)
+            elif (_left(about, decided) and about.outcome == 'waiting'
+                  and about.id not in released):
+                now[j.thread_id] = (j.repo, ANSWER)   # a fresh thread to answer it in (#72)
+        elif j.kind in ('build', 'fix'):
+            if not _left(j, decided):
+                continue
+            if j.outcome == 'waiting' and j.id not in released and j.id not in newest_ask:
                 now[j.thread_id] = (j.repo, ANSWER)
                 ever[j.thread_id] = j.repo
+            elif j.outcome == 'waiting' and j.id not in released:
+                ever[j.thread_id] = j.repo   # a fresh thread to answer in took its place (#72)
             elif j.thread_id not in going:
                 ever[j.thread_id] = j.repo
     return now, ever
 
 
+def _left(job, decided) -> bool:
+    """A build or fix whose question a decision left to Stefan."""
+    d = decided.get(job.id)
+    return (job.kind in ('build', 'fix') and d is not None and d.question == 'waiting'
+            and not d.open and d.outcome == 'stop')
+
+
 class Prefixes:
     """The Claude lane's part: each pass, the titles of the runner's threads that need Stefan."""
 
-    def __init__(self, config, *, t3, jobs, say):
+    def __init__(self, config, *, t3, jobs, say, limits=None, now=None):
         self.config, self.t3, self.jobs, self.say = config, t3, jobs, say
+        # limits.T3Store: when each thread's prompt cache expires (issue #72); None: never stale
+        self.limits, self.now = limits, now
         self._marked: set[str] = set()   # prefixed as they should be
         self._done: set[str] = set()     # plain and settled (or gone from T3)
+        self._cold: dict[str, object] = {}   # stale and settled: the expiry it was settled for
         self._said: dict[str, str] = {}
 
     def _once(self, key: str, text: str) -> None:
@@ -103,9 +130,13 @@ class Prefixes:
             self._once('log', f'thread titles: reading the job log failed ({e})')
             return
         todo: dict[str, list[str]] = {}
+        cold: dict[str, object] = {}   # stale, and not yet settled for that expiry
         for tid, (repo, _) in now.items():
             self._done.discard(tid)
-            if tid not in self._marked:
+            at = lim.stale(self.limits, tid, self.now()) if self.now else None
+            if at is not None and self._cold.get(tid) != at:
+                cold[tid] = at
+            if tid not in self._marked or tid in cold:
                 todo.setdefault(repo, []).append(tid)
         for tid, repo in ever.items():
             if tid in now:
@@ -129,8 +160,12 @@ class Prefixes:
                 t = threads.get(tid)
                 if t is None:   # archived or deleted: nothing to put right
                     (self._marked if tid in now else self._done).add(tid)
+                    if tid in cold:
+                        self._cold[tid] = cold[tid]
                 elif tid in now:
                     self._mark(t, now[tid][1])
+                    if tid in cold:
+                        self._settle_cold(t, cold[tid])
                 else:
                     self._clear(t)
 
@@ -153,6 +188,25 @@ class Prefixes:
         want = titled(prefix, t.title)
         if t.title == want or self._rename(t, want):
             self._marked.add(t.thread_id)
+
+    def _settle_cold(self, t, at) -> None:
+        """A thread that needs Stefan, settled once its prompt cache has expired (issue #72):
+        it keeps its prefix and its Inbox item, and opening that starts a fresh thread."""
+        if t.active:
+            return   # a run going warms it: looked at again next pass
+        if not t.settled:
+            try:
+                self.t3.settle(t.thread_id)
+            except Exception as e:   # noqa: BLE001
+                self._once(t.thread_id, f'{self._name(t)}: settling its stale thread '
+                                        f'{t.thread_id} in T3 failed ({type(e).__name__}: {e}); '
+                                        'tried again next pass')
+                return
+            self.say(f'{self._name(t)}: its prompt cache expired at '
+                     f'{at.astimezone():%Y-%m-%d %H:%M}, so its thread {t.thread_id} is '
+                     'settled; its Inbox item stays, and opening it there starts a fresh thread')
+        self._said.pop(t.thread_id, None)
+        self._cold[t.thread_id] = at
 
     def _clear(self, t) -> None:
         if t.active:

@@ -14,7 +14,7 @@ from queue_runner.merge import Merger
 from queue_runner.review import Reviewer
 from queue_runner.run import Runner
 from queue_runner.state import JobLog
-from queue_runner.stops import NEEDS_INFO, held, needs_info_mark
+from queue_runner.stops import NEEDS_INFO, conflict_stop, held, needs_info_mark
 from queue_runner.toast import toast_xml, WindowsToaster
 from tests.fakes import FakeGitHubWithPulls, FakeGitHubForReviews, FakeToaster, \
     full_pr, issue
@@ -25,6 +25,7 @@ NOW = datetime.datetime(2026, 11, 9, 12, 0)
 LATER = '2099-01-01T00:00:00Z'    # after any stop the test files
 EARLIER = '2026-01-01T00:00:00Z'  # before it
 ISSUE_URL = 'https://github.com/owner/first/issues/901'
+BASE1, BASE2 = '4' * 40, '5' * 40   # main's tip, as two conflict rounds merged it
 
 
 class StopsTest(unittest.TestCase):
@@ -59,15 +60,25 @@ class StopsTest(unittest.TestCase):
     def fail_check(self, sha=H2):
         self.gh.check_states[sha] = Checks('failed', failed=('ci',))
 
-    def conflict_stops(self):
-        """The PR conflicts a third time: conflict rounds pushed on two earlier heads, so this
-        conflict is a stop (ticket 15)."""
-        for sha in ('1' * 40, '2' * 40):
+    def conflict_rounds(self, *bases, released=False):
+        """A pushed conflict round on an earlier head per base it merged (None: a record from
+        before issue #91, with no base)."""
+        for i, base in enumerate(bases, 1):
             j = self.jobs.started(kind='fix', repo='first', issue=20, branch='claude/red-5',
-                                  title='Queue runner conflict: first#20', sha=sha,
-                                  cause='conflict')
+                                  title='Queue runner conflict: first#20', sha=str(i) * 40,
+                                  cause='conflict', base=base)
             self.jobs.ended(j.id, exit_code=0, outcome='pushed')
+
+    def conflict_stops(self):
+        """The PR conflicts again with the base its last conflict round merged, which hasn't
+        moved: a stop (issue #91)."""
+        self.conflict_rounds(BASE1, BASE2)
+        self.gh.now[20] = {'base_sha': BASE2}
         self.gh.conflicts.add(20)
+
+    def conflict_says(self):
+        """The conflict stop on PR #20 now, or None (`stops.conflict_stop`)."""
+        return conflict_stop(self.jobs, self.repo, self.gh.pull(self.repo, 20))
 
     def review_ended(self, outcome, round=1, signals=(), sha=H2):
         j = self.jobs.started(kind='review', repo='first', issue=20, branch='claude/red-5',
@@ -102,13 +113,69 @@ class StopsTest(unittest.TestCase):
         self.assertEqual(self.stops(), [])
         self.assertTrue(any('a conflict round (or a stop) comes first' in s for s in self.said))
 
-    def test_a_third_conflict_is_a_stop(self):
+    def test_a_conflict_on_the_base_the_last_round_merged_is_a_stop(self):
         self.conflict_stops()
         self.reviewer().review_pass()
         [stop] = self.stops()
         self.assertEqual(stop.stop, 'conflict')
-        self.assertIn('conflicts with main again', stop.reason)
-        self.assertIn('a third conflict after conflict rounds on 1111111, 2222222', stop.reason)
+        self.assertIn('conflicts with main again at bbbbbbb, though the conflict round on '
+                      '2222222 merged main at 5555555 and main has not moved since',
+                      stop.reason)
+
+    # --- a conflict after main moved: another round (issue #91) -------------------------
+
+    def test_a_conflict_on_a_new_base_under_the_ceiling_gets_a_round(self):
+        self.conflict_rounds(BASE1, BASE2, BASE1, BASE2)   # four rounds, each pushed
+        self.gh.now[20] = {'base_sha': '6' * 40}           # main moved since the last
+        self.gh.conflicts.add(20)
+        self.assertIsNone(self.conflict_says())
+        self.reviewer().review_pass()
+        self.assertEqual(self.stops(), [])
+
+    def test_a_round_without_a_base_counts_as_a_different_base(self):
+        self.conflict_rounds(None, None)
+        self.gh.now[20] = {'base_sha': BASE2}
+        self.gh.conflicts.add(20)
+        self.assertIsNone(self.conflict_says())
+        self.gh.now[20] = {'base_sha': ''}   # nor does GitHub not saying the base's tip
+        self.conflict_rounds(BASE2)
+        self.assertIsNone(self.conflict_says())
+
+    def test_after_five_conflict_rounds_the_next_conflict_is_a_stop(self):
+        self.conflict_rounds(BASE1, BASE2, BASE1, BASE2, BASE1)
+        self.gh.now[20] = {'base_sha': '6' * 40}   # main moved again: a 6th round would help
+        self.gh.conflicts.add(20)
+        self.reviewer().review_pass()
+        [stop] = self.stops()
+        self.assertEqual(stop.stop, 'conflict')
+        self.assertIn('5 conflict rounds, main keeps moving under it', stop.reason)
+
+    def test_a_continued_conflict_round_is_the_same_round(self):
+        # Four rounds, the last cut off by a usage limit and picked up (in place or fresh, or by
+        # a decision's retry or answer): five records, four rounds (Sol's review 1 of PR #101).
+        self.conflict_rounds(BASE1, BASE2, BASE1)
+        cut = self.jobs.started(kind='fix', repo='first', issue=20, branch='claude/red-5',
+                                title='Queue runner conflict: first#20', sha='4' * 40,
+                                cause='conflict', base=BASE2)
+        self.jobs.ended(cut.id, exit_code=1, outcome='usage-limit')
+        again = self.jobs.started(kind='fix', repo='first', issue=20, branch='claude/red-5',
+                                  title='Queue runner conflict: first#20', sha='4' * 40,
+                                  cause='conflict', base=BASE2, about=cut.id)
+        self.jobs.ended(again.id, exit_code=0, outcome='pushed')
+        self.gh.now[20] = {'base_sha': '6' * 40}   # main moved again: the fifth round
+        self.gh.conflicts.add(20)
+        self.assertIsNone(self.conflict_says())
+        self.conflict_rounds('7' * 40)             # that fifth round; main moves once more
+        self.gh.now[20] = {'base_sha': '8' * 40}
+        self.assertIn('5 conflict rounds, main keeps moving under it', self.conflict_says()[0])
+
+    def test_a_release_resets_the_count(self):
+        self.conflict_rounds(BASE1, BASE2, BASE1, BASE2, BASE1)
+        self.gh.now[20] = {'base_sha': BASE1}   # the same base, too
+        self.gh.conflicts.add(20)
+        self.assertIsNotNone(self.conflict_says())
+        self.jobs.released('first', 20)
+        self.assertIsNone(self.conflict_says())
 
     def test_a_review_that_stops_files_its_signals(self):
         # Review 1 raised F1 in "write logged wrongly"; review 2 on H3 raises F2 in that class.

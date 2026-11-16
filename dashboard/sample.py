@@ -13,6 +13,10 @@ from datetime import datetime, timedelta
 
 LD, QR = "leads-dashboard", "queue-runner"
 GH = {LD: "https://github.com/RoyalBullyAgency-RBA/leads-dashboard", QR: "https://github.com/stefan1575/queue-runner"}
+# A made-up favicon for leads-dashboard, so the sample shows both marks: a favicon, and (queue-runner,
+# with none) the first two letters. The runner reads the real one from the repo (queue_runner/favicon.py).
+LD_ICON = ("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+"
+           "PHJlY3Qgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiByeD0iNyIgZmlsbD0iIzI1NjNlYiIvPjxwYXRoIGQ9Ik05IDIzVjlNOSAyM2g4IiBzdHJva2U9IndoaXRlIiBzdHJva2Utd2lkdGg9IjMiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgZmlsbD0ibm9uZSIvPjxjaXJjbGUgY3g9IjIyIiBjeT0iMjAiIHI9IjMuNSIgZmlsbD0id2hpdGUiLz48L3N2Zz4=")
 T3 = "https://app.t3.codes/threads/264b77bb-5ec7-4453-8ee5-7d0162886008/mcp%3A"
 
 STATES = {
@@ -28,6 +32,7 @@ STATES = {
     "side-by-side": "Claude runs a job in each repo at once",
     "usage-stale": "Claude's usage hasn't been read for 40 minutes: every call answered 429",
     "inbox-unread": "The runner just started: the Inbox hasn't been read yet (asks null)",
+    "stale": "Two threads waiting on you went cold: their Inbox items open fresh ones",
 }
 DEFAULT = "busy"
 # Takes of the page before this one, kept while its look is being agreed: `serve.py` serves the
@@ -83,9 +88,10 @@ def build(name: str = DEFAULT, base: datetime | None = None, control: dict | Non
         # gets nothing from either lane; its asks stay in the Inbox.
         "repos": [
             # `doing`: the Claude job running in it (as a lane's `job`), and `wait`: why none
-            # starts in it now (#50; both filled in by `_doing`, below).
-            {"name": LD, "github": GH[LD], "merge": "stefan", "stopped": None},
-            {"name": QR, "github": GH[QR], "merge": "runner", "stopped": None},
+            # starts in it now (#50; both filled in by `_doing`, below). `icon`: its favicon as a
+            # data: URL, or null (the page draws its first two letters).
+            {"name": LD, "github": GH[LD], "icon": LD_ICON, "merge": "stefan", "stopped": None},
+            {"name": QR, "github": GH[QR], "icon": None, "merge": "runner", "stopped": None},
         ],
         # An ask is written to be picked up cold, a week later. `kind` is why it came to Stefan:
         # `stuck` (the runner tried and couldn't get it through), `decision` (a product decision
@@ -98,7 +104,10 @@ def build(name: str = DEFAULT, base: datetime | None = None, control: dict | Non
         # `decide` (ticket 35) is null for an ask that can't be decided in a T3 thread, else where
         # that stands: `state` "offered" (the page's Decide in T3 asks the runner to open one),
         # "asked" (the runner read the request; `note` says when it starts) or "open" (`go` is
-        # the thread then, and `also` the other place to answer it, its needs-info issue).
+        # the thread then, and `also` the other place to answer it, its needs-info issue), or
+        # "stale" (issue #72: the thread went cold and was settled; `label` is the button that
+        # asks for a fresh one, `note` why). A thread waiting for his answer has a `decide` only
+        # once it's stale, or once a fresh thread to answer in is open.
         "asks": [
             {
                 "id": "ask-152", "kind": "stuck", "repo": LD, "ref": "PR #152", "pr": 152,
@@ -194,7 +203,7 @@ def build(name: str = DEFAULT, base: datetime | None = None, control: dict | Non
         ],
         "lanes": [
             {
-                # `provider` picks the mark and the name's type: "claude" or "chatgpt"; any other gets none
+                # `provider` picks the mark: "claude" or "chatgpt"; any other gets none
                 "id": "claude", "provider": "claude", "name": "Claude", "does": "builds and fixes", "model": "Opus 5.5",
                 "state": "working",
                 "job": {"kind": "build", "repo": LD, "ref": "#212", "title": "Archive view for old callers",
@@ -559,6 +568,17 @@ def _vary(snap: dict, name: str, ago, ahead) -> None:
              "go": {"label": "Answer in T3", "where": "t3", "url": T3 + "5823cce7-a3a7-4ac6-9f2b-5883404d9828"},
              "why": ["The issue names both in different places."]},
         ]
+    elif name == "stale":   # issue #72: the runner settled both cold threads
+        cold = ("Its thread went cold (its prompt cache expired {at}), so the runner settled it. A fresh "
+                "thread starts from its brief and the cold one's last messages, so nothing is re-read uncached.")
+        stuck = next(a for a in snap["asks"] if a["id"] == "ask-152")
+        stuck["go"], stuck["also"] = stuck["also"], None
+        stuck["decide"] = {"state": "stale", "at": ago(65), "label": "Decide in a fresh T3 thread",
+                           "note": cold.format(at=ago(65)[11:16])}
+        waiting = next(a for a in snap["asks"] if a["id"] == "ask-214")
+        waiting["since"] = ago(75)
+        waiting["decide"] = {"state": "stale", "at": ago(10), "label": "Answer in a fresh T3 thread",
+                             "note": cold.format(at=ago(10)[11:16])}
     elif name == "reserve":
         snap["usage"][0]["windows"][1]["used"] = 93
         _lane(snap, "claude").update(state="waiting", job=None, next="Fix round on PR #204", wait={
@@ -628,6 +648,9 @@ def _obey(snap: dict, control: dict, now: datetime) -> None:
                     else f"It starts once Claude's current {claude['job']['kind']} ends." if claude["job"]
                     else "It starts on the Claude lane's next pass.")
             ask["decide"] = {"state": "asked", "at": record["open"].get("at"), "note": note}
+        elif (ask.get("decide") or {}).get("state") == "stale" and isinstance(record, dict) and isinstance(record.get("fresh"), dict):
+            ask["decide"] = dict(ask["decide"], state="asked", at=record["fresh"].get("at"),
+                                 note="A fresh thread starts on the Claude lane's next pass.")   # issue #72
     marks = control.get("asks") if isinstance(control.get("asks"), dict) else {}
     for ask in snap["asks"] + snap["answered"]:   # read and snoozed (ticket 36)
         mark = marks.get(ask["id"])

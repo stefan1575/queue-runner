@@ -511,10 +511,12 @@ class SnapshotTest(ThreadCase):
         samples = [s for s in (sample.build(n) for n in sample.STATES) if s['asks'] is not None]
         decides = [a['decide'] for s in samples for a in s['asks'] if a['decide']]
         alsos = [a['also'] for s in samples for a in s['asks'] if a['also']]
-        self.assertEqual({d['state'] for d in decides}, {'open', 'offered'})
+        self.assertEqual({d['state'] for d in decides}, {'open', 'offered', 'stale'})
         ask = self.opened()
         real = self.the_ask()
-        self.assertEqual(set(real['decide']), set.union(*map(set, decides)))
+        # a stale one's `label` is held to the sample in test_stale_threads.py (issue #72)
+        self.assertEqual(set(real['decide']),
+                         set.union(*(set(d) for d in decides if d['state'] != 'stale')))
         self.assertEqual(set(real['also']), set.union(*map(set, alsos)))
         self.says(ask, Message('assistant', 'Hmm.'))
         asked = apply_control({}, {'ask': 'ask-qr4', 'open': True}, NOW)

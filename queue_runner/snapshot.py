@@ -23,6 +23,7 @@ import time
 from dataclasses import dataclass, field
 
 from . import control
+from .favicon import repo_icon
 from .gate import RECENT, RESERVE_RELEASE, SAMPLES, Knob
 from .state import when
 from .usage import STALE_AFTER, Reading
@@ -128,6 +129,9 @@ class Facts:
     # Refresh on the Usage card (ticket 42): the request the publisher last acted on, and when
     # it read (`Snapshots`); None before one.
     usage_refresh: tuple | None = None
+    # Issue #72: thread id -> when its prompt cache expired, for the runner's threads waiting on
+    # Stefan whose cache has (`Snapshots._stale`); their Inbox items offer a fresh thread.
+    stale: dict = field(default_factory=dict)
 
 
 def _iso(t: datetime.datetime | None) -> str | None:
@@ -166,10 +170,11 @@ def build(facts: Facts) -> dict:
 def _repos(facts: Facts) -> list[dict]:
     """In config.toml's order, each with `stopped` (ticket 37): when Stefan stopped it, or None;
     and what it's doing now (#50): `doing`, the Claude job running in it (as a lane's `job`), or
-    None, and `wait`, why the Claude lane starts none in it now, or None."""
+    None, and `wait`, why the Claude lane starts none in it now, or None; and `icon`, its favicon
+    as a data: URL, or None, for its mark on the page (`favicon.py`)."""
     jobs = {j.repo: j for j in _open_jobs(facts, CLAUDE_KINDS)}
     return [{'name': r.name, 'github': f'https://github.com/{r.github}' if r.github else None,
-             'merge': r.merge, 'stopped': _repo_stopped(facts, r.name),
+             'icon': repo_icon(r.path), 'merge': r.merge, 'stopped': _repo_stopped(facts, r.name),
              'doing': _job(facts, jobs[r.name]) if r.name in jobs else None,
              'wait': None if r.name in jobs else _repo_wait(facts, r.name)}
             for r in facts.repos]
@@ -223,7 +228,7 @@ def _decide(facts: Facts, asks: list, answered: list) -> None:
         return w.reason if w else None
     mark(asks, answered, facts.jobs, facts.switch.opened,
          lambda repo: waits_text(facts.switch, repo, jobs.get(repo), wait(repo)),
-         released=facts.released)
+         released=facts.released, stale=facts.stale, fresh=facts.switch.fresh)
 
 
 def _marks(facts: Facts, id: str) -> dict:
@@ -625,9 +630,12 @@ class Snapshots:
     are the usage `Watch`es. Nothing here reads GitHub."""
 
     def __init__(self, config, *, calls: Calls, claude: Watch | None, sol: Watch | None,
-                 info: RunnerInfo, clock, runner=None, readers=None):
+                 info: RunnerInfo, clock, runner=None, readers=None, limits=None):
         self.config, self.calls, self.claude, self.sol = config, calls, claude, sol
         self.info, self.clock, self.runner = info, clock, runner
+        # limits.T3Store, for when a waiting thread's prompt cache expires (issue #72): the
+        # runner's own, or with none (`--snapshot`) this one; None, none is ever stale.
+        self.limits = limits if runner is None else getattr(runner, 'limits', None)
         # With no runner (`--snapshot`): the Inbox's and the work's readers, each read once.
         self.readers = dict(readers or {})
         self._threads: dict[str, str] = {}
@@ -685,8 +693,23 @@ class Snapshots:
             threads=threads, runner=self.info, calls=self.calls.all(),
             claude_usage=self.claude.reading() if self.claude else None,
             sol_usage=self.sol.reading() if self.sol else None, costs=costs,
-            usage_refresh=self._refreshed,
+            usage_refresh=self._refreshed, stale=self._stale(jobs, now),
             **self._inbox(log))
+
+    def _stale(self, jobs, now) -> dict:
+        """The threads waiting on Stefan whose prompt cache has expired (issue #72): each
+        opened ask thread's and each waiting build's or fix's, read from T3's database."""
+        from .limits import stale
+        if self.limits is None:
+            return {}
+        found = {}
+        for j in jobs:
+            if j.thread_id and ((j.kind == 'ask' and j.outcome == 'opened')
+                                or (j.kind in ('build', 'fix') and j.outcome == 'waiting')):
+                with contextlib.suppress(Exception):   # unreadable: not stale
+                    if (at := stale(self.limits, j.thread_id, now)) is not None:
+                        found[j.thread_id] = at
+        return found
 
     def _refresh(self, switch) -> bool:
         """Whether a Refresh asked on the page is to be taken now: newer than the last one acted

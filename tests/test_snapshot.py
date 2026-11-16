@@ -58,10 +58,19 @@ class BuildTest(unittest.TestCase):
     def test_repos_come_in_config_order_with_their_github_page_and_who_merges(self):
         self.assertEqual(snapshot.build(facts())['repos'], [
             {'name': 'leads-dashboard', 'github': 'https://github.com/RoyalBullyAgency-RBA/leads-dashboard',
-             'merge': 'stefan', 'stopped': None, 'doing': None, 'wait': None},
+             'icon': None, 'merge': 'stefan', 'stopped': None, 'doing': None, 'wait': None},
             {'name': 'queue-runner', 'github': 'https://github.com/stefan1575/queue-runner',
-             'merge': 'runner', 'stopped': None, 'doing': None, 'wait': None},
+             'icon': None, 'merge': 'runner', 'stopped': None, 'doing': None, 'wait': None},
         ])
+
+    def test_a_repo_with_a_favicon_carries_it_as_a_data_url(self):
+        with tempfile.TemporaryDirectory() as root:
+            os.makedirs(os.path.join(root, 'public'))
+            with open(os.path.join(root, 'public', 'favicon.svg'), 'w', encoding='utf-8') as f:
+                f.write('<svg xmlns="http://www.w3.org/2000/svg"/>')
+            repo = Repo(name='site', github=None, path=root)
+            [row] = snapshot.build(facts(repos=[repo]))['repos']
+        self.assertTrue(row['icon'].startswith('data:image/svg+xml;base64,'), row['icon'])
 
 
 def job(kind, issue, minutes_ago, **kw):
