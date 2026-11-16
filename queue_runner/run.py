@@ -348,7 +348,7 @@ class Runner:
             return None
         if red := red_base(self.jobs, name, repo.base):   # no build from a red base (#98)
             text = (f'{name}: no build starts while {repo.base} fails its checks ({red.reason}; '
-                    f'{red.link})')
+                    f'{red.link or "its issue is not filed yet"})')
             if self._said_red.get(name) != text:
                 self._said_red[name] = text
                 self.say(text)

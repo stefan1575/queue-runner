@@ -768,6 +768,9 @@ def _event(story, j) -> list[tuple]:
             'update-failed': f'Its base failed {j.reason} too; once the base passed, GitHub '
                              "wouldn't update it from the base (a conflict).",
             'moved': f'Its base failed {j.reason} too; it moved on before the base passed.',
+            'own-failure': f'Its base failed {j.reason} too, but then a check its base '
+                           "doesn't fail failed on it, so the failure is its own.",
+            'cleared': f'Its base failed {j.reason} too; then nothing failed on it any more.',
         }.get(j.outcome), 'runner'
         tone = 'bad' if j.outcome == 'update-failed' else None
     elif j.kind == 'stop':

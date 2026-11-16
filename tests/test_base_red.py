@@ -228,6 +228,99 @@ class BaseRedTest(unittest.TestCase):
         self.assertEqual(len(self.of(r, BASE_HOLD)), 2)
         self.assertEqual(self.calls('update-branch'), [])
 
+    # --- review 1's findings -------------------------------------------------------------------
+
+    def test_a_new_failure_on_a_held_head_that_main_does_not_fail_is_the_prs_own(self):
+        """F1: held on `tests`, then `lint` fails on the same H: the hold goes, and #93's re-run
+        (then its stop) follows as for any PR's own failure."""
+        self.main_fails('tests')
+        self.pr_fails(H2, 'tests')
+        r = self.runner()
+        r.reviewer.review_pass()
+        [hold] = self.of(r, BASE_HOLD)
+        self.assertEqual(hold.outcome, 'held')
+        self.gh.check_states[H2] = Checks('failed', failed=('tests', 'lint'), runs=(437,),
+                                          by_run=((437, ('tests', 'lint')),))
+        r.reviewer.review_pass()
+        [hold] = self.of(r, BASE_HOLD)
+        self.assertEqual(hold.outcome, 'own-failure')
+        self.assertEqual(self.calls('rerun'), [(437,)])
+        r.reviewer.review_pass()   # not held again on H
+        self.assertEqual(len(self.of(r, BASE_HOLD)), 1)
+
+    def test_an_update_that_fails_for_another_reason_is_tried_again(self):
+        """F2: an HTTP 503 from update-branch isn't a conflict: the hold stays and the next pass
+        updates the PR."""
+        self.main_fails('tests')
+        self.pr_fails(H2, 'tests')
+        r = self.runner()
+        r.reviewer.review_pass()
+        self.main_passes()
+        real = self.gh.update_branch
+
+        def flaky(repo, number, expected):
+            from queue_runner.github import GhError
+            raise GhError('gh api failed (1): Service Unavailable (HTTP 503)')
+        self.gh.update_branch = flaky
+        r.reviewer.review_pass()
+        [hold] = self.of(r, BASE_HOLD)
+        self.assertEqual(hold.outcome, 'held')
+        self.gh.update_branch = real
+        r.reviewer.review_pass()
+        [hold] = self.of(r, BASE_HOLD)
+        self.assertEqual(hold.outcome, 'updated')
+        self.assertEqual(self.calls('update-branch'), [(20, H2)])
+
+    def test_a_held_pr_with_a_claude_job_writing_to_it_is_not_updated_until_it_ends(self):
+        """F3: a fix round open on the PR's branch is its writer: update-branch waits for it."""
+        self.main_fails('tests')
+        self.pr_fails(H2, 'tests')
+        r = self.runner()
+        r.reviewer.review_pass()
+        fix = r.jobs.started(kind='fix', repo='first', issue=20, branch='claude/red-5',
+                             title='Queue runner conflict: first#20', sha=H2, cause='conflict')
+        self.main_passes()
+        r.reviewer.review_pass()
+        self.assertEqual(self.calls('update-branch'), [])
+        self.assertEqual(self.of(r, BASE_HOLD)[0].outcome, 'held')
+        r.jobs.ended(fix.id, exit_code=0, outcome='no-push', head=H2)
+        r.reviewer.review_pass()
+        self.assertEqual(self.calls('update-branch'), [(20, H2)])
+
+    def test_no_build_starts_from_a_red_main_even_when_its_issue_could_not_be_filed(self):
+        """F4: the issue failing to file still records main as red, so no build starts; the
+        next pass files it."""
+        self.main_fails('tests')
+        self.gh.check_states[H2] = Checks('pending', pending=('tests',))
+        self.gh.fail.add('issue')
+        r = self.runner()
+        r.reviewer.review_pass()
+        self.assertEqual(self.of(r, BASE)[-1].outcome, 'failed')
+        r.run_pass()
+        self.assertEqual(self.t3.starts, [])
+        self.gh.fail.discard('issue')
+        r.reviewer.review_pass()
+        self.assertEqual(self.of(r, BASE)[-1].outcome, 'filed')
+        self.assertEqual(len(self.calls('issue')), 1)
+        self.main_passes()
+        r.reviewer.review_pass()
+        r.run_pass()
+        self.assertEqual([s['title'] for s in self.t3.starts], ['Queue runner build: first#9'])
+
+    def test_main_passing_after_a_stop_that_never_filed_lets_builds_start(self):
+        """F4: a red main whose issue never filed, then passing: nothing to close, and builds
+        start again."""
+        self.main_fails('tests')
+        self.gh.check_states[H2] = Checks('pending', pending=('tests',))
+        self.gh.fail.add('issue')
+        r = self.runner()
+        r.reviewer.review_pass()
+        self.main_passes()
+        r.reviewer.review_pass()
+        self.assertEqual(self.calls('close-done'), [])
+        r.run_pass()
+        self.assertEqual([s['title'] for s in self.t3.starts], ['Queue runner build: first#9'])
+
     # --- the Inbox -----------------------------------------------------------------------------
 
     def test_the_inbox_lists_the_base_stop_once_as_broken_with_no_decide_in_t3(self):
