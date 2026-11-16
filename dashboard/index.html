@@ -1204,18 +1204,22 @@ function goBtn(a, cls, label) {
 }
 // Decide in T3 (ticket 35): an ask the runner can open a thread for offers one. Asked, it says so
 // until the runner has read it, then when it starts; open, `go` is the thread and `also` the
-// needs-info issue, the other place to answer.
+// needs-info issue, the other place to answer. Stale (issue #72): the thread went cold and the
+// runner settled it, so the button asks for a fresh thread (briefed with the cold one's last
+// messages) instead of opening the cold one; a thread waiting for his answer offers it too.
 function answerAt(a) {
   const d = a.decide;
   if (!d) return goBtn(a, "go");
   if (d.state === "open") return `${goBtn(a, "go")}${a.also ? `<a class="btn" href="${esc(a.also.url)}" target="_blank" rel="noreferrer">${MARK.github}${esc(a.also.label)}${ICON.out}</a>` : ""}`;
-  const want = ((ctl.asks || {})[a.id] || {}).open;
+  const label = d.label || "Decide in T3";
+  const want = ((ctl.asks || {})[a.id] || {})[d.state === "stale" ? "fresh" : "open"];
   const unread = want && want.at && !wasRead(want.at);
   if (d.state === "asked" || unread) {
     const note = unread ? `You asked at ${clock(want.at)}. The runner hasn't read it yet.` : d.note;
-    return `<button class="btn go" disabled>${ICON.thread}Decide in T3</button><p class="holds">${esc(note || "")}</p>${goBtn(a, "")}`;
+    return `<button class="btn go" disabled>${ICON.thread}${esc(label)}</button><p class="holds">${esc(note || "")}</p>${goBtn(a, "")}`;
   }
   if (frozen()) return goBtn(a, "go");
+  if (d.state === "stale") return `<button class="btn go" data-act="fresh" data-id="${esc(a.id)}" title="The runner starts a fresh thread in T3 from the brief and the cold thread's last messages">${ICON.thread}${esc(label)}</button><p class="holds">${esc(d.note || "")}</p>${goBtn(a, "")}`;
   return `<button class="btn go" data-act="decide" data-id="${esc(a.id)}" title="The runner opens a thread in T3, briefed with this ask, to talk it through and decide in">${ICON.thread}Decide in T3</button>${goBtn(a, "")}`;
 }
 const holdsText = (a) => ((a.holds_up || []).length ? `Until then <b>${a.holds_up.map(esc).join("</b> and <b>")}</b> can't start.` : "It holds nothing else up.");
@@ -2073,6 +2077,7 @@ document.addEventListener("click", (e) => {
     case "stop": ui.pop = null; send([{ lane: d.lane, stop: d.how || null }]); return;
     case "repostop": send([{ repo: d.repo, stop: d.how || null }]); return;   // one repository (ticket 37)
     case "decide": send([{ ask: d.id, open: true }]); return;   // a T3 thread for this ask (ticket 35)
+    case "fresh": send([{ ask: d.id, fresh: true }]); return;   // a fresh one for a stale thread (#72)
     case "refresh":   // read both plans now (ticket 42); spins at once, until the runner has
       ctl = { ...ctl, usage: { refresh_at: new Date().toISOString() } };
       draw(); send([{ usage: "refresh" }]); return;

@@ -132,6 +132,52 @@ class StaleAskTest(ta.ThreadCase):
         self.assertEqual(len(self.t3.launches), 1)
 
 
+class StaleSnapshotTest(ta.ThreadCase):
+    """The real snapshot's stale ask, held to the sample's."""
+    stale = StaleAskTest.stale
+
+    def test_a_stale_ask_in_the_snapshot_has_the_samples_keys_and_moves_on_once_clicked(self):
+        from dashboard import sample
+        from queue_runner import snapshot
+        from queue_runner.state import JobLog
+        self.stale()
+
+        def the_ask():
+            jobs = JobLog(os.path.join(self.config.state_dir, 'jobs.jsonl'))
+            from queue_runner.inbox import collect
+            facts = snapshot.Facts(now=datetime.datetime.now(UTC), repos=self.config.repos,
+                                   jobs=jobs.jobs(), switch=control.read(self.config.state_dir),
+                                   inbox=collect(self.config, self.gh, jobs),
+                                   stale=snapshot.Snapshots(
+                                       self.config, calls=snapshot.Calls(lambda: None),
+                                       claude=None, sol=None, info=None, clock=None,
+                                       limits=self.limits)._stale(jobs.jobs(),
+                                                                  datetime.datetime.now(UTC)))
+            [a] = [a for a in snapshot.build(facts)['asks'] if a['id'].startswith('stop-')]
+            return a
+        a = the_ask()
+        sampled = [x['decide'] for x in sample.build('stale')['asks']
+                   if (x['decide'] or {}).get('state') == 'stale']
+        self.assertEqual(a['decide']['state'], 'stale')
+        self.assertEqual(set(a['decide']), set(sampled[0]))
+        self.assertEqual(a['decide']['label'], 'Decide in a fresh T3 thread')
+        ask_for(self.config, {'ask': f'stop-{self.stop().id}', 'fresh': True})
+        self.assertEqual(the_ask()['decide']['state'], 'asked')
+        self.r.run_pass()
+        a = the_ask()
+        self.assertEqual(a['decide']['state'], 'open')
+        self.assertEqual(a['go']['url'], self.jobs('ask')[-1].link)
+
+    def test_the_samples_pretend_runner_takes_the_click(self):
+        from dashboard import sample
+        at = '2026-11-15T13:00:00+08:00'
+        asked = apply_control({}, {'ask': 'ask-152', 'fresh': True}, at)
+        played = sample.build('stale', control=asked,
+                              now=datetime.datetime.fromisoformat(at) + datetime.timedelta(minutes=1))
+        [a] = [a for a in played['asks'] if a['id'] == 'ask-152']
+        self.assertEqual((a['decide']['state'], a['decide']['at']), ('asked', at))
+
+
 class StaleAnswerTest(unittest.TestCase):
     """The decision tests' build of #4, stopped on a question a decision left to Stefan, gone
     stale."""
