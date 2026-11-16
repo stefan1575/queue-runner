@@ -138,6 +138,7 @@ class Job:
     resume: dict | None = None     # a job picking up an earlier one: in place or fresh, and why
     effort: str | None = None      # a Claude job: the effort its run used, read back (ticket 39)
     reviewer: str | None = None    # a review: `opus-fallback` when Opus reviewed in Sol's place
+    base: str | None = None        # a conflict round: the sha of origin/<base> it merged (#91)
 
     @property
     def open(self) -> bool:
@@ -165,20 +166,21 @@ class JobLog:
                 stop: str | None = None, thread_id: str | None = None, about: str | None = None,
                 question: str | None = None, head: str | None = None,
                 cause: str | None = None, resume: dict | None = None,
-                reviewer: str | None = None) -> Job:
+                reviewer: str | None = None, base: str | None = None) -> Job:
         at = _now()
         stamp = at[:19].replace('-', '').replace(':', '').replace('T', '-')
         job = Job(id=f'{stamp}-{kind}-{repo}-{issue}-{uuid.uuid4().hex[:6]}', kind=kind,
                   repo=repo, issue=issue, branch=branch, title=title, started_at=at, sha=sha,
                   round=round, stop=stop, thread_id=thread_id, about=about, question=question,
-                  head=head, cause=cause, resume=resume, reviewer=reviewer)
+                  head=head, cause=cause, resume=resume, reviewer=reviewer,
+                  base=base)
         record = {'event': 'start', 'job': job.id, 'kind': kind, 'repo': repo, 'issue': issue,
                   'branch': branch, 'title': title, 'at': at}
         if sha:
             record.update(sha=sha, round=round)
         for k, v in (('stop', stop), ('thread_id', thread_id), ('about', about),
                      ('question', question), ('head', head), ('cause', cause),
-                     ('resume', resume), ('reviewer', reviewer)):
+                     ('resume', resume), ('reviewer', reviewer), ('base', base)):
             if v:
                 record[k] = v
         self._append(record)
@@ -207,7 +209,7 @@ class JobLog:
                           thread_id=e.get('thread_id'), about=e.get('about'),
                           question=e.get('question'), head=e.get('head'),
                           cause=e.get('cause'), resume=e.get('resume'),
-                          reviewer=e.get('reviewer'))
+                          reviewer=e.get('reviewer'), base=e.get('base'))
                 jobs[job.id] = job
                 if job.kind == 'build':
                     held[(job.repo, job.issue)] = True
