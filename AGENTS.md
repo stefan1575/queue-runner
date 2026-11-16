@@ -588,7 +588,9 @@ click, never by itself.
   orders one more round on H (`Fixer.order`), `hold` holds, `stop` files a `decision` stop.
 - **An answer on GitHub meanwhile still counts:** a stop no longer `filed` (his reply, a closed
   issue, a release) or already decided is that answer's, and the thread's later block is never
-  acted on; once the thread's answer is recorded, the stop isn't `filed`, so a later reply
+  acted on. `open` reads the stop from the job log again just before it starts the thread (issue
+  #84: the Sol lane answered PR #67's stop two seconds before its thread opened), so a stop
+  answered or released after the ask was chosen gets no thread and no `ask` job, said once; once the thread's answer is recorded, the stop isn't `filed`, so a later reply
   answers nothing. Decided once either way.
 - **The snapshot** (`ask_threads.mark`): every ask has `decide` and `also`. `decide` is null for an
   ask that can't be opened, else `{state, at, note}`: `offered`; `asked` (the runner read the

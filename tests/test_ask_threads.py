@@ -10,6 +10,7 @@ import unittest
 from dashboard.serve import Refused, apply_control
 from queue_runner import control, inbox, snapshot
 from queue_runner.fix import fix_branch
+from queue_runner.github import Comment
 from queue_runner.stops import held
 from queue_runner.t3 import Message, T3Cli, T3Error
 from tests.fakes_t3 import decision_reply
@@ -359,6 +360,43 @@ class ReleasedTest(ThreadCase):
         mark(asks, [], self.r.jobs.jobs(), {}, lambda repo: None,
              released=self.r.jobs.released_ids())
         self.assertEqual((asks[0]['decide'], asks[0]['go']), (None, {'url': 'u'}))
+
+
+class RaceTest(ThreadCase):
+    """The Sol lane runs alongside: a stop answered or released after the Claude lane chose its
+    ask and before it opened the thread gets no thread (issue #84, PR #67 on 2026-11-16)."""
+
+    def between_choosing_and_opening(self, step):
+        opening = self.r.asking.open
+
+        def step_first(*a):   # the other lane's step lands between choose and open
+            step()
+            return opening(*a)
+        self.r.asking.open = step_first
+
+    def test_a_stop_answered_on_github_between_choosing_and_opening_opens_no_thread(self):
+        self.noted()
+        self.ask_to_open()
+        self.gh.comments.setdefault(20, []).append(Comment('stefan1575', td.LATER, 'fix on'))
+        self.between_choosing_and_opening(self.r.reviewer.review_pass)
+        self.r.run_pass()
+        [stop] = self.jobs('stop')
+        self.assertEqual(stop.answer, 'replied')        # GitHub's answer counts...
+        self.assertEqual(self.jobs('ask'), [])          # ...so no thread should open
+        self.assertEqual(self.t3.launches, [])
+        self.assertFalse(any('is open for Stefan' in line for line in self.said))
+        self.assertTrue(any('answered on GitHub' in line for line in self.said))
+
+    def test_a_stop_released_between_choosing_and_opening_opens_no_thread(self):
+        self.noted()
+        self.ask_to_open()
+        self.between_choosing_and_opening(lambda: self.r.jobs.released('first', 20))
+        self.r.run_pass()
+        self.assertEqual(self.jobs('ask'), [])
+        self.assertEqual(self.t3.launches, [])
+        self.assertFalse(any('is open for Stefan' in line for line in self.said))
+        self.assertTrue(any('released' in line for line in self.said))
+        self.assertIsNone(self.r.asking.next(control.read(self.config.state_dir)))
 
 
 class SnapshotTest(ThreadCase):

@@ -85,6 +85,21 @@ def _ask_text(a: dict) -> str:
     return '\n'.join(lines)
 
 
+def _settled(stop, all_jobs, gone, log) -> str | None:
+    """Why this stop's ask opens no thread now, or None: it was answered (GitHub's issue closed
+    or a reply, or its thread), released, already has a thread, or was decided."""
+    if stop.outcome != 'filed':
+        return ('answered in its T3 thread' if stop.answer == ANSWER else 'answered on GitHub'
+                if stop.outcome == 'answered' else f'marked {stop.outcome}')
+    if stop.id in gone:
+        return 'released'
+    if opened(all_jobs, stop.id):
+        return 'given a thread already'
+    if log.decided(stop.id):
+        return 'decided already'
+    return None
+
+
 class AskThreads:
     """The Claude lane's part: which asks to open, opening one, and reading the answers."""
 
@@ -113,8 +128,7 @@ class AskThreads:
         by_id = {j.id: j for j in all_jobs}
         for ask_id, _ in sorted(switch.opened.items(), key=lambda kv: kv[1]):
             s = self._stop_of(ask_id, by_id)
-            if (s is None or s.repo not in repos or s.outcome != 'filed' or s.id in gone
-                    or opened(all_jobs, s.id) or self.jobs.decided(s.id)):
+            if s is None or s.repo not in repos or _settled(s, all_jobs, gone, self.jobs):
                 continue
             repo = repos[s.repo]
             try:
@@ -162,8 +176,19 @@ class AskThreads:
 
     def open(self, repo, stop, pr) -> str:
         """Starts the ask's thread and returns at once: 'started', or 'idle' if T3 started none
-        (the request stands, and the next pass tries again)."""
+        (the request stands, and the next pass tries again) or if the stop no longer waits on
+        Stefan when read again here (the request is dropped, as next() would have)."""
         n = pr.number
+        # The Sol lane runs alongside and may have answered the stop (or Stefan released it)
+        # since next() chose it: read the log again, so no thread opens that nothing would act
+        # on (issue #84).
+        all_jobs = self.jobs.jobs()
+        now = next((j for j in all_jobs if j.id == stop.id), None)
+        why = _settled(now, all_jobs, self.jobs.released_ids(), self.jobs) if now else 'gone'
+        if why:
+            self._once(f'{PREFIX}{stop.id}', f'ask {repo.name}#{n}: its stop was {why} before '
+                                             'its thread started, so none is started')
+            return 'idle'
         job = self.jobs.started(kind=KIND, repo=repo.name, issue=n, branch=None,
                                 title=title(repo, n), sha=stop.sha, about=stop.id,
                                 question=QUESTION)
