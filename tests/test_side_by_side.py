@@ -352,6 +352,50 @@ class LimitTest(Harness):
         self.assertEqual(recovered, {'first', 'second'})
 
 
+class DryRunAndGateTest(Harness):
+    """`--once --dry-run` lists the job each working repo would start; `--gate` says how many of
+    each kind could start at once."""
+
+    def test_the_dry_run_lists_each_repos_job(self):
+        _, out = self.run_main(['--once', '--dry-run'])
+        first, second = out.index("dry run: first's Claude job:"), out.index(
+            "dry run: second's Claude job:")
+        self.assertLess(first, out.index('issue:  #4 Red widget'))
+        self.assertLess(second, out.index('issue:  #7 Blue widget'))
+        self.assertEqual(self.t3.starts, [])
+
+    def test_a_stopped_repo_has_no_job_in_it(self):
+        self.put({'version': 1, 'written_at': WRITTEN, 'lanes': {},
+                  'repos': {'first': {'stop': 'after-job', 'at': WRITTEN}}})
+        _, out = self.run_main(['--once', '--dry-run'])
+        self.assertNotIn("first's Claude job", out)
+        self.assertIn("dry run: second's Claude job:", out)
+
+    def test_a_repo_with_nothing_says_so_and_the_other_still_lists_its_job(self):
+        self.gh.by_repo['first'] = []
+        _, out = self.run_main(['--once', '--dry-run'])
+        self.assertIn('Nothing to start in first: no unblocked ready-for-agent issue', out)
+        self.assertIn('issue:  #7 Blue widget', out)
+
+    def test_gate_says_how_many_could_start(self):
+        self.learn('build', five=30)
+        _, out = self.run_main(['--gate'], usage=used(30))
+        self.assertIn('running: no Claude job; 2 working repos with none running (first, '
+                      'second)', out)
+        self.assertIn('build: starts: build fits', out)
+        self.assertIn('; 2 could start at once', out.split('build: starts')[1].splitlines()[0])
+        self.assertIn('fix: starts: fix fits', out)   # 40% each: one beside the other doesn't
+        self.assertIn('; 1 could start at once', out.split('fix: starts')[1].splitlines()[0])
+
+    def test_gate_counts_the_jobs_running(self):
+        self.learn('build', five=30)
+        self.log.started(kind='build', repo='first', issue=4, branch='claude/red-widget-4',
+                         title='Queue runner build: first#4')
+        _, out = self.run_main(['--gate'], usage=used(30))
+        self.assertIn('running: build first#4; 1 working repo with none running (second)', out)
+        self.assertIn('; 1 could start at once', out.split('build: starts')[1].splitlines()[0])
+
+
 class OldOrderTest(Harness):
     """A control.json that still has `repo_order` is read as before for its stops, and the order
     is ignored without a word."""

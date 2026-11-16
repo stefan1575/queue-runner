@@ -80,8 +80,9 @@ def _repo_stop_lines(config, switch) -> list[str]:
 
 
 def _print_gate(gate, out, config) -> None:
-    """Each lane's switch, the knob, Claude's windows now and each job kind's verdict (reads
-    usage once)."""
+    """Each lane's switch, the knob, Claude's windows now, the Claude jobs running, and each job
+    kind's verdict beside them with how many of that kind could start at once, one per working
+    repo with none running (#50). Reads usage once."""
     from . import control
     from .gate import CLAUDE_KINDS, CostBook, decide
     from .usage import UsageError
@@ -104,14 +105,32 @@ def _print_gate(gate, out, config) -> None:
         resets = (f', resets {w.resets_at.astimezone().isoformat(timespec="minutes")}'
                   if w.resets_at else ', not started')
         print(f'  {name}: {w.used:g}% used{resets}', file=out)
+    jobs = [j for j in _jobs(config).open_jobs() if j.kind in CLAUDE_KINDS]
+    running = gate.running([(f'{j.kind} {j.repo}#{j.issue}', j.kind, None) for j in jobs])
+    free = [r.name for r in working(config) if r.name not in {j.repo for j in jobs}]
+    print(f'  running: {", ".join(running.jobs) if running else "no Claude job"}; '
+          f'{len(free)} working repo{"" if len(free) == 1 else "s"} with none running'
+          + (f' ({", ".join(free)})' if free else ''), file=out)
     for kind in CLAUDE_KINDS:
         cost = gate.book.expected(kind)
         learned = ' (the cautious default)' if cost == CostBook.default(kind) else ''
         if held:
             print(f'  {kind}: waits: the Claude lane is stopped by Stefan', file=out)
             continue
-        v = decide(usage, kind, cost, knob, gate.clock())
-        print(f'  {kind}: {"starts" if v.go else "waits"}: {v.text}{learned}', file=out)
+        v = decide(usage, kind, cost, knob, gate.clock(), running)
+        print(f'  {kind}: {"starts" if v.go else "waits"}: {v.text}{learned}; '
+              f'{_could_start(usage, kind, cost, knob, gate.clock(), running, len(free))} '
+              'could start at once', file=out)
+
+
+def _could_start(usage, kind, cost, knob, now, running, free: int) -> int:
+    """How many `kind` jobs the gate would let in one after another, beside `running`, with
+    one per repo that has none running."""
+    from .gate import decide
+    n = 0
+    while n < free and decide(usage, kind, cost, knob, now, running).go:
+        running, n = running.plus(f'{kind} {n + 1}', cost), n + 1
+    return n
 
 
 def _now_iso() -> str:
@@ -167,12 +186,31 @@ def _knob(config, args, out) -> int:
     return 0
 
 
+def _limit_ahead(config, out, log_line) -> bool:
+    """While a job a usage limit cut off may not resume yet, no Claude job starts in any repo
+    (the limit is the whole account's): said first."""
+    import datetime
+    from .config import stopped
+    now = datetime.datetime.now(datetime.timezone.utc)
+    ahead = [j for j in _jobs(config).limited_jobs() if j.repo not in stopped(config)
+             and j.resume_at and datetime.datetime.fromisoformat(j.resume_at) > now]
+    if not ahead:
+        return False
+    j = max(ahead, key=lambda j: datetime.datetime.fromisoformat(j.resume_at))
+    line = (f'dry run: {j.kind} {j.repo}#{j.issue} was cut off by a usage limit: no Claude job '
+            f'starts in any repo before {j.resume_at}. Then each repo would:')
+    log_line(line)
+    print(line, file=out)
+    return True
+
+
 def _dry_run_limited(config, out, log_line) -> bool:
-    """A job cut off by a usage limit comes first: when, and in place or fresh."""
+    """A job cut off by a usage limit comes first in its repo: when, and in place or fresh."""
     from .config import stopped
     import datetime
     from .limits import resume_choice
-    limited = [j for j in _jobs(config).limited_jobs() if j.repo not in stopped(config)]
+    limited = [j for j in _jobs(config).limited_jobs() if j.repo not in stopped(config)
+               and j.repo in {r.name for r in config.repos}]
     if not limited:
         return False
     j = limited[0]
@@ -183,8 +221,8 @@ def _dry_run_limited(config, out, log_line) -> bool:
     how = ('continue its thread in place' if then and then.in_place else
            'restart it in a fresh thread') + (f' ({then.why})' if then else '')
     line = (f'dry run: {j.kind} {j.repo}#{j.issue} was cut off by a usage limit; after '
-            f'{j.resume_at} the runner would {how} ({j.link or j.thread_id}), and starts no '
-            'other Claude job before')
+            f'{j.resume_at} the runner would {how} ({j.link or j.thread_id}), before any other '
+            f'Claude job in {j.repo}')
     log_line(line)
     print(line, file=out)
     return True
@@ -199,19 +237,24 @@ def _dry_run(config, github, git, out, log_line, t3=None, gate=None) -> int:
     for id in control.LANES:
         if switch.error is None and switch.stop(id).stopped:
             print(f'dry run: {control.stopped_text(id)}. Once resumed, it would:', file=out)
-    repos = list(config.repos)
-    config = dataclasses.replace(config, repos=repos)
+    config = dataclasses.replace(config, repos=list(config.repos))
     if switch.error is None:   # ticket 37: what a stopped repo holds back, as the lanes do
         from .config import set_stopped
         for line in _repo_stop_lines(config, switch):
             print(f'dry run: {line}', file=out)
-        set_stopped(config, control.stopped_repos(repos, switch)[0])
-    if not _dry_run_limited(config, out, log_line) and \
-            not _dry_run_ask(config, github, t3, switch, out, log_line) and \
-            not _dry_run_decision(config, github, t3, out, log_line) and \
-            not _dry_run_live(config, github, git, t3, out, log_line) and \
-            not _dry_run_fix(config, github, git, out, log_line):
-        _dry_run_build(config, github, out, log_line)
+        set_stopped(config, control.stopped_repos(config.repos, switch)[0])
+    _limit_ahead(config, out, log_line)
+    for repo in working(config):   # each working repo's own job, side by side (#50)
+        one = dataclasses.replace(config, repos=[repo])
+        print(f'dry run: {repo.name}\'s Claude job:', file=out)
+        if not _dry_run_limited(one, out, log_line) and \
+                not _dry_run_ask(one, github, t3, switch, out, log_line) and \
+                not _dry_run_decision(one, github, t3, out, log_line) and \
+                not _dry_run_live(one, github, git, t3, out, log_line) and \
+                not _dry_run_fix(one, github, git, out, log_line):
+            _dry_run_build(one, github, out, log_line)
+    if not working(config):
+        print('dry run: no repo is working: Stefan stopped them all.', file=out)
     if gate is not None:
         _print_gate(gate, out, config)
     _dry_run_stops(config, github, out)
@@ -403,9 +446,10 @@ def _dry_run_build(config, github, out, log_line) -> None:
         print(brief, file=out)
         print('-' * 72, file=out)
         return
-    log_line('dry run: nothing to start')
-    print('Nothing to start: no repo has an unblocked ready-for-agent issue that isn\'t already '
-          'being built or held.', file=out)
+    names = ', '.join(r.name for r in working(config))
+    log_line(f'dry run: nothing to start in {names}')
+    print(f'Nothing to start in {names}: no unblocked ready-for-agent issue that isn\'t '
+          'already being built or held.', file=out)
 
 
 def _dry_run_ticket(repo, out, log_line) -> None:
