@@ -123,7 +123,8 @@ def _is_time(stamp) -> bool:
 def apply_control(control: object, body: object, now: str, asks: set | None = None) -> dict:
     """The control file after one request: `{"lane", "stop"}`, `{"repo", "stop"}` (ticket 37),
     or an ask's `{"ask", "read"}` and `{"ask", "snooze_until"}` (ticket 36) and
-    `{"ask", "open": true}` (ticket 35: decide that ask in a T3 thread), kept under `asks.<id>`
+    `{"ask", "open": true}` (ticket 35: decide that ask in a T3 thread) and `{"ask", "fresh":
+    true}` (issue #72: a fresh thread in place of a stale one), kept under `asks.<id>`
     beside that object's other keys, or `{"usage": "refresh"}` (ticket 42: read both plans'
     usage now), kept as `usage.refresh_at`. `{"repo_order"}` is refused: the page can't reorder
     the repos (#61), and the runner reads no order (#50), so one already in the file is dropped.
@@ -170,13 +171,21 @@ def apply_control(control: object, body: object, now: str, asks: set | None = No
         record = marks.setdefault(ask, {})
         if not isinstance(record.get("open"), dict):   # asked again: the first time stands
             record["open"] = {"at": now}
+    elif keys == {"ask", "fresh"}:   # issue #72: a fresh thread in place of a stale one
+        ask = body["ask"]
+        if not isinstance(ask, str) or not ASK.match(ask):
+            raise Refused("ask must be an ask's id")
+        if body["fresh"] is not True:
+            raise Refused("fresh must be true")
+        marks.setdefault(ask, {})["fresh"] = {"at": now}   # the latest click stands
     elif keys == {"usage"}:   # ticket 42: Refresh on the Usage card
         if body["usage"] != "refresh":
             raise Refused('usage must be "refresh"')
         refresh = now
     else:
         raise Refused('send {"lane", "stop"}, {"repo", "stop"}, {"ask", "read"}, '
-                      '{"ask", "snooze_until"}, {"ask", "open": true} or {"usage": "refresh"}')
+                      '{"ask", "snooze_until"}, {"ask", "open": true}, {"ask", "fresh": true} '
+                      'or {"usage": "refresh"}')
     if asks is not None:   # an ask that's gone takes its entry with it
         marks = {k: v for k, v in marks.items() if k in asks}
     new = {"version": 1, "written_at": now, "lanes": lanes, "repos": repos, "asks": marks}

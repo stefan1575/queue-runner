@@ -28,6 +28,8 @@ makes the file unreadable, as a lane's does.
 
 `asks.<id>.open` (ticket 35, `{"at"}`) asks the runner to start a T3 thread to decide that ask in
 (`ask_threads.py`), read as `Switch.opened`; one the page couldn't have written is ignored.
+`asks.<id>.fresh` (issue #72, `{"at"}`, the latest click standing) asks for a fresh thread in place
+of a stale one, read as `Switch.fresh`, the same way.
 
 `usage.refresh_at` (ticket 42, an ISO time) is the page's Refresh on the Usage card: the
 snapshot's publisher reads both plans' usage on its next tick, whatever `READ_EVERY` says, once
@@ -71,6 +73,7 @@ class Switch:
     error: str | None = None
     repos: dict = field(default_factory=dict)   # repo name: Stop, as written (ticket 37)
     opened: dict = field(default_factory=dict)  # ask id: when Stefan asked to open it (ticket 35)
+    fresh: dict = field(default_factory=dict)   # ask id: when he asked for a fresh thread (#72)
     asks: dict = field(default_factory=dict)    # ask id: its entry, a dict (ticket 36)
     refresh_at: datetime.datetime | None = None  # Refresh on the Usage card (ticket 42)
 
@@ -217,7 +220,7 @@ def read(state_dir: str) -> Switch:
     return Switch(lanes, written if isinstance(written, str) else None,
                   repos=repos,
                   asks={k: v for k, v in marks.items() if isinstance(v, dict)},
-                  opened=_opened(raw), refresh_at=_when(_usage(raw).get('refresh_at')))
+                  opened=_opened(raw), fresh=_opened(raw, 'fresh'), refresh_at=_when(_usage(raw).get('refresh_at')))
 
 
 def _usage(raw: dict) -> dict:
@@ -226,13 +229,14 @@ def _usage(raw: dict) -> dict:
     return usage if isinstance(usage, dict) and _when(usage.get('refresh_at')) else {}
 
 
-def _opened(raw: dict) -> dict:
-    """Each ask Stefan asked to open in a T3 thread (`asks.<id>.open.at`), and when."""
+def _opened(raw: dict, key: str = 'open') -> dict:
+    """Each ask Stefan asked to open in a T3 thread (`asks.<id>.open.at`), and when; with
+    `key` 'fresh', each he asked to open afresh (issue #72)."""
     asks = raw.get('asks')
     found = {}
     for id, record in (asks.items() if isinstance(asks, dict) else ()):
-        at = _when(record.get('open', {}).get('at')) if isinstance(record, dict) and isinstance(
-            record.get('open'), dict) else None
+        at = _when(record.get(key, {}).get('at')) if isinstance(record, dict) and isinstance(
+            record.get(key), dict) else None
         if at is not None:
             found[id] = at
     return found

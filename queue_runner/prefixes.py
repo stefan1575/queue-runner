@@ -89,6 +89,8 @@ def waiting_on_stefan(all_jobs, released) -> tuple[dict, dict]:
             if j.outcome == 'waiting' and j.id not in released and j.id not in newest_ask:
                 now[j.thread_id] = (j.repo, ANSWER)
                 ever[j.thread_id] = j.repo
+            elif j.outcome == 'waiting' and j.id not in released:
+                ever[j.thread_id] = j.repo   # a fresh thread to answer in took its place (#72)
             elif j.thread_id not in going:
                 ever[j.thread_id] = j.repo
     return now, ever

@@ -322,13 +322,13 @@ def _dry_run_ask(config, github, t3, switch, out, log_line) -> bool:
     found = asking.next(switch)
     if found is None:
         return False
-    repo, stop, pr = found
-    log_line(f'dry run: would open an ask thread on {repo.name}#{pr.number}')
-    print(f'Would open a T3 thread for Stefan to decide {repo.name}#{pr.number} in (dry run: '
+    repo, n = found.repo, found.number
+    log_line(f'dry run: would open an ask thread on {repo.name}#{n}')
+    print(f'Would open a T3 thread for Stefan to decide {repo.name}#{n} in (dry run: '
           'nothing started)', file=out)
     print('  brief:', file=out)
     print('-' * 72, file=out)
-    print(asking.brief(repo, stop, pr), file=out)
+    print(asking.brief_for(found), file=out)
     print('-' * 72, file=out)
     return True
 
@@ -560,7 +560,7 @@ def _utc_now():
     return datetime.datetime.now(datetime.timezone.utc)
 
 
-def _snapshot(config, gate, sol_usage, clock, out, github, git) -> int:
+def _snapshot(config, gate, sol_usage, clock, out, github, git, limits=None) -> int:
     """`--snapshot`: one snapshot from the state now, printed. It reads Claude's usage once,
     ChatGPT's through codex app-server (ticket 42), and GitHub once for the Inbox and the work
     as the Sol lane would (ticket 32; git only read, nothing fetched), takes no lock, and starts, posts, records and
@@ -582,8 +582,9 @@ def _snapshot(config, gate, sol_usage, clock, out, github, git) -> int:
         started = datetime.datetime.fromtimestamp(os.path.getmtime(_pid_file(config)),
                                                   datetime.timezone.utc)
     gate.reader.on_call = _heard(calls)
+    from .limits import T3Store
     snaps = Snapshots(config, calls=calls, clock=clock, info=RunnerInfo(pid, started, _commit()),
-                      readers=readers, claude=gate.reader,
+                      readers=readers, claude=gate.reader, limits=limits or T3Store(),
                       sol=Watch(sol_usage, calls, 'sol_usage', clock, timed=True))
     print(json.dumps(snaps.build(fresh=True), indent=1, ensure_ascii=False), file=out)
     return 0
@@ -748,7 +749,7 @@ def main(argv=None, github=None, out=None, t3=None, git=None, sleep=None,
         from .git import GitCli
         git = GitCli()
     if args.snapshot:
-        return _snapshot(config, gate, sol_usage, snap_clock, out, github, git)
+        return _snapshot(config, gate, sol_usage, snap_clock, out, github, git, limits)
 
     if args.inbox:   # read only: posts, starts and records nothing
         from .inbox import report
