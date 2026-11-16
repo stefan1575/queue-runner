@@ -56,8 +56,12 @@ path = "{self.dir}"
 
     def run_main(self, args, t3=None, sleep=None, **kw):
         out = io.StringIO()
-        gh = FakeGitHubWithPulls(issues=[issue(4, 'Red widget')],
-                                 pulls_by_branch={'claude/red-widget-4': PR})
+
+        class GitHub(FakeGitHubWithPulls):
+            def pull(self, repo, number):   # the stop's PR, which the Inbox reads
+                from tests.fakes import full_pr
+                return full_pr(number, 'claude/red-widget-4', 'b' * 40, title='Red widget')
+        gh = GitHub(issues=[issue(4, 'Red widget')], pulls_by_branch={'claude/red-widget-4': PR})
         code = main(args + ['--config', self.config], github=gh, out=out,
                     t3=t3 or FakeT3([(0, 'completed')]), git=FakeGit(),
                     sleep=sleep or (lambda s: None), sol=FakeSol(), toaster=FakeToaster(),

@@ -28,8 +28,12 @@ def read_link(path: Path) -> dict:
 
 class MakeShortcutTest(unittest.TestCase):
     def setUp(self):
-        self.dir = Path(tempfile.mkdtemp(prefix="qr-shortcut-"))
-        self.startup = Path(tempfile.mkdtemp(prefix="qr-startup-"))
+        _dir = tempfile.TemporaryDirectory(prefix="qr-shortcut-")
+        self.addCleanup(_dir.cleanup)
+        self.dir = Path(_dir.name)
+        _startup = tempfile.TemporaryDirectory(prefix="qr-startup-")
+        self.addCleanup(_startup.cleanup)
+        self.startup = Path(_startup.name)
         self.pythonw = self.dir / "pythonw.exe"
         self.pythonw.write_bytes(b"")   # a shortcut's target must exist for WScript to keep its path as given
 

@@ -164,6 +164,21 @@ class T3StoreTest(unittest.TestCase):
     def test_a_claude_threads_last_call_from_its_transcript(self):
         self.assertEqual(self.store.last_call(THREAD), limits.LastCall(None, 108_633))
 
+    def test_the_newest_call_by_its_own_time_across_the_sessions_transcripts(self):
+        # The same session's transcript in another project folder, touched last, holding an
+        # older call: the newer call is the thread's last (review 1's F7's class).
+        newer = os.path.join(FIXTURES, 'claude', 'transcript-requests.jsonl')
+        moved = os.path.join(self.dir, 'projects', 'C--Users-Anon--t3-worktrees-y')
+        os.makedirs(moved)
+        here = os.path.join(self.dir, 'projects', 'C--Users-Anon--t3-worktrees-x',
+                            '79889bce-919b-48ed-ac44-9136d2e24268.jsonl')
+        shutil.copy(newer, here)
+        old = os.path.join(moved, '79889bce-919b-48ed-ac44-9136d2e24268.jsonl')
+        shutil.copy(os.path.join(FIXTURES, 'claude', 'transcript-limit-stop.jsonl'), old)
+        os.utime(here, (1000, 1000))
+        os.utime(old, (2000, 2000))
+        self.assertEqual(self.store.last_call(THREAD), limits.last_call(newer))
+
     def test_an_unreadable_database_says_nothing(self):
         store = limits.T3Store(os.path.join(self.dir, 'none.sqlite'), self.dir)
         self.assertEqual(store.limit_reset(THREAD, RUN), (False, None))

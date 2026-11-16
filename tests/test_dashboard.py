@@ -106,7 +106,9 @@ class ApplyControlTest(unittest.TestCase):
 
 class AppTest(unittest.TestCase):
     def setUp(self):
-        self.dir = Path(tempfile.mkdtemp(prefix="qr-dashboard-test-"))
+        _dir = tempfile.TemporaryDirectory(prefix="qr-dashboard-test-")
+        self.addCleanup(_dir.cleanup)
+        self.dir = Path(_dir.name)
         self.app = App(self.dir, clock=lambda: NOW)
 
     def test_no_snapshot_yet_says_where_it_looked_and_how_to_start_the_runner(self):
@@ -168,11 +170,17 @@ class AppTest(unittest.TestCase):
             self.app.write_control({"lane": "claude", "stop": "sideways"})
         self.assertFalse((self.dir / "control.json").exists())
 
-    def test_an_unreadable_control_file_reads_as_nothing_asked(self):
+    def test_an_unreadable_control_file_reads_as_both_lanes_stopped_as_the_runner_holds_them(self):
+        # The runner starts nothing in either lane while it can't read the file (review 1's F5):
+        # the page says the same, and a write lets go only of what it names.
         (self.dir / "control.json").write_text("not json", encoding="utf-8")
-        self.assertEqual(self.app.control(), {"version": 1, "lanes": {}, "repo_order": []})
-        self.app.write_control({"lane": "sol", "stop": "now"})
-        self.assertEqual(self.app.control()["lanes"], {"sol": {"stop": "now", "at": NOW}})
+        stopped = {"stop": "after-job", "at": NOW}
+        self.assertEqual(self.app.control(), {"version": 1, "written_at": None, "repo_order": [],
+                                              "lanes": {"claude": stopped, "sol": stopped},
+                                              "repos": {}, "asks": {}})
+        self.app.write_control({"lane": "sol", "stop": None})
+        self.assertEqual(self.app.control()["lanes"], {"claude": stopped,
+                                                       "sol": {"stop": None, "at": NOW}})
 
 
 class SampleTest(unittest.TestCase):
@@ -330,8 +338,12 @@ class SampleTest(unittest.TestCase):
 
 class HttpTest(unittest.TestCase):
     def setUp(self):
-        self.dir = Path(tempfile.mkdtemp(prefix="qr-dashboard-test-"))
-        self.real_dir = Path(tempfile.mkdtemp(prefix="qr-dashboard-real-"))
+        _dir = tempfile.TemporaryDirectory(prefix="qr-dashboard-test-")
+        self.addCleanup(_dir.cleanup)
+        self.dir = Path(_dir.name)
+        _real_dir = tempfile.TemporaryDirectory(prefix="qr-dashboard-real-")
+        self.addCleanup(_real_dir.cleanup)
+        self.real_dir = Path(_real_dir.name)
         self.app = App(self.dir, sample=True, clock=lambda: NOW)
         self.real = App(self.real_dir, clock=lambda: NOW)
         self.server = serve(self.real, self.app, 0)
@@ -438,7 +450,9 @@ class StartTest(unittest.TestCase):
     """`python3 -m dashboard` as it's started at logon: one process, both addresses, one per port."""
 
     def setUp(self):
-        self.dir = Path(tempfile.mkdtemp(prefix="qr-dashboard-start-"))
+        _dir = tempfile.TemporaryDirectory(prefix="qr-dashboard-start-")
+        self.addCleanup(_dir.cleanup)
+        self.dir = Path(_dir.name)
         with socket.socket() as s:
             s.bind(("127.0.0.1", 0))
             self.port = s.getsockname()[1]
@@ -446,7 +460,9 @@ class StartTest(unittest.TestCase):
     def start(self):
         p = subprocess.Popen([sys.executable, "-m", "dashboard", "--port", str(self.port), "--state-dir", str(self.dir)],
                              cwd=REPO, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-                             env={**os.environ, "PYTHONUNBUFFERED": "1"})
+                             # Killed, it can't remove its sample folder: make it in ours.
+                             env={**os.environ, "PYTHONUNBUFFERED": "1", "TEMP": str(self.dir),
+                                  "TMP": str(self.dir)})
         self.addCleanup(lambda: (p.kill(), p.wait(), p.stdout.close()))
         return p
 
