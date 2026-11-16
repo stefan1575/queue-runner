@@ -434,8 +434,9 @@ status, the branch's commits, the PR found by branch, the worktree path, `effort
 the run used, read back: The effort, below; on every Claude job's end, decisions and live runs
 too) and any error.
 Outcomes: `done` (exit 0, a PR found), `done-no-pr`, `failed` (exit 1), `waiting` (exit 2),
-`continued` (it was waiting, and a decision's answer went to its thread as a later job),
-`usage-limit` (exit 1 on a Claude usage limit: Usage limits, above),
+`continued` (it was waiting, and a decision's answer, or Stefan's reply on GitHub, went to
+its thread as a later job), `closed` (it waited for Stefan, and its issue or PR was closed or
+merged on GitHub: Threads that need Stefan, below), `usage-limit` (exit 1 on a Claude usage limit: Usage limits, above),
 `branch-exists` (a local `claude/*` branch left over, so T3 couldn't make it again) and
 `not-started` (T3 failed before any thread existed). Every build that got that far holds its
 issue: the picker skips it until `--release`. Only `not-started` holds nothing, so the next pass
@@ -543,7 +544,8 @@ stands, so it isn't decided again until `--release`. `close` comments and closes
 the issue as not planned; `fix`, `carry-on` and `hold` are read from the decision's record. A
 stop goes where Stefan answers it: on a PR, the `needs-info` issue (kind `decision`, or
 `approach-note`); on a build, a comment on its issue, which the build holds until `--release`; on
-a waiting thread, a comment that links the thread, and a toast that opens it. **Once each:** a
+a waiting thread, a comment that links the thread and says a reply there is sent to it
+(Threads that need Stefan, A waiting job answered on GitHub), and a toast that opens it. **Once each:** a
 case is decided once (`JobLog.decided`, a release included), and after 3 decisions on one issue's
 or PR's failed, waiting or PR-less jobs the next goes straight to Stefan with no thread.
 
@@ -565,7 +567,8 @@ click, never by itself.
 - **Opening** (`AskThreads.next`, `open`): the Claude lane, after a limited job and before any
   decision, takes the oldest request whose stop is still `filed` and not released
   (`JobLog.released_ids`: a release leaves a stop's outcome `filed`), in a repo it works, with
-  the PR open, and starts `Queue runner ask: <repo>#<n>` in the repo's T3 project with no worktree,
+  the PR open, and starts `Decide: Queue runner ask: <repo>#<n>` (the job's own `title` has no
+  prefix: Threads that need Stefan, below) in the repo's T3 project with no worktree,
   **without waiting** (`T3Cli.launch`: `t3 thread start --json` prints `{threadId, projectId,
   runId}`, read in `server.asar` 2026-11-15), then reads its link with `thread show`. Gated as a
   decision; it teaches the learned costs nothing (`measured` records only passes that made a
@@ -1371,12 +1374,23 @@ settled), and only on threads the runner started (ids from its job records):
   question's `stop`: the Inbox's "Threads waiting for your answer"), while the job is still
   `waiting` and not released. Answered in the thread and asking again, it keeps the prefix.
 - **Off, and settled,** once it no longer needs him: decided in the ask thread or on GitHub (a
-  reply, a closed issue), answered in the thread (its job ends), or `--release`d. A GitHub
-  answer to a waiting job's stop comment isn't read by the runner (the comment says to answer in
-  the thread), so only the thread or a release ends one.
-- **`Prefixes.sync`** runs in each Claude pass after the build order (so a stopped Claude lane's
-  titles are kept right too, as renaming isn't a job) and again after the ask threads' answers
-  are read. It works from the job log and the title T3 gives now (`thread list`, once per repo,
+  reply, a closed issue), answered in the thread or on GitHub, or `--release`d. A thread a later
+  job carries on (his answer sent to it) waits for that job: its end settles it, or its own
+  question to him prefixes it again.
+- **A waiting job answered on GitHub** (`waiting.py`, review 1's F1): its stop comment (on the
+  build's issue or the fix round's PR) says to answer in the thread or there. Each Claude pass,
+  after the lane's switch and in the repos the lanes work, the runner reads each such job's issue
+  or PR. **His reply** after the question was put to him (bots and the runner's own posts aside)
+  is sent to the thread, quoted, as a continued job (in place or fresh, gated as the job's kind,
+  after a limited job and an ask thread and before decisions); the job ends `continued` with
+  `reason` `github` and `answer` the newest reply's time, so a reply goes once and the next
+  question waits for words after it. **The issue closed, or the PR merged or closed,** ends the
+  job `closed` (`reason` says which). GitHub failing is said once per job and read again next
+  pass.
+- **`Prefixes.sync`** runs in each Claude pass right after settling, before the build order and
+  the lane's switch (so titles are kept right while a dead runner's job runs on, and while the
+  Claude lane is stopped, as renaming isn't a job), and again after the ask threads' and
+  GitHub's answers are read. It works from the job log and the title T3 gives now (`thread list`, once per repo,
   only for a repo with a thread to change): `titled` strips any prefix before adding one, so a
   prefix is never doubled, and a restarted runner puts right what an earlier one left (an ask
   thread opened before #71 gets its prefix). A thread still running keeps its prefix until its
@@ -1643,8 +1657,9 @@ Threads that need Stefan: `tests/test_prefixes.py` (`titled` and `plain`; throug
 `Runner` with `FakeT3.rename` changing the title: an ask thread opened "Decide:", one from before
 prefixed once by a restarted runner, its prefix off and settled when decided in the thread, on
 GitHub or released, kept while running, a failed rename said once; a build and a fix round
-stopped on a question "Answer:", off and settled once answered or released, kept when it asks
-again).
+stopped on a question "Answer:", off and settled once answered in the thread or on GitHub (a
+reply sent to the thread once, a closed issue, a merged PR) or released, kept when it asks again,
+and a quiet pass that calls T3 for nothing).
 Read and snoozed: `tests/test_read_snoozed.py` (control.json's `asks` read and kept by
 `control.py`, and the snapshot's `read` and `snoozed_until` from `snapshot.build` on the Inbox's
 fixtures); the requests, dropping gone asks and the sample's pretend runner in `test_dashboard.py`.
@@ -1711,6 +1726,8 @@ temp folder.
 - `queue_runner/t3_mcp.py`: T3's MCP endpoint called directly, for settle and rename (ticket 70).
 - `queue_runner/prefixes.py`: "Decide: " and "Answer: " on the threads that need Stefan, off
   and settled once they don't (issue #71).
+- `queue_runner/waiting.py`: a waiting thread's question answered on GitHub: his reply sent to
+  it, or the job ended once its issue or PR is closed (issue #71).
 - `queue_runner/git.py`: local git around a job (fetch, leftover branch, the branch's commits),
   a review's checkout (the PR's head, a detached worktree, diffs), a fix brief's commits and
   files, and removing a job's worktree after its PR merged.
