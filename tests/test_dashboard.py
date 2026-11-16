@@ -227,6 +227,25 @@ class AppTest(unittest.TestCase):
                                                        "sol": {"stop": None, "at": NOW}})
 
 
+class InboxNotReadTest(unittest.TestCase):
+    """Issue #92: before the runner's first Inbox read the snapshot's asks are null."""
+    PAGE = Path(__file__).resolve().parent.parent / "dashboard" / "index.html"
+
+    def test_the_sample_has_a_state_whose_inbox_is_not_read_yet(self):
+        s = sample.build("inbox-unread")
+        self.assertIsNone(s["asks"])
+        self.assertIsNone(s["answered"])
+
+    def test_every_read_of_the_snapshots_asks_on_the_page_allows_null(self):
+        import re
+        page = self.PAGE.read_text(encoding="utf-8")
+        reads = re.findall(r"\b(?:snap|s)\.(?:asks|answered)\b(.{0,12})", page)
+        self.assertTrue(reads)
+        for after in reads:
+            self.assertRegex(after, r"^\s*(\|\| \[\]|=== null)", after)
+        self.assertIn("Inbox not read yet", page)
+
+
 class SampleTest(unittest.TestCase):
     T = datetime(2026, 11, 15, 13, 0, tzinfo=timezone(timedelta(hours=8)))
 
@@ -244,11 +263,11 @@ class SampleTest(unittest.TestCase):
                 keys = {f"{i['repo']}#{i['n']}" for i in s["issues"]}
                 for i in s["issues"]:
                     self.assertLessEqual(set(i["blocked_by"]), keys, i["title"])
-                for a in s["answered"]:
+                for a in s["answered"] or []:
                     for key in ("at", "said", "next"):
                         self.assertTrue(a["answered"][key], f"{a['id']} {key}")
-                self.assertFalse({a["id"] for a in s["asks"]} & {a["id"] for a in s["answered"]})
-                for a in s["asks"] + s["answered"]:
+                self.assertFalse({a["id"] for a in s["asks"] or []} & {a["id"] for a in s["answered"] or []})
+                for a in (s["asks"] or []) + (s["answered"] or []):
                     self.assertTrue(a["go"]["url"].startswith("https://"), a["id"])
                     self.assertIn(a["go"]["where"], ("t3", "github"), a["id"])
                     times = [datetime.fromisoformat(e["at"]) for e in a["timeline"]]
@@ -340,7 +359,7 @@ class SampleTest(unittest.TestCase):
     def test_every_ask_starts_unread_and_not_snoozed(self):
         for name in sample.STATES:
             s = sample.build(name, base=self.T, now=self.T)
-            for a in s["asks"] + s["answered"]:
+            for a in (s["asks"] or []) + (s["answered"] or []):
                 with self.subTest(state=name, ask=a["id"]):
                     self.assertEqual((a["read"], a["snoozed_until"]), (False, None))
 

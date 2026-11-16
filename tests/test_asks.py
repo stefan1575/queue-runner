@@ -497,7 +497,7 @@ class ContractTest(KindsCase):
         self.assertEqual({a['kind'] for a in snap['asks']},
                          {'merge', 'stuck', 'broken', 'decision'})
         self.assertEqual(len(snap['answered']), 1)
-        samples = [sample.build(name) for name in sample.STATES]
+        samples = [s for s in (sample.build(name) for name in sample.STATES) if s['asks'] is not None]
 
         def holds(real, pick, what):
             sets = [set(d) for s in samples for d in pick(s)]

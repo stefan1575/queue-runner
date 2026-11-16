@@ -1092,6 +1092,9 @@ function inboxLists() {
   const mine = scoped(snap.asks || []);
   return { all: snap.asks || [], open: mine.filter((a) => !snoozedUntil(a)), snoozed: mine.filter((a) => snoozedUntil(a)), answered: scoped(snap.answered || []) };
 }
+// Before the runner's first Inbox read the snapshot's asks are null, not empty (issue #92): it
+// hasn't looked yet, so the page doesn't say nothing waits.
+const NOT_READ = ["Inbox not read yet", "The runner reads it after its reviewing lane's first pass. What waits on you shows then."];
 function inboxOrder() { const l = inboxLists(); return [...l.open, ...l.snoozed, ...l.answered]; }
 function pickAsk() {
   const every = inboxOrder(), { open } = inboxLists();
@@ -1137,7 +1140,7 @@ function inbox() {
   };
   const oldest = open.reduce((m, a) => (!m || ms(a.since) < ms(m.since) ? a : m), null);
   const unread = open.filter((a) => !isRead(a)).length;
-  const count = open.length ? `<b>${open.length} waiting on you</b><span>${unread ? `${unread} unread, ` : ""}oldest ${esc(ago(oldest.since))}</span>` : `<b>Nothing waiting</b>`;
+  const count = open.length ? `<b>${open.length} waiting on you</b><span>${unread ? `${unread} unread, ` : ""}oldest ${esc(ago(oldest.since))}</span>` : snap.asks === null ? `<b>Not read yet</b>` : `<b>Nothing waiting</b>`;
   // A group at the foot of the list that folds to one line, remembered in this browser.
   const group = (id, name, xs, hint, mark = "") => {
     if (!xs.length) return "";
@@ -1157,7 +1160,8 @@ function inbox() {
   let right;
   if (cur) right = letter(cur);
   else {
-    const calm = blind ? ["Nothing seen that waits on you", "GitHub can't be read, so something may be missing."]
+    const calm = snap.asks === null ? NOT_READ
+      : blind ? ["Nothing seen that waits on you", "GitHub can't be read, so something may be missing."]
       : ui.repo && all.length ? [`Nothing in ${esc(ui.repo)} waits on you`, `${plural(all.length, "thing waits", "things wait")} in another repository. <button class="link" data-act="repo" data-repo="">Show all repositories</button>`]
       : snoozed.length ? ["Nothing else waits on you", `${plural(snoozed.length, "ask is", "asks are")} snoozed.`]
       : ["Nothing waits on you", "The runner carries on by itself."];
@@ -1259,7 +1263,8 @@ function plate() {
   if (!open.length) {
     const blind = (snap.sources || []).find((s) => s.id === "github" && !s.ok);
     const elsewhere = ui.repo ? all.filter((a) => a.repo !== ui.repo && !snoozedUntil(a)).length : 0;
-    const calm = blind ? ["Nothing seen that waits on you", "GitHub can't be read, so something may be missing."]
+    const calm = snap.asks === null ? NOT_READ
+      : blind ? ["Nothing seen that waits on you", "GitHub can't be read, so something may be missing."]
       : elsewhere ? [`Nothing in ${esc(ui.repo)} waits on you`, `${plural(elsewhere, "thing waits", "things wait")} in another repository.`]
       : ["Nothing waits on you", "The runner carries on by itself."];
     return `<section class="card ov-inbox" aria-label="Inbox">${head}
@@ -1596,7 +1601,8 @@ function queueB(q) {
   if (!open.length) {
     const blind = (snap.sources || []).find((s) => s.id === "github" && !s.ok);
     const elsewhere = ui.repo ? all.filter((a) => a.repo !== ui.repo && !snoozedUntil(a)).length : 0;
-    const calm = blind ? ["Nothing seen that waits on you", "GitHub can't be read, so something may be missing."]
+    const calm = snap.asks === null ? NOT_READ
+      : blind ? ["Nothing seen that waits on you", "GitHub can't be read, so something may be missing."]
       : elsewhere ? [`Nothing in ${esc(ui.repo)} waits on you`, `${plural(elsewhere, "thing waits", "things wait")} in another repository.`]
       : ["Nothing waits on you", "The runner carries on by itself."];
     you = `<section class="card qb-you" aria-label="Waiting on you"><div class="ov-calm">${ICON.done}<p><b>${calm[0]}</b><span>${calm[1]}${aside ? ` ${aside}.` : ""}</span></p></div></section>`;

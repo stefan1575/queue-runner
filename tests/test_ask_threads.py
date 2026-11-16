@@ -508,7 +508,7 @@ class SnapshotTest(ThreadCase):
 
     def test_decide_and_also_have_the_samples_keys(self):
         from dashboard import sample
-        samples = [sample.build(n) for n in sample.STATES]
+        samples = [s for s in (sample.build(n) for n in sample.STATES) if s['asks'] is not None]
         decides = [a['decide'] for s in samples for a in s['asks'] if a['decide']]
         alsos = [a['also'] for s in samples for a in s['asks'] if a['also']]
         self.assertEqual({d['state'] for d in decides}, {'open', 'offered'})
