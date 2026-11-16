@@ -461,9 +461,10 @@ class Watched:
 
 
 class Watch:
-    """A usage reader whose reads are kept: `read()` (the gate's reader for Claude), `reading()`
-    for the snapshot, and `due(seconds)` once the last read (good or not) is that old. With
-    `timed`, `read_fn` returns (when it was read, the value), as Codex's rollouts say."""
+    """A usage reader whose reads are kept (ChatGPT's): `read()`, `reading()` for the snapshot,
+    and `due(seconds)` once the last read (good or not) is that old. With `timed`, `read_fn`
+    returns (when it was read, the value). Claude's is `usage.CachedUsage`, which has the same
+    three and a 5-minute budget (issue 66)."""
 
     def __init__(self, read_fn, calls: Calls, id: str, clock, timed: bool = False):
         self.read_fn, self.calls, self.id, self.clock, self.timed = read_fn, calls, id, clock, timed
