@@ -502,8 +502,9 @@ and `head` (the PR's head afterwards, read from GitHub), with `commits` the ones
 `head-unknown` (exit 0, but GitHub couldn't say afterwards; the Sol lane still reads the real
 head), `failed`, `usage-limit`,
 `waiting`, `branch-exists` and `not-started`, as for builds. A conflict round's records have
-`cause` `conflict` and no `round`; its `no-push` is a `conflict` stop, not a `no-push` one (H was
-never reviewed). A continued or restarted job keeps its `cause`.
+`cause` `conflict`, `base` (the sha of `origin/<base>` it merged, read after the fetch; issue
+#91) and no `round`; its `no-push` is a `conflict` stop, not a `no-push` one (H was never
+reviewed). A continued or restarted job keeps its `cause` and `base`.
 
 ## Conflict rounds
 
@@ -524,12 +525,22 @@ head. A blocking review on H gets its ordinary fix round first.
   first. One that conflicts again holds back only higher numbers, so two never wait for each
   other. So each resolves against the base the one before landed on. In a repo Stefan merges,
   "merged" is his merge: the next waits for it.
-- **Still a stop** (`stops.conflict_stop`, filed by the Sol pass as kind `conflict`): the newest
-  round on H ended `no-push`, `head-unknown` or `branch-exists` and H still conflicts (an
-  ordinary fix round's `no-push` is its own `no-push` stop); or the PR had
-  conflict rounds on two earlier heads and conflicts again (a third conflict). `failed` and
-  `waiting` rounds get a decision first, `usage-limit` a restart, as for any fix round.
-  `--release NAME#PR` lets the PR have conflict rounds again, counting afresh. A decision that
+- **Still a stop** (`stops.conflict_stop`, filed by the Sol pass as kind `conflict`), only when
+  another conflict round wouldn't help (issue #91, Stefan 2026-11-16: PRs #67 and #74 were
+  stopped on a third conflict that only meant `main` had moved, with nothing to decide):
+  - the newest round on H ended `no-push`, `head-unknown` or `branch-exists` and H still
+    conflicts (an ordinary fix round's `no-push` is its own `no-push` stop);
+  - **the base hasn't moved:** the PR conflicts again with the same base commit its last
+    conflict round on an earlier head merged (that round's `base` equals GitHub's base sha for
+    the PR now, `PullRequest.base_sha`), so its push didn't resolve it. A record without
+    `base` (before #91), or GitHub not giving the base sha, counts as a different base;
+  - **the ceiling:** after `MAX_CONFLICT_ROUNDS` (5) conflict rounds since the last release, the
+    PR stops anyway ("5 conflict rounds, main keeps moving under it"), so a PR that never lands
+    doesn't burn usage.
+
+  A conflict after `main` moved, below the ceiling, gets another conflict round and no stop.
+  `failed` and `waiting` rounds get a decision first, `usage-limit` a restart, as for any fix
+  round. `--release NAME#PR` lets the PR have conflict rounds again, counting afresh. A decision that
   orders a fix on H after the stop (Stefan's reply) gets one more conflict round on H, its text
   first in the brief under `## Direction first`. A conflict stop
   filed on H before a round on H (before this ticket every conflict was a stop) doesn't count
@@ -853,8 +864,8 @@ is writing to), the runner looks for stops on its head H, and
 files each kind once per H (`JobLog.stopped`). The kinds: `review` (the runner's review of H
 stopped: a repeated class, a reopened finding, a kept decline; the reason is decide()'s text from
 the run folder's `decision.json`), `no-push` (a fix round on H ended without pushing),
-`failed-check` and `conflict` (only once a conflict round couldn't resolve it, or a third
-conflict: Conflict rounds, above). A review that stops files right after it posts. Two kinds are
+`failed-check` and `conflict` (only once a conflict round couldn't resolve it, the PR conflicts
+again with the base its last round merged, or after 5 conflict rounds: Conflict rounds, above). A review that stops files right after it posts. Two kinds are
 filed by decisions in the Claude lane: `approach-note` (review 3 or later still blocking, filed
 with the Approach note; the Sol pass files it again from the decision's record if filing failed)
 and `decision` (a decision thread's question on a PR). Live runs file `live` and `live-todo` on a

@@ -8,7 +8,8 @@ round or merge) until Stefan answers: he closes the issue, or replies on the PR 
 
 The kinds (KINDS): a review that stopped (a new Important finding in an earlier class, a fixed
 finding reopening, a decline Sol kept), a failed check on H, a conflict on H that a conflict round
-couldn't resolve or that came back a third time (a conflict first gets a conflict round,
+couldn't resolve, that came back on the base its last round merged, or that came back after 5
+rounds (issue #91; a conflict first gets a conflict round,
 `fix.py`), and a fix round that ended without pushing (H was reviewed already): each found here,
 and filed once per head H. Two
 come from decisions (`decisions.py`): review 3 or later still blocking (`approach-note`, filed
