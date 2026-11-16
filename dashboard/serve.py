@@ -4,7 +4,8 @@ Standard library only. It imports nothing from the runner and calls neither T3 n
 neither can break it, and it can say truthfully that the runner has stopped writing.
 
     python3 -m dashboard    # one process, two kinds of address on one port (5289):
-                            #   http://queue.localhost:5289/  the runner's snapshot (--state-dir) and controls
+                            #   http://queue.localhost/ (through ~/Code/tools/localhost-proxy on port 80)
+                            #   or http://queue.localhost:5289/  the runner's snapshot (--state-dir) and controls
                             #   http://localhost:5289/ and http://127.0.0.1:5289/  sample data, controls in a temp folder
 
 The request's Host picks which. Its port is bound alone, so a second start exits 3.
@@ -257,8 +258,11 @@ SAMPLE_HOSTS = ("localhost", "127.0.0.1")  # sample data, for judging the page
 
 
 def addresses(port: int) -> dict[str, bool]:
-    """Each address the dashboard answers on, and whether it's sample data."""
-    return {f"{REAL_HOST}:{port}": False, **{f"{h}:{port}": True for h in SAMPLE_HOSTS}}
+    """Each address the dashboard answers on, and whether it's sample data. `queue.localhost`
+    with no port is the runner's page at http://queue.localhost/: ~/Code/tools/localhost-proxy
+    holds port 80 and passes the browser's Host on as it was sent (Stefan, 2026-11-16)."""
+    return {REAL_HOST: False, f"{REAL_HOST}:{port}": False,
+            **{f"{h}:{port}": True for h in SAMPLE_HOSTS}}
 
 
 def make_handler(real: App, sample: App, port: int):
@@ -365,7 +369,8 @@ def main(argv: list[str] | None = None) -> int:
         except OSError as e:
             print(f"A dashboard is already running on port {args.port} ({e}). Stop it first, or use --port.", flush=True)
             return 3
-        print(f"Queue runner dashboard: http://{REAL_HOST}:{args.port}/ is the runner's ({real.state_dir}); "
+        print(f"Queue runner dashboard: http://{REAL_HOST}/ (through the localhost proxy) and "
+              f"http://{REAL_HOST}:{args.port}/ are the runner's ({real.state_dir}); "
               f"http://localhost:{args.port}/ and http://127.0.0.1:{args.port}/ are sample data.", flush=True)
         try:
             server.serve_forever()
