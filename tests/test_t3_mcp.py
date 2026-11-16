@@ -21,6 +21,8 @@ class FakeServer:
         self.cli, self.posts = [], []
         self.tokens = []              # tokens issued, oldest first
         self.revoked = []
+        self.closed = []              # (path, session id) of each DELETE
+        self.refuse_close = False     # answer DELETE with 405
         self.refuse = 0
         self.stream = False           # answer tools/call as an event stream
         self.state = None             # the state the decision redirects with (None: echo it)
@@ -44,9 +46,13 @@ class FakeServer:
             return 0, 'Revoked.', ''
         return 1, '', 'unknown'
 
-    def post(self, url, body, headers):
+    def post(self, url, body, headers, method='POST'):
         path = urllib.parse.urlparse(url).path
         assert url.startswith(self.origin), url
+        if method == 'DELETE':   # a session closed (review 1's N1)
+            self.closed.append((path, headers.get('Mcp-Session-Id')))
+            return (405 if self.refuse_close else 200), {}, ''
+        assert method == 'POST', method
         text = body.decode()
         self.posts.append((path, text, dict(headers)))
         if path == '/oauth/mcp/register':
@@ -131,6 +137,33 @@ class T3McpTest(unittest.TestCase):
     def test_older_runner_sessions_are_revoked_not_others(self):
         self.mcp.settle('mcp:t1')
         self.assertEqual(self.server.revoked, ['s-old'])   # not the CLI's, not the new one
+
+    def test_each_calls_session_is_closed_after_it(self):
+        self.mcp.settle('mcp:t1')
+        self.mcp.settle('mcp:t2')
+        self.assertEqual(self.server.closed, [('/mcp', 'mcp-s1'), ('/mcp', 'mcp-s1')])
+
+    def test_a_session_is_closed_after_a_failed_tool_too_and_a_refused_close_is_ignored(self):
+        self.server.refuse_close = True
+        self.server.tool_result = {'content': [{'type': 'text', 'text': 'nope'}],
+                                   'isError': True}
+        with self.assertRaises(T3Error):
+            self.mcp.settle('mcp:t1')
+        self.server.tool_result = {'structuredContent': {'sequence': 2}, 'isError': False}
+        self.mcp.settle('mcp:t1')   # the 405 on close changed nothing
+        self.assertEqual(len(self.server.closed), 2)
+
+    def test_the_lock_is_held_only_while_signing_in(self):
+        """Review 1's N2: a slow tool call doesn't hold the other lane's settle."""
+        held, post = [], self.server.post
+
+        def watch(url, body, headers, method='POST'):
+            if url.endswith('/mcp'):
+                held.append(self.mcp._lock.locked())
+            return post(url, body, headers, method)
+        self.mcp._post = watch
+        self.mcp.settle('mcp:t1')
+        self.assertEqual(held, [False, False, False, False])   # initialize, initialized, call, close
 
     def test_the_token_is_reused(self):
         self.mcp.settle('mcp:t1')

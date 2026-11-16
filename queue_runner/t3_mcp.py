@@ -43,9 +43,10 @@ PROTOCOL = '2025-06-18'
 TIMEOUT = 30
 
 
-def http_post(url: str, body: bytes, headers: dict) -> tuple[int, dict, str]:
-    """POSTs and returns (status, headers, text), an HTTP error's too."""
-    req = urllib.request.Request(url, body, headers, method='POST')
+def http_post(url: str, body: bytes | None, headers: dict,
+              method: str = 'POST') -> tuple[int, dict, str]:
+    """POSTs (or `method`) and returns (status, headers, text), an HTTP error's too."""
+    req = urllib.request.Request(url, body, headers, method=method)
     try:
         with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
             return r.status, {k.lower(): v for k, v in r.headers.items()}, r.read().decode()
@@ -74,13 +75,14 @@ def _rpc_result(text: str, content_type: str):
 
 class T3Mcp:
     """`settle` and `rename` through T3's MCP endpoint. `run` is the `t3` CLI (for the pairing
-    code and the session list), `post` the HTTP seam, `runtime` the server-runtime.json path."""
+    code and the session list), `post` the HTTP seam (`method` for anything but a POST),
+    `runtime` the server-runtime.json path."""
 
     def __init__(self, *, run=run_t3, post=http_post, runtime=SERVER_RUNTIME):
         self._run, self._post, self._runtime = run, post, runtime
         self._token: str | None = None
         self._origin: str | None = None   # the server the token was minted on
-        self._lock = threading.Lock()     # both lanes may settle
+        self._lock = threading.Lock()     # both lanes may settle: one sign-in at a time
 
     # --- the interface ---------------------------------------------------------------------
 
@@ -93,19 +95,27 @@ class T3Mcp:
                                        'title': title})
 
     def call(self, tool: str, arguments: dict):
-        """One tool call in a fresh MCP session; its structured result. A T3Error if T3 can't
-        be reached, refuses it or the tool fails."""
+        """One tool call in a fresh MCP session, closed after it; its structured result. A
+        T3Error if T3 can't be reached, refuses it or the tool fails. The lock is held only
+        while signing in, so one lane's slow call doesn't hold up the other's (review 1's N2);
+        a lane that finds no token waits for the sign-in either way."""
+        origin = self.origin()
+        for attempt in (1, 2):
+            token = self._signed_in(origin)
+            try:
+                return self._tool(origin, token, tool, arguments)
+            except Unauthorized:
+                with self._lock:
+                    if self._token == token:   # not already replaced by the other lane
+                        self._token = None
+                if attempt == 2:
+                    raise
+
+    def _signed_in(self, origin: str) -> str:
         with self._lock:
-            origin = self.origin()
-            for attempt in (1, 2):
-                if self._token is None or self._origin != origin:
-                    self._token, self._origin = self._mint(origin), origin
-                try:
-                    return self._tool(origin, tool, arguments)
-                except Unauthorized:
-                    self._token = None
-                    if attempt == 2:
-                        raise
+            if self._token is None or self._origin != origin:
+                self._token, self._origin = self._mint(origin), origin
+            return self._token
 
     # --- the server ------------------------------------------------------------------------
 
@@ -116,9 +126,11 @@ class T3Mcp:
         except (OSError, ValueError, KeyError, TypeError, AttributeError) as e:
             raise T3Error(f"T3's server isn't running ({self._runtime}: {type(e).__name__})")
 
-    def _send(self, url: str, body: bytes, headers: dict) -> tuple[int, dict, str]:
+    def _send(self, url: str, body: bytes | None, headers: dict,
+              method: str = 'POST') -> tuple[int, dict, str]:
         try:
-            return self._post(url, body, headers)
+            return (self._post(url, body, headers) if method == 'POST'
+                    else self._post(url, body, headers, method=method))
         except (OSError, ValueError) as e:   # refused, timed out, a bad URL
             raise T3Error(f"T3's server can't be reached at {url}: {type(e).__name__}: {e}")
 
@@ -196,8 +208,9 @@ class T3Mcp:
 
     # --- one tool call ---------------------------------------------------------------------
 
-    def _rpc(self, origin: str, session: str | None, method: str, params=None, id_=None):
-        headers = {'Authorization': f'Bearer {self._token}', 'Content-Type': 'application/json',
+    def _rpc(self, origin: str, token: str, session: str | None, method: str, params=None,
+             id_=None):
+        headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json',
                    'Accept': 'application/json, text/event-stream',
                    'MCP-Protocol-Version': PROTOCOL}
         if session:
@@ -214,14 +227,17 @@ class T3Mcp:
             raise T3Error(f"T3's MCP endpoint answered {status} to {method}: {text[:300]}")
         return got, (_rpc_result(text, got.get('content-type', '')) if id_ is not None else None)
 
-    def _tool(self, origin: str, tool: str, arguments: dict):
-        got, _ = self._rpc(origin, None, 'initialize', {
+    def _tool(self, origin: str, token: str, tool: str, arguments: dict):
+        got, _ = self._rpc(origin, token, None, 'initialize', {
             'protocolVersion': PROTOCOL, 'capabilities': {},
             'clientInfo': {'name': 'queue-runner', 'version': '1'}}, 1)
         session = got.get('mcp-session-id')
-        self._rpc(origin, session, 'notifications/initialized')
-        _, result = self._rpc(origin, session, 'tools/call',
-                              {'name': tool, 'arguments': arguments}, 2)
+        try:
+            self._rpc(origin, token, session, 'notifications/initialized')
+            _, result = self._rpc(origin, token, session, 'tools/call',
+                                  {'name': tool, 'arguments': arguments}, 2)
+        finally:
+            self._close(origin, token, session)
         if not isinstance(result, dict):
             raise T3Error(f'T3 sent no result for {tool}')
         if result.get('isError'):
@@ -234,3 +250,16 @@ class T3Mcp:
                 pass
             raise T3Error(f'{tool} failed: {text[:300]}')
         return result.get('structuredContent')
+
+    def _close(self, origin: str, token: str, session: str | None) -> None:
+        """Ends the MCP session (an HTTP DELETE with its id, as the MCP spec has a client do),
+        so none is left open per call (review 1's N1). A server that refuses it (405) or
+        fails leaves it to expire: tidying only."""
+        if not session:
+            return
+        try:
+            self._send(f'{origin}/mcp', None, {'Authorization': f'Bearer {token}',
+                                               'Mcp-Session-Id': session,
+                                               'MCP-Protocol-Version': PROTOCOL}, 'DELETE')
+        except Exception:   # noqa: BLE001 - tidying only
+            pass
