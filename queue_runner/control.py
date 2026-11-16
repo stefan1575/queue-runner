@@ -29,6 +29,11 @@ makes the file unreadable, as a lane's does.
 `asks.<id>.open` (ticket 35, `{"at"}`) asks the runner to start a T3 thread to decide that ask in
 (`ask_threads.py`), read as `Switch.opened`; one the page couldn't have written is ignored.
 
+`usage.refresh_at` (ticket 42, an ISO time) is the page's Refresh on the Usage card: the
+snapshot's publisher reads both plans' usage on its next tick, whatever `READ_EVERY` says, once
+a minute at most (`snapshot.Snapshots`), as `Switch.refresh_at`. An entry the page couldn't have
+written is ignored.
+
 **The older code's pause** was `gate.json`'s `paused`. With `paused: true` there and no entry for
 the Claude lane here, the Claude lane is stopped (since gate.json was written); an entry, either
 way, wins. `ask` carries such a pause over into this file and drops it from gate.json, which then
@@ -68,6 +73,7 @@ class Switch:
     repos: dict = field(default_factory=dict)   # repo name: Stop, as written (ticket 37)
     opened: dict = field(default_factory=dict)  # ask id: when Stefan asked to open it (ticket 35)
     asks: dict = field(default_factory=dict)    # ask id: its entry, a dict (ticket 36)
+    refresh_at: datetime.datetime | None = None  # Refresh on the Usage card (ticket 42)
 
     def stop(self, lane: str) -> Stop:
         return self.lanes.get(lane) or Stop()
@@ -179,11 +185,14 @@ def repaired(raw, now: str) -> dict:
         repos[name] = entry if _usable(entry, REPO_STOPS) else dict(stopped)
     order = raw.get('repo_order')
     marks = raw.get('asks')
-    return {'version': 1, 'written_at': raw.get('written_at'), 'lanes': lanes,
+    kept = {'version': 1, 'written_at': raw.get('written_at'), 'lanes': lanes,
             'repo_order': [r for r in order if isinstance(r, str)] if isinstance(order, list)
             else [], 'repos': repos,
             'asks': {k: v for k, v in marks.items() if isinstance(v, dict)}
             if isinstance(marks, dict) else {}}
+    if usage := _usage(raw):   # a Refresh asked from the page stands (ticket 42; PR #57's F1)
+        kept['usage'] = {'refresh_at': usage['refresh_at']}
+    return kept
 
 
 BROKEN = object()    # control.json is there but isn't JSON (`repaired`)
@@ -212,7 +221,13 @@ def read(state_dir: str) -> Switch:
     return Switch(lanes, written if isinstance(written, str) else None,
                   order=raw.get('repo_order'), repos=repos,
                   asks={k: v for k, v in marks.items() if isinstance(v, dict)},
-                  opened=_opened(raw))
+                  opened=_opened(raw), refresh_at=_when(_usage(raw).get('refresh_at')))
+
+
+def _usage(raw: dict) -> dict:
+    """control.json's `usage` (ticket 42), or {} when it's missing or not one the page wrote."""
+    usage = raw.get('usage')
+    return usage if isinstance(usage, dict) and _when(usage.get('refresh_at')) else {}
 
 
 def _opened(raw: dict) -> dict:
@@ -305,6 +320,8 @@ def ask(state_dir: str, lanes, stop: str | None, now: str, repos=()) -> dict:
         stops[name] = {'stop': stop, 'at': now}
     data = {'version': 1, 'written_at': now, 'lanes': entries, 'repo_order': order,
             'repos': stops, 'asks': marks}
+    if 'usage' in base:   # a Refresh asked from the page stands (ticket 42), kept by `repaired`
+        data['usage'] = base['usage']
     _write(state_dir, data)
     if old is not None:
         from .gate import Knob, read_knob, write_knob

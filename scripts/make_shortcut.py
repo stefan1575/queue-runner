@@ -3,7 +3,7 @@
 - `Queue runner.lnk` starts `pythonw -m queue_runner` in this repo: no console, one instance
   (runner.lock), logging to `log_dir/runner.log`.
 - `Queue runner dashboard.lnk` starts `pythonw -m dashboard` in this repo: one instance (its port
-  is bound alone), the runner's page on http://queue.localhost:5289/ and sample data on
+  is bound alone), the runner's page on http://queue.localhost/ (or :5289) and sample data on
   http://localhost:5289/.
 
 Both go in `~/.queue-runner/`. `--startup` also copies both into the Startup folder,
@@ -27,7 +27,7 @@ STARTUP = os.path.join(os.environ.get('APPDATA', os.path.expanduser('~/AppData/R
 SHORTCUTS = [
     ('Queue runner.lnk', 'queue_runner', "Queue runner: Stefan's build-and-review flow, no AI"),
     ('Queue runner dashboard.lnk', 'dashboard',
-     "Queue runner dashboard: the runner's page on http://queue.localhost:5289/"),
+     "Queue runner dashboard: the runner's page on http://queue.localhost/"),
 ]
 
 

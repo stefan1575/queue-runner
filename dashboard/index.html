@@ -681,6 +681,10 @@ button.stn-in:hover { background: var(--hover); }
 .meter.full .pct { color: var(--bad); }
 .plan-note { font-size: 14px; color: var(--mute); margin-top: 10px; }
 .plan-note.bad { color: var(--bad); }
+.refresh { margin-left: auto; }
+.refresh.spin .i { animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .refresh.spin .i { animation-duration: 3s; } }
 .order li { display: flex; align-items: center; gap: 10px; padding: 6px 0; }
 .order li + li { border-top: 1px solid var(--line-soft); }
 .order .n { color: var(--dim); width: 14px; }
@@ -846,6 +850,7 @@ const ICON = {
   chevron: svg('<path d="m6 9 6 6 6-6"/>'),
   left: svg('<path d="m14 6-6 6 6 6"/>'),
   right: svg('<path d="m10 6 6 6-6 6"/>'),
+  refresh: svg('<path d="M20 11a8 8 0 0 0-14.3-4.3L4 9M4 4.5V9h4.5M4 13a8 8 0 0 0 14.3 4.3L20 15M20 19.5V15h-4.5"/>'),
   flask: svg('<path d="M10 3v6l-5 9a2 2 0 0 0 1.8 3h10.4a2 2 0 0 0 1.8-3l-5-9V3M8.5 3h7M7.5 15h9"/>'),
 };
 // The providers' own marks (Simple Icons, CC0). A provider the page doesn't know gets no mark.
@@ -1787,8 +1792,10 @@ function meter(w, full) {
     <span class="pct">${known ? used + "%" : "?"}</span>
     <span class="when">${w.resets_at ? `resets ${esc(stamp(w.resets_at))}` : "not started"}${full && !w.gates ? `. ${esc(w.note || "Not used by the runner.")}` : ""}</span></div>`;
 }
+// A plan's reset credits (ticket 42): said only while it has some. Redeeming one is T3's.
+const resetsLeft = (p) => (p.resets && p.resets.available > 0 ? plural(p.resets.available, "reset", "resets") + " left, " : "");
 const plan = (p, full) => `<div class="plan">
-    <p class="plan-name">${who(p.provider, p.name)}<span class="dim small">${p.plan ? esc(p.plan) + ", " : ""}${p.read_at ? `read ${esc(clock(p.read_at))}` : "not read yet"}</span></p>
+    <p class="plan-name">${who(p.provider, p.name)}<span class="dim small">${p.plan ? esc(p.plan) + ", " : ""}${resetsLeft(p)}${p.read_at ? `read ${esc(clock(p.read_at))}` : "not read yet"}</span></p>
     ${p.error ? `<p class="plan-note bad">${esc(p.error)}</p>` : ""}
     ${(p.windows || []).map((w) => meter(w, full)).join("")}
     ${(p.windows || []).filter((w) => w.reserve).map((w) => `<p class="plan-note">${w.reserve}% of the week is kept for you.</p>`).join("")}
@@ -1832,10 +1839,30 @@ function orderRows() {
   return `<ol class="order">${rows}</ol><p class="plan-note">${note}</p>`;
 }
 
+// Refresh (ticket 42): asks the runner to read both plans now (control.json's usage.refresh_at).
+// It spins until the snapshot says the runner acted on that request (usage_refresh), which is
+// its next write, 30 seconds at most, a minute after the refresh before; then a plan it couldn't
+// read is said. Off while the runner is silent.
+const refreshAsked = () => (ctl.usage && ctl.usage.refresh_at) || null;
+const canRefresh = () => !frozen() && "usage_refresh" in snap;   // a runner older than ticket 42 can't
+const refreshPending = () => !!refreshAsked() && canRefresh() && !(snap.usage_refresh && ms(snap.usage_refresh.asked_at) >= ms(refreshAsked()));
+function refreshFailed() {
+  const at = refreshAsked();
+  if (!at || refreshPending() || !snap.usage_refresh) return [];
+  return (snap.usage || []).filter((p) => p.error && (!p.read_at || ms(p.read_at) < ms(at)));
+}
+function refreshButton() {
+  const busy = refreshPending(), off = !canRefresh();
+  const title = frozen() ? "The runner is silent: it can't read usage now" : off ? "The runner's code is older than Refresh" : busy ? "Reading both plans now" : "Refresh";
+  return `<button class="btn sm icon refresh${busy ? " spin" : ""}" data-act="refresh" title="${title}" aria-label="${busy ? "Refreshing usage" : "Refresh usage"}" ${off || busy ? "disabled" : ""}>${ICON.refresh}</button>`;
+}
+let refreshPoll = 0;   // while a refresh is on its way, the snapshot is read every 2 seconds
 function rail() {
-  const usage = `<section class="card"><header class="card-head"><h2>Usage</h2>
-      <a class="link small mute" style="margin-left:auto" href="${esc(href({ page: "usage", pr: null }))}" data-act="page" data-page="usage">Details</a></header>
-    <div class="card-pad">${(snap.usage || []).map((p) => plan(p, false)).join("")}</div></section>`;
+  clearTimeout(refreshPoll);
+  if (refreshPending()) refreshPoll = setTimeout(load, 2000);
+  const failed = refreshFailed();
+  const usage = `<section class="card"><header class="card-head"><h2>Usage</h2>${refreshButton()}</header>
+    <div class="card-pad">${failed.length ? `<p class="plan-note bad" style="margin:0 0 14px">The refresh couldn't read ${failed.map((p) => esc(p.name)).join(" or ")}: ${failed.map((p) => esc(p.error)).join(" ")}</p>` : ""}${(snap.usage || []).map((p) => plan(p, false)).join("")}</div></section>`;
   const order = `<section class="card"><header class="card-head"><h2>Build order</h2></header><div class="card-pad" style="padding-top:8px">${orderRows()}</div></section>`;
   return (ui.page === "usage" ? "" : usage) + (ui.page === "settings" ? "" : order) + status();
 }
@@ -2031,6 +2058,9 @@ document.addEventListener("click", (e) => {
     case "stop": ui.pop = null; send([{ lane: d.lane, stop: d.how || null }]); return;
     case "repostop": send([{ repo: d.repo, stop: d.how || null }]); return;   // one repository (ticket 37)
     case "decide": send([{ ask: d.id, open: true }]); return;   // a T3 thread for this ask (ticket 35)
+    case "refresh":   // read both plans now (ticket 42); spins at once, until the runner has
+      ctl = { ...ctl, usage: { refresh_at: new Date().toISOString() } };
+      draw(); send([{ usage: "refresh" }]); return;
     case "all": {
       const how = d.how || null;
       ui.pop = null;

@@ -147,7 +147,9 @@ isn't gated**, and neither is an Approach-note answer read from Stefan's words (
   `$CLAUDE_CONFIG_DIR` or `~/.claude`, `.credentials.json`. Claude Code refreshes it whenever it
   runs. The token goes only into the request header: no log, record or error holds it. The
   response's `five_hour` and `seven_day` are `{utilization: 0-100, resets_at}`; null means not
-  started. `tests/fixtures/usage/oauth-usage.json` is a real response.
+  started. `tests/fixtures/usage/oauth-usage.json` is a real response. The call adds
+  `?cedar_ember=1&skip_spend=1`, as T3's does, so the same answer has the reset credits (ticket
+  42; `oauth-usage-resets.json`): `Usage.resets` (The dashboard, Usage).
 - **Fits:** the 5-hour window's used percent plus the job's expected cost must be at most 100,
   or the lane waits for its reset (plus 2 minutes); a window with nothing used takes any job. The
   week must leave `reserve` percent (5 by default) for Stefan until 24 hours before its reset,
@@ -850,12 +852,14 @@ package, no network, no runner code, no T3, no GitHub. One HTML file, served by 
 library.
 
 ```
-python3 -m dashboard    # http://queue.localhost:5289/ is the runner's; http://localhost:5289/ is sample data
+python3 -m dashboard    # http://queue.localhost/ is the runner's; http://localhost:5289/ is sample data
 ```
 
 - **One process, and the address is the switch** (ticket 29; Stefan, 2026-11-15). The request's
-  `Host` picks the data: `queue.localhost:<port>` is the runner's snapshot and control file in
-  `--state-dir`; `localhost:<port>` and `127.0.0.1:<port>` are sample data, whose controls go to
+  `Host` picks the data: `queue.localhost:<port>`, and `queue.localhost` with no port, are the
+  runner's snapshot and control file in `--state-dir` (no port: http://queue.localhost/, through
+  `~/Code/tools/localhost-proxy`, Caddy in Docker Desktop holding 127.0.0.1:80 for every
+  `*.localhost` app and passing the Host on; Stefan, 2026-11-16); `localhost:<port>` and `127.0.0.1:<port>` are sample data, whose controls go to
   a temp folder removed when the dashboard stops. Any other `Host` is refused (403). There is no
   `--sample` any more. `?sample=<state>` and `/earlier/take-N.html` work on the sample addresses
   only, and the real snapshot is served with any `sample` key taken out, so the sample menu and
@@ -894,8 +898,8 @@ python3 -m dashboard    # http://queue.localhost:5289/ is the runner's; http://l
   last real call of each kind: the CLI wraps GitHub and T3 in `Calls.watch` and the gate's usage
   reader in a `Watch`, so every call the passes make is recorded (a failing one keeps its last
   good time). **GitHub is never read for the snapshot.** Only the publisher's own 30-second writes
-  read afresh: Claude's usage and ChatGPT's (`sol.latest_limits`, the newest `rate_limits` in
-  Codex's rollouts by the record's own timestamp, among the 20 files touched last, the account's) at most every 5 minutes (`READ_EVERY`), and an open Claude job's
+  read afresh: Claude's usage and ChatGPT's (`codex_usage.CodexUsage`, ticket 42: Usage, below)
+  at most every 5 minutes (`READ_EVERY`) or on a Refresh, and an open Claude job's
   thread in T3 until found. `asks` and `answered` are ticket 31's (The Inbox's asks, below);
   `features`, `issues`, `prs`, `activity` and each lane's `queue` ticket 32's (The work lists,
   below). `stop_now` is unavailable until ticket 34. `--snapshot` prints one built the same way
@@ -909,7 +913,10 @@ python3 -m dashboard    # http://queue.localhost:5289/ is the runner's; http://l
   order (each with `stopped`, `{"at"}` or null: ticket 37), `asks` (below; each with `read` and
   `snoozed_until`: Read and snoozed, below), `answered` (asks Stefan has answered that the runner hasn't acted on
   yet: an ask plus `answered`: `at`, `said`, `next`; not counted as waiting on him), `lanes` (each with its `queue`, what it takes up next, in order, across
-  repositories, a job a limit cut off first, and for the reviewing lane the PRs waiting for their review; `queue_empty` says why there's none), `usage`, `features` (in build order: the repos'
+  repositories, a job a limit cut off first, and for the reviewing lane the PRs waiting for their review; `queue_empty` says why there's none), `usage` (a plan
+  each: `id`, `provider`, `name`, `plan`, `read_at`, `error`, `windows`, and `resets`,
+  `{"available": N}` or null: Usage, below), `usage_refresh` (`{"asked_at", "done_at"}`, the
+  Refresh the runner last read for, or null), `features` (in build order: the repos'
   order, then the feature whose first open ticket has the lowest number, a finished one last; each with `tickets`, its
   tickets' `repo#n` keys in the order they're built: what has started first, furthest along first, then a blocker
   before what it blocks, lowest number first, one not marked ready last), `issues` (with `pick`, the order ready work is
@@ -924,9 +931,30 @@ python3 -m dashboard    # http://queue.localhost:5289/ is the runner's; http://l
   `"now"` or null to carry on), `{"repo", "stop"}` (`"after-job"` or null: Stopping one repo,
   above), `{"repo_order": [...]}`, an ask's `{"ask", "read"}` (true or false) and `{"ask",
   "snooze_until"}` (an ISO time with its offset, kept in this PC's, or null), or `{"ask": <id>,
-  "open": true}` (`asks.<id>.open`: Deciding an ask in T3, above), and anything else is refused;
+  "open": true}` (`asks.<id>.open`: Deciding an ask in T3, above), or `{"usage": "refresh"}`
+  (`usage.refresh_at`: Usage, below), and anything else is refused;
   each write keeps what the others wrote. The page shows a request as asked until
   `control_read_at` reaches its time.
+- **Usage** (ticket 42): the Usage card's head has Refresh (an icon, "Refresh" on hover) where
+  Details was; the Usage page stays in the sidebar. It posts `{"usage": "refresh"}`; the
+  publisher's next fresh tick (30 seconds at most) reads both plans whatever `READ_EVERY` says,
+  no more than once a minute (`FORCE_EVERY`; a later request waits for a later tick), and the
+  snapshot's `usage_refresh.asked_at` names the request it took. The button spins until then
+  (the page reads every 2 seconds meanwhile), then the card says which plan it couldn't read; it's
+  off while the runner is silent or its snapshot has no `usage_refresh` (older code). A request
+  left from before the runner started is taken by its first read. **Reset credits** come from
+  the same read as the windows, counted as T3 counts them: Claude's from the usage answer's
+  `cedar_ember` grants (usable, not paused or ended; none when the grant to use next isn't one:
+  `usage.resets`, T3's `claudeResetCreditsToContract`), ChatGPT's from `codex app-server`'s
+  `account/rateLimits/read`, `rateLimitResetCredits.availableCount` (`codex_usage.py`, T3's
+  `probeCodexAppServerProvider`, read 2026-11-16). That call also gives ChatGPT's windows, so it
+  replaced Codex's rollouts (which carry no credits) as the snapshot's ChatGPT read: the app
+  server started for one call (Codex on PATH, else the Codex app's copy), `initialize`,
+  `initialized`, the read, about a second, 20 at most; Codex reads its own login. Starting it
+  rewrites Codex's shared `~/.codex/models_cache.json` (seen 2026-11-16; T3's own check writes it
+  again). A plan
+  says "2 resets left" on its line, and nothing when it has none. **Redeeming one isn't on the
+  page:** it spends the credit, so it stays Stefan's, in T3.
 - **A stopped repo on the page** (ticket 37): each row of the Build order card has Stop or Resume
   and says "Stopped since ..." (or "Asked to stop/resume: the runner hasn't read it yet"); its
   work reads as stopped wherever it's listed: a dashed "Stopped" tag beside its name on Inbox rows
@@ -1119,7 +1147,9 @@ python3 -m dashboard    # http://queue.localhost:5289/ is the runner's; http://l
   a snooze's end. A list row keeps the short age ("2 h") with the whole time on hover. Choosing
   the format is pinned (ticket 22).
 - **The runner's status lists its sources by group,** in his order: Providers (Claude, ChatGPT),
-  Local (T3 Code, Stop now), External (GitHub).
+  Local (T3 Code), External (GitHub). **Only what the runner depends on** (ticket 43): the
+  sample's sources are `snapshot.SOURCES` (a test holds them), and whether Stop now is available
+  shows on the lane's Stop button (`stop_now.note`), not here.
   Nothing on the page moves by itself (Stefan). Colour is state only: blue is Stefan's, amber
   is working, green is done or healthy, red is broken; a usage bar turns amber from 85% and red
   at the limit, and its blue end is the share kept for him; Claude's clay and OpenAI's black or
@@ -1424,11 +1454,17 @@ through WScript.Shell).
 The runner's snapshot:
 `tests/test_snapshot.py` (`build` from plain facts with a fixed clock, `Calls`, `Watch`,
 `Publisher`, `Snapshots` on a temp state folder, and the contract: the real snapshot holds the
-sample's keys at the top, in a lane, its job, a plan, a window and a source) and
+sample's keys at the top, in a lane, its job, a plan, a window and a source, and every sample
+lists `SOURCES` and nothing else) and
 `tests/test_snapshot_runner.py` (through `main`: written while a build blocks the lane, after a
 run, paused, none with `--once`, `--snapshot` with the lock held; `main`'s `sol_usage` and
-`snapshot_every` keep it off Codex's real rollouts and fast). `sol.latest_limits` is in
-`tests/test_sol.py`.
+`snapshot_every` keep it off the real Codex and fast). `sol.latest_limits` (Codex's rollouts, no
+longer the snapshot's read) is in `tests/test_sol.py`.
+Usage refresh and resets (ticket 42): `tests/test_usage_refresh.py` (the control request, the
+publisher's forced read and its once a minute, the sample's pretend runner),
+`tests/test_codex_usage.py` (real `account/rateLimits/read` answers in `fixtures/codex/`, with
+and without reset credits, through `fixtures/codex/fake_app_server.py`, so no test starts Codex)
+and `ResetsTest` in `tests/test_usage.py`.
 The Inbox's asks: `tests/test_asks.py` (`collect` on a temp job log and `FakeGitHubForReviews`,
 written by `snapshot.build`: each kind's sentences and timeline, the approach note's options,
 holds_up from native dependencies and blocker lines, the order, `answered` until the runner has
@@ -1502,7 +1538,10 @@ temp folder.
   PR body's Review row.
 - `queue_runner/sol.py`: the Sol seam and its codex-sol.sh adapter.
 - `queue_runner/deps.py`: a review checkout's dependencies, cached per lockfile and linked in.
-- `queue_runner/usage.py`: Claude's usage windows from `api/oauth/usage`, with the Claude login.
+- `queue_runner/usage.py`: Claude's usage windows and reset credits from `api/oauth/usage`, with
+  the Claude login.
+- `queue_runner/codex_usage.py`: ChatGPT's usage windows and reset credits through `codex
+  app-server` (ticket 42).
 - `queue_runner/gate.py`: the usage gate: `decide()`, Stefan's knob (`gate.json`), learned costs
   (`usage.jsonl`).
 - `queue_runner/control.py`: each lane's switch: reading `control.json` (and gate.json's older

@@ -68,14 +68,13 @@ def build(name: str = DEFAULT, base: datetime | None = None, control: dict | Non
         "runner": {"pid": 18244, "started_at": ago(399), "commit": "66a5ea1"},
         "start_hint": "Double-click Queue runner.lnk in ~/.queue-runner, or run pythonw -m queue_runner in the repo.",
         "sources": [
-            # `short` is the name beside its dot; `group` sorts them on the page: "provider",
-            # "local" (on this PC) or "external"
+            # Only what the runner depends on, the real snapshot's `SOURCES` (ticket 43). `short` is
+            # the name beside its dot; `group` sorts them on the page: "provider", "local" (on
+            # this PC) or "external"
             {"id": "github", "group": "external", "name": "GitHub", "short": "GitHub", "ok": True, "note": "gh as stefan1575", "checked_at": ago(1)},
             {"id": "t3", "group": "local", "name": "T3 Code", "short": "T3 Code", "ok": True, "note": "server up", "checked_at": ago(1)},
             {"id": "claude_usage", "group": "provider", "name": "Claude usage", "short": "Claude", "ok": True, "note": "read", "checked_at": ago(1)},
             {"id": "sol_usage", "group": "provider", "name": "ChatGPT usage", "short": "ChatGPT", "ok": True, "note": "read", "checked_at": ago(9)},
-            {"id": "t3_interrupt", "group": "local", "name": "Stop now for Claude", "short": "Stop now", "ok": True,
-             "note": "T3 accepts the interrupt", "checked_at": ago(399)},
         ],
         # `stopped` (ticket 37): when Stefan stopped the repo (`at`), or null. A stopped repo
         # gets nothing from either lane; its asks stay in the Inbox.
@@ -214,18 +213,23 @@ def build(name: str = DEFAULT, base: datetime | None = None, control: dict | Non
         ],
         "usage": [
             # A model's own weekly window (Fable's here) is listed only when the account has one.
-            {"id": "claude", "provider": "claude", "name": "Claude", "plan": None, "read_at": ago(1), "error": None, "windows": [
+            # `resets`: the reset credits a plan has left (ticket 42), or None when it has none to give.
+            {"id": "claude", "provider": "claude", "name": "Claude", "plan": None, "read_at": ago(1), "error": None,
+             "resets": {"available": 2}, "windows": [
                 {"id": "five_hour", "label": "Session", "used": 38, "resets_at": ahead(60), "gates": True},
                 {"id": "week", "label": "Weekly", "used": 46, "resets_at": ahead(60 * 49.7), "gates": True,
                  "reserve": 5, "reserve_opens_at": ahead(60 * 25.7)},
                 {"id": "week_fable", "label": "Weekly, Fable", "used": 100, "resets_at": ahead(60 * 49.7),
                  "gates": False, "note": "The runner doesn't use Fable."},
             ]},
-            {"id": "sol", "provider": "chatgpt", "name": "ChatGPT", "plan": None, "read_at": ago(9), "error": None, "windows": [
+            {"id": "sol", "provider": "chatgpt", "name": "ChatGPT", "plan": None, "read_at": ago(9), "error": None,
+             "resets": None, "windows": [
                 {"id": "five_hour", "label": "Session", "used": 26, "resets_at": ahead(94), "gates": True},
                 {"id": "week", "label": "Weekly", "used": 6, "resets_at": ahead(60 * 152.9), "gates": True},
             ]},
         ],
+        # Refresh on the Usage card (ticket 42): the request the runner last read both plans for.
+        "usage_refresh": None,
         "knob": {"paused": False, "reserve": 5},   # gate.json's reserve; paused: the Claude lane is stopped
         # What the gate expects a Claude job to take, per kind (the Usage page).
         "costs": [
@@ -561,9 +565,8 @@ def _vary(snap: dict, name: str, ago, ahead) -> None:
     elif name == "repo-stopped":
         _repo(snap, LD)["stopped"] = {"at": ago(6)}   # after the jobs on it began
     elif name == "no-interrupt":
-        _source(snap, "t3_interrupt").update(ok=False, note="T3 refused the session (HTTP 426: protocol 3 expected)",
-                                             affects="Stop after this job still works.")
-        _lane(snap, "claude")["stop_now"].update(available=False, note="T3 refuses the interrupt since its last update.")
+        # Stop now isn't a source the runner depends on (ticket 43): it shows on the Stop button.
+        _lane(snap, "claude")["stop_now"].update(available=False, note="T3 refuses the interrupt since its last update: stop after the job instead.")
 
 
 def _obey(snap: dict, control: dict, now: datetime) -> None:
@@ -612,6 +615,12 @@ def _obey(snap: dict, control: dict, now: datetime) -> None:
         except (TypeError, ValueError):   # not a time, or one with no offset
             ahead = False
         ask["snoozed_until"] = until if ahead else None   # a snooze whose time has passed is over
+    usage = control.get("usage")   # Refresh (ticket 42): both plans read as the request is read
+    if isinstance(usage, dict) and isinstance(usage.get("refresh_at"), str):
+        read = (datetime.fromisoformat(written) + timedelta(seconds=ACK_SECONDS)).isoformat(timespec="seconds")
+        snap["usage_refresh"] = {"asked_at": usage["refresh_at"], "done_at": read}
+        for plan in snap["usage"]:
+            plan["read_at"] = read
     order = control.get("repo_order") or []
     names = [r["name"] for r in snap["repos"]]
     if sorted(order) == sorted(names):

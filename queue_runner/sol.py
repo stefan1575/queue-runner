@@ -43,9 +43,12 @@ class LimitWindow:
 
 @dataclass(frozen=True)
 class Limits:
-    """ChatGPT's plan windows, as Codex last reported them in a rollout's `rate_limits`."""
+    """ChatGPT's plan windows, as Codex last reported them in a rollout's `rate_limits`, or as
+    its app server read them (`codex_usage.py`, with `resets`: reset credits left, None if
+    unknown)."""
     plan: str | None
     windows: tuple
+    resets: int | None = None
 
 
 class SolOutOfUsage(Exception):
