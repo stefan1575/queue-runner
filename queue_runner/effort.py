@@ -4,9 +4,10 @@ T3's CLI has no effort flag. `t3 thread start --provider P --model M` sends T3's
 `t3_thread_launch` a model selection with no options, so the run gets the model's default effort
 (medium for Opus 5.5). With no `--provider`/`--model`, launch takes the project's default model
 selection, options and all: the project's entry in `settings.json`'s `projectSettingsOverrides`
-(T3's settings are folded on this PC), else the global `defaultModelSelection`. That entry is
-what T3's Settings, the project, New threads, Model writes; `t3_project_update` writes the
-project row, which launch no longer reads once folded. (Read 2026-11-15 in `server.asar`:
+(T3's settings are folded on this PC), else the global `defaultModelSelection`. T3 has no
+Settings screen for that entry yet (Stefan, 2026-11-16: issue #90), so it's added to the file
+by hand with T3 closed (`Effort.step` says how); `t3_project_update` writes the project row,
+which launch no longer reads once folded. (Read 2026-11-15 in `server.asar`:
 `threadStartCommand` in `binCli-*.mjs`, `t3_thread_launch` in `server-*.mjs`,
 `resolveProjectOverrides` in `ManagedEndpointRuntime-*.mjs`; checked live in the sandbox.)
 
@@ -107,11 +108,12 @@ class T3Files:
             except ValueError:
                 pass
 
-        def effective(key):
-            return overrides[key] if key in overrides else settings.get(key)
-
-        return ProjectDefault(pid, effective('defaultModelSelection'),
-                              effective('fallbackModelSelection'))
+        selection = (overrides['defaultModelSelection'] if 'defaultModelSelection' in overrides
+                     else settings.get('defaultModelSelection'))
+        # The fallback isn't one of T3's project-scoped keys (`PROJECT_SCOPED_SERVER_SETTING_KEYS`
+        # in server.asar, read 2026-11-16: PR #100's review 1, F1): a project's entry neither
+        # sets nor clears it, so only the top-level one counts.
+        return ProjectDefault(pid, selection, settings.get('fallbackModelSelection'))
 
     def _run(self, run_id: str) -> dict:
         for (payload,) in self._rows('select payload_json from orchestration_v2_projection_runs '
@@ -209,11 +211,10 @@ class Effort:
             if self.say:
                 self.say(line)
 
-    def _why_not(self, repo) -> str | None:
+    def _why_not(self, repo, found: ProjectDefault | None) -> str | None:
         """Why a thread started in the repo's T3 project with no --model wouldn't run at the
         config's model and effort; None if it would."""
         c = self.config
-        found = self.files.project_default(repo.path)
         if found is None:
             return "T3 has no project there, or its settings can't be read"
         s = found.selection
@@ -237,7 +238,8 @@ class Effort:
         explicit = {'provider': c.claude_provider, 'model': c.claude_model}
         if self.files is None:
             return explicit
-        why = self._why_not(repo)
+        found = self.files.project_default(repo.path)
+        why = self._why_not(repo, found)
         if why is None:
             self._say(self._said_project, repo.name, 'set',
                       f"{repo.name}: its T3 project's default model is {c.claude_model} at "
@@ -246,10 +248,27 @@ class Effort:
         self._say(self._said_project, repo.name, why,
                   f'{repo.name}: its Claude jobs start with --model {c.claude_model} and run at '
                   f"the model's default effort, not {c.claude_effort}: in its T3 project "
-                  f'({repo.path}) {why}. To run them at {c.claude_effort}: in T3, Settings, '
-                  f'choose the project, New threads, Model: {c.claude_model}, '
-                  f'Reasoning: {c.claude_effort}, and no fallback model')
+                  f'({repo.path}) {why}. {self.step(found)}')
         return explicit
+
+    def step(self, found: ProjectDefault | None) -> str:
+        """How Stefan sets the project's default by hand (issue #90): T3 has no Settings screen
+        for it yet, so the entry goes in its settings.json, with T3 closed; and a fallback model,
+        which T3 reads only at the file's top level, comes out there."""
+        c = self.config
+        where = getattr(self.files, 'settings', None) or '~/.t3/userdata/settings.json'
+        pid = json.dumps(found.project_id) if found else '<its project id>'
+        selection = json.dumps({'instanceId': c.claude_provider, 'model': c.claude_model,
+                                'options': [{'id': 'effort', 'value': c.claude_effort}]})
+        # T3 reads the fallback only at the file's top level, for every project (PR #100's
+        # review 1, F1), so a set one is named there, and nothing is said of one when none is.
+        fallback = found.fallback if found else None
+        drop = (f", and remove the top-level fallbackModelSelection ({fallback.get('model')}): "
+                "T3 has no per-project one, so that stops every project's new threads moving to "
+                'it while Claude is out of usage') if fallback else ''
+        return (f'To run them at {c.claude_effort}: with T3 closed (it may write over the file '
+                f'while it runs), in {where}, under projectSettingsOverrides[{pid}]'
+                f'.defaultModelSelection, put {selection}{drop}, then start T3 again')
 
     def check(self, repos) -> None:
         """At start: says for each served repo how its jobs will start."""

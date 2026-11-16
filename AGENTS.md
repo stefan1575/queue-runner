@@ -1581,11 +1581,15 @@ at `[claude] effort` (`high`).
 - **Where a project's default lives:** T3's settings are folded (`projectSettingsFolded: true` in
   `~/.t3/userdata/settings.json`), so launch reads only that file's
   `projectSettingsOverrides[<project id>].defaultModelSelection`, else its global
-  `defaultModelSelection` (`resolveProjectOverrides`, `ManagedEndpointRuntime-*.mjs`). The
+  `defaultModelSelection` (`resolveProjectOverrides`, `ManagedEndpointRuntime-*.mjs`). **The
+  fallback model is the file's top-level `fallbackModelSelection` only**: it isn't one of the
+  project-scoped keys (`PROJECT_SCOPED_SERVER_SETTING_KEYS`, read 2026-11-16: PR #100's review
+  1, F1), so a project's entry can neither set nor clear it, and `T3Files.project_default` reads
+  only the top-level one. None is set on this PC (2026-11-16). The
   project row's `default_model_selection_json` (`projection_projects`, what MCP's
   `t3_project_update` writes; personal-ops has Opus 5.5 at high there) is not read once folded.
-  T3's Settings page with a project chosen, New threads, Model ("Model for new threads in this
-  project.") writes the override (client `ProjectDefaultsSettings-*.js`).
+  T3 has no Settings screen that writes the override yet (Stefan, 2026-11-16: issue #90), so it's
+  added to the file by hand (Stefan's step, below).
 - **Checked live on 2026-11-15** in the "queue-runner sandbox" project, Haiku threads, reading
   each run's `modelSelection` in `orchestration_v2_projection_runs` and its Claude transcript:
   A, `--provider claudeAgent --model claude-haiku-5-5`: the run's selection has no options, and
@@ -1608,12 +1612,20 @@ at `[claude] effort` (`high`).
   medium, not high`), and an unreadable one too; it's said again only when it changes. Only
   `main` reads T3's files (`effort.T3Files`, read-only); a `Runner` without an `Effort` (tests,
   `live_merge.py`) starts with `--model` and records no effort.
-- **Stefan's step, once per served project** (game-backdrop, leads-dashboard, queue-runner; none
-  is set on 2026-11-15, so all three run at medium until then): in T3, Settings, choose the
-  project, New threads, Model: Claude Opus 5.5, Reasoning: High, and leave its fallback model
-  unset. The runner's start line then says `<repo>: its T3 project's default model is
-  claude-opus-5-5 at effort high; its Claude jobs start on it (no --model)`. If it still says
-  "it has no default model", the change went to the project row, which launch doesn't read.
+- **Stefan's step, once per served project** (game-backdrop and queue-runner had one;
+  leads-dashboard's, `67f79781-c6fd-499d-b309-af07e13304b0`, was added by script on 2026-11-16
+  after backing the file up to `~/Code/backups/t3/`): with T3 closed (it may write over the file
+  while it runs), in `~/.t3/userdata/settings.json`, under
+  `projectSettingsOverrides[<project id>].defaultModelSelection`, put `{"instanceId":
+  "claudeAgent", "model": "claude-opus-5-5", "options": [{"id": "effort", "value": "high"}]}`
+  (the config's provider, model and effort), then start T3 again. A top-level
+  `fallbackModelSelection` also keeps jobs on `--model`, and taking it out changes every
+  project's new threads, so it's his choice; the start line names it when one is set. The
+  runner's start line for a repo not set says the same with its project id and the JSON for
+  the config (`Effort.step`). Once set it says `<repo>: its T3 project's default
+  model is claude-opus-5-5 at effort high; its Claude jobs start on it (no --model)`. If it still
+  says "it has no default model", the entry is under another id or went to the project row,
+  which launch doesn't read.
 
 ## Live check
 

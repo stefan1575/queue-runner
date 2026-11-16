@@ -155,6 +155,20 @@ class ProjectDefaultTest(unittest.TestCase):
         found = self.t3.files().project_default(self.root)
         self.assertEqual((found.selection, found.fallback), (HIGH, fallback))
 
+    def test_the_fallback_is_only_the_global_one(self):
+        # PR #100's review 1, F1: fallbackModelSelection isn't one of T3's project-scoped keys
+        # (PROJECT_SCOPED_SERVER_SETTING_KEYS in server.asar, read 2026-11-16), so a project's
+        # entry neither clears the global fallback nor sets one of its own.
+        fallback = {'instanceId': 'codex', 'model': 'gpt-6.1-sol'}
+        self.t3.write_settings(projectSettingsFolded=True, fallbackModelSelection=fallback,
+                               projectSettingsOverrides={'p1': {'defaultModelSelection': HIGH,
+                                                                'fallbackModelSelection': None}})
+        self.assertEqual(self.t3.files().project_default(self.root).fallback, fallback)
+        self.t3.write_settings(projectSettingsFolded=True,
+                               projectSettingsOverrides={'p1': {'defaultModelSelection': HIGH,
+                                                                'fallbackModelSelection': fallback}})
+        self.assertIsNone(self.t3.files().project_default(self.root).fallback)
+
     def test_an_override_of_null_clears_the_global_default(self):
         self.t3.write_settings(projectSettingsFolded=True, defaultModelSelection=HIGH,
                                projectSettingsOverrides={'p1': {'defaultModelSelection': None}})
@@ -314,8 +328,34 @@ class BuildTest(RunnerHarness):
                          [('claudeAgent', 'claude-opus-5-5')] * 2)
         [line] = self.told('start with --model')
         self.assertIn('first', line)
-        self.assertIn('Settings', line)
-        self.assertIn('Reasoning: high', line)
+        self.assertNotIn('New threads', line)
+        self.assertIn('projectSettingsOverrides[<its project id>].defaultModelSelection', line)
+        self.assertIn('{"instanceId": "claudeAgent", "model": "claude-opus-5-5", '
+                      '"options": [{"id": "effort", "value": "high"}]}', line)
+        self.assertIn('with T3 closed', line)
+
+    def test_a_project_with_another_default_names_its_id_in_the_step(self):
+        r = self.runner(FakeFiles(set_high(self.dir, effort='medium')))
+        r.run_pass()
+        [line] = self.told('start with --model')
+        self.assertIn('projectSettingsOverrides["p1"].defaultModelSelection', line)
+
+    def test_a_global_fallback_is_named_in_the_step_as_the_top_level_key(self):
+        # PR #100's review 1, F1: a project's entry can't clear it, so the step says where it is.
+        fallback = {'instanceId': 'codex', 'model': 'gpt-6.1-sol'}
+        r = self.runner(FakeFiles(set_high(self.dir, effort='medium', fallback=fallback)))
+        r.run_pass()
+        [line] = self.told('start with --model')
+        self.assertIn('projectSettingsOverrides["p1"].defaultModelSelection', line)
+        self.assertIn('remove the top-level fallbackModelSelection (gpt-6.1-sol)', line)
+        self.assertIn('every project', line)
+        self.assertNotIn('no fallbackModelSelection there', line)
+
+    def test_with_no_fallback_set_the_step_says_nothing_of_one(self):
+        r = self.runner(FakeFiles(set_high(self.dir, effort='medium')))
+        r.run_pass()
+        [line] = self.told('start with --model')
+        self.assertNotIn('fallbackModelSelection', line)
 
     def test_another_model_effort_or_a_fallback_is_not_the_configs(self):
         fallback = {'instanceId': 'codex', 'model': 'gpt-6.1-sol'}
@@ -487,7 +527,12 @@ class StartTest(unittest.TestCase):
         said = self.run_main(set_up=False)
         self.assertIn('first: its Claude jobs start with --model claude-opus-5-5', said)
         self.assertIn('it has no default model', said)
-        self.assertIn('New threads, Model: claude-opus-5-5, Reasoning: high', said)
+        self.assertNotIn('New threads', said)
+        self.assertIn('settings.json, under projectSettingsOverrides["p1"].defaultModelSelection',
+                      said)
+        self.assertIn('{"instanceId": "claudeAgent", "model": "claude-opus-5-5", '
+                      '"options": [{"id": "effort", "value": "high"}]}', said)
+        self.assertIn('with T3 closed', said)
 
     def test_a_repo_whose_project_is_set_is_said_at_start_too(self):
         said = self.run_main(set_up=True)
