@@ -14,7 +14,7 @@ import os
 from importlib import resources
 from string import Template
 
-from .config import Config, Repo
+from .config import Config, Repo, working
 from .github import Comment, PullRequest
 from .ledger import TAGS, OPEN, SolFailed, decide, next_round, norm, read_reviews, runner_post, \
     state
@@ -121,6 +121,7 @@ class Reviewer:
                                toaster=toaster) if poster is None else None
         self._last_why: dict[tuple[str, int], str | None] = {}
         self._said_paused = None
+        self.titles: dict[tuple[str, int], str] = {}   # the PRs it reviewed (the snapshot's)
         self._said_kept: set[str] = set()   # checkouts moved aside that can't be deleted yet
 
     # --- a pass ---------------------------------------------------------------------------
@@ -135,12 +136,14 @@ class Reviewer:
             with runner_lock(self.config.state_dir, 'sol.lock'):
                 self.settle()
                 if self.stopper:   # first: a PR stopped now neither merges nor is reviewed
-                    self.stopper.stop_pass()
-                if self.merger:
-                    self.merger.merge_pass()
-                for repo in self.config.repos:
+                    self.stopper.stop_pass(halted=self.lane_stopped)
+                if self.merger and not self.lane_stopped():
+                    self.merger.merge_pass(halted=self.lane_stopped)
+                for repo in working(self.config):   # a repo Stefan stopped: none (ticket 37)
                     if not repo.github:
                         continue
+                    if self.lane_stopped():   # Stop asked during a merge: nothing after it
+                        return IDLE
                     for pr, why in self._candidates(repo):
                         self._note(repo, pr, why)
                         if why is None:
@@ -251,6 +254,7 @@ class Reviewer:
 
     def review(self, repo: Repo, pr: PullRequest) -> str:
         n, h = pr.number, pr.head_sha
+        self.titles[(repo.name, n)] = pr.title
         earlier = read_reviews(self.github.issue_comments(repo, n))
         rnd = next_round(earlier)
         job = self.jobs.started(kind='review', repo=repo.name, issue=n, branch=pr.branch,
@@ -326,11 +330,39 @@ class Reviewer:
                         signals=[s['signal'] for s in d['signals']], run_dir=run_dir, link=url)
         why = f' ({"; ".join(s["text"] for s in d["signals"])})' if d['signals'] else ''
         self.say(f'{name}: review {rnd} on {h[:7]} is {d["verdict"]}, next: {d["outcome"]}{why}')
-        if outcome == 'clean' and self.merger:
+        if self.stopped_now(repo):   # the review was the job: what follows waits for Resume
+            what = repo.name if repo.name in self._repo_stops() else 'the reviewing lane'
+            self.say(f'{name}: {what} was stopped during the review; '
+                     + ('its merge' if outcome == 'clean' else 'what follows')
+                     + ' waits until Stefan resumes it')
+        elif outcome == 'clean' and self.merger:
             self.merger.try_merge(repo, pr)
         elif outcome in ('stop', 'approach-note') and self.stopper:
             self.stopper.check(repo, pr)
         return STARTED
+
+    def stopped_now(self, repo: Repo) -> bool:
+        """Whether Stefan has stopped the repo (ticket 37) or the reviewing lane (ticket 30), or
+        control.json is unreadable, read now: a review running when he stopped it finishes, and
+        nothing after it happens."""
+        from . import control
+        from .config import stopped
+        switch = control.read(self.config.state_dir)
+        return (repo.name in stopped(self.config) or switch.holds('sol')
+                or switch.repo_stop(repo.name).stopped)
+
+    def _repo_stops(self) -> set:
+        from . import control
+        from .config import stopped
+        switch = control.read(self.config.state_dir)
+        return stopped(self.config) | {n for n, s in switch.repos.items() if s.stopped}
+
+    def lane_stopped(self) -> bool:
+        """Whether the reviewing lane may start nothing now (control.json read now: Stefan's
+        Stop, or the file unreadable): asked between its jobs, so the merge or review running
+        finishes and nothing starts after it (ticket 30)."""
+        from . import control
+        return control.read(self.config.state_dir).holds('sol')
 
     def _inputs(self, repo, pr, rnd, last, gone, earlier, run_dir, wt) -> list[str]:
         """Writes Sol's inputs to the run folder; returns the brief's list of them."""

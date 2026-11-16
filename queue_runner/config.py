@@ -41,7 +41,10 @@ class Config:
     state_dir: str
     log_dir: str
     claude_provider: str = 'claudeAgent'     # T3 provider instance for Claude jobs
-    claude_model: str = 'claude-opus-5-5'    # T3 has no flag for reasoning effort
+    claude_model: str = 'claude-opus-5-5'
+    # The effort every Claude job runs at (ticket 39, `effort.py`): T3's CLI has no flag for it,
+    # so a job gets it from its T3 project's default model when that is this model at this effort.
+    claude_effort: str = 'high'
     poll_seconds: int = 300                  # continuous mode: the pause after an idle pass
     runs_dir: str = ''        # a review's run folder: brief, inputs, reply, would-be comment
     checkouts_dir: str = ''   # Sol's detached checkout of the PR's head, removed after
@@ -52,6 +55,38 @@ class Config:
     # this date (GitHub's UTC time, `YYYY-MM-DD`), counts as its own for the fix lane. '' adopts
     # none.
     adopt_reviews_before: str = ''
+
+
+def toml_order(config: Config) -> list[Repo]:
+    """The repos in config.toml's order, whatever build order is taken up now."""
+    return list(getattr(config, '_toml_order', config.repos))
+
+
+def set_build_order(config: Config, repos: list[Repo]) -> None:
+    """The one change made to a Config once it's loaded: the order Stefan set on the dashboard
+    (control.json's `repo_order`, ticket 33), which every part that goes through `repos` follows.
+    The list is replaced, never changed in place, so a lane going through the repos when it
+    changes finishes in the order it began."""
+    if not hasattr(config, '_toml_order'):
+        object.__setattr__(config, '_toml_order', list(config.repos))
+    object.__setattr__(config, 'repos', list(repos))
+
+
+def set_stopped(config: Config, names) -> None:
+    """The repos Stefan stopped (control.json's `repos`, ticket 37): every part that chooses work
+    goes through `working`, which leaves them out. `repos` itself keeps them, for what is only
+    looked up or shown (a job's own repo, the Inbox, the snapshot)."""
+    object.__setattr__(config, '_stopped', frozenset(names))
+
+
+def stopped(config: Config) -> frozenset:
+    return getattr(config, '_stopped', frozenset())
+
+
+def working(config: Config) -> list[Repo]:
+    """The repos the lanes take work from: `repos`, in the build order, less those stopped."""
+    off = stopped(config)
+    return [r for r in config.repos if r.name not in off]
 
 
 def _path(p: str) -> str:
@@ -74,6 +109,16 @@ def _merge(entry: dict) -> str:
     return merge
 
 
+EFFORTS = ('low', 'medium', 'high', 'xhigh', 'max')   # Claude Code's effort levels
+
+
+def _effort(claude: dict) -> str:
+    effort = claude.get('effort', 'high')
+    if effort not in EFFORTS:
+        raise ValueError(f"[claude] effort must be one of {', '.join(EFFORTS)}, not {effort!r}")
+    return effort
+
+
 def load_config(path: str = DEFAULT_CONFIG) -> Config:
     with open(path, 'rb') as f:
         raw = tomllib.load(f)
@@ -91,6 +136,7 @@ def load_config(path: str = DEFAULT_CONFIG) -> Config:
     return Config(repos=repos, state_dir=state_dir, log_dir=_path(raw['log_dir']),
                   claude_provider=claude.get('provider', 'claudeAgent'),
                   claude_model=claude.get('model', 'claude-opus-5-5'),
+                  claude_effort=_effort(claude),
                   poll_seconds=int(raw.get('poll_seconds', 300)),
                   runs_dir=_path(raw.get('runs_dir') or os.path.join(home, 'runs')),
                   checkouts_dir=_path(raw.get('checkouts_dir') or os.path.join(home, 'checkouts')),

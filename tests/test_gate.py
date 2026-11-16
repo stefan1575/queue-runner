@@ -4,7 +4,7 @@ import os
 import tempfile
 import unittest
 
-from queue_runner.gate import (FITS, FIVE_HOUR, PAUSED, RELEASED, RESERVE, WEEKLY, Cost,
+from queue_runner.gate import (FITS, FIVE_HOUR, RELEASED, RESERVE, WEEKLY, Cost,
                                CostBook, Knob, decide, read_knob, write_knob)
 from queue_runner.usage import Usage, Window
 
@@ -58,18 +58,15 @@ class DecideTest(unittest.TestCase):
         self.assertEqual((v.go, v.why), (False, WEEKLY))
         self.assertGreaterEqual(v.until, WEEK_RESET)
 
-    def test_paused_starts_nothing_whatever_the_usage(self):
-        v = decide(usage(0, 0, None, None), 'build', BUILD, Knob(paused=True), NOW)
-        self.assertEqual((v.go, v.why, v.until), (False, PAUSED, None))
-        self.assertIn('--resume', v.text)
+    # Stopping the Claude lane is control.json's, read before the gate (tests/test_switch.py).
 
 
 class KnobTest(unittest.TestCase):
-    def test_the_knob_defaults_to_running_with_a_5_percent_reserve_and_keeps_what_is_set(self):
+    def test_the_knob_defaults_to_a_5_percent_reserve_and_keeps_what_is_set(self):
         with tempfile.TemporaryDirectory() as d:
-            self.assertEqual(read_knob(d), Knob(paused=False, reserve=5.0))
-            write_knob(d, Knob(paused=True, reserve=12.5))
-            self.assertEqual(read_knob(d), Knob(paused=True, reserve=12.5))
+            self.assertEqual(read_knob(d), Knob(reserve=5.0))
+            write_knob(d, Knob(reserve=12.5))
+            self.assertEqual(read_knob(d), Knob(reserve=12.5))
 
 
 def snap(five, week, five_reset=FIVE_RESET, week_reset=WEEK_RESET):

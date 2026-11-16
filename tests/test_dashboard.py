@@ -1,6 +1,10 @@
 """The dashboard's server and its sample snapshots. No runner, no T3, no GitHub: two files."""
 import http.client
 import json
+import os
+import socket
+import subprocess
+import sys
 import tempfile
 import threading
 import unittest
@@ -9,6 +13,8 @@ from pathlib import Path
 
 from dashboard import sample
 from dashboard.serve import App, Refused, apply_control, serve
+
+REPO = Path(__file__).resolve().parent.parent
 
 NOW = "2026-11-15T13:00:00+08:00"
 
@@ -33,6 +39,43 @@ class ApplyControlTest(unittest.TestCase):
         self.assertEqual(c["repo_order"], ["queue-runner", "leads-dashboard"])
         self.assertEqual(c["lanes"]["claude"]["stop"], "now")
 
+    def test_an_ask_is_marked_read_or_unread_under_asks_and_the_rest_is_kept(self):
+        c = apply_control({}, {"lane": "claude", "stop": "after-job"}, NOW)
+        c = apply_control(c, {"ask": "stop-0042", "read": True}, NOW)
+        self.assertEqual(c["asks"], {"stop-0042": {"read": True}})
+        self.assertEqual(c["lanes"]["claude"]["stop"], "after-job")
+        c = apply_control(c, {"ask": "stop-0042", "read": False}, "2026-11-15T13:05:00+08:00")
+        self.assertEqual(c["asks"]["stop-0042"], {"read": False})
+        self.assertEqual(c["written_at"], "2026-11-15T13:05:00+08:00")
+
+    def test_an_asks_other_keys_are_kept(self):
+        # Ticket 35 keeps `open` in the same object: a read or a snooze leaves it as it was.
+        c = apply_control({"asks": {"stop-0042": {"open": "t3"}, "merge-qr-5-abc1234": {"read": True}}},
+                          {"ask": "stop-0042", "read": True}, NOW)
+        self.assertEqual(c["asks"], {"stop-0042": {"open": "t3", "read": True},
+                                     "merge-qr-5-abc1234": {"read": True}})
+        c = apply_control(c, {"lane": "sol", "stop": None}, NOW)
+        self.assertEqual(c["asks"]["stop-0042"], {"open": "t3", "read": True})
+
+    def test_an_ask_is_snoozed_until_a_time_and_unsnoozed_with_null(self):
+        c = apply_control({"asks": {"stop-0042": {"read": True}}},
+                          {"ask": "stop-0042", "snooze_until": "2026-11-16T01:00:00.000Z"}, NOW)
+        until = c["asks"]["stop-0042"]["snooze_until"]
+        self.assertEqual(datetime.fromisoformat(until), datetime(2026, 11, 16, 1, tzinfo=timezone.utc))
+        self.assertTrue(c["asks"]["stop-0042"]["read"])
+        c = apply_control(c, {"ask": "stop-0042", "snooze_until": None}, NOW)
+        self.assertEqual(c["asks"]["stop-0042"], {"read": True, "snooze_until": None})
+
+    def test_asks_that_no_longer_exist_are_dropped_on_a_write(self):
+        c = apply_control({"asks": {"stop-1": {"read": True}, "stop-2": {"read": True}}},
+                          {"ask": "stop-3", "read": True}, NOW, asks={"stop-2", "stop-3"})
+        self.assertEqual(c["asks"], {"stop-2": {"read": True}, "stop-3": {"read": True}})
+        c = apply_control(c, {"lane": "claude", "stop": None}, NOW, asks={"stop-3"})
+        self.assertEqual(c["asks"], {"stop-3": {"read": True}})
+        # Not knowing which asks exist (no snapshot yet) drops nothing.
+        self.assertEqual(apply_control(c, {"ask": "stop-9", "read": True}, NOW)["asks"],
+                         {"stop-3": {"read": True}, "stop-9": {"read": True}})
+
     def test_anything_else_is_refused(self):
         for body in (
             {"lane": "claude", "stop": "maybe"},
@@ -45,6 +88,15 @@ class ApplyControlTest(unittest.TestCase):
             {"repo_order": "a"},
             {"lane": "claude", "stop": "now", "repo_order": ["a"]},
             {"paused": True},
+            {"ask": "stop-1", "read": "yes"},
+            {"ask": "stop-1", "read": None},
+            {"ask": "../x", "read": True},
+            {"ask": 3, "read": True},
+            {"ask": "stop-1"},
+            {"ask": "stop-1", "read": True, "snooze_until": None},
+            {"ask": "stop-1", "snooze_until": "tomorrow"},
+            {"ask": "stop-1", "snooze_until": "2026-11-16T09:00:00"},   # no offset: whose 9:00?
+            {"ask": "stop-1", "snooze_until": 3},
             ["lane"],
             "now",
         ):
@@ -54,20 +106,30 @@ class ApplyControlTest(unittest.TestCase):
 
 class AppTest(unittest.TestCase):
     def setUp(self):
-        tmp = tempfile.TemporaryDirectory(prefix="qr-dashboard-test-")
-        self.addCleanup(tmp.cleanup)
-        self.dir = Path(tmp.name)
+        _dir = tempfile.TemporaryDirectory(prefix="qr-dashboard-test-")
+        self.addCleanup(_dir.cleanup)
+        self.dir = Path(_dir.name)
         self.app = App(self.dir, clock=lambda: NOW)
 
-    def test_no_snapshot_yet_says_where_it_looked(self):
+    def test_no_snapshot_yet_says_where_it_looked_and_how_to_start_the_runner(self):
         status, body = self.app.snapshot()
         self.assertEqual(status, 404)
-        self.assertEqual(json.loads(body)["path"], str(self.dir / "snapshot.json"))
+        body = json.loads(body)
+        self.assertEqual((body["error"], body["path"]), ("missing", str(self.dir / "snapshot.json")))
+        self.assertIn("Queue runner.lnk", body["start"])
+        self.assertIn("pythonw -m queue_runner", body["start"])
+        self.assertIn(str(REPO), body["start"])
 
     def test_the_runners_snapshot_is_served_as_written(self):
         raw = json.dumps({"version": 1, "asks": []}).encode()
         (self.dir / "snapshot.json").write_bytes(raw)
         self.assertEqual(self.app.snapshot(), (200, raw))
+
+    def test_the_runners_snapshot_never_carries_the_sample_menu(self):
+        # The page shows the sample menu and the Queue's variant pill only when `sample` is set.
+        (self.dir / "snapshot.json").write_text(json.dumps({"version": 1, "sample": {"state": "busy"}}), encoding="utf-8")
+        status, body = self.app.snapshot("busy")
+        self.assertEqual((status, json.loads(body)), (200, {"version": 1}))
 
     def test_a_snapshot_that_isnt_json_is_a_fault_not_an_empty_page(self):
         (self.dir / "snapshot.json").write_text("{ torn", encoding="utf-8")
@@ -78,20 +140,47 @@ class AppTest(unittest.TestCase):
     def test_a_control_request_is_written_whole_to_the_state_folder(self):
         self.app.write_control({"lane": "claude", "stop": "after-job"})
         on_disk = json.loads((self.dir / "control.json").read_text(encoding="utf-8"))
-        self.assertEqual(on_disk, {"version": 1, "written_at": NOW, "lanes": {"claude": {"stop": "after-job", "at": NOW}}, "repo_order": []})
+        self.assertEqual(on_disk, {"version": 1, "written_at": NOW, "lanes": {"claude": {"stop": "after-job", "at": NOW}}, "repo_order": [], "repos": {}, "asks": {}})
         self.assertEqual(self.app.control(), on_disk)
         self.assertEqual([p.name for p in self.dir.iterdir()], ["control.json"])   # no temp file left
+
+    def test_a_write_drops_the_entries_of_asks_the_snapshot_no_longer_lists(self):
+        (self.dir / "control.json").write_text(json.dumps({"asks": {
+            "stop-1": {"read": True}, "stop-2": {"read": True, "open": "t3"}, "merge-x-5-abc1234": {"read": True}}}), encoding="utf-8")
+        (self.dir / "snapshot.json").write_text(json.dumps({"version": 1, "asks": [{"id": "stop-2"}],
+                                                            "answered": [{"id": "merge-x-5-abc1234"}]}), encoding="utf-8")
+        new = self.app.write_control({"ask": "stop-2", "snooze_until": None})
+        self.assertEqual(new["asks"], {"stop-2": {"read": True, "open": "t3", "snooze_until": None},
+                                       "merge-x-5-abc1234": {"read": True}})
+
+    def test_with_no_snapshot_to_go_by_a_write_drops_nothing(self):
+        (self.dir / "control.json").write_text(json.dumps({"asks": {"stop-1": {"read": True}}}), encoding="utf-8")
+        self.assertEqual(self.app.write_control({"lane": "sol", "stop": None})["asks"], {"stop-1": {"read": True}})
+        (self.dir / "snapshot.json").write_text("{ torn", encoding="utf-8")
+        self.assertEqual(self.app.write_control({"lane": "sol", "stop": None})["asks"], {"stop-1": {"read": True}})
+
+    def test_the_samples_controls_drop_what_no_sample_state_lists(self):
+        app = App(self.dir, sample=True, clock=lambda: NOW)
+        some = next(a["id"] for a in sample.build("busy")["asks"])
+        app.write_control({"ask": "gone-1", "read": True})
+        self.assertEqual(app.write_control({"ask": some, "read": True})["asks"], {some: {"read": True}})
 
     def test_a_refused_request_writes_nothing(self):
         with self.assertRaises(Refused):
             self.app.write_control({"lane": "claude", "stop": "sideways"})
         self.assertFalse((self.dir / "control.json").exists())
 
-    def test_an_unreadable_control_file_reads_as_nothing_asked(self):
+    def test_an_unreadable_control_file_reads_as_both_lanes_stopped_as_the_runner_holds_them(self):
+        # The runner starts nothing in either lane while it can't read the file (review 1's F5):
+        # the page says the same, and a write lets go only of what it names.
         (self.dir / "control.json").write_text("not json", encoding="utf-8")
-        self.assertEqual(self.app.control(), {"version": 1, "lanes": {}, "repo_order": []})
-        self.app.write_control({"lane": "sol", "stop": "now"})
-        self.assertEqual(self.app.control()["lanes"], {"sol": {"stop": "now", "at": NOW}})
+        stopped = {"stop": "after-job", "at": NOW}
+        self.assertEqual(self.app.control(), {"version": 1, "written_at": None, "repo_order": [],
+                                              "lanes": {"claude": stopped, "sol": stopped},
+                                              "repos": {}, "asks": {}})
+        self.app.write_control({"lane": "sol", "stop": None})
+        self.assertEqual(self.app.control()["lanes"], {"claude": stopped,
+                                                       "sol": {"stop": None, "at": NOW}})
 
 
 class SampleTest(unittest.TestCase):
@@ -204,6 +293,28 @@ class SampleTest(unittest.TestCase):
         self.assertIsNone(s["control_read_at"])
         self.assertEqual(s["lanes"][0]["state"], "working")
 
+    def test_every_ask_starts_unread_and_not_snoozed(self):
+        for name in sample.STATES:
+            s = sample.build(name, base=self.T, now=self.T)
+            for a in s["asks"] + s["answered"]:
+                with self.subTest(state=name, ask=a["id"]):
+                    self.assertEqual((a["read"], a["snoozed_until"]), (False, None))
+
+    def test_the_pretend_runner_reads_which_asks_are_read_and_snoozed(self):
+        written = self.T.isoformat()
+        ids = [a["id"] for a in sample.build("busy", base=self.T, now=self.T)["asks"]]
+        later, gone = (self.T + timedelta(hours=3)).isoformat(), (self.T - timedelta(minutes=1)).isoformat()
+        asked = {"written_at": written, "asks": {ids[0]: {"read": True}, ids[1]: {"snooze_until": later, "open": "t3"},
+                                                 ids[2]: {"read": True, "snooze_until": gone}}}
+        early = {a["id"]: a for a in sample.build("busy", base=self.T, now=self.T + timedelta(seconds=1), control=asked)["asks"]}
+        self.assertFalse(early[ids[0]]["read"])
+        self.assertIsNone(early[ids[1]]["snoozed_until"])
+        read = {a["id"]: a for a in sample.build("busy", base=self.T, now=self.T + timedelta(seconds=sample.ACK_SECONDS), control=asked)["asks"]}
+        self.assertTrue(read[ids[0]]["read"])
+        self.assertEqual(read[ids[1]]["snoozed_until"], later)
+        self.assertFalse(read[ids[1]]["read"])
+        self.assertEqual((read[ids[2]]["read"], read[ids[2]]["snoozed_until"]), (True, None))   # its time has passed
+
     def test_the_pretend_runner_reads_control_a_few_seconds_after_it_was_written(self):
         written = self.T.isoformat()
         asked = {"written_at": written, "lanes": {"claude": {"stop": "after-job", "at": written}, "sol": {"stop": "now", "at": written}},
@@ -227,15 +338,35 @@ class SampleTest(unittest.TestCase):
 
 class HttpTest(unittest.TestCase):
     def setUp(self):
-        tmp = tempfile.TemporaryDirectory(prefix="qr-dashboard-test-")
-        self.addCleanup(tmp.cleanup)
-        self.dir = Path(tmp.name)
+        _dir = tempfile.TemporaryDirectory(prefix="qr-dashboard-test-")
+        self.addCleanup(_dir.cleanup)
+        self.dir = Path(_dir.name)
+        _real_dir = tempfile.TemporaryDirectory(prefix="qr-dashboard-real-")
+        self.addCleanup(_real_dir.cleanup)
+        self.real_dir = Path(_real_dir.name)
         self.app = App(self.dir, sample=True, clock=lambda: NOW)
-        self.server = serve(self.app, 0)
+        self.real = App(self.real_dir, clock=lambda: NOW)
+        self.server = serve(self.real, self.app, 0)
         self.port = self.server.server_address[1]
-        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        threading.Thread(target=self.server.serve_forever, args=(0.05,), daemon=True).start()
         self.addCleanup(self.server.server_close)
         self.addCleanup(self.server.shutdown)
+
+    def at(self, host):
+        return {"Host": f"{host}:{self.port}"}
+
+    def test_the_host_picks_the_data_queue_localhost_is_the_runners_and_the_rest_are_sample(self):
+        raw = json.dumps({"version": 1, "asks": [], "written_at": NOW}).encode()
+        (self.real_dir / "snapshot.json").write_bytes(raw)
+        status, _, body = self.call("GET", "/snapshot.json?sample=busy", headers=self.at("queue.localhost"))
+        self.assertEqual((status, body), (200, raw))   # ?sample= means nothing on the real address
+        for host in ("localhost", "127.0.0.1"):
+            status, _, body = self.call("GET", "/snapshot.json?sample=busy", headers=self.at(host))
+            self.assertEqual((status, json.loads(body)["sample"]["state"]), (200, "busy"), host)
+        status, kind, _ = self.call("GET", "/", headers=self.at("queue.localhost"))
+        self.assertEqual((status, kind), (200, "text/html; charset=utf-8"))
+        for host in ("queue.localhost:1", "evil.localhost:%d" % self.port, "queue.localhost", "127.0.0.1"):
+            self.assertEqual(self.call("GET", "/snapshot.json", headers={"Host": host})[0], 403, host)
 
     def call(self, method, path, body=None, headers=None):
         conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
@@ -246,6 +377,26 @@ class HttpTest(unittest.TestCase):
 
     def post(self, body, **headers):
         return self.call("POST", "/control", json.dumps(body), {"Content-Type": "application/json", **headers})
+
+    def json_post(self, path, body):   # from the sample page, as a browser sends it
+        return self.call("POST", path, body, {"Content-Type": "application/json", "Origin": f"http://127.0.0.1:{self.port}"})
+
+    def test_a_control_is_taken_only_from_the_address_it_was_sent_to(self):
+        real, sample = f"http://queue.localhost:{self.port}", f"http://localhost:{self.port}"
+        stop = {"lane": "claude", "stop": "now"}
+        self.assertEqual(self.post(stop, Origin=sample, **self.at("queue.localhost"))[0], 403)   # the sample page
+        self.assertEqual(self.post(stop, Origin=f"http://127.0.0.1:{self.port}", **self.at("queue.localhost"))[0], 403)
+        self.assertEqual(self.post(stop, **self.at("queue.localhost"))[0], 403)   # no Origin: not from a page
+        self.assertEqual(self.post(stop, Origin=real, **self.at("localhost"))[0], 403)
+        self.assertFalse((self.real_dir / "control.json").exists())
+        self.assertEqual(self.app.control()["lanes"], {})
+
+        self.assertEqual(self.post(stop, Origin=real, **self.at("queue.localhost"))[0], 200)
+        self.assertEqual(self.real.control()["lanes"]["claude"]["stop"], "now")
+        self.assertEqual(self.app.control()["lanes"], {})   # the sample's controls are its own
+        self.assertEqual(self.post({"lane": "sol", "stop": "now"}, Origin=sample, **self.at("localhost"))[0], 200)
+        self.assertEqual(set(self.real.control()["lanes"]), {"claude"})
+        self.assertEqual(set(self.app.control()["lanes"]), {"sol"})
 
     def test_the_page_the_snapshot_and_the_control_file_are_served(self):
         status, kind, body = self.call("GET", "/")
@@ -265,8 +416,8 @@ class HttpTest(unittest.TestCase):
             self.assertIn(b"<title>Queue runner</title>", body)
         for path in ("/earlier/take-999.html", "/earlier/serve.py", "/earlier/..%2Fserve.py", "/earlier/"):
             self.assertEqual(self.call("GET", path)[0], 404, path)
-        self.app.sample = False
-        self.assertEqual(self.call("GET", "/earlier/take-1.html")[0], 404)
+        self.assertEqual(self.call("GET", "/earlier/take-1.html", headers=self.at("localhost"))[0], 200)
+        self.assertEqual(self.call("GET", "/earlier/take-1.html", headers=self.at("queue.localhost"))[0], 404)
 
     def test_the_page_has_no_address_outside_itself_to_load(self):
         page = (Path(__file__).resolve().parent.parent / "dashboard" / "index.html").read_text(encoding="utf-8")
@@ -286,12 +437,66 @@ class HttpTest(unittest.TestCase):
         self.assertEqual(self.app.control()["lanes"], {})
 
     def test_a_request_that_isnt_small_json_is_refused(self):
-        self.assertEqual(self.call("POST", "/control", '{"lane":"claude","stop":"now"}', {"Content-Type": "text/plain"})[0], 415)
-        self.assertEqual(self.call("POST", "/control", "{ torn", {"Content-Type": "application/json"})[0], 400)
-        self.assertEqual(self.post({"lane": "claude", "stop": "sideways"})[0], 400)
-        self.assertEqual(self.call("POST", "/control", "", {"Content-Type": "application/json"})[0], 400)
-        self.assertEqual(self.call("POST", "/elsewhere", "{}", {"Content-Type": "application/json"})[0], 404)
+        origin = {"Origin": f"http://127.0.0.1:{self.port}"}
+        self.assertEqual(self.call("POST", "/control", '{"lane":"claude","stop":"now"}', {"Content-Type": "text/plain", **origin})[0], 415)
+        self.assertEqual(self.json_post("/control", "{ torn")[0], 400)
+        self.assertEqual(self.post({"lane": "claude", "stop": "sideways"}, **origin)[0], 400)
+        self.assertEqual(self.json_post("/control", "")[0], 400)
+        self.assertEqual(self.json_post("/elsewhere", "{}")[0], 404)
         self.assertEqual(self.app.control()["lanes"], {})
+
+
+class StartTest(unittest.TestCase):
+    """`python3 -m dashboard` as it's started at logon: one process, both addresses, one per port."""
+
+    def setUp(self):
+        _dir = tempfile.TemporaryDirectory(prefix="qr-dashboard-start-")
+        self.addCleanup(_dir.cleanup)
+        self.dir = Path(_dir.name)
+        with socket.socket() as s:
+            s.bind(("127.0.0.1", 0))
+            self.port = s.getsockname()[1]
+
+    def start(self):
+        p = subprocess.Popen([sys.executable, "-m", "dashboard", "--port", str(self.port), "--state-dir", str(self.dir)],
+                             cwd=REPO, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                             # Killed, it can't remove its sample folder: make it in ours.
+                             env={**os.environ, "PYTHONUNBUFFERED": "1", "TEMP": str(self.dir),
+                                  "TMP": str(self.dir)})
+        self.addCleanup(lambda: (p.kill(), p.wait(), p.stdout.close()))
+        return p
+
+    def test_the_start_line_names_both_addresses_and_which_is_which(self):
+        first = self.start()
+        line = first.stdout.readline()
+        self.assertIn(f"http://queue.localhost:{self.port}/", line)
+        self.assertIn(f"http://localhost:{self.port}/", line)
+        real, sample = line.split(f"http://localhost:{self.port}/")
+        self.assertIn("runner", real)
+        self.assertIn("sample", sample)
+        conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
+        self.addCleanup(conn.close)
+        conn.request("GET", "/snapshot.json", headers={"Host": f"localhost:{self.port}"})
+        self.assertIn("sample", json.loads(conn.getresponse().read()))
+
+    def test_there_is_no_sample_switch_any_more_the_address_is_the_switch(self):
+        from dashboard.serve import main
+        with self.assertRaises(SystemExit) as e, open(os.devnull, "w") as quiet:
+            sys.stderr, err = quiet, sys.stderr
+            try:
+                main(["--sample", "--port", str(self.port)])
+            finally:
+                sys.stderr = err
+        self.assertEqual(e.exception.code, 2)
+
+    def test_a_second_dashboard_on_the_same_port_says_so_and_exits_3(self):
+        first = self.start()
+        first.stdout.readline()   # it's listening
+        second = self.start()
+        out, _ = second.communicate(timeout=30)
+        self.assertEqual(second.returncode, 3, out)
+        self.assertIn(f"A dashboard is already running on port {self.port}", out)
+        self.assertIsNone(first.poll())
 
 
 if __name__ == "__main__":

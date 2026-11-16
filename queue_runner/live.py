@@ -148,8 +148,10 @@ def pr_numbers(commits) -> list[int]:
 
 class LiveSteps:
     def __init__(self, config, *, github, git, t3, jobs: JobLog, say, stopper, merger,
-                 limit=None, find_thread=None, now=None):
+                 limit=None, find_thread=None, now=None, effort=None):
         self.config, self.github, self.git, self.t3, self.jobs = config, github, git, t3, jobs
+        from .effort import Effort   # ticket 39: how its thread starts, its effort read back
+        self.effort = effort or Effort(config)
         self.say, self.stopper, self.merger = say, stopper, merger
         self.limit = limit or (lambda *a: None)          # Runner._limit: a usage-limit stop
         self.find_thread = find_thread                   # Runner._find_thread
@@ -158,7 +160,10 @@ class LiveSteps:
         self.wait_until: datetime.datetime | None = None   # a live run's usage-limit resume
 
     def served(self):
-        return [r for r in self.config.repos if r.live_doc and r.github]
+        """The repos whose live steps run, in the build order; a repo Stefan stopped has none
+        (`config.working`, ticket 37)."""
+        from .config import working
+        return [r for r in working(self.config) if r.live_doc and r.github]
 
     # --- where the last run reached ------------------------------------------------------------
 
@@ -403,10 +408,9 @@ class LiveSteps:
         self.say(f'Starting {name}: {prs} merged ({b.start[:7]}..{b.target[:7]}), '
                  f'{len(b.pending)} migration(s) to apply')
         try:
-            result = self.t3.start(repo.path, brief, title=job.title,
-                                   provider=self.config.claude_provider,
-                                   model=self.config.claude_model, worktree=b.target,
-                                   branch=live_branch(b.target, job.id))
+            result = self.t3.start(repo.path, brief, title=job.title, worktree=b.target,
+                                   branch=live_branch(b.target, job.id),
+                                   **self.effort.flags(repo))
         except T3Error as e:
             try:
                 thread = self.find_thread(job) if self.find_thread else None
@@ -466,7 +470,8 @@ class LiveSteps:
         self.jobs.ended(job.id, exit_code=exit_code, outcome=outcome, thread_id=thread_id,
                         link=link, run_id=run_id, status=status, worktree=worktree,
                         applied=list(answer.applied), prs=list(b.prs),
-                        reason=answer.text or None, error=error, **(limit or {}))
+                        reason=answer.text or None, error=error, **(limit or {}),
+                        **self.effort.used(repo.name, name, thread_id, run_id))
         prs = ', '.join(f'#{n}' for n in b.prs)
         if outcome == LIVE:
             self.say(f'{name}: {prs} live at {b.target[:7]} ({len(answer.applied)} migration(s) '

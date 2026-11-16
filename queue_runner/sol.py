@@ -14,6 +14,7 @@ import json
 import os
 import re
 import subprocess
+from dataclasses import dataclass
 
 from .ledger import SolFailed
 
@@ -31,6 +32,20 @@ OUT_OF_USAGE = re.compile(r'hit your usage limit', re.I)
 TRY_AGAIN = re.compile(r'try again at (?:(?P<mon>[A-Z][a-z]{2})[a-z]* (?P<day>\d{1,2})'
                        r'(?:st|nd|rd|th)?, (?P<year>\d{4}) )?(?P<h>\d{1,2}):(?P<m>\d{2}) ?'
                        r'(?P<ap>[AP]M)', re.I)
+
+
+@dataclass(frozen=True)
+class LimitWindow:
+    minutes: int                          # the window's length: 300 is the session, 10080 the week
+    used: float                           # percent used
+    resets_at: datetime.datetime | None
+
+
+@dataclass(frozen=True)
+class Limits:
+    """ChatGPT's plan windows, as Codex last reported them in a rollout's `rate_limits`."""
+    plan: str | None
+    windows: tuple
 
 
 class SolOutOfUsage(Exception):
@@ -79,6 +94,45 @@ def rollout_reset(log: str, sessions: str = SESSIONS) -> datetime.datetime | Non
     full = [w['resets_at'] for w in (limits.get('primary'), limits.get('secondary'))
             if w and (w.get('used_percent') or 0) >= FULL and w.get('resets_at')]
     return datetime.datetime.fromtimestamp(max(full)) if full else None
+
+
+LIMITS_FILES = 20   # latest_limits looks in this many of the newest rollouts at most
+
+
+def _window(raw) -> LimitWindow | None:
+    if not isinstance(raw, dict) or not isinstance(raw.get('used_percent'), (int, float)):
+        return None
+    reset = raw.get('resets_at')
+    return LimitWindow(int(raw.get('window_minutes') or 0), float(raw['used_percent']),
+                       datetime.datetime.fromtimestamp(reset, datetime.timezone.utc)
+                       if isinstance(reset, (int, float)) else None)
+
+
+def latest_limits(sessions: str = SESSIONS) -> tuple[datetime.datetime, Limits]:
+    """ChatGPT's plan windows as Codex last reported them: the `rate_limits` record with a window
+    whose own timestamp is newest (any session: the plan is the account's), and when, among the
+    LIMITS_FILES rollouts touched last (file times only bound the search: a file touched last
+    may hold an older reading). Raises LookupError if none has. Reads local files only."""
+    found = glob.glob(os.path.join(glob.escape(sessions), '*', '*', '*', 'rollout-*.jsonl'))
+    best = None
+    for path in sorted(found, key=os.path.getmtime, reverse=True)[:LIMITS_FILES]:
+        with open(path, encoding='utf-8', errors='replace') as f:
+            for line in f:
+                if '"rate_limits"' not in line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                    raw = rec['payload']['rate_limits']
+                    windows = tuple(w for w in (_window(raw.get('primary')),
+                                                _window(raw.get('secondary'))) if w)
+                    at = datetime.datetime.fromisoformat(rec['timestamp'].replace('Z', '+00:00'))
+                except (KeyError, TypeError, ValueError, AttributeError):
+                    continue
+                if windows and (best is None or at >= best[0]):
+                    best = at, Limits(raw.get('plan_type'), windows)
+    if best is None:
+        raise LookupError('No Codex session has reported ChatGPT usage yet')
+    return best
 
 
 def _slash(p: str) -> str:

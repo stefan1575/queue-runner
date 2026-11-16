@@ -36,6 +36,13 @@ class RunResult:
 
 
 @dataclass(frozen=True)
+class Launched:
+    """A thread `start` without `--wait` started: `{threadId, projectId, runId}`."""
+    thread_id: str
+    run_id: str | None
+
+
+@dataclass(frozen=True)
 class Thread:
     thread_id: str
     title: str
@@ -120,6 +127,16 @@ class T3Cli:
         if branch:
             args += ['--branch', branch]
         return self._run_result(args + [project, '-'], message)
+
+    def launch(self, project: str, message: str, *, title: str, provider: str | None = None,
+               model: str | None = None) -> Launched:
+        """Starts a thread in the project folder and returns at once (no `--wait`): T3 prints
+        `{threadId, projectId, runId}` (`threadStartCommand` in `server.asar`, read 2026-11-15)."""
+        args = ['thread', 'start', '--json', '--title', title]
+        if provider:
+            args += ['--provider', provider, '--model', model]
+        raw = self._json(args + [project, '-'], message)
+        return Launched(thread_id=raw['threadId'], run_id=raw.get('runId'))
 
     def send(self, thread_id: str, message: str) -> RunResult:
         """Sends a message and blocks until the run it starts ends."""

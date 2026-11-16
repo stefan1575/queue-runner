@@ -19,8 +19,10 @@ The cases, in the order a pass takes them, each decided once (`JobLog.decided`):
   is a fix round told to rework the approach), `hold` leaves the PR until `--release`,
   `carry-on` lets the loop go on as it is.
 - `failed`, `waiting`, `no-pr`: a build or fix thread ended failed (exit 1), waiting for an answer
-  (exit 2), or (a build) done without a PR. `retry` and `answer` send the earlier thread a
-  message, as a new job of its kind (`Runner.continue_job`); `close` closes the issue as not
+  (exit 2), or (a build) done without a PR. `retry` and `answer` pick up the earlier job as a
+  new job of its kind (`Runner.continue_job`): a message to its thread, or, when that thread is
+  cold and large (`limits.resume_choice`), a fresh thread with the decision's text first and,
+  for an answer, the question it answers; `close` closes the issue as not
   planned. After MAX_CHAIN such decisions on one issue or PR, the next goes straight to Stefan.
 
 A decision job (kind `decision`, `about` the job it decides on, `question`) ends with the action
@@ -46,9 +48,11 @@ FENCE = re.compile(r'^[ \t]*```+[ \t]*queue-runner-decision[ \t]*\r?\n(.*?)^[ \t
 # Each action: the fields it needs (non-empty strings), and what the runner does with it.
 ACTIONS = {
     'retry': (('add',), 'the runner sends `add` to the earlier thread, which carries on in its '
-                        'own worktree from its commits'),
+                        'own worktree from its commits (or, if that thread has gone cold and '
+                        'large, gives `add` first to a fresh thread on the same branch)'),
     'answer': (('text',), 'the runner sends `text` to the waiting thread as the answer to its '
-                          'question'),
+                          'question (or, if that thread has gone cold and large, gives its '
+                          'question and `text` first to a fresh thread on the same branch)'),
     'fix': (('add',), "one more fix round on the PR's head, with `add` first in its brief"),
     'carry-on': ((), 'nothing to do: the loop carries on as it is'),
     'hold': ((), 'the PR is left alone until Stefan releases it'),
@@ -195,12 +199,15 @@ def _template() -> Template:
 
 
 class Decider:
-    def __init__(self, config, *, github, t3, jobs, say, stopper):
+    def __init__(self, config, *, github, t3, jobs, say, stopper, effort=None):
         self.config, self.github, self.t3, self.jobs = config, github, t3, jobs
         self.say, self.stopper = say, stopper
+        from .effort import Effort   # ticket 39: how its thread starts, its effort read back
+        self.effort = effort or Effort(config)
 
     def next_case(self) -> Case | None:
-        for repo in self.config.repos:
+        from .config import working   # a repo Stefan stopped gets no decision (ticket 37)
+        for repo in working(self.config):
             if not repo.github:
                 continue
             try:
@@ -233,8 +240,9 @@ class Decider:
                          waiting[-1])
                 yield Case('reply', repo, n, s, prs[n], tuple(self._said(repo, n, s)))
         newest = {}   # each issue's newest build and each PR's newest fix: earlier ones are past
-        for j in jobs.jobs():
-            if j.kind in ('build', 'fix') and j.repo == repo.name and j.outcome != NOT_SENT:
+        for j in jobs.jobs():   # one that never reached a thread is no newer job: it never ran
+            if (j.kind in ('build', 'fix') and j.repo == repo.name
+                    and j.outcome not in (NOT_SENT, NOT_STARTED)):
                 newest[(j.kind, j.issue)] = j
         for (kind, n), j in sorted(newest.items(), key=lambda kv: kv[0][1]):
             if (j.open or j.outcome not in ENDED or not j.thread_id or jobs.decided(j.id)
@@ -401,8 +409,7 @@ class Decider:
         try:
             brief = self.brief(case)
             result = self.t3.start(repo.path, brief, title=job.title,
-                                   provider=self.config.claude_provider,
-                                   model=self.config.claude_model)
+                                   **self.effort.flags(repo))
         except Exception as e:   # T3 down, or the brief couldn't be built: the next pass
             self.jobs.ended(job.id, exit_code=None, outcome=NOT_STARTED,
                             error=f'{type(e).__name__}: {e}')
@@ -426,7 +433,8 @@ class Decider:
             except T3Error:
                 pass
         ran = {} if result is None else dict(
-            thread_id=result.thread_id, run_id=result.run_id, status=result.status)
+            thread_id=result.thread_id, run_id=result.run_id, status=result.status,
+            **self.effort.used(repo.name, case.name, result.thread_id, result.run_id))
         code = None if result is None else result.exit_code
         text = answer.text
 
@@ -467,7 +475,7 @@ class Decider:
                    f"{text}\n\nCarry on, and end as the job's brief says.")
         if continue_thread(case.about, message) == 'idle':   # never reached the thread
             self.jobs.ended(job.id, exit_code=code, outcome=NOT_STARTED, link=link,
-                            reason=text or None, error='sending to the earlier thread failed')
+                            reason=text or None, error='the earlier job was not continued')
             return 'idle'
         return 'started'
 

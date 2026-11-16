@@ -18,14 +18,16 @@ before). Commit after every completed step, with a message that says what change
 ```
 python3 -m queue_runner                       # run: both lanes, pass after pass (unattended: see Running unattended)
 python3 -m queue_runner --once                # one pass of each lane: at most one Claude job (a decision, a fix round or a build), merges, at most one Sol review
-python3 -m queue_runner --once --dry-run      # print the next Claude job's brief (a job cut off by a usage limit first, then a decision, then a fix round), list the stops it would file, what Sol would review and what would merge
+python3 -m queue_runner --once --dry-run      # print the next Claude job's brief (a job cut off by a usage limit first, then an ask thread Stefan asked for, then a decision, then a fix round), list the stops it would file, what Sol would review and what would merge
 python3 -m queue_runner --release NAME#N      # let the picker take a held issue again (a PR: retry its failed reviews, merges and fix round; let a stopped PR go)
 python3 -m queue_runner --review NAME#N       # Sol reviews that PR's head now, if adoption says it needs one
 python3 -m queue_runner --gate                # Claude's usage now, and whether a build, fix or decision would start
-python3 -m queue_runner --pause | --resume    # Stefan's knob: start no Claude job, or start them again
+python3 -m queue_runner --pause | --resume [LANE]   # stop a lane after its job, or let it carry on (claude by default; sol, all): the dashboard's Stop and Resume
+python3 -m queue_runner --pause | --resume NAME     # stop one served repo in both lanes, or let it carry on: the Build order card's Stop and Resume
 python3 -m queue_runner --reserve PERCENT     # the share of the week kept for Stefan (default 5)
 python3 -m queue_runner --stop                # stop the running runner
 python3 -m queue_runner --inbox               # everything waiting on Stefan: PRs ready to merge, needs-info stops, threads waiting for his answer
+python3 -m queue_runner --snapshot            # print the dashboard's snapshot from the state now (reads usage and GitHub once; no lock, writes nothing)
 ```
 
 **`--once`, the bare command and `--review` start real Claude builds, fix rounds and decision
@@ -45,10 +47,13 @@ second runner out: it logs `a second runner started (pid N) and exited at once` 
 `config.toml` names the repos it serves (GitHub repo, local clone, base branch, and
 `review_table` for a repo whose PR bodies keep a `## Review` table, `issues = "local"` for one
 whose tickets are local markdown: Local tickets, below, `merge = "stefan"` for one whose PRs Stefan
-merges himself: Stefan merges, below), in priority order; the runner's `state_dir` and `log_dir` (`~/.queue-runner/`, outside every served repo);
+merges himself: Stefan merges, below), in priority order (Stefan's build order on the dashboard
+wins: The build order, below); the runner's `state_dir` and `log_dir` (`~/.queue-runner/`, outside every served repo);
 `runs_dir`, `checkouts_dir` and `deps_dir` for reviews; `poll_seconds`, the pause after a pass that started
 nothing; `adopt_reviews_before`, the cutover date before which a blocking review the runner
-didn't run counts as its own for fix rounds (A Claude pass, step 4); `[claude]`, the T3 provider instance and model for Claude jobs; and `[sol]`,
+didn't run counts as its own for fix rounds (A Claude pass, step 4); `[claude]`, the T3
+provider instance, model and `effort` (default `high`) for Claude jobs (The effort, below);
+and `[sol]`,
 `codex-sol.sh` and the Git bash that runs it. `--config <path>` reads another one.
 
 ## Running unattended
@@ -60,6 +65,10 @@ Ticket 10 (`orchestration.md`, The runner and Sleep).
   `%APPDATA%/Microsoft/Windows/Start Menu/Programs/Startup/` since the cutover (ticket 13), with
   `T3 Code (Beta).lnk` beside it (Stefan, 2026-11-10), so T3's server comes up at logon too. By
   hand: double-click the shortcut, or `pythonw -m queue_runner` from this folder.
+- **The dashboard starts beside it** (ticket 29): `~/.queue-runner/Queue runner dashboard.lnk`
+  runs the same pythonw `-m dashboard` in this repo (The dashboard, below). `python3
+  scripts/make_shortcut.py` makes both shortcuts; `--startup` also copies both into the Startup
+  folder (`--dir`, `--startup-dir` and `--pythonw` name other places; its test uses temp folders).
 - **Stop:** `python3 -m queue_runner --stop` kills the process named in `<state_dir>/runner.pid`
   (written once it holds `runner.lock`, removed when it ends), and only a Python process: a stale pid
   that Windows gave to something else is left alone. A Claude job it was blocked on runs on in T3, and the
@@ -84,7 +93,8 @@ Ticket 10 (`orchestration.md`, The runner and Sleep).
   that nothing waits for any more, is deleted at the next sync (said in the log), and each
   expires an hour after its time so Windows deletes it if the runner is gone. Times under a
   minute ahead get no new task, but one already set is kept until it fires. Plain idle polls (`poll_seconds`) set no wake: a sleeping PC just
-  polls later. A Task Scheduler error is logged once and never stops the loop.
+  polls later. A lane Stefan stopped (Stopping a lane, below) waits for nothing, so it sets
+  none, and neither lane does while `control.json` is unreadable. A Task Scheduler error is logged once and never stops the loop.
 - **Sleeping by the wall clock:** the loop's waits (`run.wall_sleep`, the Sol lane's too) look at
   the wall clock every 30 seconds, since Windows' timers may not count time the PC slept.
 - `--once` sets no wake tasks.
@@ -100,8 +110,9 @@ Ticket 10 (`orchestration.md`, The runner and Sleep).
 
 ## Serving itself
 
-Ticket 14. The runner serves its own repo, `stefan1575/queue-runner` (`config.toml`, after
-leads-dashboard): GitHub issues, builds, Sol reviews, and it merges its own clean PRs.
+Ticket 14. The runner serves its own repo, `stefan1575/queue-runner` (`config.toml`, last, after
+game-backdrop and leads-dashboard; game-backdrop is first since 2026-11-15, Stefan's first run
+under the dashboard): GitHub issues, builds, Sol reviews, and it merges its own clean PRs.
 `.github/workflows/tests.yml` runs `python -m unittest` on Windows on every PR and on main, so
 "checks passed on H" means the tests passed on H.
 
@@ -146,10 +157,10 @@ isn't gated**, and neither is an Approach-note answer read from Stefan's words (
 - **Waiting:** a held pass is `gated`; the log says once why and until when (`Claude lane waits:
   ...`, and again only when that changes), and the loop sleeps `poll_seconds` or until the gate
   opens, if sooner. The Sol lane goes on.
-- **The knob** is `<state_dir>/gate.json` (`paused`, `reserve`), written whole by `--pause`,
-  `--resume` and `--reserve N` without the runner lock, and read before every Claude job, so it
-  works while the runner runs (within one `poll_seconds`). Pausing doesn't stop a running job or
-  the Sol lane.
+- **The knob** is `<state_dir>/gate.json` (`reserve` only, since ticket 30), written whole by
+  `--reserve N` without the runner lock, and read before every Claude job, so it works while the
+  runner runs (within one `poll_seconds`). Stopping a lane isn't the gate's: it's `control.json`
+  (Stopping a lane, below), read before the gate; an older `paused: true` here is read there.
 - **Learned cost:** each Claude job pass that started a thread appends to
   `<state_dir>/usage.jsonl`: the kind, the jobs it started, usage before (the gate's read) and
   after, and `spent` per window (null for a window that reset mid-job). The expected cost per kind
@@ -174,23 +185,40 @@ same limit) is started on it.
   count, in the run's error or the run's own last assistant message, never an earlier run's
   ("You've hit your weekly limit · resets ...", "Claude API rate limit reached").
 - **When:** 10 minutes after the reset T3 stored for the stop; 5h05m from the stop if it stored
-  none. The end record has `resume_at` and `context` (the thread's tokens, or null). Until then
+  none. The end record has `resume_at`, `context` (the thread's tokens, or null) and
+  `last_request` (when its last real request started, or null). Until then
   the Claude lane starts nothing (`gated`, said once: the limit is the whole account's); the Sol
   lane goes on. Then the usage gate checks the job as usual.
-- **In place or fresh:** `context` of about 50k tokens or less (`IN_PLACE_MAX`) continues the
-  old thread, as a continued job (`t3 thread send`, the message `limits.RESUME_MESSAGE`).
-  Anything bigger, or unknown, starts a fresh thread: the job's own brief rebuilt from its
-  sources (the issue; for a fix, the fix brief from the same review of H), plus
-  `templates/restart.md` (the old thread's link, where it starts, what it left uncommitted, its
-  last 3 messages). T3 can't make a worktree on a branch that exists, and makes it at the same
+- **In place or fresh** (ticket 38; `limits.resume_choice`, the one rule every caller uses: a
+  limit's recovery and a decision's `retry` or `answer`). It reads only what it can measure, at
+  the moment the job resumes: when the thread's last real request started and its context.
+  - **Warm** (that request started under 55 minutes ago, `WARM_FOR`): continue in place, any
+    size. Claude Code's subscription cache lasts an hour from a request's start; 55 minutes is
+    the research's margin under it.
+  - **Cold and under 120k tokens** (`COLD_FRESH_MIN`): continue in place.
+  - **Cold and 120k or more:** a fresh thread. 120k is the research's cold break-even
+    (`C* = F + o*E / (w + (n-1)*r)`: 93.6k for leads-dashboard's 50k starts, 113.6k for
+    queue-runner's 70k, with 25k of rereading and 5k of extra output) rounded up toward
+    continuing, since what a fresh thread loses isn't priced. The arithmetic and where its
+    evidence is thin are beside the constant in `limits.py`.
+  - **Unknown** age (no request record names the last call) is cold; unknown size is large.
+  In place is a continued job (`t3 thread send`; after a limit the message is
+  `limits.RESUME_MESSAGE`). Fresh is the job's own brief rebuilt from its sources (the issue;
+  for a fix, the fix brief from the same review of H), plus `templates/restart.md` (how the old
+  thread stopped and why it isn't continued, its link, where it starts, what it left
+  uncommitted, its last 3 messages). The new job's start record has `resume` (`how`
+  `in-place` or `fresh`, `why`, `last_request`, `idle_minutes`, `context`), and the log line
+  says the same (`Continuing ... in place: warm (...)`, `Restarting ... fresh after the usage
+  limit (cold (...) and N tokens ...)`). The stop's own log line says what would be chosen at
+  its resume time; the recovery chooses again when it runs. T3 can't make a worktree on a branch that exists, and makes it at the same
   folder (`~/.t3/worktrees/<project>/<branch>`), so `GitCli.free_branch` keeps the branch's tip
   under `refs/queue-runner/limit/<branch>` and anything uncommitted (untracked files too) as a
   `git stash create` commit under `.../<branch>-uncommitted`, removes the old worktree and
   deletes the branch; T3 then makes the same branch again at that tip, in that folder
   (`--worktree <tip> --branch <same>`). For a fix that's the round's own local branch
   `claude/fix-pr<n>-<H7>`; it still pushes to the PR's.
-- **The new job** has the old job's kind, issue, branch, title, H and round, and `about` the old
-  job: that's what marks it recovered. One that never reached a thread (`not-started`,
+- **The new job** has the old job's kind, issue, branch, title, H and round, `about` the old
+  job (that's what marks it recovered) and `resume`. One that never reached a thread (`not-started`,
   `not-sent`) doesn't count, so the next pass tries again. A fresh restart whose brief or branch
   can't be made (the old worktree won't go, the review isn't in the log) ends `restart-failed`:
   it isn't tried again, the old job stays the PR's writer, and Stefan gets a toast, until
@@ -227,6 +255,113 @@ starts, so what that pass's review decides waits for the next pass.
 waiting for an answer (until it ends or is released), Sol doesn't review it, it doesn't merge,
 and it gets no other fix round.
 
+## Stopping a lane
+
+`control.py` (ticket 30; spec `.scratch/queue-runner/dashboard-live.md`, One switch). **One
+switch per lane:** `<state_dir>/control.json`'s `lanes.<id>.stop`, which the dashboard's Stop,
+Resume and Stop all write (`dashboard/serve.py`, `apply_control`) and `--pause [LANE]` and
+`--resume [LANE]` write in the same format (`control.ask`; `LANE` is `claude` by default, `sol`
+or `all`). `"after-job"` lets the lane's job finish and starts nothing after it; null carries
+on; `"now"` is read as `"after-job"` until ticket 34.
+
+- **Read** (`control.read`, never raises) at the start of each lane's pass: the Claude lane after
+  settling (`Runner.plan`, a pass that ends `stopped`), the Sol lane before it files a stop,
+  merges or reviews anything (`Runner._sol_pass`), so a stopped Sol lane does none of them.
+  `--once` obeys too; `--review` is Stefan's own and doesn't ask (but merges nothing after,
+  below). The log says once
+  `The Claude lane is stopped by Stefan: it starts no job (Resume on the dashboard, or python3
+  -m queue_runner --resume)` (the reviewing lane's: `... --resume sol`), and `... runs again:
+  Stefan resumed it` when it changes.
+- **Asked again between jobs, in both lanes,** so a Stop asked while a job runs lets it finish
+  and starts nothing after it, in that pass too: the Sol lane before its merge pass, before
+  each merge in it (`Merger.merge_pass(halted=...)`), before each repo's stops and before its
+  review (`Reviewer.lane_stopped`); a review that ends after the Stop posts, and its merge or
+  stop waits for Resume (`Reviewer.stopped_now`, as for a stopped repo); the Claude lane before
+  a decision's retry or answer (`Runner.continue_job`): the decision ends `not-started` and the
+  earlier job stays as it was, so the case is decided again after Resume.
+- **Unreadable** (not JSON, not an object, `lanes` or `repos` there but not an object, a lane's
+  or repo's entry that isn't an object or has no `stop` the page could have written: a missing
+  `stop` is never a Resume): neither lane starts anything until it's fixed, said once. An odd
+  `repo_order` or ask entry is ignored instead (The build order, Read and snoozed). Any Stop or
+  Resume on the page, any other request it sends, or `--pause`/`--resume`, writes it afresh
+  from what they can read (`control.repaired`, and the page's `serve.usable`, the same file
+  from either end) and **lets go only of what it names**: an entry it can't use is written
+  stopped (`after-job`), and with no lanes to read (not JSON, not an object, `lanes` not one)
+  each lane is, so Resume on one lane leaves the other held until it's resumed too. JSON `null`
+  is not an object either: both ends mark no file as `MISSING`, never None, which `null` parses
+  to (review 2's F9). A `repos`
+  that isn't an object names no repo and is dropped. The page reads control.json through the
+  same repair (`App.control`), so it shows those lanes stopped.
+- **The older pause:** with `paused: true` in gate.json and no `claude` entry in control.json,
+  the Claude lane is stopped (since gate.json's mtime). An entry, either way, wins. The CLI's
+  `ask` (and `--reserve`, through `carry_over`) moves that pause into control.json and leaves
+  gate.json with `reserve` only; the runner itself writes neither file. Today's runner was
+  paused that way, so restarting onto this code starts no Claude job.
+- **Wake tasks:** a stopped lane sets none (`Runner.wake_times`).
+- `--gate` prints each lane's switch first (and each kind `waits: the Claude lane is stopped by
+  Stefan` while it is); `--once --dry-run` says a stopped lane's line before what it would do
+  once resumed.
+
+## The build order
+
+`control.ordered` and `Runner.take_order` (ticket 33). **`control.json`'s `repo_order`**, which
+the dashboard's Build order card writes (`apply_control`), is the order both lanes go through the
+served repos: the first repo with work gets the next job, and the Sol lane files stops, merges
+and reviews in that order.
+
+- **Used only when it names every served repo exactly once.** Missing or `[]` is config.toml's
+  order, said nothing. Anything else (a repo left out, one not served, one twice, not a list of
+  names) is ignored, config.toml's order stands, and the log says once why: `control.json's
+  repo_order is ignored (it leaves out queue-runner): repos are taken in config.toml's order,
+  ...`. It never makes control.json unreadable: the stops stand. A new order is said once:
+  `Repos are taken in Stefan's build order now: ...`.
+- **Taken up at the start of each lane's pass** (`plan`, after settling, and `_sol_pass`), next
+  to the stop, so a job already running goes on; the next pass chooses in the new order.
+  `config.set_build_order` replaces `config.repos` (the one change made to a loaded Config),
+  never changing the list in place, so a lane already going through the repos finishes in the
+  order it began; every part that reads `config.repos` follows. `config.toml_order` keeps
+  config.toml's.
+- **The snapshot** reads control.json once for the stops and the order: its `repos` are in the
+  order the lanes take up next, so the one that first shows a new order is the one whose
+  `control_read_at` is that file's `written_at`. The features and each lane's queue go through
+  `Facts.repos` in that order (ticket 32: The work lists, below).
+- `--once --dry-run` says the order first (`dry run: repos are taken in Stefan's build order:
+  ...`, config.toml's, or why his is ignored) and chooses in it.
+
+## Stopping one repo
+
+`config.working` and `Runner._take_repo_stops` (ticket 37; Stefan, 2026-11-15: so game-backdrop
+can be the first real run while leads-dashboard stays served). **`control.json`'s
+`repos.<name>.stop`** (`"after-job"` or null, with its `at`; Stop now stays a lane's) is written by
+the Build order card's Stop and Resume (`apply_control`'s `{"repo", "stop"}`) and by `--pause NAME`
+and `--resume NAME` (`control.ask(..., repos=[NAME])`; a lane's id and `all` keep their meaning, and
+any other name is refused with exit 2).
+
+- **A stopped repo gets nothing from either lane:** no decision, live run, fix or conflict round,
+  limit recovery or build in the Claude lane; no stop filed, merge, ready mark, noticing of
+  Stefan's merge or review in the Sol lane. Each of those goes through `config.working(config)`,
+  the build order less the stopped repos (`decisions.next_case`, `live.served`, `Runner.next_fix`,
+  `Runner.choose`'s builds and limited jobs, `stops.stop_pass`, `merge.merge_pass`,
+  `Reviewer.review_pass`); `config.repos` keeps every repo for what is only looked up or shown (a
+  job's own repo when it's settled, the Inbox, the snapshot). The next repo's work is taken.
+- **A job already running on it finishes** and is settled as usual. A review that ends after its
+  repo was stopped (`Reviewer.stopped_now` reads control.json then) merges nothing and files no
+  stop: both wait for Resume, when the next pass does them.
+- **Taken up with the build order** at the start of each lane's pass (`take_order`), said once
+  each: `leads-dashboard is stopped by Stefan: neither lane takes up its work, ...` and
+  `leads-dashboard runs again: Stefan resumed it`. A name that isn't served is ignored and said
+  once (`control.json stops old-repo, which is not served: ignored`). An entry the page couldn't
+  have written (`"now"`, not an object) makes control.json unreadable, as a lane's does.
+- **Its asks stay in the Inbox** (`inbox.collect` reads every repo); stopping the work answers
+  nothing. **Its waits set no wake task:** a stopped repo's limited job and live run are skipped,
+  so they set no `gate_until`. The usage limit is the account's, so another repo's job may then
+  start and meet the gate or the limit itself.
+- `--gate` lists the stopped repos after the lanes; `--once --dry-run` says them after the order
+  and chooses as the lanes would.
+- The snapshot's repo carries `stopped` (`{"at"}` or null); `control_read_at` moves as for any
+  write.
+- `--review NAME#N` is Stefan's own and still reviews a stopped repo's PR, but merges nothing after.
+
 ## A Claude pass
 
 1. **Settle.** A build or fix job the log shows open was left by a runner that died mid-job: its
@@ -237,7 +372,11 @@ and it gets no other fix round.
    recorded again. One that's running again, or that T3 can't read, also makes the pass start
    nothing: if its thread is gone for good, `--release` the issue. A decision left open was cut
    off with its runner: `not-started`, so it's decided again.
-2. **A decision** (`decisions.py`; Decision threads, below), before any fix round or build: the
+2. **An ask thread** (`ask_threads.py`; Deciding an ask in T3, below): first each open ask
+   thread's newest reply is read and a readable answer acted on; then, before any decision, a
+   thread Stefan asked for from the Inbox is opened (not waited on). A job a limit cut off still
+   comes first.
+   **A decision** (`decisions.py`; Decision threads, below), before any fix round or build: the
    first case the fixed flow doesn't cover.
 3. **Live steps** (`live.py`; Live steps, below): a repo's merges since its last live run, once no
    other merge is about to land.
@@ -282,7 +421,9 @@ and it gets no other fix round.
 **The job log** is `<state_dir>/jobs.jsonl` (`state.py`): `start`, `end` and `release` events, one
 JSON object per line, each synced to disk as it's written. A last line torn by a crash is
 ignored and cut off by the next write; a bad line anywhere else is an error. An end record has the thread id and link, run id, T3's exit code and
-status, the branch's commits, the PR found by branch, the worktree path and any error.
+status, the branch's commits, the PR found by branch, the worktree path, `effort` (the effort
+the run used, read back: The effort, below; on every Claude job's end, decisions and live runs
+too) and any error.
 Outcomes: `done` (exit 0, a PR found), `done-no-pr`, `failed` (exit 1), `waiting` (exit 2),
 `continued` (it was waiting, and a decision's answer went to its thread as a later job),
 `usage-limit` (exit 1 on a Claude usage limit: Usage limits, above),
@@ -335,11 +476,16 @@ head. A blocking review on H gets its ordinary fix round first.
 
 **A continued job** (a decision's `retry` or `answer`): a new build or fix job of the same issue,
 branch, title and H, whose start record carries the earlier job's `thread_id` and `about` (its
-id). The runner sends the message with `t3 thread send --wait --json`, and records the end as for
+id), and `resume`: whether the earlier thread is continued in place or a fresh thread starts
+(Usage limits, In place or fresh; the same rule). In place, the runner sends the message with `t3 thread send --wait --json`, and records the end as for
 any job of its kind; a dead runner's settle finds the thread by its id. A message that never
 reached a run (T3 failed and the thread isn't running) ends the new job `not-sent` (it counts for
 nothing; the issue stays held), puts a waiting job back to `waiting`, and the decision
-`not-started`, so the case is decided again.
+`not-started`, so the case is decided again. **A fresh thread T3 never started** (it failed
+before one existed, or a dead runner's settle finds none) is the same (`Runner._uncontinue`):
+the new job ends `not-started`, which holds the issue still (a build with `about` doesn't free
+it) and is no newer job to the decisions (`Decider.cases` passes over `not-started` and
+`not-sent`), the waiting job is `waiting` again, and the case is decided again.
 
 ## Decision threads
 
@@ -374,7 +520,14 @@ decision after it that says `fix` or `carry-on`; another stop's answer doesn't c
 written for that review even if the head has moved since. A reply not yet decided on holds the PR
 too, and one reply that answers several stops is decided once (`stops.undecided_replies`).
 
-**Acting:** `retry` and `answer` continue the earlier thread (above); `close` comments and closes
+**Acting:** `retry` and `answer` pick up the earlier job (A continued job, above): in its thread
+while that's warm or cold and under 120k tokens, else in a fresh thread on the same branch
+(`limits.resume_choice`; Usage limits, In place or fresh). A fresh thread's brief starts with
+`## Direction first`: how the earlier thread stopped, for an `answer` the question it asked (its
+last message, quoted), and the decision's message; then the job's own brief and
+`templates/restart.md`. A waiting job picked up fresh ends `continued` too. A fresh start whose
+brief or branch can't be made ends `restart-failed` and toasts, as after a limit; the decision
+stands, so it isn't decided again until `--release`. `close` comments and closes
 the issue as not planned; `fix`, `carry-on` and `hold` are read from the decision's record. A
 stop goes where Stefan answers it: on a PR, the `needs-info` issue (kind `decision`, or
 `approach-note`); on a build, a comment on its issue, which the build holds until `--release`; on
@@ -387,6 +540,56 @@ job decided on: the review, the stop, or the build or fix; `question`): the outc
 taken, `reason` the text acted on, `link` the thread (an approach note: the note's comment),
 `error` why an answer couldn't be read; `not-started` when T3 started no thread, so the next pass
 tries again.
+
+## Deciding an ask in T3
+
+`ask_threads.py` and `templates/ask.md` (ticket 35; spec `.scratch/queue-runner/dashboard-live.md`).
+On a stopped PR's ask (a stop of kind `review`, `approach-note`, `no-push`, `conflict`,
+`failed-check` or `decision`; not a live run's), the Inbox offers **Decide in T3**: the page writes
+`{"ask": <id>, "open": true}` (`control.json`'s `asks.<id>.open`, `{"at"}`; the first time stands,
+and ticket 36's keys in the same record are kept). The runner starts a thread for it only on that
+click, never by itself.
+
+- **Opening** (`AskThreads.next`, `open`): the Claude lane, after a limited job and before any
+  decision, takes the oldest request whose stop is still `filed` and not released
+  (`JobLog.released_ids`: a release leaves a stop's outcome `filed`), in a repo it works, with
+  the PR open, and starts `Queue runner ask: <repo>#<n>` in the repo's T3 project with no worktree,
+  **without waiting** (`T3Cli.launch`: `t3 thread start --json` prints `{threadId, projectId,
+  runId}`, read in `server.asar` 2026-11-15), then reads its link with `thread show`. Gated as a
+  decision; it teaches the learned costs nothing (`measured` records only passes that made a
+  Claude job of a gated kind). A stopped Claude lane or repo keeps the request and starts nothing
+  until Resume. **Once per ask:** an `ask` job (`about` the stop, `sha` its H, `question`
+  `reply`) ends `opened` with the thread's `thread_id`, `run_id` and `link`; T3 failing ends it
+  `not-started`, and the next pass tries again. A link T3 didn't give at the start is recorded
+  when the thread is next read.
+- **The brief** is the ask as the Inbox writes it (`asks.ask`, from the PR read now), the PR's open
+  findings and classes (`Decider._pr_part`) and the earlier threads; it tells the thread to set the
+  case out with a recommendation, talk it through, change nothing, and only once Stefan has
+  decided end with a `queue-runner-decision` block: the `reply` question's `fix` (`add`),
+  `carry-on`, `hold` or `stop` (`question`).
+- **Reading the answer** (`read_answers`, each Claude pass after the lane's switch, before
+  choosing): each opened thread's newest message (`thread show --messages 1`). Nothing happens
+  while it runs, when Stefan spoke last, or with no block yet; a block it can't act on is said once
+  and waits for another. A readable one ends the stop `answered` with `answer` `thread`, then a
+  `decision` job (`question` `reply`, `about` the stop, `sha` the PR's head now, `link` the
+  thread) is acted on by `Decider.act`, exactly as a decision thread on Stefan's reply: `fix`
+  orders one more round on H (`Fixer.order`), `hold` holds, `stop` files a `decision` stop.
+- **An answer on GitHub meanwhile still counts:** a stop no longer `filed` (his reply, a closed
+  issue, a release) or already decided is that answer's, and the thread's later block is never
+  acted on; once the thread's answer is recorded, the stop isn't `filed`, so a later reply
+  answers nothing. Decided once either way.
+- **The snapshot** (`ask_threads.mark`): every ask has `decide` and `also`. `decide` is null for an
+  ask that can't be opened, else `{state, at, note}`: `offered`; `asked` (the runner read the
+  request: `note` says when it starts, `waits_text`: when the Claude lane or the repo is resumed,
+  once Claude's current job ends, once the gate opens, or on the lane's next pass; or that T3
+  couldn't start it); `open` (`go` is the thread, "Decide in T3", and `also` the needs-info issue).
+  An ask answered in its thread moves to `answered` with `said` "In T3: <the decision's text>",
+  `go` the thread and `also` the issue; its timeline says "You opened a thread in T3 to decide
+  it." and "You decided in T3."
+- **The page** (`answerAt` in `dashboard/index.html`): offered, a Decide in T3 button beside the
+  needs-info link; asked, the button greyed with "You asked at ... The runner hasn't read it yet."
+  until `control_read_at` reaches it, then `decide.note`; open, the thread's link and the issue's.
+- `--once --dry-run` prints the ask thread it would open, with its brief.
 
 ## Live steps
 
@@ -441,7 +644,7 @@ pass says `merged`, the live run says `live` (the log, and a **Live.** comment o
 ## Stefan merges
 
 `merge.py` (ticket 17). A repo whose `config.toml` entry says `merge = "stefan"` (leads-dashboard,
-since 2026-11-10) isn't merged by the runner; `merge = "runner"` (the default) is.
+since 2026-11-10; game-backdrop, since 2026-11-15) isn't merged by the runner; `merge = "runner"` (the default) is.
 
 - **Ready:** where the merge pass would merge (the same re-check, A Sol pass, step 3, except an
   open live run doesn't hold it: his merge goes in the next batch), it labels the PR
@@ -462,7 +665,8 @@ since 2026-11-10) isn't merged by the runner; `merge = "runner"` (the default) i
   as the merge pass reads it), the `needs-info` stops filed and not answered or released,
   the builds a decision left to Stefan (until `--release`), and the threads waiting for his
   answer (a decision's `stop` on a waiting job), with their links; `Nothing waits on you.` when
-  there's nothing. A repo GitHub can't read is said after the list.
+  there's nothing. A repo GitHub can't read is said after the list. It prints `inbox.collect`,
+  the one collection the dashboard's Inbox is written from too (The Inbox's asks, below).
 - `--once --dry-run`'s merge lines say `would mark ready for Stefan at H` (or `ready for Stefan
   at H`) instead of `would merge`.
 
@@ -594,7 +798,8 @@ stop and links the issue (`<!-- queue-runner stop kind=K sha=H issue=I -->`; `le
 keeps it, like the reviews, from counting as a reply), then a toast. An issue that can't be filed
 makes the stop `failed`, and the next pass files it; a failed PR comment or toast is said and
 left. **Stop job records** (kind `stop`, `issue` = the PR): `stop` (the kind), `sha` H, `link`
-the issue, `reason`; outcomes `filed`, `answered` (with `answer`: `issue-closed` or `replied`) and
+the issue, `reason`; outcomes `filed`, `answered` (with `answer`: `issue-closed`, `replied`, or `thread` when
+Stefan decided it in its ask thread: Deciding an ask in T3, above) and
 `failed`.
 
 **Left alone until Stefan answers:** while a stop is `filed`, the PR gets no review (even on a new
@@ -645,20 +850,64 @@ package, no network, no runner code, no T3, no GitHub. One HTML file, served by 
 library.
 
 ```
-python3 -m dashboard             # the runner's snapshot, http://127.0.0.1:5289/
-python3 -m dashboard --sample    # sample data, no runner needed; ?sample=<state> picks a state
+python3 -m dashboard    # http://queue.localhost:5289/ is the runner's; http://localhost:5289/ is sample data
 ```
+
+- **One process, and the address is the switch** (ticket 29; Stefan, 2026-11-15). The request's
+  `Host` picks the data: `queue.localhost:<port>` is the runner's snapshot and control file in
+  `--state-dir`; `localhost:<port>` and `127.0.0.1:<port>` are sample data, whose controls go to
+  a temp folder removed when the dashboard stops. Any other `Host` is refused (403). There is no
+  `--sample` any more. `?sample=<state>` and `/earlier/take-N.html` work on the sample addresses
+  only, and the real snapshot is served with any `sample` key taken out, so the sample menu and
+  the Queue's variant pill (both shown only when `snap.sample` is set) never show there. The
+  start line names both addresses and which is which.
+- **A control is taken only from the address it was sent to:** `POST /control` needs an
+  `Origin` equal to `http://<its Host>` (a browser sends one on every POST), so the sample page
+  can never write the real control file, and a request with no `Origin` (not a page) is refused.
+- **No snapshot yet** on the real address: `/snapshot.json` is a 404 whose `start` says how to
+  start the runner (its shortcut, or `pythonw -m queue_runner` in this repo), and the page
+  shows that and no controls.
+- **One dashboard per port** (`serve.Server`): it binds with `SO_EXCLUSIVEADDRUSE` and without
+  `SO_REUSEADDR` (Python's `HTTPServer` sets it, which on Windows let three dashboards listen on
+  5289 at once). A second start says `A dashboard is already running on port N` and exits 3. It
+  starts at logon from the Startup folder (Running unattended, above).
 
 - **Two files are the whole contract,** both in the state folder (`--state-dir`, default
   `~/.queue-runner/state`). `snapshot.json`: the runner writes it whole, the page reads it.
-  `control.json`: the page writes it whole, the runner reads it. **The runner writes neither yet**
-  (ticket 18's remaining boxes), so today only `--sample` shows anything.
+  `control.json`: the page writes it whole, the runner reads it. **The runner writes
+  `snapshot.json`** (ticket 28, below) and obeys `control.json`'s stops (ticket 30: Stopping a
+  lane, above) and its `repo_order` (ticket 33: The build order, above).
+- **The runner's snapshot** (`queue_runner/snapshot.py`, ticket 28; spec
+  `.scratch/queue-runner/dashboard-live.md`). In continuous mode only (`--once` writes none):
+  `Publisher` writes it whole (a temp file, then `os.replace`) after every pass of either lane,
+  and every `write_every` (30) seconds from its own thread, so it goes on while a lane is
+  blocked in a job. A write that fails is logged once (`The dashboard snapshot was not
+  written ...`, then `... is written again`) and never stops a lane. `build(Facts)` is pure, one
+  small function per part; `Snapshots` gathers the facts: the job log (each lane's open job),
+  each lane's switch (`control.read`: a stopped lane is `stopped`, `stopped.at` when Stefan
+  asked, or gate.json's mtime for the older pause; `stopping` while its job still runs; an
+  unreadable control.json makes an idle lane `waiting` with the reason; `control_read_at` is
+  the `written_at` of the control.json the snapshot read, since each lane reads it again before
+  it starts anything; `knob.paused` is whether the Claude lane is stopped), gate.json's reserve, the learned costs (`CostBook.learned`), the Claude lane's wait as its last
+  pass left it (`Runner.claude_wait`: the gate's verdict text or a limit's resume), Sol's resume
+  (`JobLog.sol_resume_at`), and the titles the passes read (`Runner.titles`). **Sources** are the
+  last real call of each kind: the CLI wraps GitHub and T3 in `Calls.watch` and the gate's usage
+  reader in a `Watch`, so every call the passes make is recorded (a failing one keeps its last
+  good time). **GitHub is never read for the snapshot.** Only the publisher's own 30-second writes
+  read afresh: Claude's usage and ChatGPT's (`sol.latest_limits`, the newest `rate_limits` in
+  Codex's rollouts by the record's own timestamp, among the 20 files touched last, the account's) at most every 5 minutes (`READ_EVERY`), and an open Claude job's
+  thread in T3 until found. `asks` and `answered` are ticket 31's (The Inbox's asks, below);
+  `features`, `issues`, `prs`, `activity` and each lane's `queue` ticket 32's (The work lists,
+  below). `stop_now` is unavailable until ticket 34. `--snapshot` prints one built the same way
+  with no runner in memory (its pid and start from runner.pid, a limit's wait from the job log),
+  reading GitHub once itself for the Inbox and the work (git only read: nothing fetched).
 - **The snapshot's shape is what `dashboard/sample.py` builds** (version 1): `written_at` and
   `write_every` (a snapshot older than three times that, or 90 seconds, means the runner has
   gone quiet: the page says so, greys the health readings and takes the controls away),
   `control_read_at`, `sources` (health; `short` is the name beside its dot, `group` sorts them
   on the page: `provider`, `local` or `external`), `repos` in build
-  order, `asks` (below), `answered` (asks Stefan has answered that the runner hasn't acted on
+  order (each with `stopped`, `{"at"}` or null: ticket 37), `asks` (below; each with `read` and
+  `snoozed_until`: Read and snoozed, below), `answered` (asks Stefan has answered that the runner hasn't acted on
   yet: an ask plus `answered`: `at`, `said`, `next`; not counted as waiting on him), `lanes` (each with its `queue`, what it takes up next, in order, across
   repositories, a job a limit cut off first, and for the reviewing lane the PRs waiting for their review; `queue_empty` says why there's none), `usage`, `features` (in build order: the repos'
   order, then the feature whose first open ticket has the lowest number, a finished one last; each with `tickets`, its
@@ -672,8 +921,19 @@ python3 -m dashboard --sample    # sample data, no runner needed; ?sample=<state
   `chatgpt`), which picks the mark beside the name; the reviewing lane's id stays `sol`. Times
   are ISO strings; the page formats them. `sample.STATES` names every state the page has to show.
 - **Control** (`serve.apply_control`): `POST /control` takes `{"lane", "stop"}` (`"after-job"`,
-  `"now"` or null to carry on) or `{"repo_order": [...]}`, and anything else is refused. The page
-  shows a request as asked until `control_read_at` reaches its time.
+  `"now"` or null to carry on), `{"repo", "stop"}` (`"after-job"` or null: Stopping one repo,
+  above), `{"repo_order": [...]}`, an ask's `{"ask", "read"}` (true or false) and `{"ask",
+  "snooze_until"}` (an ISO time with its offset, kept in this PC's, or null), or `{"ask": <id>,
+  "open": true}` (`asks.<id>.open`: Deciding an ask in T3, above), and anything else is refused;
+  each write keeps what the others wrote. The page shows a request as asked until
+  `control_read_at` reaches its time.
+- **A stopped repo on the page** (ticket 37): each row of the Build order card has Stop or Resume
+  and says "Stopped since ..." (or "Asked to stop/resume: the runner hasn't read it yet"); its
+  work reads as stopped wherever it's listed: a dashed "Stopped" tag beside its name on Inbox rows
+  and repo tags, "Stopped." in the repository switcher, and "Its repository is stopped" as an
+  unfinished ticket's standing on the Queue (`repoOff`, `offTag`, `standing`). The sample's
+  `repo-stopped` state stops leads-dashboard while its two jobs finish: the queues hold
+  queue-runner's work only, and its asks stay.
 - **Only this PC:** it binds 127.0.0.1, and refuses a request whose `Host` isn't its own address
   or whose `Origin` is another site's, so a web page elsewhere can't stop a lane.
 - **An ask is written to be picked up cold** (Stefan: he may come back a week later with the
@@ -683,7 +943,86 @@ python3 -m dashboard --sample    # sample data, no runner needed; ?sample=<state
   `because` (the specifics), `timeline` (what has happened, oldest first: each step's `at` and
   a whole sentence as `text`; Stefan found fragments too short to read), `question`, `options`,
   `holds_up` and `go` (where it's answered: `label`, `url`, and `where`, `t3` or `github`, which
-  picks the mark on the button). The runner lists asks in the order they're worth taking.
+  picks the mark on the button), `decide` and `also` (whether it can be decided in a T3 thread
+  and where that stands, and the other place to answer it: Deciding an ask in T3, above). The
+  runner lists asks in the order they're worth taking.
+- **The Inbox's asks** (ticket 31; `inbox.py` and `asks.py`). **One collection:**
+  `inbox.collect` reads the job log and GitHub for what waits on Stefan (`ready` PRs, open
+  `stop`s, `build`s a decision left to him, waiting `thread`s, and `answered` stops), each with
+  what its ask is written from: the PR's or issue's title, page and body, the body of the issue
+  a PR closes, what it holds up (GitHub's native dependencies, `GhCli.blocking`, and `Blocked
+  by:` lines: leads-dashboard records its blockers only natively), an Approach note's text and
+  Stefan's words, and each review's `decision.json` from its run folder. `--inbox` prints it;
+  **the Sol lane reads it after every pass while a snapshot is published** (`Runner._read_inbox`,
+  `inbox.Reader`), even while Stefan has stopped that lane (it only reads), and the snapshot
+  writes from that read, never from GitHub. **GitHub down:** a repo it can't read keeps the last
+  good read's asks, and the GitHub source turns red with that read's time and an `affects`
+  line (`asks.stale_github`). **Part-way** (one ask's PR, issue, dependencies or comments
+  failing, `_Reader.fill`): that ask is the last good read's (`inbox.key`, `Inbox.unfilled`;
+  listed bare only if there's none), the others this read's, and the source says so the same
+  way, with the time of the repo's last whole read. GitHub saying a thing isn't there (HTTP
+  404, a deleted issue: `inbox.gone`) is the ask's own state: said, the ask listed as the job
+  log has it, and not stale. **Templates, no AI** (`asks.render`): `about` is the first prose
+  (markdown stripped) under the closed issue's "What to build" or "Summary", else its first
+  paragraph, else the PR's, clipped to 300 characters; `because` the stop's reason plus the
+  Important findings still open ("Open now: F3, ..."), an approach note's first paragraph after
+  it; `timeline` the job log on that PR or issue, oldest first, a whole sentence per step (a
+  build, each review and the kinds of problem it raised, each fix or conflict round, decisions,
+  stops, answers, ready marks, merges, live runs, `--release`s; a tie goes to the job written
+  first). **Kinds:** a review stop, approach note, `no-push` and `conflict` are `stuck`; a
+  failed check and a `live` stop `broken`; a decision's stop on a PR, a build a decision left to
+  him, a waiting thread and `live-todo` `decision`; a ready PR `merge`. Listed broken, stuck,
+  decision, merge, oldest first inside a kind. **Ids** are stable: `stop-<job>`,
+  `decision-<decision job>`, `thread-<job>`, `merge-<repo>-<n>-<head7>`. An approach note
+  offers rework, fix on and hold with its recommendation marked; a PR stop offers a reply, hold
+  or closing the issue; a merge, a waiting thread none. **Answered** (`inbox.finished`): the
+  newest answered stop on an open PR stays until the runner has acted: after a reply, the
+  decision on it ended (and the fix round it ordered); after a closed issue, the next job on the
+  PR ended. `said` is his newest words on the PR or its issue since the stop (`closed #N` for a
+  closed issue); `next` says what the runner does with it.
+- **The work lists** (ticket 32; `work.py`). **The read** (`work.read_repo`, kept per repo by
+  `work.Reader`): the Sol lane reads it after every pass while a snapshot is published, with the
+  Inbox, through one `work.Memo` (each GitHub call once for both: about 80 `gh` calls and a
+  minute for the three served repos, 2026-11-15, half of it the Inbox's). It goes through the
+  lanes' own code, so the queues are what the lanes take up: `Decider.cases`,
+  `LiveSteps.batch(record=False)` on a git that never fetches (`work.NoFetch`) and a stopper that
+  files nothing, `Fixer.candidates`, `picker.pickable` (every build `pick` could take, in its
+  order), `Reviewer.candidates`, and `Merger.steps` (the merge re-check step by step: `why_not`
+  is its first failing step). Issues come from `GhCli.work_issues` (one paged GraphQL query:
+  labels, parent, sub-issues, native blockers). Every repo is read, a stopped one too, and
+  `--snapshot` reads the same way. **GitHub down:** a repo it can't read keeps its last good
+  read, and the GitHub source says so (`work.stale_github`, after the Inbox's line). **A
+  part failing on its own** (the builds, what's in flight, decisions, live steps, what's merged
+  and not live, the findings, fix rounds or reviews, or one PR's merge re-check, reviews, or
+  its own reading in the lanes' readers, said there as `reading it failed`) keeps that part
+  from the last good read (`work.kept`, `RepoRead.failed`; a PR's own parts only while its
+  head is the same), and the repo is stale, since its last whole read, until a read has every
+  part. **The
+  lists** (`work.lists`, `work.queue`) are written from the last read and the job log now, in
+  `Facts.repos`' order, a stopped repo's work left out of both queues. **The Claude lane's
+  queue** is `Runner.choose`'s order: the jobs a limit cut off, decisions, live steps (ref the
+  batch's newest PR), fix and conflict rounds (only those that may go now: the next conflicted
+  PR waits), then builds in the picker's order; its open job isn't listed again. **The reviewing
+  lane's** is the PRs Sol would review now. **Issues:** each repo's open issues but its specs
+  and maps (an issue with sub-issues is a feature) and the runner's `needs-info` issues, plus
+  each feature's closed sub-issues (`done`, or `merged` while a merge commit since the last live
+  run names its branch). An issue with an open PR takes its PR's family (`you` while it's held or
+  ready for him, `fixing` while a round is queued or running, else `review`), with the PR's
+  status as `note`; then an ask on it is `you`; a build the job log holds says what it left
+  (`building`, or `you` with the `--release` that frees it; a build a release settled holds
+  nothing, `View.released`); then in flight, `not-ready` without
+  `ready-for-agent`, `ready` if the picker would take it (`pick` its place in the Claude
+  queue's builds), else `blocked`. `blocked_by` is GitHub's dependencies and `Blocked by:` lines,
+  as `repo#n`. **Features:** each open issue with sub-issues ("Spec:" or "Map:" taken off its
+  title), its tickets its direct sub-issues, ordered as `dashboard/sample.py` orders them.
+  **PRs:** `status` and `next` from the open job on it, its repo's stop, a hold for Stefan, the
+  merge re-check (`checks`, one per step, for a PR clean on its head), its fix or conflict round
+  and its place in the queue, then why Sol leaves it: **left alone** says so and what lets it go
+  (a review posted before the cutover or by hand: a new head; two failed reviews: a push or
+  `--release`). `timeline` is the job log on it by head (its build on the first head reviewed or
+  fixed), each event a whole sentence (`asks.Story`'s), a review with its findings from its
+  `decision.json`. **Activity:** every job's events and the releases, newest first, the latest
+  200, with the issue's or PR's title as `detail`.
 - **How it looks** is explained at the top of `dashboard/index.html`. **The Inbox reads like a
   mail client:** the list down the left for the page's whole height, in the runner's order,
   with the sidebar's Inbox entry carrying the count. **A row reads like a thread in T3's
@@ -721,7 +1060,7 @@ python3 -m dashboard --sample    # sample data, no runner needed; ?sample=<state
 - **The Queue page is a prototype in three variants** (ticket 21; `queue()` in
   `dashboard/index.html`, sample data only, none agreed). `?page=queue&variant=a|b|c`; the pill
   over the sidebar's foot and the left and right arrow keys turn between them (the pill shows
-  with `--sample` only), and the last one looked at is remembered in the browser. **A, features
+  on the sample addresses only), and the last one looked at is remembered in the browser. **A, features
   first** (`queueA`): a card per feature in build order, with its bar, what's left in a sentence
   ("4 to go: 2 wait on you, 1 merged but not live, 1 blocked.") and its tickets as rows in the
   order they're built; a chip or a feature's name narrows the page to it (`?feature=<id>`,
@@ -753,9 +1092,21 @@ python3 -m dashboard --sample    # sample data, no runner needed; ?sample=<state
   out of the list and the count until a time he picks (3 hours, tomorrow 9:00, next Monday
   9:00); it sits in the Snoozed group, still holding its work up, and its row's Unsnooze
   button (or the briefing's) undoes it. Choosing the snooze times in Settings is pinned (ticket 24).
-  **Both live in the browser's localStorage while the page is a prototype**, so Firefox and
-  Chrome disagree; the real ones go through `control.json` (not built), so every browser agrees
-  and the runner can hold a snoozed ask's toast.
+  **Both are kept with the runner** (ticket 36), so every browser agrees: the page asks
+  `{"ask", "read"}` and `{"ask", "snooze_until"}` (Control, above), kept in `control.json` as
+  `asks.<id>` with `read` and `snooze_until` beside that object's other keys (ticket 35's
+  `open`); the runner reads them (`Switch.asks`, leniently: an entry it can't use is left out
+  and never stops a lane) and the snapshot's asks and answered asks carry `read` (false with no
+  entry) and `snoozed_until`, null once its time has passed (`snapshot._marks`). A snoozed ask
+  stays in `asks`, so it still holds its work up; the page leaves it out of the count. Until
+  `control_read_at` reaches the page's last write, its entry stands in for the snapshot's
+  (`mark()` in `index.html`), so a click shows at once. **An ask that's gone takes its entry
+  with it:** each write drops the entries of asks the snapshot no longer lists (asks or
+  answered; `App.ask_ids`, every sample state's on the sample addresses; no snapshot to go by
+  drops nothing). An ask is keyed by its id only: a stop, review or head that comes back is a
+  new job and a new id, so it's unread again. The sample's pretend runner reads its own control
+  file's `asks` like the rest (`_obey`). The folded groups stay in the browser. The runner
+  holding a snoozed ask's toast isn't built.
 - **A point in time is written whole** (Stefan, 2026-11-15): `stamp()` gives "November 15, 2026
   Sunday 1:14pm", for when an ask began waiting, a usage window's reset, the runner's start and
   a snooze's end. A list row keeps the short age ("2 h") with the whole time on hover. Choosing
@@ -774,7 +1125,7 @@ python3 -m dashboard --sample    # sample data, no runner needed; ?sample=<state
   `?variant=a|b|c` and `?feature=<id>` (the Queue's arrangement, and the feature A is narrowed
   to), `?view=pyramid` and `?pr=<repo>:<n>` open the page there.
 - **Earlier takes, while the look is being agreed:** `dashboard/earlier/take-N.html` is the page
-  as it was before a rework, served at `/earlier/take-N.html` with `--sample` only and linked
+  as it was before a rework, served at `/earlier/take-N.html` on the sample addresses only and linked
   from the sidebar's sample menu (`sample.EARLIER`). Before reworking the page again, copy it
   there as the next take (take 8 is the page before the Overview was built, take 9 the page
   before the Queue was), add it to
@@ -855,8 +1206,9 @@ bug with a failing test; CI still gates the merge.
   failed, interrupted, cancelled). It also exits 1 with nothing on stdout when T3 itself fails
   (server down, unknown project): `T3Error`. Source: `finishRun` and `ThreadNeedsInputError` in
   the app's `resources/server.asar` (`apps/server/dist/binCli-*.mjs`).
-- **No reasoning-effort flag.** CLI threads get T3's default effort for the model. T3 sets
-  effort through session options; only `ultrathink` goes into the prompt (`Ultrathink:`).
+- **No reasoning-effort flag.** T3 sets effort through the thread's model selection (its
+  `options`, `{id: "effort", value}`); only `ultrathink` goes into the prompt (`Ultrathink:`).
+  How the runner gets `high` anyway is The effort, below.
 - **Worktrees are made by T3**: `--worktree <base ref> --branch <name>` runs
   `git worktree add -b <name>` from the base ref, under `~/.t3/worktrees/<project folder>/<branch
   with / as ->`. T3 doesn't fetch first, so the runner fetches `origin/<base>`. A leftover local
@@ -894,7 +1246,63 @@ bug with a failing test; CI still gates the merge.
   `~/.claude/projects/<folder>/<session id>.jsonl`, and the context is its last real assistant
   record's `usage`: `input_tokens + cache_creation_input_tokens + cache_read_input_tokens +
   output_tokens` (Claude Code's `<synthetic>` limit message has zeros and is skipped). Checked on
-  the real stop: 108,633 tokens.
+  the real stop: 108,633 tokens. **When that call's request started** (ticket 38,
+  `limits.last_call`): the assistant record's `requestRef` names an `api-request` record (`id`,
+  `timestamp`: the request's start, which the cache's hour counts from) in the same transcript;
+  no such record (older Claude Code; the real stop's fixture has none) reads as unknown.
+  `tests/fixtures/claude/transcript-requests.jsonl` is hand-made in the shape of a real
+  2.1.319 transcript.
+
+## The effort
+
+`effort.py` (ticket 39; Stefan, 2026-11-15: "keep it at high by default", until his Claude Max
+plan ends). Every Claude job (build, fix or conflict round, decision, live run) is meant to run
+at `[claude] effort` (`high`).
+
+- **What T3 does** (read 2026-11-15 in `resources/server.asar`, `apps/server/dist/`):
+  `threadStartCommand` (`binCli-*.mjs`) calls MCP's `t3_thread_launch` with
+  `modelSelection: {instanceId, model}` and no options when `--provider` and `--model` are given,
+  and with no `modelSelection` when they aren't. `t3_thread_launch` (`server-*.mjs`) takes the
+  given selection as it is; with none, the project's default (`resolveProjectSettings` then
+  `resolveNewThreadModelSelection`), options and all, swapped for the fallback model while the
+  default's provider is out of usage. A selection with no effort option compiles to the model's
+  default (`compileClaudeModelSelection`: Opus 5.5's is medium, `model-manifest.json`).
+- **Where a project's default lives:** T3's settings are folded (`projectSettingsFolded: true` in
+  `~/.t3/userdata/settings.json`), so launch reads only that file's
+  `projectSettingsOverrides[<project id>].defaultModelSelection`, else its global
+  `defaultModelSelection` (`resolveProjectOverrides`, `ManagedEndpointRuntime-*.mjs`). The
+  project row's `default_model_selection_json` (`projection_projects`, what MCP's
+  `t3_project_update` writes; personal-ops has Opus 5.5 at high there) is not read once folded.
+  T3's Settings page with a project chosen, New threads, Model ("Model for new threads in this
+  project.") writes the override (client `ProjectDefaultsSettings-*.js`).
+- **Checked live on 2026-11-15** in the "queue-runner sandbox" project, Haiku threads, reading
+  each run's `modelSelection` in `orchestration_v2_projection_runs` and its Claude transcript:
+  A, `--provider claudeAgent --model claude-haiku-5-5`: the run's selection has no options, and
+  the transcript's API request had `output_config.effort: "medium"`, its assistant record
+  `effort: "medium"`. Then the sandbox's project row was set to Haiku at high with
+  `t3_project_update` (it still is). B, no `--model`: refused, "Pass modelSelection: the project
+  has no default model.", so the row isn't read. C, `--model` again: medium, as A. The override
+  itself wasn't set live: no T3 tool writes it, and editing `settings.json` changes T3's global
+  settings. That step is code-read; each job's read-back confirms it.
+- **So the runner** (`Effort.flags`) starts a repo's job with no `--provider`/`--model` only when
+  its T3 project's default, read as launch reads it (`T3Files.project_default`), is the config's
+  provider, model and effort and no fallback model is set (one would start it on another
+  model); else with `--model` as before, at the model's default. It says which, per repo, at
+  start and again whenever it changes, with the step when it isn't set. A continued job (`t3
+  thread send`) keeps its thread's selection.
+- **Read back** (`T3Files.run_effort`, into the end record's `effort`): the `effort` on the
+  thread's Claude transcript's assistant records since the run started (Claude Code's own record
+  of what it sent; `<synthetic>` ones skipped), else the effort option on T3's run record, else
+  null. Anything but the config's effort is said once per repo (`<repo>: <job> ran at effort
+  medium, not high`), and an unreadable one too; it's said again only when it changes. Only
+  `main` reads T3's files (`effort.T3Files`, read-only); a `Runner` without an `Effort` (tests,
+  `live_merge.py`) starts with `--model` and records no effort.
+- **Stefan's step, once per served project** (game-backdrop, leads-dashboard, queue-runner; none
+  is set on 2026-11-15, so all three run at medium until then): in T3, Settings, choose the
+  project, New threads, Model: Claude Opus 5.5, Reasoning: High, and leave its fallback model
+  unset. The runner's start line then says `<repo>: its T3 project's default model is
+  claude-opus-5-5 at effort high; its Claude jobs start on it (no --model)`. If it still says
+  "it has no default model", the change went to the project row, which launch doesn't read.
 
 ## Live check
 
@@ -905,7 +1313,8 @@ python3 scripts/live_sandbox.py
 This runs one real build job, a small Haiku thread, through `Runner.run_build` on a hand-made
 issue ("Add a line to README") in the sandbox. The sandbox is `~/.queue-runner/sandbox/repo`: T3
 project "queue-runner sandbox", with a bare `../origin.git` as its `origin` and no GitHub. Its
-job log and runner log stay in `~/.queue-runner/sandbox/`. Before running it again, delete the
+job log and runner log stay in `~/.queue-runner/sandbox/`. It says how the sandbox's jobs start
+(The effort, above) and its record has the `effort` read back. Before running it again, delete the
 `claude/add-a-line-to-1` branch locally and in `origin.git`, or the job is held as
 `branch-exists`.
 
@@ -965,11 +1374,19 @@ The usage gate: `tests/test_usage.py` (the real response, the login, never the t
 `tests/test_gate.py` (`decide()` with a fixed clock, the knob, learned costs) and
 `tests/test_gating.py` (the run loop and the knob through `main`, `FakeUsage` in `fakes.py`; every
 test that runs `main` passes one, so none reads the real endpoint).
-Limit recovery: `tests/test_limits.py` (the resume time, in place or fresh, `T3Store` on a temp
+Limit recovery: `tests/test_limits.py` (the resume time, in place or fresh (`resume_choice` with
+a fixed clock), the last call's request start, `T3Store` on a temp
 SQLite holding the real stop's rows, the transcript, the auto-resume warning) and
 `LimitRecoveryTest` in `tests/test_run.py` and a fix round's in `tests/test_fix.py` (fixed clocks,
-`FakeLimits` in `fakes.py`; every test that runs `main` passes it, and a `t3_settings` path, so
-none reads T3's real database or settings).
+`FakeLimits` in `fakes.py`, whose `starts` and `default_start` give a thread's last request
+start; every test that runs `main` passes it, and a `t3_settings` path, so none reads T3's real
+database or settings). A decision's `retry` and `answer` in place or fresh: the `cold` tests in
+`tests/test_decisions.py` (its `Runner` gets a `FakeLimits` whose threads are warm unless a test
+says otherwise).
+The effort: `tests/test_effort.py` (`[claude] effort`; `T3Files` on a temp `settings.json`,
+SQLite and transcript folder; the start flags, end records and log lines through a real build,
+decision, continued job, fix round and live run with `FakeFiles`; the start line through `main`
+with a `T3Store` on the temp files).
 Local tickets: `tests/test_tickets.py` (both status forms, blocker lines, a sandbox git repo
 with three tickets in a blocker chain) and `LocalTicketsDryRunTest` in `tests/test_cli.py`.
 Live steps: `tests/test_live.py` (the answer block, the batch from `FakeLiveGit`, about to land,
@@ -984,8 +1401,54 @@ Running unattended: `tests/test_wake.py` (`Waker` against `FakeScheduler` in `fa
 task XML, `Schtasks` on canned calls, `wall_sleep`, a second start, waiting for T3, `--stop`
 with a fake kill); every test that runs `main` continuously passes a waker, so none touches the
 real Task Scheduler.
-The dashboard: `tests/test_dashboard.py` (control requests, the server on a free port, every
-sample state, and that the page loads nothing from outside itself).
+Deciding an ask in T3: `tests/test_ask_threads.py` (the page's request, the record kept by
+`--pause`/`--resume`, `T3Cli.launch` on canned output, then the decision tests' stopped PR #20
+through the real `Runner` with `FakeT3.launch`: opened once on his click, gated, kept while a lane
+or repo is stopped, its answer read and acted on, a GitHub answer winning, the snapshot's `decide`
+and `also` held to the sample, and `--once --dry-run`).
+The dashboard: `tests/test_dashboard.py` (control requests, the server on a free port with both
+addresses' `Host` and `Origin`, every sample state, that the page loads nothing from outside
+itself, and `python -m dashboard` started twice on one free port: the start line, exit 3).
+Read and snoozed: `tests/test_read_snoozed.py` (control.json's `asks` read and kept by
+`control.py`, and the snapshot's `read` and `snoozed_until` from `snapshot.build` on the Inbox's
+fixtures); the requests, dropping gone asks and the sample's pretend runner in `test_dashboard.py`.
+The logon shortcuts: `tests/test_make_shortcut.py` (real `.lnk` files in temp folders, read back
+through WScript.Shell).
+The runner's snapshot:
+`tests/test_snapshot.py` (`build` from plain facts with a fixed clock, `Calls`, `Watch`,
+`Publisher`, `Snapshots` on a temp state folder, and the contract: the real snapshot holds the
+sample's keys at the top, in a lane, its job, a plan, a window and a source) and
+`tests/test_snapshot_runner.py` (through `main`: written while a build blocks the lane, after a
+run, paused, none with `--once`, `--snapshot` with the lock held; `main`'s `sol_usage` and
+`snapshot_every` keep it off Codex's real rollouts and fast). `sol.latest_limits` is in
+`tests/test_sol.py`.
+The Inbox's asks: `tests/test_asks.py` (`collect` on a temp job log and `FakeGitHubForReviews`,
+written by `snapshot.build`: each kind's sentences and timeline, the approach note's options,
+holds_up from native dependencies and blocker lines, the order, `answered` until the runner has
+acted, GitHub down through `inbox.Reader`, and a real ask of each kind held to the sample's
+keys); `CollectTest` in `tests/test_inbox.py` (`--inbox` prints the collection);
+`InboxTest` in `tests/test_snapshot_runner.py` (a Sol pass reads it, only with a publisher).
+The work lists: `tests/test_work.py` (`work.Reader` on a temp job log and `FakeGitHubForReviews`
+with its `work_list`, written by `snapshot.build`: each lane's queue in its order, the build
+order and a stopped repo, a limited job and the running one, decisions, conflict rounds, live
+steps with `FakeLiveGit` and nothing fetched; each issue state, features and their order; each
+PR status, left alone included; timelines and activity; GitHub down; and a real issue, feature,
+PR, queue entry and activity row held to the sample's keys); `WorkTest` and `--snapshot`'s
+GitHub read in `tests/test_snapshot_runner.py`; `GhCli.work_issues` in `tests/test_github.py`.
+Stopping a lane: `tests/test_switch.py` (today's gate.json pause through the run loop, each
+stop through `main` and `Runner.run_once`, the older pause against an entry, `--pause` and
+`--resume`, the same file from the CLI's writer and `serve.App.write_control`, `--gate` and the
+dry run's words, an unreadable control.json in every shape, read and repaired from both
+ends, the wake tasks a stopped lane doesn't set, and a Stop asked mid-review or mid-merge).
+The build order: `tests/test_build_order.py` (two served repos through `main` and the real
+`Runner`: each lane in `repo_order`, the orders that are ignored and said once, a new order
+written mid-job, the dry run, and the snapshot's `repos` and `control_read_at`).
+Stopping one repo: `tests/test_repo_stop.py` (leads-dashboard with live steps due and
+game-backdrop first through the run loop: game-backdrop's build comes first; each kind of Claude
+work and the Sol lane's stops, merges and reviews with a control run unstopped; a review that ends
+after its repo was stopped; `apply_control` and `--pause NAME` writing the same file; the log said
+once, an unserved name, an unreadable entry, wake tasks, the Inbox, the snapshot, `--gate`, the
+dry run, and the sample's `repo-stopped` state).
 `tests/test_git.py` runs `GitCli` on a real local repo in a
 temp folder.
 
@@ -996,7 +1459,7 @@ temp folder.
   under a `## Blocked by` heading), not already in flight (a `claude/*-<issue>` branch, an open
   PR on one, or an open PR that closes it or that GitHub links to it by hand), not a spec with
   open sub-issues (its children are the work); lowest number first. The job branches `claude/<slug>-<issue>` from
-  `origin/<base>`.
+  `origin/<base>`. `pickable` yields every build in that order (the dashboard's queue).
 - `queue_runner/tickets.py`: local tickets: status, blockers and the next one (ticket 12).
 - `queue_runner/brief.py` and `templates/<kind>.md`: a job's brief, filled from the issue and the
   repo; no handoff files.
@@ -1008,6 +1471,8 @@ temp folder.
 - `queue_runner/state.py`: the job log.
 - `queue_runner/run.py`: the two lanes, a build job, a fix round's thread, a continued job and
   the loop.
+- `queue_runner/ask_threads.py` and `templates/ask.md`: an ask decided in a T3 thread Stefan
+  opens from the Inbox: opening it, reading its answer, and the ask's `decide` in the snapshot.
 - `queue_runner/decisions.py` and `templates/decision.md`: decision threads: the cases, the
   brief, the answer and acting on it.
 - `queue_runner/fix.py`, `templates/fix.md` and `templates/conflict.md`: which PRs get a fix
@@ -1016,7 +1481,11 @@ temp folder.
   land, the brief, the answer and its stops.
 - `queue_runner/merge.py`: the pre-merge re-check, the expected-head merge and the worktrees
   removed after; in a repo Stefan merges, the `ready-for-stefan` mark and noticing his merge.
-- `queue_runner/inbox.py`: `--inbox`, everything waiting on Stefan. A fix round's local branch name (`fix_branch`) is `fix.py`'s.
+- `queue_runner/inbox.py`: `--inbox`, everything waiting on Stefan: `collect`, the one
+  collection, and `Reader`, the Sol lane's last read for the snapshot.
+- `queue_runner/asks.py`: the Inbox's asks written from that collection and the job log.
+- `queue_runner/work.py`: the dashboard's work lists (ticket 32): the read of each repo through
+  the lanes' own code (`Reader`, `Memo`), and the queues, issues, features, PRs and activity. A fix round's local branch name (`fix_branch`) is `fix.py`'s.
 - `queue_runner/review.py` and `templates/review.md`: the Sol lane: adoption, the brief, a review.
 - `queue_runner/ledger.py`: earlier reviews from a PR's comments, and `decide()`.
 - `queue_runner/stops.py`: stops for Stefan: which, the `needs-info` issue, the PR comment, the
@@ -1029,11 +1498,24 @@ temp folder.
 - `queue_runner/usage.py`: Claude's usage windows from `api/oauth/usage`, with the Claude login.
 - `queue_runner/gate.py`: the usage gate: `decide()`, Stefan's knob (`gate.json`), learned costs
   (`usage.jsonl`).
+- `queue_runner/control.py`: each lane's switch: reading `control.json` (and gate.json's older
+  pause), writing it for `--pause` and `--resume`, and what the runner says (ticket 30); the
+  build order, `ordered` (ticket 33); each repo's stop, `stopped_repos` (ticket 37); each ask's
+  entry, `Switch.asks`, read only (ticket 36).
+- `queue_runner/config.py`: the served repos and the runner's folders; the build order
+  (`set_build_order`) and the stopped repos (`set_stopped`), and `working`, the repos the lanes
+  take work from.
 - `queue_runner/limits.py` and `templates/restart.md`: usage-limit stops: T3's record of the
-  reset, the transcript's context, when and how a job resumes, the auto-resume warning.
+  reset, the transcript's last call (its context and its request's start), when a job resumes,
+  in place or fresh for any job picking up an earlier thread (`resume_choice`), the auto-resume
+  warning.
+- `queue_runner/effort.py`: the effort Claude jobs run at: the start flags from the T3 project's
+  default, and the effort a run used, read back (ticket 39).
 - `queue_runner/lock.py`: `runner.lock` and `sol.lock`.
 - `queue_runner/wake.py`: the wake tasks: `Waker.sync` and the `schtasks` adapter.
 - `queue_runner/restart.py`: restarting on its own new code after main moves (ticket 14).
+- `queue_runner/snapshot.py`: the dashboard's `snapshot.json`: the facts, `build()`, the
+  sources' last calls, the usage readings and the publisher (ticket 28).
 - `queue_runner/cli.py`: the command line.
 - `dashboard/`: the dashboard, apart from the runner: `index.html` (the page), `serve.py` (its
   server and the control file), `sample.py` (the snapshot's shape, in every state), `earlier/`
@@ -1041,5 +1523,6 @@ temp folder.
 - `scripts/live_sandbox.py`, `scripts/live_review.py`, `scripts/live_fix_brief.py` and
   `scripts/live_merge.py`: the live checks.
 - `scripts/make_icon.py`: draws the toast icon, `queue_runner/assets/icon.png`.
-- `scripts/make_shortcut.py`: makes the logon shortcut; `scripts/live_wake.py`: the wake task's
+- `scripts/make_shortcut.py`: makes the logon shortcuts, the runner's and the dashboard's
+  (`--startup` copies both into the Startup folder); `scripts/live_wake.py`: the wake task's
   live check; `scripts/live_restart.py`: a restart onto broken code, toasted.

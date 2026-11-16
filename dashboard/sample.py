@@ -24,10 +24,11 @@ STATES = {
     "github-down": "GitHub can't be read",
     "no-interrupt": "T3 refuses the interrupt, so Stop now is off for Claude",
     "dead": "The runner stopped writing 42 minutes ago",
+    "repo-stopped": "leads-dashboard is stopped: its running jobs finish, then only queue-runner is worked on",
 }
 DEFAULT = "busy"
 # Takes of the page before this one, kept while its look is being agreed: `serve.py` serves the
-# ones in `dashboard/earlier/` in sample mode, and the sidebar's sample menu links them.
+# ones in `dashboard/earlier/` on the sample addresses, and the sidebar's sample menu links them.
 EARLIER = [
     {"href": "/earlier/take-9.html", "label": "Take 9", "note": "The Overview as three cards, the Queue still the old work list and pyramid"},
     {"href": "/earlier/take-8.html", "label": "Take 8", "note": "The Inbox as agreed, the Overview still the two lanes"},
@@ -76,9 +77,11 @@ def build(name: str = DEFAULT, base: datetime | None = None, control: dict | Non
             {"id": "t3_interrupt", "group": "local", "name": "Stop now for Claude", "short": "Stop now", "ok": True,
              "note": "T3 accepts the interrupt", "checked_at": ago(399)},
         ],
+        # `stopped` (ticket 37): when Stefan stopped the repo (`at`), or null. A stopped repo
+        # gets nothing from either lane; its asks stay in the Inbox.
         "repos": [
-            {"name": LD, "github": GH[LD], "merge": "stefan"},
-            {"name": QR, "github": GH[QR], "merge": "runner"},
+            {"name": LD, "github": GH[LD], "merge": "stefan", "stopped": None},
+            {"name": QR, "github": GH[QR], "merge": "runner", "stopped": None},
         ],
         # An ask is written to be picked up cold, a week later. `kind` is why it came to Stefan:
         # `stuck` (the runner tried and couldn't get it through), `decision` (a product decision
@@ -88,6 +91,10 @@ def build(name: str = DEFAULT, base: datetime | None = None, control: dict | Non
         # below; `story` is the same in fragments, read by the earlier takes only); then `question`, `options` and where it's answered (`go`, whose
         # `where` is "t3" or "github": it picks the mark on the button).
         # `why` is read by the earlier takes only, and goes when they do.
+        # `decide` (ticket 35) is null for an ask that can't be decided in a T3 thread, else where
+        # that stands: `state` "offered" (the page's Decide in T3 asks the runner to open one),
+        # "asked" (the runner read the request; `note` says when it starts) or "open" (`go` is
+        # the thread then, and `also` the other place to answer it, its needs-info issue).
         "asks": [
             {
                 "id": "ask-152", "kind": "stuck", "repo": LD, "ref": "PR #152", "pr": 152,
@@ -106,6 +113,8 @@ def build(name: str = DEFAULT, base: datetime | None = None, control: dict | Non
                 ],
                 "holds_up": ["#216 Ring-to audit page"],
                 "go": {"label": "Decide in T3", "where": "t3", "url": T3 + "0481ebdf-41e8-4253-b3a1-3be2d40a80b2"},
+                "decide": {"state": "open", "at": ago(20), "note": None},
+                "also": {"label": "Open the needs-info issue", "where": "github", "url": GH[LD] + "/issues/219"},
                 "why": [
                     "Review 3 raised I-4 again: the ring-to check reads the Client's owner from before the move.",
                     "The decision thread's approach note recommends rework: read the owner from the call's routing row, not from the Client.",
@@ -153,6 +162,7 @@ def build(name: str = DEFAULT, base: datetime | None = None, control: dict | Non
                 "because": "The issue says \"old callers\" without saying how old. A decision thread couldn't settle it.",
                 "story": ["Today: the build started", "It stopped at the archive's cut-off", "You answered after 12 months"],
                 "question": "After how long without a call does a caller move to the archive?",
+                "options": [],
                 "holds_up": [],
                 "go": {"label": "Answer in T3", "where": "t3", "url": T3 + "130f3d30-2a6c-4260-9c8e-941810cb97e1"},
                 "answered": {"at": ago(38), "said": "after 12 months",
@@ -167,6 +177,11 @@ def build(name: str = DEFAULT, base: datetime | None = None, control: dict | Non
                 "story": ["Fri: built, PR #209 opened", "Reviews 1 and 2: problems fixed", "Yesterday: review 3 still blocking",
                           "Today: you answered fix on"],
                 "question": "Rework the approach, patch this case too, or hold it?",
+                "options": [
+                    {"say": "rework", "means": "One more fix round that reworks the approach, as the note and your reply say"},
+                    {"say": "fix on", "means": "One more fix round on the open findings, the same approach", "recommended": True},
+                    {"say": "hold", "means": "Leave the PR until you release it"},
+                ],
                 "holds_up": [],
                 "go": {"label": "Open the needs-info issue", "where": "github", "url": GH[LD] + "/issues/221"},
                 "answered": {"at": ago(7), "said": "fix on",
@@ -211,7 +226,7 @@ def build(name: str = DEFAULT, base: datetime | None = None, control: dict | Non
                 {"id": "week", "label": "Weekly", "used": 6, "resets_at": ahead(60 * 152.9), "gates": True},
             ]},
         ],
-        "knob": {"paused": False, "reserve": 5},   # gate.json, as the runner last read it
+        "knob": {"paused": False, "reserve": 5},   # gate.json's reserve; paused: the Claude lane is stopped
         # What the gate expects a Claude job to take, per kind (the Usage page).
         "costs": [
             {"kind": "build", "label": "Build", "session": 60, "week": 15, "basis": "The cautious default, until 3 builds are recorded"},
@@ -243,7 +258,11 @@ def build(name: str = DEFAULT, base: datetime | None = None, control: dict | Non
     snap["activity"] = _activity(snap["prs"], ago)
     _vary(snap, name, ago, ahead)
     for ask in snap["asks"] + snap["answered"]:
+        ask.setdefault("decide", None)
+        ask.setdefault("also", None)
+    for ask in snap["asks"] + snap["answered"]:
         ask["timeline"] = [{"at": ago(minutes), "text": text} for minutes, text in _TIMELINES[ask["id"]]]
+        ask.update(read=False, snoozed_until=None)   # what Stefan did with it: control.json's `asks` (ticket 36)
     if name == "dead":
         snap["written_at"] = (now - timedelta(minutes=42)).isoformat(timespec="seconds")
     else:
@@ -514,7 +533,8 @@ def _vary(snap: dict, name: str, ago, ahead) -> None:
              "because": "test_wake.py timed out once in CI and passes locally. A decision thread couldn't tell a flake from a fault.",
              "story": ["Today: built, PR #4 opened", "Review 1 clean", "The tests timed out on Windows"],
              "question": "Run the tests again, or look first?", "holds_up": [],
-             "go": {"label": "Decide in T3", "where": "t3", "url": T3 + "89d3ed68-05f2-418f-afd8-9b4a28709ddc"},
+             "go": {"label": "Open the needs-info issue", "where": "github", "url": GH[QR] + "/issues/6"},
+             "decide": {"state": "offered", "at": None, "note": None},
              "why": ["test_wake.py timed out once in CI and passes locally."]},
             {"id": "ask-ops", "kind": "decision", "repo": LD, "ref": "#231", "pr": None, "subject": "Monthly report email", "since": ago(1),
              "situation": "The issue names two different recipients.",
@@ -538,6 +558,8 @@ def _vary(snap: dict, name: str, ago, ahead) -> None:
     elif name == "github-down":
         _source(snap, "github").update(ok=False, note="No answer since then (HTTP 503)", checked_at=ago(18),
                                        affects="Asks, PRs and the work list are as they were then; some may be missing.")
+    elif name == "repo-stopped":
+        _repo(snap, LD)["stopped"] = {"at": ago(6)}   # after the jobs on it began
     elif name == "no-interrupt":
         _source(snap, "t3_interrupt").update(ok=False, note="T3 refused the session (HTTP 426: protocol 3 expected)",
                                              affects="Stop after this job still works.")
@@ -566,6 +588,30 @@ def _obey(snap: dict, control: dict, now: datetime) -> None:
             lane.update(state="stopped", job=None, wait=None, stopped={"at": ask.get("at"), "during": was if stop == "now" else None})
             if was and stop == "now":
                 lane["next"] = f"{job['ref']} carries on from where it stopped" if lane["id"] == "claude" else f"{job['ref']} is reviewed afresh"
+    for repo in snap["repos"]:   # a repo's stop (ticket 37)
+        ask = (control.get("repos") or {}).get(repo["name"])
+        if isinstance(ask, dict) and "stop" in ask:
+            repo["stopped"] = {"at": ask.get("at")} if ask["stop"] else None
+    claude = _lane(snap, "claude")
+    for ask in snap["asks"]:   # Decide in T3 (ticket 35): read, it starts on the next pass
+        record = (control.get("asks") or {}).get(ask["id"])
+        if (ask.get("decide") or {}).get("state") == "offered" and isinstance(record, dict) and isinstance(record.get("open"), dict):
+            note = ("It starts when you resume the Claude lane." if claude["state"] == "stopped"
+                    else f"It starts once Claude's current {claude['job']['kind']} ends." if claude["job"]
+                    else "It starts on the Claude lane's next pass.")
+            ask["decide"] = {"state": "asked", "at": record["open"].get("at"), "note": note}
+    marks = control.get("asks") if isinstance(control.get("asks"), dict) else {}
+    for ask in snap["asks"] + snap["answered"]:   # read and snoozed (ticket 36)
+        mark = marks.get(ask["id"])
+        if not isinstance(mark, dict):
+            continue
+        ask["read"] = mark.get("read") is True
+        until = mark.get("snooze_until")
+        try:
+            ahead = isinstance(until, str) and datetime.fromisoformat(until) > now
+        except (TypeError, ValueError):   # not a time, or one with no offset
+            ahead = False
+        ask["snoozed_until"] = until if ahead else None   # a snooze whose time has passed is over
     order = control.get("repo_order") or []
     names = [r["name"] for r in snap["repos"]]
     if sorted(order) == sorted(names):
@@ -614,16 +660,27 @@ def _queue(snap: dict) -> None:
              for i in snap["issues"] if i["state"] == "fixing" and f"PR #{i['pr']}" != job.get("ref")]
     builds = [{"kind": "build", "repo": i["repo"], "ref": f"#{i['n']}", "title": i["title"]}
               for i in sorted((i for i in snap["issues"] if i["pick"]), key=lambda i: i["pick"])]
-    claude["queue"] = held + fixes + builds
+    off = _stopped(snap)   # a stopped repo's work is in no lane's queue (ticket 37)
+    claude["queue"] = [q for q in held + fixes + builds if q["repo"] not in off]
     reviews = [{"kind": "review", "repo": p["repo"], "ref": f"PR #{p['n']}", "title": p["title"]}
-               for p in snap["prs"] if p["status"] == WAITS_FOR_REVIEW]
+               for p in snap["prs"] if p["status"] == WAITS_FOR_REVIEW and p["repo"] not in off]
     _lane(snap, "sol").update(queue=reviews, queue_empty="Nothing is waiting for review.")
+
+
+def _repo(snap: dict, name: str) -> dict:
+    return next(r for r in snap["repos"] if r["name"] == name)
+
+
+def _stopped(snap: dict) -> set:
+    return {r["name"] for r in snap["repos"] if r.get("stopped")}
 
 
 def _number(snap: dict) -> None:
     """The order the runner would build in: the first repo with ready work, lowest number first."""
     rank = {r["name"]: k for k, r in enumerate(snap["repos"])}
-    ready = sorted((i for i in snap["issues"] if i["state"] == "ready"), key=lambda i: (rank[i["repo"]], i["n"]))
+    off = _stopped(snap)   # a stopped repo's ready work isn't built until it's resumed
+    ready = sorted((i for i in snap["issues"] if i["state"] == "ready" and i["repo"] not in off),
+                   key=lambda i: (rank[i["repo"]], i["n"]))
     for k, i in enumerate(ready, 1):
         i["pick"] = k
 

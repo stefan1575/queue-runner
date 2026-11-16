@@ -378,6 +378,48 @@ class LimitRecoveryTest(RunHarness):
         self.assertEqual(t3.sends, [])
         self.assertIn('Claude lane waits: build first#4 was cut off by a usage limit', out)
 
+    def test_a_warm_thread_is_continued_in_place_at_any_size(self):
+        # The limit reset 30 minutes after its last request started: 41 minutes idle at resume.
+        t3 = FakeT3([(1, 'failed'), (0, 'completed')])
+        old = self.limited_build(t3, resets={'mcp:t1': STOP + datetime.timedelta(minutes=30)},
+                                 contexts={'mcp:t1': 300_000},
+                                 starts={'mcp:t1': STOP - datetime.timedelta(minutes=1)})
+        self.assertIn('stopped on a usage limit', self.runner_log())
+        self.assertIn('(in place: warm (its last request started 41 min ago)', self.runner_log())
+        self.at = STOP + datetime.timedelta(minutes=40)
+        self.run_main(['--once'], self.gh, t3)
+        self.assertEqual(len(t3.starts), 1)
+        [sent] = t3.sends
+        self.assertEqual(sent['thread_id'], 'mcp:t1')
+        again = self.log.jobs()[1]
+        self.assertEqual((again.about, again.thread_id), (old.id, 'mcp:t1'))
+        self.assertEqual(again.resume, {
+            'how': 'in-place', 'idle_minutes': 41, 'context': 300_000,
+            'last_request': '2026-11-08T07:33:00+00:00',
+            'why': 'warm (its last request started 41 min ago): continuing it in place is '
+                   'cheaper at any size'})
+        self.assertIn('Continuing build first#4 in place: warm (its last request started 41 '
+                      'min ago)', self.runner_log())
+
+    def test_the_stop_records_its_last_request_and_a_dry_run_says_the_choice(self):
+        t3 = FakeT3([(1, 'failed')])
+        job = self.limited_build(t3, resets={'mcp:t1': STOP + datetime.timedelta(minutes=30)},
+                                 contexts={'mcp:t1': 300_000},
+                                 starts={'mcp:t1': STOP - datetime.timedelta(minutes=1)})
+        self.assertEqual(job.last_request, '2026-11-08T07:33:00+00:00')
+        _, out = self.run_main(['--once', '--dry-run'], self.gh, t3)
+        self.assertIn('the runner would continue its thread in place (warm (its last request '
+                      'started 41 min ago)', out)
+
+    def test_a_cold_thread_under_120k_tokens_is_continued_in_place(self):
+        t3 = FakeT3([(1, 'failed'), (0, 'completed')])
+        self.limited_build(t3, resets={'mcp:t1': RESET}, contexts={'mcp:t1': 119_999},
+                           starts={'mcp:t1': STOP})
+        self.at = RESET + datetime.timedelta(minutes=10)
+        self.run_main(['--once'], self.gh, t3)
+        self.assertEqual([s['thread_id'] for s in t3.sends], ['mcp:t1'])
+        self.assertEqual(self.log.jobs()[1].resume['how'], 'in-place')
+
     def test_a_small_thread_is_continued_in_place_after_the_reset(self):
         t3 = FakeT3([(1, 'failed'), (0, 'completed')])
         old = self.limited_build(t3, resets={'mcp:t1': RESET}, contexts={'mcp:t1': 50_000})
@@ -393,11 +435,12 @@ class LimitRecoveryTest(RunHarness):
         self.assertEqual(again.outcome, 'done-no-pr')
         self.assertEqual(self.log.limited_jobs(), [])
 
-    def test_a_big_thread_restarts_fresh_on_its_branch_at_its_newest_commit(self):
+    def test_a_cold_big_thread_restarts_fresh_on_its_branch_at_its_newest_commit(self):
         t3 = FakeT3([(1, 'failed'), (0, 'completed')])
         git = FakeGit()
         git.tips = {'claude/a-ticket-4': 'abc1234def'}
-        self.limits = FakeLimits(contexts={'mcp:t1': 108_633})   # no reset stored
+        self.limits = FakeLimits(contexts={'mcp:t1': 120_000},   # no reset stored
+                                 starts={'mcp:t1': STOP})
         t3.messages['mcp:t1'] = [Message('user', 'Go.'), Message('assistant', LIMIT_SAID)]
         self.run_main(['--once'], self.gh, t3, git)
         old = self.log.jobs()[0]
@@ -413,7 +456,10 @@ class LimitRecoveryTest(RunHarness):
         self.assertEqual((fresh['worktree'], fresh['branch'], fresh['title']),
                          ('abc1234def', 'claude/a-ticket-4', 'Queue runner build: first#4'))
         self.assertTrue(fresh['message'].startswith('/implement GitHub issue #4 in owner/first'))
-        self.assertIn('## Picking up after a usage limit', fresh['message'])
+        self.assertIn('## Picking up from an earlier thread', fresh['message'])
+        self.assertIn('cut off by a usage limit', fresh['message'])
+        self.assertIn('cold (its last request started 5 h 15 min ago) and 120,000 tokens',
+                      fresh['message'])
         self.assertIn(old.link, fresh['message'])
         self.assertIn(LIMIT_SAID, fresh['message'])
         self.assertIn('at `abc1234`', fresh['message'])
@@ -421,6 +467,10 @@ class LimitRecoveryTest(RunHarness):
         again = self.log.jobs()[1]
         self.assertEqual((again.about, again.thread_id, again.outcome), (old.id, 'mcp:t2',
                                                                          'done-no-pr'))
+        self.assertEqual((again.resume['how'], again.resume['idle_minutes'],
+                          again.resume['context']), ('fresh', 315, 120_000))
+        self.assertIn('Restarting build first#4 fresh after the usage limit (cold (its last '
+                      'request started 5 h 15 min ago) and 120,000 tokens', self.runner_log())
 
     def test_any_other_failure_is_not_a_limit_stop(self):
         t3 = FakeT3([(1, 'failed')])

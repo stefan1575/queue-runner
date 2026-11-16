@@ -6,8 +6,9 @@ Limits). Sol isn't gated.
 - **The weekly reserve:** `reserve` percent of the week (5 unless Stefan changes it) stays unspent
   until 24 hours before the weekly reset; inside those 24 hours the queue may spend it. A job that
   wouldn't fit the week even then waits for the weekly reset.
-- **Stefan's knob** is `<state_dir>/gate.json` (`paused`, `reserve`), set with `--pause`, `--resume`
-  and `--reserve N`; the runner reads it before every Claude job, so it works while it runs.
+- **Stefan's knob** is `<state_dir>/gate.json` (`reserve`), set with `--reserve N`; the runner
+  reads it before every Claude job, so it works while it runs. Stopping a lane isn't the gate's:
+  it's `control.json` (`control.py`), and an older `paused` here is read there.
 - **Expected cost** per job kind (build, fix, decision), in percent of each window, is learned from
   `<state_dir>/usage.jsonl`: one record per Claude job pass, usage before and after. With fewer
   than `SAMPLES` usable records it's the cautious `DEFAULTS`; then the largest of the last `RECENT`.
@@ -33,7 +34,6 @@ RELEASED = 'reserve-released'   # fits only because the last 24 hours release th
 FIVE_HOUR = 'five-hour'         # waits for the 5-hour reset
 RESERVE = 'weekly-reserve'      # waits for the reserve's release, 24 hours before the weekly reset
 WEEKLY = 'weekly-full'          # waits for the weekly reset
-PAUSED = 'paused'
 UNREADABLE = 'unreadable'       # usage couldn't be read: nothing starts; read again next pass
 
 
@@ -54,7 +54,6 @@ DEFAULTS = {'build': Cost(60, 15), 'fix': Cost(40, 10), 'decision': Cost(15, 4),
 
 @dataclass(frozen=True)
 class Knob:
-    paused: bool = False
     reserve: float = DEFAULT_RESERVE
 
 
@@ -80,9 +79,6 @@ def decide(usage: Usage, kind: str, cost: Cost, knob: Knob,
     def wait(why, text, until=None):
         return Verdict(False, why, text, until, usage)
 
-    if knob.paused:
-        return wait(PAUSED, 'paused by Stefan: no Claude job starts '
-                    '(python3 -m queue_runner --resume to go on)')
     five, week = usage.five_hour, usage.seven_day
     expect = f'a {kind} is expected to take {_pct(cost.five_hour)} of 5 hours, ' \
              f'{_pct(cost.seven_day)} of the week'
@@ -124,8 +120,8 @@ def read_knob(state_dir: str) -> Knob:
             raw = json.load(f)
     except FileNotFoundError:
         return Knob()
-    return Knob(paused=bool(raw.get('paused', False)),
-                reserve=float(raw.get('reserve', DEFAULT_RESERVE)))
+    # An older `paused` in it is control.py's to read.
+    return Knob(reserve=float(raw.get('reserve', DEFAULT_RESERVE)))
 
 
 def write_knob(state_dir: str, knob: Knob) -> None:
@@ -133,7 +129,7 @@ def write_knob(state_dir: str, knob: Knob) -> None:
     os.makedirs(state_dir, exist_ok=True)
     path = _knob_path(state_dir)
     with open(path + '.tmp', 'w', encoding='utf-8') as f:
-        json.dump({'paused': knob.paused, 'reserve': knob.reserve}, f)
+        json.dump({'reserve': knob.reserve}, f)
         f.flush()
         os.fsync(f.fileno())
     os.replace(path + '.tmp', path)
@@ -170,17 +166,24 @@ class CostBook:
             rec['error'] = error
         append_record(self.path, rec)
 
+    def _spent(self, kind: str, window: str) -> list[float]:
+        return [r['spent'][window] for r in read_records(self.path)
+                if r.get('kind') == kind and r.get('spent')
+                and r['spent'].get(window) is not None]
+
     def expected(self, kind: str) -> Cost:
         """Raises ValueError if usage.jsonl has a bad line (other than a torn last one)."""
-        spent = [r['spent'] for r in read_records(self.path)
-                 if r.get('kind') == kind and r.get('spent')]
         default = self.default(kind)
 
         def learned(window, fallback):
-            got = [s[window] for s in spent if s.get(window) is not None]
+            got = self._spent(kind, window)
             return max(got[-RECENT:]) if len(got) >= SAMPLES else fallback
         return Cost(learned('five_hour', default.five_hour),
                     learned('seven_day', default.seven_day))
+
+    def learned(self, kind: str) -> bool:
+        """Whether `expected(kind)` is learned in both windows, not the cautious default."""
+        return all(len(self._spent(kind, w)) >= SAMPLES for w in ('five_hour', 'seven_day'))
 
 
 class Gate:
@@ -203,9 +206,6 @@ class Gate:
         except (OSError, ValueError) as e:
             return Verdict(False, UNREADABLE, f'gate.json is unreadable ({e}): no Claude job '
                            'starts until it is fixed or removed')
-        if knob.paused:   # no usage read needed
-            return decide(Usage(Window(0, None), Window(0, None)), label,
-                          CostBook.default(kind), knob, self.clock())
         try:
             usage = self.reader.read()
         except UsageError as e:

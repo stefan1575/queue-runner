@@ -11,18 +11,33 @@ poll_seconds = 300   # continuous mode: the pause after a pass that started noth
 # the session that ran it.
 adopt_reviews_before = 2026-11-10
 
-# Claude jobs run as T3 threads on this provider instance and model. T3's CLI has no flag for
-# reasoning effort, so a thread gets the model's default effort in T3. For claude-opus-5-5 that's
-# medium (`~/.t3/userdata/model-manifest.json`, profile opus-5-5), which is what Stefan wants for
-# builds (2026-11-09).
+# Claude jobs run as T3 threads on this provider instance and model, at this effort (ticket 39;
+# Stefan, 2026-11-15: "keep it at high by default", until his Claude Max plan ends). T3's CLI has
+# no effort flag: a thread started with --model gets the model's default (medium for Opus 5.5).
+# So a repo's jobs start on its T3 project's default model instead, when that default is this
+# model at this effort (T3 Settings, the project, New threads, Model), and with --model, at
+# medium, when it isn't; the runner says which at start, and each end record has the effort the
+# run used, read back from Claude Code's transcript (AGENTS.md, T3 as a script sees it).
 [claude]
 provider = "claudeAgent"
 model = "claude-opus-5-5"
+effort = "high"
 
 # Sol reviews run through codex-sol.sh at effort high (a T3 thread can't be given an effort).
 [sol]
 script = "~/Code/tools/codex-sol/codex-sol.sh"
 bash = "C:/Program Files/Git/bin/bash.exe"
+
+# First in the build order (Stefan, 2026-11-15: "prioritize game backdrop full stop", its first
+# run under the dashboard). Stefan merges its PRs himself (2026-11-15: "no auto merge, just
+# leave it up to me"): a desktop app nobody runs before a merge. It has no live steps: merged
+# is live.
+[[repos]]
+name = "game-backdrop"
+github = "stefan1575/game-backdrop"
+path = "~/Code/Personal/game-backdrop"
+base = "main"
+merge = "stefan"
 
 [[repos]]
 name = "leads-dashboard"

@@ -10,15 +10,21 @@
     python -m queue_runner --release NAME#N   # let the picker take a held issue again
     python -m queue_runner --review NAME#N    # Sol reviews that PR's head now
     python -m queue_runner --gate             # Claude's usage now, and whether each job kind fits
-    python -m queue_runner --pause | --resume # hold Claude jobs back, or let them start again
+    python -m queue_runner --pause | --resume [LANE]   # stop a lane after its job, or let it
+                                              # carry on (claude by default; sol, all): the
+                                              # dashboard's Stop and Resume, in control.json
     python -m queue_runner --reserve PERCENT  # the share of the week kept for Stefan (default 5)
     python -m queue_runner --stop             # stop the running runner (its pid in runner.pid)
     python -m queue_runner --inbox            # everything waiting on Stefan: PRs ready to
                                               # merge, needs-info stops, threads waiting
+    python -m queue_runner --snapshot         # print the dashboard's snapshot from the state
+                                              # now (reads usage once; no lock, writes nothing)
 """
 import argparse
 import contextlib
+import dataclasses
 import datetime
+import json
 import os
 import re
 import sys
@@ -26,7 +32,7 @@ import time
 import traceback
 
 from .brief import build_brief
-from .config import DEFAULT_CONFIG, load_config
+from .config import DEFAULT_CONFIG, load_config, working
 from .run import RESTART, Runner, RunnerBusy, runner_lock, wall_sleep
 from .state import JobLog
 
@@ -54,18 +60,41 @@ def _gate(config, usage, clock):
     return Gate(config.state_dir, usage, clock)
 
 
-def _print_gate(gate, out) -> None:
-    """The knob, Claude's windows now and each job kind's verdict (reads usage once)."""
+def _switch_lines(config) -> list[str]:
+    """Each lane's switch (`control.py`), then each repo Stefan stopped (ticket 37), as the log
+    says them."""
+    from . import control
+    switch = control.read(config.state_dir)
+    if switch.error is not None:
+        return [control.unreadable_text(switch)]
+    return [control.stopped_text(id) if switch.stop(id).stopped else
+            f'The {control.NAMES[id]} lane carries on' for id in control.LANES
+            ] + _repo_stop_lines(config, switch)
+
+
+def _repo_stop_lines(config, switch) -> list[str]:
+    from . import control
+    names, unknown = control.stopped_repos(config.repos, switch)
+    return [control.repo_stopped_text(n) for n in names] + (
+        [control.unknown_repos_text(unknown)] if unknown else [])
+
+
+def _print_gate(gate, out, config) -> None:
+    """Each lane's switch, the knob, Claude's windows now and each job kind's verdict (reads
+    usage once)."""
+    from . import control
     from .gate import CLAUDE_KINDS, CostBook, decide
     from .usage import UsageError
+    for line in _switch_lines(config):
+        print(line, file=out)
+    held = control.read(config.state_dir).holds('claude')
     try:
         knob = gate.knob()
     except (OSError, ValueError) as e:
         print(f'gate.json is unreadable ({e}): no Claude job starts until it is fixed or removed',
               file=out)
         return
-    print(f'Claude usage gate: {"paused" if knob.paused else "running"}, weekly reserve '
-          f'{knob.reserve:g}%', file=out)
+    print(f'Claude usage gate: weekly reserve {knob.reserve:g}%', file=out)
     try:
         usage = gate.reader.read()
     except UsageError as e:
@@ -78,41 +107,81 @@ def _print_gate(gate, out) -> None:
     for kind in CLAUDE_KINDS:
         cost = gate.book.expected(kind)
         learned = ' (the cautious default)' if cost == CostBook.default(kind) else ''
+        if held:
+            print(f'  {kind}: waits: the Claude lane is stopped by Stefan', file=out)
+            continue
         v = decide(usage, kind, cost, knob, gate.clock())
         print(f'  {kind}: {"starts" if v.go else "waits"}: {v.text}{learned}', file=out)
 
 
+def _now_iso() -> str:
+    return datetime.datetime.now().astimezone().isoformat(timespec='seconds')
+
+
+def _switch(config, args, out) -> int:
+    """`--pause [LANE]` and `--resume [LANE]`: control.json, as the dashboard's Stop and Resume
+    write it (`control.py`)."""
+    from . import control
+    lane = args.pause or args.resume
+    served = [r.name for r in config.repos]
+    words = (*control.LANES, 'all')   # a lane's id and all keep their meaning (ticket 30)
+    if lane not in (*words, *served):
+        print(f'--pause and --resume take {", ".join(words)}'
+              + (f', {", ".join(served[:-1])} or {served[-1]}' if served else '')
+              + f', not {lane!r}.', file=out)
+        return 2
+    repos = () if lane in words else (lane,)
+    lanes = control.LANES if lane == 'all' else () if repos else (lane,)
+    if (was := control.read(config.state_dir)).error:
+        print(f'{was.error}; writing it afresh.', file=out)
+    control.ask(config.state_dir, lanes, 'after-job' if args.pause else None, _now_iso(),
+                repos=repos)
+    for name in repos:   # ticket 37: one repo, in both lanes
+        print(f'{control.repo_stopped_text(name)}.' if args.pause else
+              f'{control.repo_resumed_text(name)}: both lanes take up its work again on their '
+              'next pass.', file=out)
+    for id in lanes:
+        if args.pause:
+            print(f'{control.stopped_text(id)}. A job running now runs to its end.', file=out)
+        else:
+            print(f'The {control.NAMES[id]} lane carries on: it starts jobs again on its next '
+                  'pass.', file=out)
+    return 0
+
+
 def _knob(config, args, out) -> int:
-    from dataclasses import replace
+    from . import control
     from .gate import Knob, read_knob, write_knob
+    if not 0 <= args.reserve <= 100:
+        print('--reserve takes a percent from 0 to 100.', file=out)
+        return 2
     try:
-        knob = read_knob(config.state_dir)
-    except (OSError, ValueError) as e:   # set afresh from the defaults
-        print(f'gate.json was unreadable ({e}); starting again from the defaults.', file=out)
-        knob = Knob()
-    if args.reserve is not None:
-        if not 0 <= args.reserve <= 100:
-            print('--reserve takes a percent from 0 to 100.', file=out)
-            return 2
-        knob = replace(knob, reserve=args.reserve)
-    if args.pause or args.resume:
-        knob = replace(knob, paused=args.pause)
-    write_knob(config.state_dir, knob)
-    state = ('Paused: no Claude job starts (one running now runs to its end; Sol goes on)'
-             if knob.paused else 'Running: Claude jobs start when they fit')
-    print(f'{state}; the weekly reserve is {knob.reserve:g}%. A running runner reads this '
-          'before its next Claude job.', file=out)
+        read_knob(config.state_dir)
+    except (OSError, ValueError) as e:   # set afresh
+        print(f'gate.json was unreadable ({e}); writing it afresh.', file=out)
+    else:
+        control.carry_over(config.state_dir, _now_iso())   # an older pause in it stands
+    write_knob(config.state_dir, Knob(reserve=args.reserve))
+    print(f'The weekly reserve is {args.reserve:g}%. A running runner reads this before its '
+          'next Claude job.', file=out)
     return 0
 
 
 def _dry_run_limited(config, out, log_line) -> bool:
     """A job cut off by a usage limit comes first: when, and in place or fresh."""
-    from .limits import in_place
-    limited = _jobs(config).limited_jobs()
+    from .config import stopped
+    import datetime
+    from .limits import resume_choice
+    limited = [j for j in _jobs(config).limited_jobs() if j.repo not in stopped(config)]
     if not limited:
         return False
     j = limited[0]
-    how = 'continue its thread in place' if in_place(j.context) else 'restart it in a fresh thread'
+    when = datetime.datetime.fromisoformat
+    # As the stop's record says it would be chosen at its resume time; the run chooses again.
+    then = resume_choice(when(j.last_request) if j.last_request else None, j.context,
+                         when(j.resume_at)) if j.resume_at else None
+    how = ('continue its thread in place' if then and then.in_place else
+           'restart it in a fresh thread') + (f' ({then.why})' if then else '')
     line = (f'dry run: {j.kind} {j.repo}#{j.issue} was cut off by a usage limit; after '
             f'{j.resume_at} the runner would {how} ({j.link or j.thread_id}), and starts no '
             'other Claude job before')
@@ -122,13 +191,35 @@ def _dry_run_limited(config, out, log_line) -> bool:
 
 
 def _dry_run(config, github, git, out, log_line, t3=None, gate=None) -> int:
+    from . import control
+    switch = control.read(config.state_dir)
+    if switch.error is not None:
+        print(f'dry run: {control.unreadable_text(switch)}. Once it is, the lanes would:',
+              file=out)
+    for id in control.LANES:
+        if switch.error is None and switch.stop(id).stopped:
+            print(f'dry run: {control.stopped_text(id)}. Once resumed, it would:', file=out)
+    repos, why = control.ordered(config.repos, switch.order)   # the build order (ticket 33)
+    if why is not None:
+        print(f'dry run: {control.order_text(repos, why)}', file=out)
+    else:
+        whose = "Stefan's build order" if switch.order else "config.toml's order"
+        print(f'dry run: repos are taken in {whose}: {", ".join(r.name for r in repos)}',
+              file=out)
+    config = dataclasses.replace(config, repos=repos)
+    if switch.error is None:   # ticket 37: what a stopped repo holds back, as the lanes do
+        from .config import set_stopped
+        for line in _repo_stop_lines(config, switch):
+            print(f'dry run: {line}', file=out)
+        set_stopped(config, control.stopped_repos(repos, switch)[0])
     if not _dry_run_limited(config, out, log_line) and \
+            not _dry_run_ask(config, github, t3, switch, out, log_line) and \
             not _dry_run_decision(config, github, t3, out, log_line) and \
             not _dry_run_live(config, github, git, t3, out, log_line) and \
             not _dry_run_fix(config, github, git, out, log_line):
         _dry_run_build(config, github, out, log_line)
     if gate is not None:
-        _print_gate(gate, out)
+        _print_gate(gate, out, config)
     _dry_run_stops(config, github, out)
     _dry_run_reviews(config, github, out)
     _dry_run_merges(config, github, out)
@@ -141,7 +232,7 @@ def _dry_run_stops(config, github, out) -> None:
     jobs = _jobs(config)
     stopper = Stopper(config, github=github, jobs=jobs, say=lambda line: None)
     print('Stops for Stefan (dry run: nothing filed or toasted):', file=out)
-    for repo in config.repos:
+    for repo in working(config):   # a stopped repo: none (37)
         if not repo.github:
             continue
         for pr in sorted(github.open_pulls(repo), key=lambda p: p.number):
@@ -150,6 +241,33 @@ def _dry_run_stops(config, github, out) -> None:
                       file=out)
             if why := held(jobs, repo, pr.number):
                 print(f'  {repo.name}#{pr.number}: {why}', file=out)
+
+
+def _dry_run_ask(config, github, t3, switch, out, log_line) -> bool:
+    """Prints the ask thread Stefan asked for that the Claude lane would open first (ticket 35),
+    with its brief."""
+    from .ask_threads import AskThreads
+    from .decisions import Decider
+    from .stops import Stopper
+    if switch.error is not None:
+        return False
+    jobs = _jobs(config)
+    decider = Decider(config, github=github, t3=t3, jobs=jobs, say=lambda line: None,
+                      stopper=Stopper(config, github=github, jobs=jobs, say=lambda line: None))
+    asking = AskThreads(config, github=github, t3=t3, jobs=jobs, say=lambda line: None,
+                        decider=decider)
+    found = asking.next(switch)
+    if found is None:
+        return False
+    repo, stop, pr = found
+    log_line(f'dry run: would open an ask thread on {repo.name}#{pr.number}')
+    print(f'Would open a T3 thread for Stefan to decide {repo.name}#{pr.number} in (dry run: '
+          'nothing started)', file=out)
+    print('  brief:', file=out)
+    print('-' * 72, file=out)
+    print(asking.brief(repo, stop, pr), file=out)
+    print('-' * 72, file=out)
+    return True
 
 
 def _dry_run_decision(config, github, t3, out, log_line) -> bool:
@@ -224,7 +342,7 @@ def _dry_run_fix(config, github, git, out, log_line) -> bool:
     from .fix import Fixer
     from .fix import fix_branch
     fixer = Fixer(config, github=github, git=git, jobs=_jobs(config))
-    for repo in config.repos:
+    for repo in working(config):   # a stopped repo: none (37)
         if not repo.github:
             continue
         for pr, review, why in fixer.candidates(repo):
@@ -258,7 +376,7 @@ def _dry_run_merges(config, github, out) -> None:
     from .merge import Merger
     merger = Merger(config, github=github, git=None, jobs=_jobs(config), say=lambda line: None)
     print('Merges (dry run: nothing merged):', file=out)
-    for repo in config.repos:
+    for repo in working(config):   # a stopped repo: none (37)
         if not repo.github:
             continue
         for pr, why in merger.candidates(repo):
@@ -271,7 +389,7 @@ def _dry_run_merges(config, github, out) -> None:
 def _dry_run_build(config, github, out, log_line) -> None:
     from .picker import pick
     jobs = _jobs(config)
-    for repo in config.repos:
+    for repo in working(config):   # a stopped repo: none (37)
         if repo.local_issues:   # shown, but the lane builds none: go on to what it would build
             _dry_run_ticket(repo, out, log_line)
             continue
@@ -317,7 +435,7 @@ def _dry_run_reviews(config, github, out) -> None:
     reviewer = Reviewer(config, github=github, git=None, sol=None, jobs=_jobs(config),
                         say=lambda line: None, poster=DryRunPoster(lambda line: None))
     print('Sol reviews (dry run: Sol not started):', file=out)
-    for repo in config.repos:
+    for repo in working(config):   # a stopped repo: none (37)
         if not repo.github:
             continue
         for pr, why in reviewer.candidates(repo):
@@ -360,6 +478,61 @@ def _review(config, github, git, sol, value, out, log_line, toaster=None, deps=N
         print(f'{value}: not reviewed: {why}.', file=out)
         return 1
     return 0
+
+
+def _commit() -> str | None:
+    """The commit this runner's code is on (the snapshot's `runner.commit`)."""
+    import subprocess
+    try:
+        p = subprocess.run(['git', '-C', os.path.dirname(DEFAULT_CONFIG), 'rev-parse', '--short',
+                            'HEAD'], capture_output=True, text=True, timeout=10,
+                           creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return p.stdout.strip() or None if p.returncode == 0 else None
+
+
+def _utc_now():
+    return datetime.datetime.now(datetime.timezone.utc)
+
+
+def _snapshot(config, gate, sol_usage, clock, out, github, git) -> int:
+    """`--snapshot`: one snapshot from the state now, printed. It reads Claude's usage once,
+    Codex's newest rollout, and GitHub once for the Inbox and the work as the Sol lane would
+    (ticket 32; git only read, nothing fetched), takes no lock, and starts, posts, records and
+    writes nothing. The runner's pid and start are runner.pid's, if one is there."""
+    from .inbox import Reader as InboxReader
+    from .snapshot import Calls, RunnerInfo, Snapshots, Watch
+    from .work import Memo, Reader as WorkReader
+    calls = Calls(clock)
+    github = calls.watch(github, 'github')
+    readers = {'inbox': InboxReader(config, github, _jobs(config), clock),
+               'work': WorkReader(config, github, git, _jobs(config), clock)}
+    shared = Memo(github)
+    for reader in readers.values():
+        reader.read(shared)
+    pid = started = None
+    with contextlib.suppress(OSError, ValueError):
+        with open(_pid_file(config), encoding='utf-8') as f:
+            pid = int(f.read().strip())
+        started = datetime.datetime.fromtimestamp(os.path.getmtime(_pid_file(config)),
+                                                  datetime.timezone.utc)
+    snaps = Snapshots(config, calls=calls, clock=clock, info=RunnerInfo(pid, started, _commit()),
+                      readers=readers,
+                      claude=Watch(gate.reader.read, calls, 'claude_usage', clock),
+                      sol=Watch(sol_usage, calls, 'sol_usage', clock, timed=True))
+    print(json.dumps(snaps.build(fresh=True), indent=1, ensure_ascii=False), file=out)
+    return 0
+
+
+def _publisher(config, runner, calls, claude, sol_usage, clock, log_line, every):
+    """The running runner's snapshot (`snapshot.py`): written by both lanes and its own thread."""
+    from .snapshot import Publisher, RunnerInfo, Snapshots, Watch
+    snaps = Snapshots(config, calls=calls, clock=clock, runner=runner, claude=claude,
+                      sol=Watch(sol_usage, calls, 'sol_usage', clock, timed=True),
+                      info=RunnerInfo(os.getpid(), clock(), _commit()))
+    return Publisher(os.path.join(config.state_dir, 'snapshot.json'), snaps.build, log_line,
+                     every=every)
 
 
 def _pid_file(config) -> str:
@@ -430,7 +603,8 @@ def _relauncher(config, toaster, log_line):
 
 def main(argv=None, github=None, out=None, t3=None, git=None, sleep=None,
          sol=None, toaster=None, usage=None, clock=None, limits=None,
-         t3_settings=None, waker=None, kill=_kill, self_update=None, relaunch=None) -> int:
+         t3_settings=None, waker=None, kill=_kill, self_update=None, relaunch=None,
+         sol_usage=None, snapshot_every=None) -> int:
     out = out or sys.stdout   # None under pythonw: print() then prints nothing
     sleep = sleep or wall_sleep
     parser = argparse.ArgumentParser(prog='queue_runner')
@@ -443,14 +617,22 @@ def main(argv=None, github=None, out=None, t3=None, git=None, sleep=None,
     parser.add_argument('--gate', action='store_true',
                         help="print Claude's usage now and whether each job kind would start")
     knob = parser.add_mutually_exclusive_group()
-    knob.add_argument('--pause', action='store_true', help='start no Claude job until --resume')
-    knob.add_argument('--resume', action='store_true', help='let Claude jobs start again')
+    # A lane (claude, sol, all) or a served repo's name (ticket 37), checked once config is read
+    knob.add_argument('--pause', nargs='?', const='claude', metavar='LANE|REPO',
+                      help='stop a lane after its job: claude (the default), sol or all; or '
+                           "one served repo, in both lanes; the dashboard's Stop")
+    knob.add_argument('--resume', nargs='?', const='claude', metavar='LANE|REPO',
+                      help="let a lane or a repo carry on: claude (the default), sol, all or a "
+                           "repo's name; the dashboard's Resume")
     parser.add_argument('--reserve', type=float, metavar='PERCENT',
                         help='the share of the week kept for Stefan until 24h before its reset')
     parser.add_argument('--stop', action='store_true', help='stop the running runner')
     parser.add_argument('--inbox', action='store_true',
                         help='list everything waiting on Stefan: PRs ready to merge, '
                              'needs-info stops, threads waiting for an answer')
+    parser.add_argument('--snapshot', action='store_true',
+                        help="print the dashboard's snapshot built from the state now (no lock; "
+                             'starts, posts and records nothing)')
     parser.add_argument('--config', default=DEFAULT_CONFIG)
     args = parser.parse_args(argv)
     if args.dry_run and not args.once:
@@ -474,21 +656,30 @@ def main(argv=None, github=None, out=None, t3=None, git=None, sleep=None,
         return 0
 
     if args.pause or args.resume or args.reserve is not None:
-        code = _knob(config, args, out)
+        code = 0
+        if args.reserve is not None:
+            code = _knob(config, args, out)
+        if code == 0 and (args.pause or args.resume):
+            code = _switch(config, args, out)
         if code == 0:
-            log_line(f'gate knob: {" ".join(argv or sys.argv[1:])}')
+            log_line(f'Stefan: {" ".join(argv or sys.argv[1:])}')
         return code
     gate = _gate(config, usage, clock)
     if args.gate:
-        _print_gate(gate, out)
+        _print_gate(gate, out, config)
         return 0
-
+    if sol_usage is None:
+        from .sol import latest_limits as sol_usage
+    snap_clock = clock or _utc_now
     if github is None:
         from .github import GhCli
         github = GhCli()
     if git is None:
         from .git import GitCli
         git = GitCli()
+    if args.snapshot:
+        return _snapshot(config, gate, sol_usage, snap_clock, out, github, git)
+
     if args.inbox:   # read only: posts, starts and records nothing
         from .inbox import report
         print(report(config, github, _jobs(config)), file=out)
@@ -521,11 +712,28 @@ def main(argv=None, github=None, out=None, t3=None, git=None, sleep=None,
         waker = Waker(Schtasks(), say=lambda line: runner.say(line), now=clock)
     if self_update is None and not args.once:
         self_update = _self_update(config, log_line)
+    calls = None
+    if not args.once:   # the dashboard's sources: the last real call of each kind
+        from .snapshot import Calls, Watch
+        calls = Calls(snap_clock)
+        github, t3 = calls.watch(github, 'github'), calls.watch(t3, 't3')
+        gate.reader = Watch(gate.reader.read, calls, 'claude_usage', snap_clock)
+    # The effort Claude jobs run at (ticket 39): read from T3's own files when the limits store
+    # is T3's real database (a test's fake store reads none, so nothing is read back).
+    from .effort import Effort, T3Files, T3_SETTINGS
+    effort = Effort(config, files=T3Files(settings=t3_settings or T3_SETTINGS, db=limits.path,
+                                          projects=limits.projects)
+                    if isinstance(limits, T3Store) else None)
     runner = Runner(config, github=github, t3=t3, git=git, out=out, log_line=log_line, sol=sol,
                     toaster=toaster, gate=gate, limits=limits, now=clock, waker=waker,
-                    self_update=self_update, deps=deps)
+                    self_update=self_update, deps=deps, effort=effort)
+    if calls is not None:   # continuous mode only: --once writes no snapshot
+        from .snapshot import WRITE_EVERY
+        runner.publisher = _publisher(config, runner, calls, gate.reader, sol_usage, snap_clock,
+                                      log_line, snapshot_every or WRITE_EVERY)
     if warning := auto_resume_warning(*([t3_settings] if t3_settings else [])):
         runner.say(f'Warning: {warning}')
+    effort.check(config.repos)   # how each served repo's Claude jobs start, and at what effort
     restart = None
     try:
         with runner_lock(config.state_dir):

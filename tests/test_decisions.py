@@ -1,5 +1,6 @@
 """Decision threads: the answer block parsed (an unreadable one is a stop), and each case and action
 through the real `Runner`, with GitHub, T3, git and Sol faked."""
+import datetime
 import io
 import os
 import tempfile
@@ -13,7 +14,7 @@ from queue_runner.ledger import RUNNER_MARK, runner_post
 from queue_runner.run import Runner
 from queue_runner.stops import held
 from queue_runner.t3 import Message, T3Error
-from tests.fakes import FakeGitHubForReviews, FakeToaster, full_pr, issue
+from tests.fakes import FakeGitHubForReviews, FakeLimits, FakeToaster, full_pr, issue
 from tests.fakes_t3 import FakeReviewGit, FakeSol, FakeT3, decision_reply
 from tests.test_ledger import H2, H3, important, old_marker
 
@@ -95,11 +96,15 @@ class DecisionTest(unittest.TestCase):
         self.git = FakeReviewGit(heads={20: H2})
         self.toaster = FakeToaster()
         self.said = []
+        # Every thread's last request started just now, so it's warm and continued in place,
+        # unless a test says otherwise (ticket 38).
+        self.limits = FakeLimits(default_start=datetime.datetime.now(datetime.timezone.utc))
 
     def runner(self, *outcomes, sol=()):
         self.t3 = FakeT3(list(outcomes))
         self.r = Runner(self.config, github=self.gh, t3=self.t3, git=self.git, out=io.StringIO(),
-                        log_line=self.said.append, sol=FakeSol(list(sol)), toaster=self.toaster)
+                        log_line=self.said.append, sol=FakeSol(list(sol)), toaster=self.toaster,
+                        limits=self.limits)
         return self.r
 
     def jobs(self, kind):
@@ -321,6 +326,122 @@ class DecisionTest(unittest.TestCase):
         self.assertEqual(first.outcome, 'failed')
         self.assertEqual(self.r.jobs.held_issues('first'), {4})
 
+    def cold(self, tokens):
+        """The build's thread last ran two hours ago and holds `tokens`."""
+        two_hours_ago = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=2)
+        self.limits = FakeLimits(contexts={'mcp:t1': tokens}, starts={'mcp:t1': two_hours_ago})
+        # A fresh thread's brief is the build's own, read from the issue again.
+        self.gh.issue_bodies[('owner/first', 4)] = issue(4, 'Blue widget', 'Make it blue.')
+
+    def test_a_cold_big_thread_retried_starts_fresh_with_the_decision_first(self):
+        self.cold(200_000)
+        self.git.tips = {'claude/blue-widget-4': 'abc1234def'}
+        self.build((1, 'failed'),
+                   (0, 'completed', decision_reply('retry', add='Install deps first.')),
+                   (0, 'completed'))
+        self.t3.messages['mcp:t1'] = [Message('assistant', 'npm test failed: missing module')]
+        self.assertEqual(self.r.run_pass(), 'started')
+        self.assertEqual(self.t3.sends, [])
+        fresh = self.t3.starts[2]
+        self.assertEqual((fresh['worktree'], fresh['branch'], fresh['title']),
+                         ('abc1234def', 'claude/blue-widget-4', 'Queue runner build: first#4'))
+        brief = fresh['message']
+        self.assertTrue(brief.startswith('## Direction first\n\nAn earlier thread on this job '
+                                         'failed'))
+        self.assertIn('Install deps first.', brief)
+        self.assertLess(brief.index('Install deps first.'), brief.index('/implement'))
+        self.assertIn('## Picking up from an earlier thread', brief)
+        self.assertIn('cold (its last request started 2 h ago) and 200,000 tokens', brief)
+        self.assertIn('npm test failed: missing module', brief)
+        self.assertEqual(self.git.freed, [('claude/blue-widget-4', 'C:/t3/worktrees/mcp:t1')])
+        first, second = self.jobs('build')
+        self.assertEqual((second.about, second.thread_id, second.outcome),
+                         (first.id, 'mcp:t3', 'done-no-pr'))
+        self.assertEqual((second.resume['how'], second.resume['context']), ('fresh', 200_000))
+        self.assertTrue(any('Restarting build first#4 fresh for the decision (cold' in line
+                            for line in self.said))
+
+    def test_a_cold_big_thread_answered_starts_fresh_with_its_question_and_the_answer(self):
+        self.cold(150_000)
+        self.build((2, 'waiting'), (0, 'completed', decision_reply('answer', text='Use blue.')),
+                   (0, 'completed'))
+        self.t3.messages['mcp:t1'] = [Message('user', 'Go.'),
+                                      Message('assistant', 'Which blue: navy or sky?')]
+        self.r.run_pass()
+        self.assertEqual(self.t3.sends, [])
+        brief = self.t3.starts[2]['message']
+        self.assertIn('An earlier thread on this job stopped to ask a question', brief)
+        self.assertIn('The earlier thread asked:\n\n> Which blue: navy or sky?', brief)
+        self.assertIn('Use blue.', brief)
+        self.assertLess(brief.index('Use blue.'), brief.index('/implement'))
+        first, second = self.jobs('build')
+        self.assertEqual((first.outcome, second.outcome), ('continued', 'done-no-pr'))
+        self.assertEqual(self.r.jobs.waiting_jobs(), [])
+
+    def fresh_start_fails(self, first, decision):
+        """A cold, big build thread that ended `first`, a decision that picks it up, and T3
+        failing before the fresh thread for it exists (review 1's F4)."""
+        from dataclasses import replace
+        self.cold(150_000)
+        self.build(first, (0, 'completed', decision), T3Error('Server unavailable before launch'))
+        # The old thread was made before the new job: settling can't take it for the new one's.
+        self.t3.threads['mcp:t1'] = replace(self.t3.threads['mcp:t1'],
+                                            created_at='2026-01-01T00:00:00Z')
+        self.assertEqual(self.r.run_pass(), 'idle')
+        self.assertEqual(self.jobs('build')[-1].outcome, 'not-started')
+        self.assertEqual(self.jobs('decision')[-1].outcome, 'not-started')
+
+    def test_a_fresh_answer_that_never_starts_leaves_the_waiting_case_to_decide_again(self):
+        self.fresh_start_fails((2, 'waiting'), decision_reply('answer', text='Use blue.'))
+        first = self.jobs('build')[0]
+        self.assertEqual(first.outcome, 'waiting')   # as it was: never continued
+        case = self.r.decider.next_case()
+        self.assertIsNotNone(case)
+        self.assertEqual((case.question, case.about.id), ('waiting', first.id))
+        self.assertEqual(self.r.jobs.held_issues('first'), {4})   # the picker leaves it alone
+        self.assertEqual([j.id for j in self.r.jobs.waiting_jobs()], [first.id])
+        self.t3.outcomes = [(0, 'completed', decision_reply('answer', text='Use blue.')),
+                            (0, 'completed')]
+        self.assertEqual(self.r.run_pass(), 'started')
+        self.assertEqual([j.outcome for j in self.jobs('build')],
+                         ['continued', 'not-started', 'done-no-pr'])
+
+    def test_a_fresh_retry_that_never_starts_leaves_the_failed_case_to_decide_again(self):
+        self.fresh_start_fails((1, 'failed'), decision_reply('retry', add='Again.'))
+        first = self.jobs('build')[0]
+        self.assertEqual(first.outcome, 'failed')
+        case = self.r.decider.next_case()
+        self.assertEqual((case.question, case.about.id), ('failed', first.id))
+        self.assertEqual(self.r.jobs.held_issues('first'), {4})
+
+    def test_a_fresh_answer_cut_off_with_its_runner_before_t3_started_is_decided_again(self):
+        # The runner died after marking the waiting job continued and before T3 made the fresh
+        # thread: the next runner's settle finds no thread for the new job.
+        from dataclasses import replace
+        self.cold(150_000)
+        self.build((2, 'waiting'))
+        self.t3.threads['mcp:t1'] = replace(self.t3.threads['mcp:t1'],
+                                            created_at='2026-01-01T00:00:00Z')
+        first = self.jobs('build')[0]
+        self.r.jobs.ended(first.id, exit_code=2, outcome='continued')
+        self.r.jobs.started(kind='build', repo='first', issue=4, branch=first.branch,
+                            title=first.title, about=first.id)
+        self.t3.outcomes = [(0, 'completed', decision_reply('answer', text='Use blue.')),
+                            (0, 'completed')]
+        self.assertEqual(self.r.run_pass(), 'started')
+        self.assertEqual([j.outcome for j in self.jobs('build')],
+                         ['continued', 'not-started', 'done-no-pr'])
+        self.assertEqual([d.outcome for d in self.jobs('decision')], ['answer'])
+
+    def test_a_cold_thread_under_120k_tokens_retried_carries_on_in_place(self):
+        self.cold(119_000)
+        self.build((1, 'failed'),
+                   (0, 'completed', decision_reply('retry', add='Again.')), (0, 'completed'))
+        self.r.run_pass()
+        self.assertEqual([s['thread_id'] for s in self.t3.sends], ['mcp:t1'])
+        second = self.jobs('build')[1]
+        self.assertEqual((second.resume['how'], second.resume['idle_minutes']), ('in-place', 120))
+
     def test_a_message_that_never_reaches_the_thread_leaves_the_case_to_decide_again(self):
         self.build((2, 'waiting'), (0, 'completed', decision_reply('answer', text='Blue.')),
                    T3Error('T3 is down'),
@@ -333,6 +454,32 @@ class DecisionTest(unittest.TestCase):
         self.r.run_pass()
         self.assertEqual([j.outcome for j in self.jobs('build')],
                          ['continued', 'not-sent', 'done-no-pr'])
+
+    def test_a_stop_asked_during_the_decision_thread_holds_its_retry_until_resume(self):
+        # Stefan stops the Claude lane while the decision thread runs (ticket 30; review 1's
+        # F1): the decision finishes, the retry it chose is a job after it, so it waits.
+        self.build((1, 'failed'),
+                   (0, 'completed', decision_reply('retry', add='Install deps first.')),
+                   (0, 'completed', decision_reply('retry', add='Install deps first.')),
+                   (0, 'completed'))
+        control = os.path.join(self.config.state_dir, 'control.json')
+        t3_start = self.t3.start
+
+        def start(*args, **kwargs):
+            with open(control, 'w', encoding='utf-8') as f:
+                f.write('{"lanes": {"claude": {"stop": "after-job", "at": "2026-11-16T00:00:00Z"}}}')
+            self.t3.start = t3_start
+            return t3_start(*args, **kwargs)
+        self.t3.start = start
+        self.assertEqual(self.r.run_pass(), 'idle')
+        self.assertEqual(self.t3.sends, [])
+        self.assertEqual([j.outcome for j in self.jobs('build')], ['failed'])
+        self.assertEqual(self.jobs('decision')[0].outcome, 'not-started')
+        self.assertTrue(any('Claude lane is stopped by Stefan' in line for line in self.said))
+        self.assertEqual(self.r.run_pass(), 'stopped')   # still stopped: nothing at all
+        os.remove(control)   # Resume: the case is decided again, and the retry goes on
+        self.assertEqual(self.r.run_pass(), 'started')
+        self.assertEqual([s['thread_id'] for s in self.t3.sends], ['mcp:t1'])
 
     def test_a_waiting_build_answered_by_a_decision_continues_and_the_old_job_is_done(self):
         self.build((2, 'waiting'), (0, 'completed', decision_reply('answer', text='Use blue.')),

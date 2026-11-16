@@ -665,6 +665,8 @@ button.stn-in:hover { background: var(--hover); }
 .order .n { color: var(--dim); width: 14px; }
 .order .name { min-width: 0; flex: 1; font-weight: 600; }
 .order .name span { display: block; font-size: 14px; font-weight: 400; color: var(--mute); }
+.order li.off .name { color: var(--mute); }
+.tag.off { margin-left: 8px; color: var(--mute); border-style: dashed; }
 
 /* ---------------------------------------------------------------- activity */
 .day { padding: 16px 20px 8px; font-weight: 600; font-size: 15px; color: var(--mute); }
@@ -833,6 +835,7 @@ const who = (provider, name) => `<span class="who ${MARK[provider] ? esc(provide
 let snap = null;     // the runner's snapshot, as last read
 let ctl = {};        // control.json, as last read
 let fault = null;    // why the snapshot couldn't be read: "server", "missing", "unreadable"
+let faultStart = ""; // with "missing": how to start the runner, as the server says it
 const PAGES = [["overview", "Overview"], ["inbox", "Inbox"], ["queue", "Queue"], ["activity", "Activity"], ["usage", "Usage"], ["settings", "Settings"]];
 const UNBUILT = [];   // pages still as they were before the split
 // PROTOTYPE (ticket 21): the Queue page's three arrangements, ?variant=a|b|c
@@ -937,8 +940,11 @@ const key = (i) => `${i.repo}#${i.n}`;
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 const scoped = (xs) => (ui.repo ? xs.filter((x) => x.repo === ui.repo) : xs);
 // A repository's mark on an Inbox row: its first letter on a plain tile. Colour is kept for state.
-const repoMark = (name) => `<span class="rlogo" aria-hidden="true">${esc((name || "?")[0].toUpperCase())}</span><span class="rname">${esc(name)}</span>`;
-const repoTag = (name) => (ui.repo ? "" : `<span class="tag">${esc(name)}</span>`);
+const repoMark = (name) => `<span class="rlogo" aria-hidden="true">${esc((name || "?")[0].toUpperCase())}</span><span class="rname">${esc(name)}</span>${offTag(name)}`;
+const repoTag = (name) => (ui.repo ? offTag(name) : `<span class="tag">${esc(name)}${repoOff(name) ? ", stopped" : ""}</span>`);
+// A repository Stefan stopped (ticket 37): neither lane takes up its work; its asks stay.
+const repoOff = (name) => ((snap && snap.repos) || []).find((r) => r.name === name && r.stopped) || null;
+const offTag = (name) => { const r = repoOff(name); return r ? `<span class="tag off" title="Stopped${r.stopped.at ? ` since ${esc(stamp(r.stopped.at))}` : ""}: neither lane takes up its work">Stopped</span>` : ""; };
 const prLink = (repo, n, text) => `<button class="link" data-act="pr" data-repo="${esc(repo)}" data-n="${n}">${text}</button>`;
 
 // ------------------------------------------------------------------ sidebar
@@ -946,7 +952,7 @@ function side() {
   const s = snap || {};
   const repos = s.repos || [], asks = s.asks || [];
   const count = (name) => asks.filter((a) => (!name || a.repo === name) && !snoozedUntil(a)).length;
-  const merges = (r) => (r.merge === "stefan" ? "You merge its PRs" : "The runner merges its PRs");
+  const merges = (r) => (r.stopped ? "Stopped. " : "") + (r.merge === "stefan" ? "You merge its PRs" : "The runner merges its PRs");
   const item = (name, title, sub) => `<button class="mi" role="menuitemradio" aria-checked="${ui.repo === name}" data-act="repo" data-repo="${esc(name)}">
       <span class="tick">${ui.repo === name ? ICON.check : ""}</span>
       <span class="two"><b>${esc(title)}</b><span>${esc(sub)}</span></span>
@@ -1002,7 +1008,7 @@ function notices() {
   const out = [];
   if (fault === "server") out.push(`<p class="notice"><b>This page lost its own server.</b> What's below is as it was at ${esc(clock(snap.written_at))}. Start it again with <code>python3 -m dashboard</code>.</p>`);
   else if (isStale()) out.push(`<p class="notice"><b>The runner hasn't written since ${esc(clock(snap.written_at))}, ${esc(ago(snap.written_at))} ago.</b> Everything here is as it was then. ${esc(snap.start_hint || "")}</p>`);
-  for (const s of snap.sources || []) if (!s.ok && s.affects) out.push(`<p class="notice"><b>${esc(s.name)}: ${esc(s.note)}</b>, last good ${esc(clock(s.checked_at))}. ${esc(s.affects)}</p>`);
+  for (const s of snap.sources || []) if (!s.ok && s.affects) out.push(`<p class="notice"><b>${esc(s.name)}: ${esc(s.note)}</b>, ${s.checked_at ? `last good ${esc(clock(s.checked_at))}` : "never answered"}. ${esc(s.affects)}</p>`);
   return out.join("");
 }
 
@@ -1016,14 +1022,29 @@ function notices() {
 // runner is through with them, so "handled" and "still held" can be told apart).
 const KIND_ICON = { stuck: ICON.stuck, decision: ICON.decision, merge: ICON.merge, broken: ICON.broken };
 
-// Read and snoozed are kept in this browser while the page is a prototype. The real ones go
-// through control.json, so every browser agrees and the runner can hold a snoozed ask's toast.
-function stored(k) { try { return JSON.parse(recall(k) || "{}") || {}; } catch { return {}; } }
-const readKey = (a) => `${a.id}@${a.since}`;   // an ask that came back later is unread again
-const isRead = (a) => !!stored("read")[readKey(a)];
-function setRead(a, yes) { const m = stored("read"); if (yes) m[readKey(a)] = 1; else delete m[readKey(a)]; remember("read", JSON.stringify(m)); }
-function snoozedUntil(a) { const t = stored("snooze")[a.id]; return t && ms(t) > Date.now() ? t : null; }
-function setSnooze(id, until) { const m = stored("snooze"); if (until) m[id] = until; else delete m[id]; remember("snooze", JSON.stringify(m)); }
+// Read and snoozed are kept with the runner (ticket 36): the page asks through control.json's
+// `asks.<id>` and the snapshot's asks carry `read` and `snoozed_until`, so every browser agrees.
+// What the page last asked stands in for an ask until the snapshot has read that control file.
+function mark(a) {
+  const e = ((ctl && ctl.asks) || {})[a.id];
+  const ahead = ctl && ctl.written_at && !(snap.control_read_at && ms(snap.control_read_at) >= ms(ctl.written_at));
+  const read = e && ahead && "read" in e ? e.read === true : !!a.read;
+  const until = e && ahead && "snooze_until" in e ? e.snooze_until : a.snoozed_until;
+  return { read, until };
+}
+const isRead = (a) => mark(a).read;
+function snoozedUntil(a) { const t = mark(a).until; return t && ms(t) > Date.now() ? t : null; }
+const asking = new Set();   // requests on their way, so a redraw meanwhile doesn't send one again
+function askMark(id, change) {
+  const body = { ask: id, ...change }, key = JSON.stringify(body);
+  if (asking.has(key)) return;
+  asking.add(key);
+  // Shown at once; the next read of control.json replaces this.
+  ctl = { ...ctl, written_at: new Date().toISOString(), asks: { ...(ctl.asks || {}), [id]: { ...((ctl.asks || {})[id] || {}), ...change } } };
+  send([body]).finally(() => asking.delete(key));
+}
+const setRead = (a, yes) => askMark(a.id, { read: yes });
+const setSnooze = (id, until) => askMark(id, { snooze_until: until || null });
 function snoozeChoices() {
   const now = new Date(), later = new Date(now.getTime() + 3 * 3600e3);
   const tomorrow = new Date(now); tomorrow.setDate(now.getDate() + 1); tomorrow.setHours(9, 0, 0, 0);
@@ -1124,6 +1145,22 @@ function goBtn(a, cls, label) {
   const where = a.go.where || (/github\.com/.test(a.go.url) ? "github" : "t3");
   return `<a class="btn ${cls}" href="${esc(a.go.url)}" target="_blank" rel="noreferrer">${{ github: MARK.github, t3: ICON.thread }[where] || ""}${esc(label || a.go.label)}${ICON.out}</a>`;
 }
+// Decide in T3 (ticket 35): an ask the runner can open a thread for offers one. Asked, it says so
+// until the runner has read it, then when it starts; open, `go` is the thread and `also` the
+// needs-info issue, the other place to answer.
+function answerAt(a) {
+  const d = a.decide;
+  if (!d) return goBtn(a, "go");
+  if (d.state === "open") return `${goBtn(a, "go")}${a.also ? `<a class="btn" href="${esc(a.also.url)}" target="_blank" rel="noreferrer">${MARK.github}${esc(a.also.label)}${ICON.out}</a>` : ""}`;
+  const want = ((ctl.asks || {})[a.id] || {}).open;
+  const unread = want && want.at && !wasRead(want.at);
+  if (d.state === "asked" || unread) {
+    const note = unread ? `You asked at ${clock(want.at)}. The runner hasn't read it yet.` : d.note;
+    return `<button class="btn go" disabled>${ICON.thread}Decide in T3</button><p class="holds">${esc(note || "")}</p>${goBtn(a, "")}`;
+  }
+  if (frozen()) return goBtn(a, "go");
+  return `<button class="btn go" data-act="decide" data-id="${esc(a.id)}" title="The runner opens a thread in T3, briefed with this ask, to talk it through and decide in">${ICON.thread}Decide in T3</button>${goBtn(a, "")}`;
+}
 const holdsText = (a) => ((a.holds_up || []).length ? `Until then <b>${a.holds_up.map(esc).join("</b> and <b>")}</b> can't start.` : "It holds nothing else up.");
 const historyLink = (a) => (a.pr ? prLink(a.repo, a.pr, "PR history") : "");
 // `timeline` is each step with its time; a snapshot with only the older `story` still reads.
@@ -1139,7 +1176,7 @@ function letter(a) {
     ? `<aside class="vc-ask answered"><p class="move-label">You answered</p><p class="question">${esc(done.said)}</p>
         <p class="holds">${esc(stamp(done.at))}. ${esc(done.next)}</p>${goBtn(a, "", "See where you answered")}<p class="vc-foot">${historyLink(a)}</p></aside>`
     : `<aside class="vc-ask"><p class="move-label">What it needs from you</p><p class="question">${esc(a.question)}</p>${options}
-        <p class="holds">${holdsText(a)}</p>${goBtn(a, "go")}<p class="vc-foot">${historyLink(a)}</p></aside>`;
+        <p class="holds">${holdsText(a)}</p>${answerAt(a)}<p class="vc-foot">${historyLink(a)}</p></aside>`;
   return `<article class="letter vc"><div class="vc-grid">
     <div class="vc-story" data-scroll="ask">${metaLine(a)}
       <h2>${esc(a.situation || a.subject)}</h2><p class="vc-sub"><b>${esc(a.subject)}</b></p>
@@ -1390,6 +1427,7 @@ function standing(i, q) {
     more = at.n === 1 ? `Next for ${at.lane.name}` : `${nth(at.n)} in ${at.lane.name}'s queue`;
     short = i.state === "ready" ? (at.n === 1 ? "Next in line" : `${nth(at.n)} in line`) : `${word}, ${at.n === 1 ? "next" : nth(at.n)} in line`;
   } else if (ask) more = short = askWords(ask)[0];
+  else if (repoOff(i.repo) && i.state !== "done") more = short = "Its repository is stopped";
   else if (i.state === "blocked" && waits.length) more = short = `After ${waits.map((w) => `#${w.n}`).join(" and ")}`;
   else if (i.state === "not-ready") { more = "Not marked ready for the runner"; short = "Not marked ready"; }
   return { word, seg, on, at, ask, more, short };
@@ -1700,10 +1738,10 @@ function meter(w, full) {
     <span class="bar" role="img" aria-label="${esc(w.label)}: ${known ? used + "% used" : "unknown"}">
       ${known ? `<i class="fill" style="width:${Math.min(used, 100)}%"></i>` : ""}${w.reserve ? `<i class="kept" style="width:${w.reserve}%" title="${w.reserve}% kept for you"></i>` : ""}</span>
     <span class="pct">${known ? used + "%" : "?"}</span>
-    <span class="when">resets ${esc(stamp(w.resets_at))}${full && !w.gates ? `. ${esc(w.note || "Not used by the runner.")}` : ""}</span></div>`;
+    <span class="when">${w.resets_at ? `resets ${esc(stamp(w.resets_at))}` : "not started"}${full && !w.gates ? `. ${esc(w.note || "Not used by the runner.")}` : ""}</span></div>`;
 }
 const plan = (p, full) => `<div class="plan">
-    <p class="plan-name">${who(p.provider, p.name)}<span class="dim small">${p.plan ? esc(p.plan) + ", " : ""}read ${esc(clock(p.read_at))}</span></p>
+    <p class="plan-name">${who(p.provider, p.name)}<span class="dim small">${p.plan ? esc(p.plan) + ", " : ""}${p.read_at ? `read ${esc(clock(p.read_at))}` : "not read yet"}</span></p>
     ${p.error ? `<p class="plan-note bad">${esc(p.error)}</p>` : ""}
     ${(p.windows || []).map((w) => meter(w, full)).join("")}
     ${(p.windows || []).filter((w) => w.reserve).map((w) => `<p class="plan-note">${w.reserve}% of the week is kept for you.</p>`).join("")}
@@ -1719,7 +1757,7 @@ function status() {
   const one = (x) => `<span class="${x.ok || down ? "" : "no"}" title="${esc(x.name)}: ${esc(x.note || "")}"><i class="dot ${down ? "" : x.ok ? "ok" : "bad"}"></i>${esc(x.short || x.name)}</span>`;
   return `<a class="card status${down ? " down" : ""}" href="${esc(href({ page: "settings", pr: null }))}" data-act="page" data-page="settings" title="Connections are in Settings">
     <span class="h-top"><i class="dot ${down ? "bad" : "ok"}"></i><b>${down ? "Runner silent" : "Runner running"}</b></span>
-    <span class="h-when">since ${esc(stamp(down ? snap.written_at : snap.runner.started_at))}</span>
+    ${(down ? snap.written_at : (snap.runner || {}).started_at) ? `<span class="h-when">since ${esc(stamp(down ? snap.written_at : snap.runner.started_at))}</span>` : ""}
     <span class="h-groups">${groups.map(([label, xs]) => `<span class="h-label">${label}</span><span class="h-row">${xs.map(one).join("")}</span>`).join("")}</span>
     ${!down && bad.length ? `<span class="h-bad">${bad.map((x) => `${esc(x.name)}: ${esc(x.note)}`).join(". ")}</span>` : ""}</a>`;
 }
@@ -1730,11 +1768,20 @@ function orderRows() {
   const shown = valid ? want : names, stale = frozen();
   const rows = shown.map((name, n) => {
     const r = snap.repos.find((x) => x.name === name);
-    return `<li><span class="n">${n + 1}</span><span class="name">${esc(name)}<span>${r.merge === "stefan" ? "you merge" : "the runner merges"}</span></span>
+    const a = (ctl.repos || {})[name], pending = a && !wasRead(a.at) && !!a.stop !== !!r.stopped;
+    const off = pending ? !!a.stop : !!r.stopped;
+    const sub = pending ? (a.stop ? "Asked to stop: the runner hasn't read it yet" : "Asked to resume: the runner hasn't read it yet")
+      : r.stopped ? `Stopped${r.stopped.at ? ` since ${stamp(r.stopped.at)}` : ""}` : r.merge === "stefan" ? "you merge" : "the runner merges";
+    const btn = stale ? "" : off
+      ? `<button class="btn sm solid" data-act="repostop" data-repo="${esc(name)}" data-how="" title="Both lanes take up its work again">${ICON.play}Resume</button>`
+      : `<button class="btn sm" data-act="repostop" data-repo="${esc(name)}" data-how="after-job" title="A job running on it finishes; then neither lane takes up its work">${ICON.pause}Stop</button>`;
+    return `<li${r.stopped ? ' class="off"' : ""}><span class="n">${n + 1}</span><span class="name">${esc(name)}<span>${esc(sub)}</span></span>${btn}
       <button class="btn sm icon" data-act="move" data-repo="${esc(name)}" data-by="-1" aria-label="Build ${esc(name)} earlier" title="Build earlier" ${n === 0 || stale ? "disabled" : ""}>${ICON.up}</button>
       <button class="btn sm icon" data-act="move" data-repo="${esc(name)}" data-by="1" aria-label="Build ${esc(name)} later" title="Build later" ${n === shown.length - 1 || stale ? "disabled" : ""}>${ICON.down}</button></li>`;
   }).join("");
-  const note = valid && want.join("\n") !== names.join("\n") ? "You changed the order. The runner hasn't taken it up yet." : "The first repository with ready work gets the next build.";
+  const note = valid && want.join("\n") !== names.join("\n") ? "You changed the order. The runner hasn't taken it up yet."
+    : snap.repos.some((r) => r.stopped) ? "The first repository with ready work gets the next build. A stopped one gets nothing until you resume it."
+    : "The first repository with ready work gets the next build.";
   return `<ol class="order">${rows}</ol><p class="plan-note">${note}</p>`;
 }
 
@@ -1787,8 +1834,8 @@ function settings() {
       <table class="plain"><tbody>${roles.map((x) => { const l = lanesBy.get(x.lane) || {}; return `<tr><td class="strong" style="width:150px">${esc(x.job)}</td><td class="mute">${esc(x.what)}</td><td style="width:170px">${who(l.provider, l.name || x.lane)}</td></tr>`; }).join("")}</tbody></table></section>` : ""}
     <section class="card"><header class="card-head"><h2>Connections</h2></header>
       <ul class="rows">
-        <li><i class="dot ${stale ? "bad" : "ok"}"></i><span class="strong">Runner</span><span class="${stale ? "no" : "mute"}">${stale ? `Silent since ${esc(clock(snap.written_at))}` : `Up since ${esc(clock(r.started_at))}, process ${esc(r.pid)}, on commit <span class="sha">${esc(r.commit)}</span>`}</span><span class="dim small">wrote ${esc(clock(snap.written_at))}</span></li>
-        ${(snap.sources || []).map((s) => `<li><i class="dot ${stale ? "" : s.ok ? "ok" : "bad"}"></i><span class="strong">${esc(s.name)}</span><span class="${s.ok ? "mute" : "no"}">${esc(s.note || (s.ok ? "ok" : "failing"))}${!s.ok && s.affects ? `. ${esc(s.affects)}` : ""}</span><span class="dim small">${s.ok ? "checked" : "last good"} ${esc(clock(s.checked_at))}</span></li>`).join("")}
+        <li><i class="dot ${stale ? "bad" : "ok"}"></i><span class="strong">Runner</span><span class="${stale ? "no" : "mute"}">${stale ? `Silent since ${esc(clock(snap.written_at))}` : `Up${r.started_at ? ` since ${esc(clock(r.started_at))}` : ""}, process ${esc(r.pid ?? "unknown")}, on commit <span class="sha">${esc(r.commit)}</span>`}</span><span class="dim small">wrote ${esc(clock(snap.written_at))}</span></li>
+        ${(snap.sources || []).map((s) => `<li><i class="dot ${stale ? "" : s.ok ? "ok" : "bad"}"></i><span class="strong">${esc(s.name)}</span><span class="${s.ok ? "mute" : "no"}">${esc(s.note || (s.ok ? "ok" : "failing"))}${!s.ok && s.affects ? `. ${esc(s.affects)}` : ""}</span><span class="dim small">${s.checked_at ? `${s.ok ? "checked" : "last good"} ${esc(clock(s.checked_at))}` : s.ok ? "" : "never answered"}</span></li>`).join("")}
       </ul></section>`;
 }
 
@@ -1849,7 +1896,7 @@ function draw() {
   put("side", side());
   put("top", topBar());
   if (!snap) {
-    const why = fault === "missing" ? ["No snapshot yet", "The runner writes one on every pass. Start the runner and this page fills in by itself."]
+    const why = fault === "missing" ? ["The runner hasn't written a snapshot yet", esc(faultStart || "Start the runner, and this page fills in by itself.")]
       : fault === "unreadable" ? ["The snapshot can't be read", "The file is there but isn't valid. The runner's log says what went wrong."]
       : ["This page can't reach its server", "Start it with <code>python3 -m dashboard</code> in the queue-runner folder."];
     put("main", fault ? `<div class="blank"><h2>${why[0]}</h2><p class="mute">${why[1]}</p></div>` : "");
@@ -1877,7 +1924,7 @@ async function load() {
     ]);
     ctl = c.ok ? await c.json() : {};
     if (s.ok) { snap = await s.json(); fault = null; }
-    else { fault = s.status === 404 ? "missing" : "unreadable"; snap = null; }
+    else { fault = s.status === 404 ? "missing" : "unreadable"; faultStart = fault === "missing" ? ((await s.json().catch(() => ({}))).start || "") : ""; snap = null; }
   } catch { fault = "server"; }
   draw();
 }
@@ -1935,6 +1982,8 @@ document.addEventListener("click", (e) => {
     case "open": ui.open = ui.open.includes(d.id) ? ui.open.filter((x) => x !== d.id) : [...ui.open, d.id]; break;   // the Queue, B
     case "variant": turnVariant(Number(d.by)); break;   // PROTOTYPE
     case "stop": ui.pop = null; send([{ lane: d.lane, stop: d.how || null }]); return;
+    case "repostop": send([{ repo: d.repo, stop: d.how || null }]); return;   // one repository (ticket 37)
+    case "decide": send([{ ask: d.id, open: true }]); return;   // a T3 thread for this ask (ticket 35)
     case "all": {
       const how = d.how || null;
       ui.pop = null;
