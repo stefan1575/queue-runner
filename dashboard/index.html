@@ -37,9 +37,11 @@
     sentence), unread ones marked, and the picked one open on the right as a briefing that
     still makes sense a week later: the story down the left, the ask standing beside it. A row
     reads like a thread in T3's sidebar: the repository and its mark, then the tag, then the
-    title. Two groups sit at the foot of the list, each folding to one line: Snoozed (out of
-    the list until a time you chose, each with its Unsnooze button) and Decided (until the
-    runner is through with it: "Runner's turn" until a lane takes it up, then "Working").
+    title. A row's actions are icons over its age that show on hover or focus, as in T3's
+    sidebar: mark it unread (or read) and snooze it, or unsnooze a snoozed one. Two groups sit
+    at the foot of the list, each folding to one line: Snoozed (out of the list until a time
+    you chose) and Decided (until the runner is through with it: "Runner's turn" until a lane
+    takes it up, then "Working").
   - A point in time is written whole, as he asked: November 15, 2026 Sunday 1:14pm.
   - Nothing moves by itself.
   - Colour is state and nothing else: blue is yours, amber is working, green is done or healthy,
@@ -248,15 +250,34 @@ body.page-inbox .stage { padding-bottom: 24px; }
 .fold ol { overflow-y: auto; scrollbar-width: thin; padding: 0 8px 8px; }
 .fold .mrow .m2 b { color: var(--ink-2); }
 .fold + .fold { border-top-color: var(--line-soft); }
-.has-wake { position: relative; }
-.has-wake .mrow .m1 { padding-right: 96px; }
-.wake { position: absolute; top: 8px; right: 10px; }
+/* a row's actions, as in T3's sidebar: icons over the age, shown while the row is hovered or
+   has focus, or its menu is open; with no hover (a touch screen, a narrow window) on the open row */
+.mail-list li { position: relative; }
+.rtools { position: absolute; top: 7px; right: 8px; display: none; gap: 2px; }
+.mail-list li:is(:hover, :focus-within, .popped) .rtools { display: flex; }
+.mail-list li:is(:hover, :focus-within, .popped) .ma { display: none; }
+.mail-list li[data-tools="2"]:is(:hover, :focus-within, .popped) .m1 { padding-right: 60px; }
+.mail-list li[data-tools="1"]:is(:hover, :focus-within, .popped) .m1 { padding-right: 30px; }
+@media (max-width: 1040px), (hover: none) {
+  .mail-list li.cur .rtools { display: flex; }
+  .mail-list li.cur .ma { display: none; }
+  .mail-list li.cur[data-tools="2"] .m1 { padding-right: 60px; }
+  .mail-list li.cur[data-tools="1"] .m1 { padding-right: 30px; }
+}
+.ricon { width: 30px; height: 30px; display: grid; place-items: center; border: 0; border-radius: 8px; background: none; color: var(--mute); cursor: pointer; }
+.ricon .i { width: 18px; height: 18px; }
+.ricon:hover, .ricon[aria-expanded="true"] { background: var(--hover); color: var(--ink); }
+.ricon:focus-visible { outline: 2px solid var(--you); outline-offset: -2px; color: var(--ink); }
+/* an icon's name, shown at once on hover or keyboard focus */
+[data-tip] { position: relative; }
+[data-tip]:is(:hover, :focus-visible)::after { content: attr(data-tip); position: absolute; top: calc(100% + 5px); right: 0; z-index: 70; padding: 4px 9px; border-radius: 7px; background: var(--ink); color: var(--page); font-size: 14px; font-weight: 600; line-height: 20px; white-space: nowrap; pointer-events: none; box-shadow: var(--float); }
+[data-tip][aria-expanded="true"]::after { display: none; }
+/* the row's Snooze menu is fixed to the window (placeRowMenu), since the list it opens from scrolls */
+.pop.row-pop { position: fixed; min-width: 0; width: 330px; max-width: calc(100vw - 16px); visibility: hidden; }
 
 /* the briefing */
 .letter { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow-y: auto; scrollbar-width: thin; container-type: inline-size; }
 .letter-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 10px; font-size: 14.5px; color: var(--mute); min-height: 30px; }
-.letter-tools { margin-left: auto; display: flex; gap: 8px; }
-.letter-tools .pop { width: 330px; }
 .timeline { border-left: 2px solid var(--line); margin: 5px 0 0 5px; }
 .timeline li { position: relative; padding: 0 0 16px 22px; }
 .timeline li:last-child { padding-bottom: 0; }
@@ -822,6 +843,9 @@ const ICON = {
   merge: svg('<circle cx="6" cy="5.5" r="2.2"/><circle cx="6" cy="18.5" r="2.2"/><circle cx="18" cy="13" r="2.2"/><path d="M6 7.7v8.6M6 7.7c0 3.6 3.6 5.3 9.8 5.3"/>'),
   broken: svg('<path d="M12 4 2.8 19.5h18.4L12 4Z"/><path d="M12 10v4.5M12 17.2v.3"/>'),
   snooze: svg('<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.2 2"/>'),
+  unsnooze: svg('<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.2 2M3.5 20.5l17-17"/>'),
+  mail: svg('<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3.5 6.5 8.5 6.5 8.5-6.5"/>'),
+  mailopen: svg('<path d="M3 10v9a1 1 0 0 0 1 1h16a1 1 0 0 0 1-1v-9L12 4 3 10Z"/><path d="m3.5 10.5 8.5 6 8.5-6"/>'),
   thread: svg('<path d="M5 5h14a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-7l-4.5 3.5V16H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1Z"/>'),
   chevron: svg('<path d="m6 9 6 6 6-6"/>'),
   left: svg('<path d="m14 6-6 6 6 6"/>'),
@@ -1022,8 +1046,10 @@ function notices() {
 // yours (each kind has its icon), what it is, the situation in a sentence, how long it has waited.
 // The runner lists them in the order they're worth taking. One you haven't opened is marked
 // unread. The picked one is open on the right as a briefing that still makes sense a week later.
+// A row's actions are icons on it (ticket 44): mark unread or read, and snooze, or unsnooze a
+// snoozed one; they act without opening the ask, and `u` and `s` do the same for the open one.
 // At the foot, two groups that fold: the snoozed (out of the list until a time you chose; they
-// still hold their work up, and each can be unsnoozed from its row) and the decided (until the
+// still hold their work up) and the decided (until the
 // runner is through with them, so "handled" and "still held" can be told apart).
 const KIND_ICON = { stuck: ICON.stuck, decision: ICON.decision, merge: ICON.merge, broken: ICON.broken };
 
@@ -1049,6 +1075,13 @@ function askMark(id, change) {
   send([body]).finally(() => asking.delete(key));
 }
 const setRead = (a, yes) => askMark(a.id, { read: yes });
+// The envelope: a read ask is marked unread, an unread one read. The open one, marked unread,
+// stays unread until you open another (ui.hold), or opening it would read it again at once.
+function toggleRead(a) {
+  const yes = !isRead(a);
+  setRead(a, yes);
+  if (a.id === ui.ask) ui.hold = yes ? null : a.id;
+}
 const setSnooze = (id, until) => askMark(id, { snooze_until: until || null });
 function snoozeChoices() {
   const now = new Date(), later = new Date(now.getTime() + 3 * 3600e3);
@@ -1090,11 +1123,12 @@ function inbox() {
     const zz = snoozedUntil(a), quiet = !!(a.answered || zz), unread = !quiet && !isRead(a);
     const line = a.answered ? `You said "${a.answered.said}". ${doing(a)}` : zz ? `Back ${stamp(zz)}` : a.situation || a.question;
     const when = a.answered ? a.answered.at : a.since;
-    return `<li${zz ? ' class="has-wake"' : ""}><button class="mrow${zz ? " quiet" : ""}${unread ? " unread" : ""}" data-act="ask" data-id="${esc(a.id)}" aria-current="${a === cur}">
+    const tools = rowTools(a), popped = ui.pop === `snooze:${a.id}`;
+    return `<li class="${a === cur ? "cur" : ""}${popped ? " popped" : ""}" data-tools="${tools ? (zz ? 1 : 2) : 0}"><button class="mrow${zz ? " quiet" : ""}${unread ? " unread" : ""}" data-act="ask" data-id="${esc(a.id)}" aria-current="${a === cur}">
       <span class="m1">${repoMark(a.repo)}${kindTag(a)}
         ${zz ? "" : `<span class="ma" title="${a.answered ? "You answered" : "Waiting since"} ${esc(stamp(when))}">${esc(ago(when))}</span>`}</span>
       <span class="m2">${unread ? `<i class="dot" title="Unread"></i>` : ""}<b>${esc(a.subject)}</b><span>${esc(a.ref)}</span></span>
-      <span class="m3">${esc(line)}</span></button>${zz ? `<button class="btn sm wake" data-act="wake" data-id="${esc(a.id)}">Unsnooze</button>` : ""}</li>`;
+      <span class="m3">${esc(line)}</span></button>${tools}</li>`;
   };
   const oldest = open.reduce((m, a) => (!m || ms(a.since) < ms(m.since) ? a : m), null);
   const unread = open.filter((a) => !isRead(a)).length;
@@ -1128,22 +1162,35 @@ function inbox() {
   return `<section class="card mail${none ? " empty" : ""}" aria-label="Inbox">${none ? "" : list}${right}</section>`;
 }
 
-// ---- the briefing's parts
-function tools(a) {
+// ---- a row's icons: none on a decided ask (an answered ask can't be snoozed or marked today)
+function rowTools(a) {
   if (a.answered) return "";
   const id = esc(a.id);
-  if (snoozedUntil(a)) return `<span class="letter-tools"><button class="btn sm" data-act="wake" data-id="${id}">${ICON.snooze}Unsnooze</button></span>`;
-  const menu = ui.pop === "snooze" ? `<div class="pop right" role="menu" aria-label="Snooze">
+  if (snoozedUntil(a)) return `<span class="rtools"><button class="ricon" data-act="wake" data-id="${id}" aria-label="Unsnooze" data-tip="Unsnooze">${ICON.unsnooze}</button></span>`;
+  const read = isRead(a), pop = `snooze:${a.id}`, open = ui.pop === pop, say = read ? "Mark unread" : "Mark read";
+  const menu = open ? `<div class="pop row-pop" role="menu" aria-label="Snooze">
       <p class="pop-label">Out of the list until then. It still holds its work up.</p>
       ${snoozeChoices().map(([label, t]) => `<button class="mi" role="menuitem" data-act="snooze" data-id="${id}" data-until="${t.toISOString()}"><span class="two"><b>${label}</b><span>${esc(stamp(t.toISOString()))}</span></span></button>`).join("")}</div>` : "";
-  return `<span class="letter-tools">
-    <button class="btn sm" data-act="unread" data-id="${id}">${ui.hold === a.id ? "Mark read" : "Mark unread"}</button>
-    <span class="pop-root"><button class="btn sm" data-act="pop" data-pop="snooze" aria-haspopup="menu" aria-expanded="${ui.pop === "snooze"}">${ICON.snooze}Snooze</button>${menu}</span></span>`;
+  return `<span class="rtools pop-root">
+    <button class="ricon" data-act="unread" data-id="${id}" aria-label="${say}" data-tip="${say}">${read ? ICON.mail : ICON.mailopen}</button>
+    <button class="ricon" data-act="pop" data-pop="${esc(pop)}" aria-haspopup="menu" aria-expanded="${open}" aria-label="Snooze" data-tip="Snooze">${ICON.snooze}</button>${menu}</span>`;
 }
+// Placed after each draw, under the clock (or over it, with no room below), inside the window.
+function placeRowMenu() {
+  const m = document.querySelector(".row-pop");
+  if (!m) return;
+  const b = m.parentElement.querySelector('[aria-haspopup="menu"]').getBoundingClientRect();
+  const h = m.offsetHeight, w = m.offsetWidth;
+  m.style.top = `${b.bottom + 6 + h <= innerHeight - 8 ? b.bottom + 6 : Math.max(8, b.top - 6 - h)}px`;
+  m.style.left = `${Math.max(8, Math.min(b.right - w, innerWidth - w - 8))}px`;
+  m.style.visibility = "visible";
+}
+
+// ---- the briefing's parts
 function metaLine(a) {
   const zz = snoozedUntil(a);
   const when = a.answered ? `answered ${stamp(a.answered.at)}` : zz ? `snoozed until ${stamp(zz)}` : `waiting ${ago(a.since)}, since ${stamp(a.since)}`;
-  return `<div class="letter-meta">${kindTag(a)}<span class="tag">${esc(a.repo)}</span><span>${esc(a.ref)}</span><span>${esc(when)}</span>${tools(a)}</div>`;
+  return `<div class="letter-meta">${kindTag(a)}<span class="tag">${esc(a.repo)}</span><span>${esc(a.ref)}</span><span>${esc(when)}</span></div>`;
 }
 // Where it's answered carries that place's mark.
 function goBtn(a, cls, label) {
@@ -1932,6 +1979,7 @@ function draw() {
   }
   const page = { inbox, queue, activity, usage: usagePage, settings }[ui.page] || overview;
   put("main", notices() + page());
+  placeRowMenu();
   put("rail", rail());
   const s = sheet(), dlg = $("sheet");
   put("sheet", s);
@@ -1997,8 +2045,7 @@ document.addEventListener("click", (e) => {
     case "unread": {
       const a = inboxOrder().find((x) => x.id === d.id);
       if (!a) return;
-      const back = ui.hold === a.id;   // a second press reads it again
-      setRead(a, back); ui.hold = back ? null : a.id;
+      toggleRead(a);
       break;
     }
     case "snooze": setSnooze(d.id, d.until); ui.pop = null; if (ui.ask === d.id) ui.ask = null; break;
@@ -2036,10 +2083,28 @@ document.addEventListener("click", (e) => {
   address();
   draw();
 });
-// In the Inbox the arrow keys walk the list, as in a mail client.
+// In the Inbox the arrow keys walk the list, as in a mail client; `u` marks the row that has
+// focus unread (or read) and `s` opens its Snooze menu, as its icons do: the focused row, not the
+// open ask (PR #59's review 1, F1), which they fall back to when focus is on no row.
+const rowOf = (id) => [...document.querySelectorAll(".mrow")].find((r) => r.dataset.id === id);
+const focusRow = (id = ui.ask) => { const row = rowOf(id); if (row) row.focus(); };
+const focusedAsk = (el) => {
+  const li = el && el.closest ? el.closest("li") : null, row = li && li.querySelector(".mrow");
+  return row ? row.dataset.id : ui.ask;
+};
 document.addEventListener("keydown", (e) => {
   if (ui.page !== "inbox" || !snap || ui.pop || ui.pr || e.ctrlKey || e.metaKey || e.altKey) return;
   if (e.target.closest("input, textarea, select")) return;
+  if (e.key === "u" || e.key === "s") {
+    const id = focusedAsk(e.target), a = inboxOrder().find((x) => x.id === id);
+    if (!a || a.answered || snoozedUntil(a)) return;
+    e.preventDefault();
+    if (e.key === "u") { toggleRead(a); draw(); focusRow(a.id); return; }
+    ui.pop = `snooze:${a.id}`; draw();
+    const first = document.querySelector(".row-pop .mi");
+    if (first) first.focus();
+    return;
+  }
   const step = e.key === "ArrowDown" ? 1 : e.key === "ArrowUp" ? -1 : 0;
   if (!step) return;
   const every = inboxOrder();
@@ -2062,9 +2127,14 @@ document.addEventListener("keydown", (e) => {
 });
 document.addEventListener("keydown", (e) => {
   if (e.key !== "Escape" || !(ui.pop || ui.rail || ui.nav)) return;
+  const pop = String(ui.pop), from = pop.startsWith("snooze:") ? pop.slice("snooze:".length) : null;
   ui.pop = null; ui.rail = false; ui.nav = false;
   draw();
+  if (from) focusRow(from);   // back to the row the menu opened from, not the open ask
 });
+// The row's Snooze menu follows its row as the list or the window scrolls.
+document.addEventListener("scroll", () => { if (String(ui.pop).startsWith("snooze:")) placeRowMenu(); }, true);
+addEventListener("resize", placeRowMenu);
 $("sheet").addEventListener("close", () => { if (ui.pr) { ui.pr = null; address(); draw(); } });
 addEventListener("popstate", () => { readAddress(); draw(); });
 
