@@ -178,7 +178,8 @@ class Runner:
         self.asking = AskThreads(config, github=github, t3=t3, jobs=self.jobs, say=self.say,
                                  decider=self.decider)
         from .prefixes import Prefixes   # "Decide: " and "Answer: " on threads that need him (71)
-        self.prefixes = Prefixes(config, t3=t3, jobs=self.jobs, say=self.say)
+        self.prefixes = Prefixes(config, t3=t3, jobs=self.jobs, say=self.say,
+                                 limits=limits, now=self.now)   # and stale ones settled (#72)
         from .waiting import GitHubAnswers   # a waiting thread's question answered on GitHub
         self.answers = GitHubAnswers(config, github=github, jobs=self.jobs, say=self.say)
         self.live = LiveSteps(config, github=github, git=git, t3=t3, jobs=self.jobs,
