@@ -38,9 +38,10 @@ class ConfigTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'effort'):
             load_config(write_config(self.dir, '[claude]\neffort = "ultrathink"\n'))
 
-    def test_the_served_config_runs_claude_jobs_at_high(self):
+    def test_the_served_config_runs_claude_jobs_at_medium(self):
+        # Stefan, 2026-11-16 (fba6c8f): "Opus 5.5 medium as worker".
         from queue_runner.config import DEFAULT_CONFIG
-        self.assertEqual(load_config(DEFAULT_CONFIG).claude_effort, 'high')
+        self.assertEqual(load_config(DEFAULT_CONFIG).claude_effort, 'medium')
 
 
 HIGH = {'instanceId': 'claudeAgent', 'model': 'claude-opus-5-5',
