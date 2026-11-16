@@ -28,6 +28,7 @@ from importlib import resources
 from string import Template
 
 from .decisions import ACTIONS, QUESTIONS, VERSION, Answer, Case, parse
+from .prefixes import DECIDE, titled
 from .state import NOT_STARTED
 from .t3 import RunResult, T3Error
 
@@ -170,7 +171,9 @@ class AskThreads:
         try:
             # Started as every Claude job is (ticket 39): on the project's default model when
             # that is the config's model at its effort, else with --model.
-            launched = self.t3.launch(repo.path, self.brief(repo, stop, pr), title=job.title,
+            # Titled "Decide: ..." from the start: it waits on Stefan's decision (issue #71).
+            launched = self.t3.launch(repo.path, self.brief(repo, stop, pr),
+                                      title=titled(DECIDE, job.title),
                                       **self.decider.effort.flags(repo))
         except Exception as e:   # T3 down, or the brief couldn't be built
             self.jobs.ended(job.id, exit_code=None, outcome=NOT_STARTED,

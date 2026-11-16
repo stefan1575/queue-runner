@@ -24,7 +24,9 @@ class FakeT3:
         self.launch_error = None  # a T3Error the next launch raises
         self.settles = []         # thread ids settled, in order (ticket 70)
         self.settle_error = None  # an exception every settle raises
-        self.renames = []
+        self.renames = []         # (thread id, title), in order (issue #71)
+        self.rename_error = None  # an exception every rename raises
+        self.lists = []           # the projects `list` was asked for, in order
 
     def add(self, thread_id, title, status, created_at='2099-01-01T00:00:00.000Z', **extra):
         self.threads[thread_id] = Thread(
@@ -93,9 +95,17 @@ class FakeT3:
             self.threads[thread_id] = replace(self.threads[thread_id], settled=True)
 
     def rename(self, thread_id, title):
+        """The thread's title changes; a settled thread stays settled (T3 unsettles only on a
+        new turn)."""
+        from dataclasses import replace
+        if self.rename_error is not None:
+            raise self.rename_error
         self.renames.append((thread_id, title))
+        if thread_id in self.threads:
+            self.threads[thread_id] = replace(self.threads[thread_id], title=title)
 
     def list(self, project):
+        self.lists.append(project)
         return sorted(self.threads.values(), key=lambda t: t.created_at, reverse=True)
 
 

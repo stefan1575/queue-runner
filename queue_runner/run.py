@@ -121,6 +121,8 @@ class Runner:
         from .ask_threads import AskThreads   # an ask decided in a T3 thread (ticket 35)
         self.asking = AskThreads(config, github=github, t3=t3, jobs=self.jobs, say=self.say,
                                  decider=self.decider)
+        from .prefixes import Prefixes   # "Decide: " and "Answer: " on threads that need him (71)
+        self.prefixes = Prefixes(config, t3=t3, jobs=self.jobs, say=self.say)
         self.live = LiveSteps(config, github=github, git=git, t3=t3, jobs=self.jobs,
                               say=self.say, stopper=stopper,
                               merger=Merger(config, github=github, git=git, jobs=self.jobs,
@@ -174,9 +176,11 @@ class Runner:
         if self.settle() == BUSY:
             return BUSY
         self.take_order()
+        self.prefixes.sync()   # not a job: a stopped lane's threads say what needs Stefan too
         if self.held('claude'):
             return STOPPED
         self.asking.read_answers()   # an ask thread's answer, before anything is chosen (35)
+        self.prefixes.sync()   # an answer just read takes its thread's prefix off (71)
         chosen = self.choose()
         return self._gated(*chosen) if isinstance(chosen, tuple) else chosen
 
