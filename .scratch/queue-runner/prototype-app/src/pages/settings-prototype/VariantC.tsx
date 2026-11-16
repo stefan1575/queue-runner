@@ -51,7 +51,7 @@ export function VariantC({ st }: { st: Settings }) {
         <SavedNote st={st} />
       </div>
 
-      <Group title="You">
+      <Group title="Name">
         <p>Call me <NameField st={st} look="inline" /> in the briefs the runner writes. <Aside>From your GitHub account, {GH.login}.</Aside></p>
       </Group>
 

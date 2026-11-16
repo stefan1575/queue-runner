@@ -183,24 +183,19 @@ export function PlayButton({ st, className }: { st: Settings; className?: string
   );
 }
 
+// One button per sound: clicking it picks it and plays it. No separate play target.
 export function SoundChoices({ st, disabled }: { st: Settings; disabled?: boolean }) {
   return (
     <div role="group" aria-label="Sound" className={cn("flex flex-wrap gap-2", disabled && "opacity-45")}>
       {SOUNDS.map((x) => {
         const on = st.s.notify.sound === x.id;
         return (
-          <span key={x.id} className={cn("inline-flex h-9 items-center rounded-lg border", on ? "border-ink ring-1 ring-ink" : "border-line")}>
-            <button type="button" aria-pressed={on} disabled={disabled} onClick={() => { play(x.id); if (!on) st.set((d) => { d.notify.sound = x.id; }); }}
-              className={cn("h-full rounded-l-lg px-3 text-[15px] font-medium hover:bg-sunk disabled:cursor-not-allowed", x.id === "none" && "rounded-r-lg")}>
-              {x.label}
-            </button>
-            {x.id !== "none" && (
-              <button type="button" disabled={disabled} onClick={() => play(x.id)} aria-label={`Play ${x.label}`} title={`Play ${x.label}`}
-                className="grid h-full w-8 place-items-center rounded-r-lg border-l border-line text-mute hover:bg-sunk hover:text-ink disabled:cursor-not-allowed">
-                <Play className="size-3.5" />
-              </button>
-            )}
-          </span>
+          <button key={x.id} type="button" aria-pressed={on} disabled={disabled} title={x.id === "none" ? undefined : `Play ${x.label}`}
+            onClick={() => { play(x.id); if (!on) st.set((d) => { d.notify.sound = x.id; }); }}
+            className={cn("inline-flex h-9 items-center gap-1.5 rounded-lg border px-3 text-[15px] hover:bg-sunk disabled:cursor-not-allowed", on ? "border-ink font-medium ring-1 ring-ink" : "border-line")}>
+            {x.id !== "none" && <Play className={cn("size-3.5", on ? "text-ink" : "text-faint")} />}
+            {x.label}
+          </button>
         );
       })}
     </div>

@@ -1,6 +1,8 @@
-// The providers' marks and wordmark type. The brand fonts aren't public, so the names use stand-ins:
-// a book serif for Claude's wordmark, a geometric sans for ChatGPT's.
-// Brand colour lives here and on the provider's name, nowhere else.
+// The providers' marks. The brand is the mark alone: a provider's name is set in the app's own type,
+// in the text colour, at whatever size and weight the place it sits in uses, so "Claude" and
+// "ChatGPT" side by side match each other and the model names next to them. (Until 2026-11-16 each
+// name had a stand-in brand font, a serif for Claude and a tight sans for ChatGPT: at one font size
+// they came out different sizes and weights.) Brand colour lives on the mark, nowhere else.
 import { cn } from "@/lib/cn";
 
 export type Provider = "claude" | "chatgpt";
@@ -17,16 +19,16 @@ export function OpenAIMark({ className }: { className?: string }) {
   return <svg viewBox="0 0 24 24" className={cn("text-openai", className)} aria-hidden><path d={OPENAI_PATH} fill="currentColor" /></svg>;
 }
 
-export const PROVIDER: Record<Provider, { name: string; Mark: typeof ClaudeMark; text: string; model: string }> = {
-  claude: { name: "Claude", Mark: ClaudeMark, text: "text-claude font-claude font-semibold tracking-[-0.01em]", model: "Opus 5.5" },
-  chatgpt: { name: "ChatGPT", Mark: OpenAIMark, text: "text-openai font-openai font-semibold tracking-[-0.02em]", model: "GPT-6.1 Sol" },
+export const PROVIDER: Record<Provider, { name: string; Mark: typeof ClaudeMark; model: string }> = {
+  claude: { name: "Claude", Mark: ClaudeMark, model: "Opus 5.5" },
+  chatgpt: { name: "ChatGPT", Mark: OpenAIMark, model: "GPT-6.1 Sol" },
 };
 
 export function ProviderName({ p, className, mark = "size-[18px]" }: { p: Provider; className?: string; mark?: string }) {
-  const { name, Mark, text } = PROVIDER[p];
+  const { name, Mark } = PROVIDER[p];
   return (
-    <span className={cn("inline-flex items-center gap-2", text, className)}>
-      <Mark className={mark} />
+    <span className={cn("inline-flex items-center gap-2", className)}>
+      <Mark className={cn("shrink-0", mark)} />
       {name}
     </span>
   );

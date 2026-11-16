@@ -4,14 +4,12 @@
    Colour is state, never decoration:
      blue  = needs you        amber = working        red = broken
      green = healthy / done   grey  = idle or waiting
-   Brand colour (Claude's clay, OpenAI's monochrome) appears only on the provider's own mark and
-   name, so it never reads as a state. */
+   Brand colour (Claude's clay, OpenAI's monochrome) appears only on the provider's own mark, so it
+   never reads as a state. A provider's name is plain app type, the same for both. */
 
 @theme {
   --font-sans: "Atkinson Hyperlegible Next", ui-sans-serif, system-ui, "Segoe UI", sans-serif;
   --font-mono: "Atkinson Hyperlegible Mono", ui-monospace, monospace;
-  --font-claude: "Source Serif 4", Georgia, serif;
-  --font-openai: "Inter Tight", ui-sans-serif, sans-serif;
 
   --color-page: var(--c-page);
   --color-side: var(--c-side);

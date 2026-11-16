@@ -3,6 +3,7 @@
 // follows the scroll and jumps on click. The search box narrows the page to the settings that match:
 // it knows other words for a setting, what it's set to now (a model, a repo, a date) and forgives a
 // typo. Controls sit in one column on the right and keep their width, so nothing shifts on a change.
+// Type has three levels: the section's heading above its card, a setting's title, its description.
 import { Bell, CalendarClock, FolderGit2, Inbox, Monitor, PieChart, Search, Trash2, User, Users, X, type LucideIcon } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ClaudeMark, OpenAIMark } from "@/components/Brand";
@@ -17,7 +18,7 @@ export const name = "Categories and search";
 
 type CatId = "you" | "roles" | "share" | "repos" | "display" | "inbox" | "notify" | "machine";
 const CATS: { id: CatId; label: string; title?: string; icon: LucideIcon; about: string }[] = [
-  { id: "you", label: "You", icon: User, about: "Who the runner works for." },
+  { id: "you", label: "Name", icon: User, about: "What the runner calls you." },
   { id: "roles", label: "Roles", icon: Users, about: "Who does the work, from the providers T3 Code has connected." },
   { id: "share", label: "Your share", title: "Your share of each plan", icon: PieChart, about: "The part of each weekly window the runner leaves for you, whichever role uses that provider." },
   { id: "repos", label: "Repositories", icon: FolderGit2, about: "The same list as T3 Code's projects, kept in step both ways. The runner never touches one that isn't served." },
@@ -226,7 +227,7 @@ export function VariantB({ st }: { st: Settings }) {
         <SavedNote st={st} className="mt-4 px-3" />
       </aside>
 
-      <div className="min-w-0 space-y-4">
+      <div className="min-w-0 space-y-5">
         {q && (
           <div className="flex items-baseline gap-3 px-1 text-[15.5px]">
             <span><b className="font-semibold">{shown.length}</b> {shown.length === 1 ? "setting matches" : "settings match"} "{q}"</span>
@@ -238,16 +239,16 @@ export function VariantB({ st }: { st: Settings }) {
         )}
 
         {CATS.filter((c) => count(c.id) > 0).map((c) => (
-          <section key={c.id} id={`cat-${c.id}`} aria-label={c.title ?? c.label} className="rounded-xl border border-line bg-surface px-6 pb-1 pt-5" style={{ scrollMarginTop: TOP }}>
-            <header className="flex items-start gap-4 pb-1">
+          <section key={c.id} id={`cat-${c.id}`} aria-label={c.title ?? c.label} className="pb-5" style={{ scrollMarginTop: TOP }}>
+            <header className="flex items-end gap-4 px-1 pb-3">
               <div className="min-w-0 flex-1">
-                <h2 className="text-[19px] font-semibold tracking-[-0.01em]">{c.title ?? c.label}</h2>
-                <p className="mt-0.5 text-[14.5px] text-mute">{c.about}</p>
+                <h2 className="text-[23px] font-semibold leading-tight tracking-[-0.015em]">{c.title ?? c.label}</h2>
+                <p className="mt-1 text-[15px] text-mute">{c.about}</p>
               </div>
               {c.id === "repos" && <AddRepo st={st} />}
             </header>
-            {c.id === "repos" && !q && n.noneServed && <div className={cn(NUDGE, "mt-3 px-3 py-2 text-[15px]")}>The runner isn't serving any repository yet, so it has nothing to do. Switch on the ones it should work on.</div>}
-            <div className="divide-y divide-line-2">
+            {c.id === "repos" && !q && n.noneServed && <div className={cn(NUDGE, "mb-3 px-3 py-2 text-[15px]")}>The runner isn't serving any repository yet, so it has nothing to do. Switch on the ones it should work on.</div>}
+            <div className="divide-y divide-line-2 rounded-xl border border-line bg-surface px-6">
               {shown.filter((r) => r.cat === c.id).map((r) => <div key={r.id}>{r.node}</div>)}
             </div>
           </section>

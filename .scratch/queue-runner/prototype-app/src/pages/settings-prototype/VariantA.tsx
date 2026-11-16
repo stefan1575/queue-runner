@@ -27,7 +27,7 @@ function Row({ title, desc, children, below, dim }: { title: ReactNode; desc?: R
   );
 }
 
-const SECTIONS = ["You", "Roles", "Your share", "Repositories", "Display", "Inbox", "Notifications", "Machine"];
+const SECTIONS = ["Name", "Roles", "Your share", "Repositories", "Display", "Inbox", "Notifications", "Machine"];
 const anchor = (s: string) => `set-${s.toLowerCase().replace(/\s+/g, "-")}`;
 
 export function VariantA({ st }: { st: Settings }) {
@@ -50,8 +50,8 @@ export function VariantA({ st }: { st: Settings }) {
       </div>
 
       <div className="space-y-4">
-        <div id={anchor("You")} className="scroll-mt-36">
-          <Section title="You" flush>
+        <div id={anchor("Name")} className="scroll-mt-36">
+          <Section title="Name" flush>
             <Row title="Your name" desc={<>The runner uses it in the briefs it writes. From your GitHub account, {GH.login}.</>}><NameField st={st} /></Row>
           </Section>
         </div>

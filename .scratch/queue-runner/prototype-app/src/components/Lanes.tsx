@@ -46,7 +46,7 @@ function LaneRow({ which, unit }: { which: "claude" | "sol"; unit: string }) {
     <section className="relative min-w-0 overflow-hidden rounded-lg border border-line bg-surface" aria-label={`${PROVIDER[p].name} lane`}>
       <span className={cn("absolute inset-y-0 left-0 w-[3px]", lane.status === "working" || lane.status === "stopping" ? bar : "bg-line")} />
       <div className="flex h-11 items-center gap-2 border-b border-line-2 pl-3.5 pr-2">
-        <ProviderName p={p} className="text-[16.5px]" />
+        <ProviderName p={p} className="text-[16.5px] font-semibold" />
         <span className="text-[14px] text-faint">{PROVIDER[p].model}</span>
         <Chip tone={tone} className="ml-1">{stale ? "Last known · " : ""}{label}{lane.until ? ` until ${lane.until}` : ""}</Chip>
         <div className="ml-auto"><StopMenu which={which} lane={lane} unit={unit} setWorld={setWorld} /></div>
