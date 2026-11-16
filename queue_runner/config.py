@@ -51,6 +51,10 @@ class Config:
     deps_dir: str = ''        # node_modules per lockfile, linked into Sol's checkout (ticket 16)
     sol_script: str = ''      # ~/Code/tools/codex-sol/codex-sol.sh
     sol_bash: str = ''        # Git's bash, which runs it
+    # The runner's cutover (issue 3): a blocking review it didn't run, posted on GitHub before
+    # this date (GitHub's UTC time, `YYYY-MM-DD`), counts as its own for the fix lane. '' adopts
+    # none.
+    adopt_reviews_before: str = ''
 
 
 def toml_order(config: Config) -> list[Repo]:
@@ -138,4 +142,5 @@ def load_config(path: str = DEFAULT_CONFIG) -> Config:
                   checkouts_dir=_path(raw.get('checkouts_dir') or os.path.join(home, 'checkouts')),
                   deps_dir=_path(raw.get('deps_dir') or os.path.join(home, 'deps')),
                   sol_script=_path(sol.get('script') or SOL_SCRIPT),
-                  sol_bash=sol.get('bash') or GIT_BASH)
+                  sol_bash=sol.get('bash') or GIT_BASH,
+                  adopt_reviews_before=str(raw.get('adopt_reviews_before') or ''))

@@ -279,5 +279,151 @@ class FixTest(unittest.TestCase):
         self.assertEqual(self.t3.starts, [])
 
 
+class AdoptedReviewTest(FixTest):
+    """A blocking review the runner didn't run, posted before its cutover (the old loop's, on
+    leads-dashboard #162 and #168), counts as the runner's review of H for the fix lane. One
+    posted after the cutover is still the session's that ran it."""
+    CUTOVER = '2026-11-10'
+
+    def setUp(self):
+        super().setUp()
+        from dataclasses import replace
+        self.config = replace(self.config, adopt_reviews_before=self.CUTOVER)
+
+    def old_review(self, at='2026-11-06T21:45:04Z', sha=H2, verdict='blocking', hand=False):
+        """Review 1 of `sha` on the PR, F1 Important (open, class "write logged wrongly") and F2
+        a nit, in the old script's format, or (`hand`) as Sol posted it from a T3 child."""
+        import json
+        from tests.test_ledger import old_marker
+        found = [{**f, 'status': 'open', 'raised': 1} for f in (important('F1'), nit('F2'))]
+        block = json.dumps({'round': 1, 'head': sha, 'findings': found})
+        heading = f'## Sol review 1 · {verdict.title()}\n\nProse.\n\n'
+        body = (f'<!-- sol-review round=1 head={sha} -->\n{heading}```sol-findings\n{block}\n```\n'
+                if hand else heading + old_marker(1, verdict, sha, found))
+        self.gh.comments[20] = [Comment('stefan1575', at, body)]
+
+    def test_a_blocking_review_from_before_the_cutover_gets_a_fix_round(self):
+        for hand in (False, True):
+            with self.subTest(hand=hand):
+                self.old_review(hand=hand)
+                r = self.runner(PushingT3([(0, 'completed')], self.gh, H3))
+                self.assertEqual(r.run_pass(), 'started')
+                [start] = self.t3.starts
+                self.assertEqual((start['worktree'], start['branch']), (H2, WORK))
+                brief = start['message']
+                self.assertIn('**F1** · Important · write logged wrongly · `src/a.ts:10` · open',
+                              brief)
+                self.assertIn('**Classes to fix:** "write logged wrongly"', brief)
+                self.assertIn('**F2** · Nit', brief)
+                [fix] = self.fixes(r)
+                self.assertEqual((fix.sha, fix.round, fix.outcome), (H2, 1, 'pushed'))
+                os.remove(r.jobs.path)
+                self.gh.now.pop(20, None)
+
+    def test_a_hand_run_review_after_the_cutover_is_left_to_its_session(self):
+        for hand in (False, True):
+            with self.subTest(hand=hand):
+                self.old_review(at='2026-11-10T03:00:00Z', hand=hand)
+                r = self.runner(FakeT3([]))
+                self.assertIsNone(r.next_fix())
+
+    def test_with_no_cutover_set_nothing_is_adopted(self):
+        from dataclasses import replace
+        self.config = replace(self.config, adopt_reviews_before='')
+        self.old_review()
+        self.assertIsNone(self.runner(FakeT3([])).next_fix())
+
+    def test_an_old_review_of_another_head_or_a_clean_one_is_not_adopted(self):
+        for kwargs in ({'sha': H3}, {'verdict': 'clean'}):
+            with self.subTest(**kwargs):
+                self.old_review(**kwargs)
+                self.assertIsNone(self.runner(FakeT3([])).next_fix())
+
+    def old_reviews(self, *rounds, at='2026-11-06T21:45:04Z'):
+        """The old script's reviews of H2 on the PR, one per `found` list (round 1 first), each
+        finding as the ledger left it after that review."""
+        from tests.test_ledger import old_marker
+        self.gh.comments[20] = [
+            Comment('stefan1575', at, f'## Sol review {n} · Blocking\n\nProse.\n\n'
+                    + old_marker(n, 'blocking', H2, found))
+            for n, found in enumerate(rounds, 1)]
+
+    def test_an_old_review_that_needed_stefan_is_not_adopted(self):
+        """Review 3 still blocking needs an Approach note; a kept decline, a repeated class or a
+        reopened finding stops for Stefan. Adopting any of them as `blocking` would skip that."""
+        f1 = {**important('F1'), 'raised': 1}
+        f3 = {**important('F3'), 'raised': 2}   # F1's class again, under a new ID
+        cases = {
+            'review 3 still blocking': ([{**f1, 'status': 'open'}], [{**f1, 'status': 'open'}],
+                                        [{**f1, 'status': 'open'}]),
+            'decline kept': ([{**f1, 'status': 'open'}], [{**f1, 'status': 'decline-kept'}]),
+            'repeated class': ([{**f1, 'status': 'open'}],
+                               [{**f1, 'status': 'fixed', 'closed': 2}, {**f3, 'status': 'open'}]),
+        }
+        cases['reopened'] = ([{**f1, 'status': 'open'}], [{**f1, 'status': 'fixed', 'closed': 2}],
+                             [{**f1, 'status': 'open'}])
+        for name, rounds in cases.items():
+            for conflicted in (False, True):
+                with self.subTest(name, conflicted=conflicted):
+                    self.old_reviews(*rounds)
+                    self.gh.conflicts = {20} if conflicted else set()
+                    said = []
+                    r = self.runner(FakeT3([]))
+                    r.say = said.append
+                    self.assertIsNone(r.next_fix())
+                    if conflicted:   # no conflict round either (PR 4's review 2, F1)
+                        self.assertTrue(any('#20' in s and 'Stefan' in s for s in said), said)
+
+    def test_a_conflict_round_still_starts_once_stefan_ordered_a_fix(self):
+        f1 = {**important('F1'), 'raised': 1}
+        self.old_reviews([{**f1, 'status': 'open'}], [{**f1, 'status': 'decline-kept'}])
+        self.gh.conflicts = {20}
+        r = self.runner(FakeT3([]))
+        d = r.jobs.started(kind='decision', repo='first', issue=20, branch='claude/red-5',
+                           title='t', sha=H2)
+        r.jobs.ended(d.id, exit_code=None, outcome='fix')
+        found = r.next_fix()
+        self.assertEqual(found and (found[1].number, found[2]), (20, None))
+
+    def test_an_old_review_2_that_only_says_fix_is_adopted(self):
+        f1 = {**important('F1'), 'raised': 1}
+        f3 = {**important('F3', cls='another class'), 'raised': 2, 'status': 'open'}
+        self.old_reviews([{**f1, 'status': 'open'}], [{**f1, 'status': 'fixed', 'closed': 2}, f3])
+        found = self.runner(FakeT3([])).next_fix()
+        self.assertEqual(found and found[2].round, 2)
+
+    def test_the_runner_s_own_review_of_h_comes_before_an_old_one(self):
+        self.old_review()
+        for outcome, fixes in (('clean', False), ('blocking', True)):
+            with self.subTest(outcome):
+                r = self.runner(FakeT3([]))
+                j = r.jobs.started(kind='review', repo='first', issue=20, branch='claude/red-5',
+                                   title='t', sha=H2, round=1)
+                r.jobs.ended(j.id, exit_code=None, outcome=outcome)
+                found = r.next_fix()
+                self.assertEqual(found and found[2].id, j.id if fixes else None)
+                os.remove(r.jobs.path)
+
+    def test_a_round_on_an_adopted_review_cut_off_by_a_usage_limit_restarts_fresh(self):
+        import datetime
+        from tests.fakes import FakeLimits
+        stop = datetime.datetime(2026, 11, 10, 7, 34, tzinfo=datetime.timezone.utc)
+        self.old_review()
+        r = self.runner(PushingT3([(1, 'failed'), (0, 'completed')], self.gh, H3))
+        r.limits = FakeLimits(resets={'mcp:t1': None}, contexts={'mcp:t1': 150_000})
+        r.now = lambda: stop
+        r.run_pass()
+        [old] = self.fixes(r)
+        self.assertEqual(old.outcome, 'usage-limit')
+        self.git.tips = {WORK: H3}
+        r.now = lambda: stop + datetime.timedelta(hours=6)
+        self.assertEqual(r.run_pass(), 'started')
+        fresh = self.t3.starts[1]
+        self.assertIn('F1', fresh['message'])   # the fix brief, from the old review 1 of H2
+        self.assertIn('## Picking up from an earlier thread', fresh['message'])
+        again = self.fixes(r)[1]
+        self.assertEqual((again.about, again.sha, again.round), (old.id, H2, 1))
+
+
 if __name__ == '__main__':
     unittest.main()
