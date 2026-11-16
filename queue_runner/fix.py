@@ -18,8 +18,11 @@ gets a fix round too (`cause` `conflict`, `templates/conflict.md`): Claude merge
 resolves the conflict and pushes, and Sol reviews the new head afresh. One conflicted PR at a time
 in a repo, lowest number first: while another open PR that had a conflict round isn't stopped for
 Stefan (`stops.held`), it's still on its way to merging, and the next waits, so each resolves
-against the newest base. A round on H that couldn't resolve it, or a third conflict on the PR, is
-a `conflict` stop instead (`stops.conflict_stop`).
+against the newest base. A conflict is a `conflict` stop instead (`stops.conflict_stop`, issue
+#91) only when another round wouldn't help: the round on H couldn't resolve it, the PR conflicts
+again with the same base commit its last conflict round merged (the round records it as `base`),
+or it had 5 conflict rounds since the last release. A conflict after main moved, below that,
+gets another round.
 """
 from importlib import resources
 from string import Template

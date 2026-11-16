@@ -125,12 +125,16 @@ class FakeGit:
         self.tips = {}    # branch -> its tip, for free_branch (an exception: it fails)
         self.uncommitted = {}   # branch -> the commit keeping what its worktree left
         self.freed = []   # (branch, worktree) freed after a usage limit
+        self.refs = {}    # ref -> its sha (`sha`; a ref not named: None)
 
     def fetch(self, path, branch):
         self.fetches.append((path, branch))
 
     def has_branch(self, path, branch):
         return branch in self.local_branches
+
+    def sha(self, path, ref):
+        return self.refs.get(ref)
 
     def commits(self, path, base, branch):
         return list(self.commit_log.get(branch, []))

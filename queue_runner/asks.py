@@ -396,10 +396,16 @@ def _stop_ask(story, w, repo) -> dict:
     elif s.stop == 'no-push':
         situation = f'The fix round after review {r} pushed nothing, so the PR is stuck at {h7}.'
     elif s.stop == 'conflict':
-        situation = (f'PR #{n} conflicts with its base for the third time.'
-                     if 'third conflict' in reason else
-                     f"PR #{n} conflicts with {w.base or 'its base'}, and a conflict round "
-                     "couldn't resolve it.")
+        base = w.base or 'its base'
+        situation = (f'PR #{n} keeps conflicting as {base} moves under it, after '
+                     f'{reason.split(" ", 1)[0]} conflict rounds.'
+                     if 'keeps moving under it' in reason else
+                     f'PR #{n} still conflicts with {base}, though a conflict round merged it '
+                     'and it has not moved since.'
+                     if 'has not moved since' in reason else
+                     f'PR #{n} conflicts with its base for the third time.'
+                     if 'third conflict' in reason else   # a stop filed before issue #91
+                     f"PR #{n} conflicts with {base}, and a conflict round couldn't resolve it.")
     elif s.stop == 'failed-check':
         situation = f'A check failed on {h7}.'
         question = 'Is the failure the change\'s fault, or should the PR go on?'

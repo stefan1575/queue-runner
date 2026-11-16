@@ -297,6 +297,22 @@ class KindsTest(KindsCase):
                      reason='it conflicts with main at aaaaaaa')
         self.assertEqual([a['ref'] for a in self.snap()['asks']], ['PR #154', 'PR #152'])
 
+    def test_a_conflict_stops_situation_says_which_rule_stopped_it(self):
+        # Issue #91: the same base again, or five rounds with main moving under it.
+        for reason, says in [
+                ('it conflicts with main again at aaaaaaa, though the conflict round on '
+                 'bbbbbbb merged main at ccccccc and main has not moved since',
+                 'though a conflict round merged it and it has not moved since'),
+                ('5 conflict rounds, main keeps moving under it: it conflicts again at aaaaaaa',
+                 'keeps conflicting as main moves under it, after 5 conflict rounds')]:
+            with self.subTest(reason=reason):
+                stop = self.job('stop', 154, 'filed', branch='claude/twilio-120', sha=H1,
+                                stop='conflict', reason=reason)
+                [ask] = [a for a in self.snap()['asks'] if a['ref'] == 'PR #154']
+                self.assertIn(says, ask['situation'])
+                self.jobs.ended(stop.id, exit_code=None, outcome='answered',
+                                answer='issue-closed')
+
 
 class AnsweredTest(AskCase):
     def answered(self, answer):

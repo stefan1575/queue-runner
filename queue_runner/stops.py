@@ -8,7 +8,8 @@ round or merge) until Stefan answers: he closes the issue, or replies on the PR 
 
 The kinds (KINDS): a review that stopped (a new Important finding in an earlier class, a fixed
 finding reopening, a decline Sol kept), a failed check on H, a conflict on H that a conflict round
-couldn't resolve or that came back a third time (a conflict first gets a conflict round,
+couldn't resolve, that came back on the base its last round merged, or that came back after 5
+rounds (issue #91; a conflict first gets a conflict round,
 `fix.py`), and a fix round that ended without pushing (H was reviewed already): each found here,
 and filed once per head H. Two
 come from decisions (`decisions.py`): review 3 or later still blocking (`approach-note`, filed
@@ -28,7 +29,9 @@ from .toast import NoToaster
 
 NEEDS_INFO = 'needs-info'
 CONFLICT = 'conflict'   # a fix job's `cause` for a conflict round (ticket 15)
-MAX_CONFLICT_HEADS = 2  # conflict rounds on this many heads, then a conflict again: a stop
+# A PR conflicting again after this many conflict rounds since the last release: a stop, since
+# main keeps moving under it and each round costs usage (issue #91).
+MAX_CONFLICT_ROUNDS = 5
 # A conflict round on H that ended so, with the PR still at H and conflicting: it couldn't
 # resolve it. (`failed` and `waiting` get a decision first, `usage-limit` a restart.)
 UNRESOLVED = ('no-push', 'head-unknown', 'branch-exists')
@@ -333,6 +336,14 @@ def conflict_rounds(jobs, repo_name: str, n: int) -> list:
             if j.cause == CONFLICT and j.outcome not in (NOT_STARTED, NOT_SENT)]
 
 
+def rounds_counted(rounds: list) -> list:
+    """The conflict rounds that count toward MAX_CONFLICT_ROUNDS: a job that picks up an
+    earlier one (`about`: a usage limit's recovery, or a decision's retry or answer, in place or
+    fresh) carries on that round, so it isn't another (Sol's review 1 of PR #101)."""
+    ids = {j.id for j in rounds}
+    return [j for j in rounds if j.about not in ids]
+
+
 def rounds_on(jobs, repo_name: str, n: int, sha: str) -> list:
     """The PR's fix rounds of any cause on head H that ran or are running, oldest first."""
     return [j for j in jobs.on('fix', repo_name, n, sha)
@@ -340,11 +351,14 @@ def rounds_on(jobs, repo_name: str, n: int, sha: str) -> list:
 
 
 def conflict_stop(jobs, repo, pr) -> tuple[str, str | None] | None:
-    """Why a conflict on the PR's head H is a stop for Stefan, (why, link), or None while a
-    conflict round may still resolve it: the newest round on H (a conflict round, or an
-    ordinary fix round that couldn't start) ended without resolving it, or the PR had conflict
-    rounds on two earlier heads already, so this is its third conflict. An ordinary round's
-    `no-push` is its own `no-push` stop."""
+    """Why a conflict on the PR's head H is a stop for Stefan, (why, link), or None while
+    another conflict round may still resolve it (issue #91). A stop only when one wouldn't help:
+    the newest round on H (a conflict round, or an ordinary fix round that couldn't start) ended
+    without resolving it; or the PR conflicts again with the same base commit its last conflict
+    round merged in (`base`; a record without one counts as a different base), so that round's
+    push didn't resolve it; or it had MAX_CONFLICT_ROUNDS conflict rounds since the last
+    release (a continued round is the round it carries on: `rounds_counted`), as main keeps moving under it. A conflict after main moved, below that, gets
+    another round. An ordinary round's `no-push` is its own `no-push` stop."""
     h7 = pr.head_sha[:7]
     rounds = conflict_rounds(jobs, repo.name, pr.number)
     on_h = [j for j in rounds_on(jobs, repo.name, pr.number, pr.head_sha) if not j.open]
@@ -354,8 +368,14 @@ def conflict_stop(jobs, repo, pr) -> tuple[str, str | None] | None:
         what = 'conflict round' if last.cause == CONFLICT else 'fix round'
         return (f'it conflicts with {pr.base} at {h7}, and the {what} on {h7} '
                 f"couldn't resolve it (it ended {last.outcome})", last.link)
-    heads = list(dict.fromkeys(j.sha for j in rounds if j.sha != pr.head_sha))
-    if len(heads) >= MAX_CONFLICT_HEADS:
-        return (f'it conflicts with {pr.base} again at {h7}, a third conflict after conflict '
-                f'rounds on {", ".join(x[:7] for x in heads)}', rounds[-1].link)
+    count = len(rounds_counted(rounds))
+    if count >= MAX_CONFLICT_ROUNDS:
+        return (f'{count} conflict rounds, {pr.base} keeps moving under it: it conflicts '
+                f'again at {h7}', rounds[-1].link)
+    earlier = [j for j in rounds if j.sha != pr.head_sha]
+    if earlier and earlier[-1].base and earlier[-1].base == pr.base_sha:
+        prev = earlier[-1]
+        return (f'it conflicts with {pr.base} again at {h7}, though the conflict round on '
+                f'{prev.sha[:7]} merged {pr.base} at {prev.base[:7]} and {pr.base} has not moved '
+                'since', prev.link)
     return None
