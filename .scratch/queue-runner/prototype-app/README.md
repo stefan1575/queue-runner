@@ -14,6 +14,7 @@ pnpm dev        # http://localhost:5288
   OpenAI's brand colours appear only on their marks.
 - **Settings is a layout prototype** (#36): three layouts of the same settings on `/settings`,
   switched by `?variant=A|B|C` or the floating bar (← → keys too); `?data=new` shows a new install.
+  Earlier rounds stay viewable: `?round=1`, `?round=2` (keys 1, 2, 3). Round 3's B copies T3 Code's settings.
   The bar's "Stored JSON" shows what the runner would store. Code: `src/pages/settings-prototype/`.
 - Elsewhere: one realistic busy state, no prototype bar. Other states still load by URL (`?demo=`, see
   `src/data/fixtures.ts`) for when we look at one element's edge cases.

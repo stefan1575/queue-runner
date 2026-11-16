@@ -8,30 +8,34 @@
 //      (picked by Stefan on 2026-11-16; reworked from his feedback)
 //   C  the settings written as plain sentences with the choices inline
 //
-// Two rounds are kept side by side: ?round=1 is every layout as first shown, the default (round 2)
-// is after Stefan's first feedback. The bar switches rounds, and so do the 1 and 2 keys.
+// Three rounds are kept side by side, switched from the bar or with the 1, 2 and 3 keys:
+//   ?round=1  every layout as first shown
+//   ?round=2  after Stefan's first feedback (B became one scrolling page)
+//   default   round 3: B remade as a copy of T3 Code's own settings (A and C are as in round 2)
 import { useUrl } from "@/lib/router";
 import { PrototypeBar } from "./PrototypeBar";
 import { VariantA as A1 } from "./round1/VariantA";
 import { VariantB as B1 } from "./round1/VariantB";
 import { VariantC as C1 } from "./round1/VariantC";
+import { VariantB as B2 } from "./round2/VariantB";
 import { useSettings } from "./state";
 import { VariantA, name as nameA } from "./VariantA";
 import { VariantB, name as nameB } from "./VariantB";
 import { VariantC, name as nameC } from "./VariantC";
 
 const VARIANTS = [
-  { key: "A", name: nameA, View: VariantA, First: A1 },
-  { key: "B", name: nameB, View: VariantB, First: B1 },
-  { key: "C", name: nameC, View: VariantC, First: C1 },
+  { key: "A", name: nameA, views: [A1, VariantA, VariantA] },
+  { key: "B", name: nameB, views: [B1, B2, VariantB] },
+  { key: "C", name: nameC, views: [C1, VariantC, VariantC] },
 ];
 
 export function SettingsPrototype() {
   const { params } = useUrl();
   const st = useSettings();
   const current = VARIANTS.find((v) => v.key === (params.get("variant") ?? "A").toUpperCase()) ?? VARIANTS[0];
-  const round = params.get("round") === "1" ? 1 : 2;
-  const View = round === 1 ? current.First : current.View;
+  const r = params.get("round");
+  const round = r === "1" ? 1 : r === "2" ? 2 : 3;
+  const View = current.views[round - 1];
   return (
     <>
       {/* Room at the bottom so the bar never covers the last setting. */}

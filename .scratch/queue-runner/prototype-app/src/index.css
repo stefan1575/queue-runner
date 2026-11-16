@@ -22,6 +22,7 @@
   --color-line: var(--c-line);
   --color-line-2: var(--c-line-2);
   --color-accent: var(--c-ink);
+  --color-on: var(--c-on, var(--c-ink)); /* a switch that is on */
 
   /* who: brand marks only */
   --color-claude: var(--c-claude);
@@ -94,3 +95,25 @@ body {
 .sheet-in { animation: slide-in 160ms ease-out; }
 @keyframes slide-in-left { from { transform: translateX(-16px); opacity: 0; } to { transform: none; opacity: 1; } }
 .sheet-in-left { animation: slide-in-left 160ms ease-out; }
+
+/* PROTOTYPE (#36, round 3 of the Settings layout): T3 Code's own look, read from T3 Code 0.1.9's
+   stylesheet on 2026-11-16 (its default theme: zinc greys, true black in dark, a blue primary, Inter).
+   It is a skin over the tokens above, so every control follows; it is on only while the T3-style
+   Settings is open (the page adds the class to <html>). */
+html.t3-skin {
+  --c-page: #fcfcfc; --c-side: #fafafa; --c-surface: #ffffff; --c-sunk: #f4f4f5;
+  --c-ink: #18181b; --c-ink-2: #3f3f46; --c-mute: #71717a; --c-faint: #a1a1aa;
+  --c-line: #d4d4d8; --c-line-2: #e4e4e7;
+  --c-on: oklch(48.8% 0.217 264);
+  --c-you: oklch(48.8% 0.217 264); --c-you-soft: #eef2ff; --c-you-line: #c7d2fe;
+}
+@media (prefers-color-scheme: dark) {
+  html.t3-skin {
+    --c-page: #0a0a0a; --c-side: #0a0a0a; --c-surface: #101011; --c-sunk: #191a1d;
+    --c-ink: #f1f3f7; --c-ink-2: #d4d4d8; --c-mute: #a3a3a3; --c-faint: #737373;
+    --c-line: #ffffff2e; --c-line-2: #ffffff14;
+    --c-on: oklch(57.1% 0.21 264);
+    --c-you: oklch(72% 0.15 264); --c-you-soft: #172033; --c-you-line: #24345c;
+  }
+}
+html.t3-skin body { font-family: "Inter Variable", Inter, "Segoe UI", system-ui, sans-serif; }

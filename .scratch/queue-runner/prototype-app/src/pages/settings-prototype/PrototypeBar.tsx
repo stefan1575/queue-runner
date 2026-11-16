@@ -1,5 +1,5 @@
 // PROTOTYPE (throwaway): the floating bar that isn't part of any design. It switches the layout
-// (arrows, or the ← → keys outside a field), the round (1 and 2 keys), the data set, and shows what the runner would
+// (arrows, or the ← → keys outside a field), the round (1, 2 and 3 keys), the data set, and shows what the runner would
 // store (a drawer over the sidebar), with the last change marked. Inverted colours so it never reads as the page. Dev only.
 import { Braces, ChevronLeft, ChevronRight, RotateCcw, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -26,20 +26,20 @@ function lines(v: unknown, path = "", depth = 0, key?: string, comma = false, ou
   return out;
 }
 
-export function PrototypeBar({ variants, current, round, st }: { variants: VariantInfo[]; current: VariantInfo; round: 1 | 2; st: Settings }) {
+export function PrototypeBar({ variants, current, round, st }: { variants: VariantInfo[]; current: VariantInfo; round: 1 | 2 | 3; st: Settings }) {
   const [open, setOpen] = useState(false);
   const i = variants.findIndex((v) => v.key === current.key);
   const step = (by: number) => setParams({ variant: variants[(i + by + variants.length) % variants.length].key });
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const arrow = e.key === "ArrowLeft" || e.key === "ArrowRight", digit = e.key === "1" || e.key === "2";
+      const arrow = e.key === "ArrowLeft" || e.key === "ArrowRight", digit = e.key === "1" || e.key === "2" || e.key === "3";
       if (!arrow && !digit) return;
       if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
       const t = e.target as HTMLElement | null;
       if (t?.closest("input, textarea, select, [contenteditable], [role=dialog], [role=menu], [role=listbox]")) return;
       e.preventDefault();
-      if (digit) setParams({ round: e.key === "1" ? "1" : null });
+      if (digit) setParams({ round: e.key === "3" ? null : e.key });
       else step(e.key === "ArrowRight" ? 1 : -1);
     };
     addEventListener("keydown", onKey);
@@ -109,9 +109,10 @@ export function PrototypeBar({ variants, current, round, st }: { variants: Varia
 
         <span className="mx-1 h-5 w-px bg-page/20" />
         <span className="inline-flex rounded-full bg-page/15 p-0.5" role="group" aria-label="Round">
-          {([1, 2] as const).map((r) => (
-            <button key={r} type="button" aria-pressed={round === r} onClick={() => setParams({ round: r === 1 ? "1" : null })} title={r === 1 ? "As first shown (key 1)" : "After the first feedback (key 2)"}
-              className={cn("rounded-full px-2.5 py-1 text-[14.5px] font-medium", round === r ? "bg-page text-ink" : "hover:bg-page/15")}>Round {r}</button>
+          {([1, 2, 3] as const).map((r) => (
+            <button key={r} type="button" aria-pressed={round === r} onClick={() => setParams({ round: r === 3 ? null : String(r) })}
+              title={["As first shown (key 1)", "After the first feedback (key 2)", "B as a copy of T3 Code's settings (key 3)"][r - 1]}
+              className={cn("rounded-full px-2.5 py-1 text-[14.5px] font-medium", round === r ? "bg-page text-ink" : "hover:bg-page/15")}>{r === 1 ? "Round 1" : r}</button>
           ))}
         </span>
 

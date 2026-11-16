@@ -54,7 +54,7 @@ export function Pick<T extends string>({ value, options, onChange, look = "box",
 export function Toggle({ checked, onChange, label, disabled }: { checked: boolean; onChange: (v: boolean) => void; label: string; disabled?: boolean }) {
   return (
     <Switch.Root checked={checked} onCheckedChange={onChange} disabled={disabled} aria-label={label}
-      className="relative h-6 w-[42px] shrink-0 rounded-full bg-faint transition-colors data-[state=checked]:bg-ink disabled:cursor-not-allowed disabled:opacity-40">
+      className="relative h-6 w-[42px] shrink-0 rounded-full bg-faint transition-colors data-[state=checked]:bg-on disabled:cursor-not-allowed disabled:opacity-40">
       <Switch.Thumb className="block size-[18px] translate-x-[3px] rounded-full bg-surface shadow transition-transform data-[state=checked]:translate-x-[21px]" />
     </Switch.Root>
   );
