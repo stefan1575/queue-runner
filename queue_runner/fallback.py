@@ -22,7 +22,7 @@ import os
 import re
 
 from .ledger import SolFailed
-from .t3 import T3Error
+from .t3 import T3Error, settle_quietly
 
 # The review job's `reviewer`, and why Opus reviewed: Sol was out of usage, or config.toml says
 # Claude reviews.
@@ -106,6 +106,8 @@ class OpusThread:
         with open(out, 'w', encoding='utf-8', newline='\n') as fh:
             fh.write(f'T3 thread {result.thread_id}, run {result.run_id}: exit '
                      f'{result.exit_code}, {result.status}\n{result.error or ""}\n')
+        if result.exit_code != 2:   # its end read: settled (ticket 70); one that asked is left
+            settle_quietly(f.t3, result.thread_id, f'review {repo.name} (Opus fallback)', f.say)
         if result.exit_code == 2:
             raise SolFailed(f'The {self.name} thread {result.thread_id} stopped to ask a '
                             'question instead of reviewing.')
@@ -129,8 +131,9 @@ class OpusFallback:
     """What the Sol lane needs for the fallback: T3, the usage gate (None: every review starts,
     as for the tests' Runner without one) and the effort (None: --model, nothing read back)."""
 
-    def __init__(self, config, *, t3, gate=None, effort=None):
+    def __init__(self, config, *, t3, gate=None, effort=None, say=lambda line: None):
         self.config, self.t3, self.gate, self.effort = config, t3, gate, effort
+        self.say = say   # a failed settle of its thread (ticket 70)
 
     def check(self):
         """The gate's verdict for a fallback review now, or None with no gate (it starts)."""

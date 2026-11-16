@@ -119,7 +119,7 @@ def _tests(prepared) -> str:
 class Reviewer:
     def __init__(self, config: Config, *, github, git, sol, jobs: JobLog, say,
                  now=datetime.datetime.now, poster=None, merger=None, toaster=None, deps=None,
-                 fallback=None):
+                 fallback=None, t3=None):
         self.config, self.github, self.git, self.sol, self.jobs = config, github, git, sol, jobs
         # fallback.OpusFallback: who reviews while Sol is out of usage (issue #69), or every time
         # config.toml says Claude reviews (issue #76); None has Sol review and waits for Sol's
@@ -133,7 +133,7 @@ class Reviewer:
         self.poster = poster or GitHubPoster(github, say)
         # A dry-run poster (the live check) merges nothing either, unless given a merger.
         self.merger = merger if merger is not None or poster is not None else Merger(
-            config, github=github, git=git, jobs=jobs, say=say, toaster=toaster)
+            config, github=github, git=git, jobs=jobs, say=say, toaster=toaster, t3=t3)
         # Stops are filed with the real posts only: a dry-run poster files none.
         self.stopper = Stopper(config, github=github, jobs=jobs, say=say,
                                toaster=toaster) if poster is None else None

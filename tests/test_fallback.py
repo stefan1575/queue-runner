@@ -105,6 +105,7 @@ class FallbackTest(unittest.TestCase):
                          (KIND, 'blocking', 'blocking', 'mcp:t1', 'run:mcp:t1:1'))
         self.assertTrue(any('Opus (the fallback while Sol is out of usage) reviews' in s
                             for s in self.said), self.said)
+        self.assertEqual(self.t3.settles, ['mcp:t1'])   # its reply read: settled (ticket 70)
 
     def test_the_comment_status_and_decision_name_the_fallback(self):
         self.sol_out()
@@ -164,6 +165,7 @@ class FallbackTest(unittest.TestCase):
         self.assertIn('stopped to ask a question', failed[1].error)
         self.assertEqual(failed[0].thread_id, 'mcp:t1')
         self.assertEqual(self.posted('comment'), [])
+        self.assertEqual(self.t3.settles, ['mcp:t1'])   # the one that asked is left
         self.assertEqual(r.review_pass(), 'idle')   # two failed reviews on H2, as for Sol's
 
     def test_t3_not_starting_the_thread_is_a_failed_review(self):

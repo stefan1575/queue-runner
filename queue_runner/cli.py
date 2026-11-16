@@ -707,9 +707,10 @@ def main(argv=None, github=None, out=None, t3=None, git=None, sleep=None,
     if args.review:
         return _review(config, github, git, sol, args.review, out, log_line, toaster, deps)
 
-    if t3 is None:
+    if t3 is None:   # settle and rename go to T3's MCP endpoint (ticket 70)
         from .t3 import T3Cli
-        t3 = T3Cli()
+        from .t3_mcp import T3Mcp
+        t3 = T3Cli(mcp=T3Mcp())
     from .limits import T3Store, auto_resume_warning
     if limits is None:
         limits = T3Store()
