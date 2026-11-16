@@ -167,9 +167,12 @@ never counts it, and `--gate` prints it as its own line, held by the reviewing l
   than 30 minutes (`STALE_AFTER`), even if the latest call failed. A 429 beside such a reading
   never holds the lane. "Ended" is any Claude thread the runner sees end (`Gate.job_ended`): a
   measured job's, and outside a measured pass a dead runner's build, fix or live job settled, a
-  waiting job that ran on Stefan's answer (ended, or asking again), and a decision thread whose
-  retry or answer never reached its job (PR 67's review 1, F1). A job settled with no thread
-  holds nothing. An ask thread runs on with Stefan unwatched, like his own sessions, so it
+  waiting job that ran on Stefan's answer (ended, or asking again), a decision thread whose
+  retry or answer never reached its job (PR 67's review 1, F1), and a dead runner's Opus fallback
+  review whose thread has ended (review 2, F2: The Opus fallback, The job record). With the
+  job's id it's told once, so the two lanes both seeing one thread end don't throw away a
+  reading taken in between; and a job's after-read is judged against its own end, not one the
+  other lane said meanwhile. A job settled with no thread holds nothing. An ask thread runs on with Stefan unwatched, like his own sessions, so it
   doesn't count.
 - **Fits:** the 5-hour window's used percent plus the job's expected cost must be at most 100,
   or the lane waits for its reset (plus 2 minutes); a window with nothing used takes any job. The
@@ -729,7 +732,7 @@ The review loop's rules are `~/Code/docs/pr-review.md`; leads-dashboard's
 `docs/agents/review-loop.md` and `REVIEW.md` define the words.
 
 1. **Settle.** Under `sol.lock`, a review the log shows open was cut off with its runner: it
-   counts as `failed`. An open merge is settled from GitHub: `merged` or `failed`.
+   counts as `failed` (an Opus fallback review's once its thread has ended: The Opus fallback). An open merge is settled from GitHub: `merged` or `failed`.
 2. **Stops** (`stops.Stopper`, before merging, so a PR stopped now neither merges nor is
    reviewed; see Stops for Stefan, below).
 3. **Merge** (`merge.Merger`, also right after a clean review is posted). A PR merges once the
@@ -1272,9 +1275,17 @@ doesn't wait: a PR that needs a review gets one from a T3 thread on the Claude m
 - **The job record:** kind `review` with `reviewer` `opus-fallback` in its start record, and the
   thread's `thread_id`, `run_id` and `effort` in its end. `sol_resume_at` reads only Sol's own
   reviews, so fallback reviews never end the wait; **once Sol's reset has passed, the next review
-  goes to Sol**, and if Sol is still out, its `out-of-usage` starts the fallback again. A runner
-  that dies mid-review counts the review `failed` as for Sol's (its T3 thread runs on; its reply
-  is never read).
+  goes to Sol**, and if Sol is still out, its `out-of-usage` starts the fallback again.
+- **A runner that dies mid-review** (PR 67's review 2, F2): its T3 thread runs on, and its reply
+  is never read. The next runner finds the thread by its title (`t3.find_job_thread`, as for a
+  build). While it runs (or T3 can't say), the job stays open, said once in the Sol lane: that
+  PR isn't reviewed (`why_not`), and the Claude lane starts nothing (`Runner._fallback_runs`:
+  busy, as for a dead runner's build; the Sol lane's own review now, `Reviewer.live`, still runs
+  beside it). Once it has ended, the Sol lane counts the review `failed`, with its `thread_id`
+  and `run_id`, and whichever lane saw the end first tells the gate (The usage gate, Which
+  reading). No thread found: `failed`, holding nothing. A Reviewer with no fallback (`--review`)
+  leaves such a review open for the runner's. Until then the dashboard shows it as the
+  reviewing lane's job.
 - **Alongside the Claude lane:** the fallback runs in the Sol lane, beside whatever Claude job
   runs. Each is gated on its own, so a build and a fallback review that each fit may together
   take more of the 5-hour window than either check saw.
@@ -1509,7 +1520,11 @@ waiting for the budget). One reading, one budget (issue 66): `CachedUsageTest` i
 `tests/test_usage.py`, and `tests/test_usage_budget.py`: the CLI's wiring on `StubEndpoint`
 (`fakes.py`: a real `OAuthUsage` whose fetch answers 429 within a minute of its last call),
 Stefan's 2026-11-16 Refresh replayed, an hour of all four callers with every call 5 minutes
-apart, a 429 beside a recent reading, a stale one, and the after-job read.
+apart, a 429 beside a recent reading, a stale one, and the after-job read; `EndedElsewhereTest`
+(a thread that ends outside a measured pass), `DeadFallbackReviewTest` (a dead runner's
+fallback review, either lane seeing it end first) and `MeasuredRaceTest` (the other lane saying a
+job ended mid-read), and `tests/test_review2_fallback_settle.py` (PR 67's review 2, as Sol wrote
+it).
 The Opus fallback: `tests/test_fallback.py` (through the Sol seam, `FakeT3` and
 `FakeGitHubForReviews`: the thread and its brief, the comment, status, Review row and
 `decision.json` naming it, the effort read back in the label, failed and waiting threads, the
