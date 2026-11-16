@@ -279,7 +279,9 @@ def _lane(facts: Facts, id: str, job, wait: Wait | None) -> dict:
         'provider': 'claude' if id == 'claude' else 'chatgpt',
         'name': 'Claude' if id == 'claude' else 'ChatGPT',
         'does': 'builds and fixes' if id == 'claude' else 'reviews',
-        'model': _model(facts.claude_model) if id == 'claude' else SOL_MODEL,
+        # A review the Opus fallback runs while Sol is out of usage (issue #69) is Claude's.
+        'model': _model(facts.claude_model) if id == 'claude' or getattr(job, 'reviewer', None)
+        else SOL_MODEL,
         'state': state,
         'job': _job(facts, job) if job is not None else None,
         'next': None,   # read by the page's earlier takes only
@@ -668,6 +670,6 @@ class Snapshots:
     def _sol_wait(log, now) -> Wait | None:
         resume = log.sol_resume_at()
         if resume and _when(resume) > now:
-            return Wait(_when(resume), 'ChatGPT ran out of usage: reviews start again 10 minutes '
-                        'after its reset')
+            return Wait(_when(resume), 'ChatGPT ran out of usage: Opus reviews in its place, '
+                        "through Claude's usage gate, until 10 minutes after its reset")
         return None

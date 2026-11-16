@@ -139,7 +139,11 @@ under the dashboard): GitHub issues, builds, Sol reviews, and it merges its own 
 `gate.py` and `usage.py` (ticket 08; `orchestration.md`, Limits). Before each Claude job (a build,
 a fix round, a decision thread; a continued job runs inside its decision's pass), after settling
 and choosing it, the Claude lane reads Claude's windows and the job kind's expected cost. **Sol
-isn't gated**, and neither is an Approach-note answer read from Stefan's words (no thread).
+isn't gated**, and neither is an Approach-note answer read from Stefan's words (no thread). The
+Opus review while Sol is out of usage is (The Opus fallback, below): the Sol lane checks it as
+kind `review` (default cost 30% of 5 hours, 8% of the week) and records what it spent the same
+way; it isn't one of the Claude lane's kinds (`gate.CLAUDE_KINDS`), so that lane's measurement
+never counts it, and `--gate` prints it as its own line, held by the reviewing lane's stop.
 
 - **Reading usage:** `GET https://api.anthropic.com/api/oauth/usage` with `anthropic-beta:
   oauth-2025-04-20` and the Claude login's token, as T3 does (`readClaudeResetCredits` and
@@ -237,7 +241,7 @@ same limit) is started on it.
   10 minutes after the reset in Sol's own rollout (codex-sol.sh logs `session id:` in
   `reply.md.log`; its `~/.codex/sessions/*/*/*/rollout-*-<id>.jsonl`'s newest `rate_limits`
   record; the window at 99% or more, the later one if both), else the time Sol's error names,
-  else 30 minutes.
+  else 30 minutes. Until then reviews go to the Opus fallback (The Opus fallback, below).
 
 **First real stop: confirm.** The fixtures are from one real Claude stop (2026-11-08, a weekly
 limit, before the runner existed): `tests/fixtures/t3/turn-item-usage-limit.json`,
@@ -1202,8 +1206,51 @@ python3 -m dashboard    # http://queue.localhost/ is the runner's; http://localh
 - It runs under Git's bash by full path, through a parent bash that waits: codex-sol.sh's
   watchdog ends the run once its caller is gone. 75 minutes, then tree-killed and `failed`.
 - **Out of usage** ("hit your usage limit" in `run.out` or `reply.md.log`): `out-of-usage`, and
-  the Sol lane starts no review until 10 minutes after the reset in Sol's rollout, else the time
-  Sol names, else 30 minutes (Usage limits, above).
+  the Sol lane starts no Sol review until 10 minutes after the reset in Sol's rollout, else the
+  time Sol names, else 30 minutes (Usage limits, above); meanwhile the Opus fallback reviews
+  (below), and stops and merges go on.
+
+## The Opus fallback
+
+`fallback.py` (issue #69, part of #68; Stefan, 2026-11-16: Sol was out from 15:46 to 18:36 and
+every PR waited). While Sol is out of usage (`JobLog.sol_resume_at` in the future), the Sol lane
+doesn't wait: a PR that needs a review gets one from a T3 thread on the Claude model
+(`[claude]`: Opus 5.5), from the same review brief, posted as Sol's are.
+
+- **Who reviews** (`Reviewer._who`, asked once a PR needs a review, after stops and merges, which
+  go on while Sol is out with or without the fallback): Sol; the fallback while Sol is out, if
+  the usage gate lets it (kind `review`: The usage gate, above; `Opus fallback review waits: ...`
+  said once while it holds); or nobody, until the next pass. The Runner gives the Reviewer the
+  fallback (`OpusFallback`, with T3, the gate and the effort); `--review NAME#N`, the live checks
+  and `Reviewer`s made without one wait for Sol as before.
+- **The Sol seam** (`OpusThread.review(brief, reply, workdir, out, writable)`, as
+  `SolCli.review`): the brief is Sol's, after a preamble (`brief-opus.md` in the run folder) that
+  says to work in the runner's checkout of H (where the dependencies are linked in), change
+  nothing in the project folder, post and push nothing, and ask nothing. The thread is `Queue
+  runner review: <repo>#<n>`, `t3 thread start --wait` in the repo's project folder with no
+  worktree (T3 can't start one in an existing folder), started as every Claude job is
+  (`Effort.flags`: The effort, below). Its reply's last `sol-findings` block is the verdict
+  (`ledger.decide`), as for Sol. A thread T3 couldn't start, that failed, that waits for an
+  answer or that left no reply is a `failed` review (two on a head leave it, as for Sol's).
+- **The label** (`fallback.label`): "Opus 5.5 high, fallback while Sol is out", with the effort
+  the run used, read back (`Effort.used`), else the config's. It's in the comment's heading
+  (`## Sol review N · V · <label>`, so `HEADING` still reads it) and byline, the `sol-review`
+  status's description (`<label>: Clean: ...`; the context stays `sol-review`), the Review row
+  (`[Review N, <label>](...)`) and `decision.json`'s `reviewer`. The hidden marker is the same,
+  so the review counts as any other: **a clean fallback review merges** (or marks
+  `ready-for-stefan`), and a blocking one gets a fix round.
+- **The job record:** kind `review` with `reviewer` `opus-fallback` in its start record, and the
+  thread's `thread_id`, `run_id` and `effort` in its end. `sol_resume_at` reads only Sol's own
+  reviews, so fallback reviews never end the wait; **once Sol's reset has passed, the next review
+  goes to Sol**, and if Sol is still out, its `out-of-usage` starts the fallback again. A runner
+  that dies mid-review counts the review `failed` as for Sol's (its T3 thread runs on; its reply
+  is never read).
+- **Alongside the Claude lane:** the fallback runs in the Sol lane, beside whatever Claude job
+  runs. Each is gated on its own, so a build and a fallback review that each fit may together
+  take more of the 5-hour window than either check saw.
+- **On the dashboard:** the Sol lane's wait says Opus reviews meanwhile, a lane on a fallback
+  review names Claude's model, and the work lists and the Inbox's timelines say a review was
+  Opus's.
 
 ## Sol runs tests
 
@@ -1259,7 +1306,8 @@ didn't start: only ids from its own job records.
 
 - **When:** a build, fix or conflict thread once its end is recorded (`Runner.finish`,
   `finish_fix`, so a dead runner's settle too), whatever the outcome except `waiting`; a decision
-  thread once its answer is read (`Decider.run`), unless it asked back (exit 2); and at a merge
+  thread once its answer is read (`Decider.run`), and an Opus fallback review's thread once its
+  reply is read (`fallback.OpusThread`), unless either asked back (exit 2); and at a merge
   (`Merger.after_merge`, the runner's or Stefan's), every build and fix thread of the PR, the
   latest point one can still be open. **Not settled:** ask threads and jobs waiting on Stefan (a
   later ticket of #68), live threads.
@@ -1479,6 +1527,12 @@ The usage gate: `tests/test_usage.py` (the real response, the login, never the t
 `tests/test_gate.py` (`decide()` with a fixed clock, the knob, learned costs) and
 `tests/test_gating.py` (the run loop and the knob through `main`, `FakeUsage` in `fakes.py`; every
 test that runs `main` passes one, so none reads the real endpoint).
+The Opus fallback: `tests/test_fallback.py` (through the Sol seam, `FakeT3` and
+`FakeGitHubForReviews`: the thread and its brief, the comment, status, Review row and
+`decision.json` naming it, the effort read back in the label, failed and waiting threads, the
+gate holding it back and learning its cost, `--gate`'s line, the switch back to Sol after the
+reset, a clean fallback review merging or marking ready, a blocking one's fix round through the
+real `Runner`).
 Limit recovery: `tests/test_limits.py` (the resume time, in place or fresh (`resume_choice` with
 a fixed clock), the last call's request start, `T3Store` on a temp
 SQLite holding the real stop's rows, the transcript, the auto-resume warning) and
@@ -1520,7 +1574,7 @@ server) and, through the real `Runner` with `FakeT3.settle` (settled threads sta
 `send` unsettles), each job kind's settle and a failing one in `tests/test_fix.py`,
 `tests/test_conflicts.py`, `tests/test_decisions.py` (a build, its decision, a retry, a waiting
 build, a decision that asked back, a dead runner's build), `tests/test_merge.py` and
-`tests/test_ask_threads.py` (an ask thread is left).
+`tests/test_ask_threads.py` (an ask thread is left) and `tests/test_fallback.py`.
 Read and snoozed: `tests/test_read_snoozed.py` (control.json's `asks` read and kept by
 `control.py`, and the snapshot's `read` and `snoozed_until` from `snapshot.build` on the Inbox's
 fixtures); the requests, dropping gone asks and the sample's pretend runner in `test_dashboard.py`.
@@ -1613,6 +1667,8 @@ temp folder.
 - `queue_runner/post.py`: posting a review: follow-up issues, the comment, `sol-review`, the
   PR body's Review row.
 - `queue_runner/sol.py`: the Sol seam and its codex-sol.sh adapter.
+- `queue_runner/fallback.py`: the Opus fallback reviewer while Sol is out of usage: the Sol
+  seam over a T3 thread, gated, and its label (issue #69).
 - `queue_runner/deps.py`: a review checkout's dependencies, cached per lockfile and linked in.
 - `queue_runner/usage.py`: Claude's usage windows and reset credits from `api/oauth/usage`, with
   the Claude login.
