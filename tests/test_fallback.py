@@ -2,6 +2,7 @@
 a T3 thread on Opus through the usage gate, is posted naming its reviewer, merges or starts a fix
 round as Sol's would, and once Sol's reset passes the next review goes to Sol again. Through the
 Sol seam (FakeSol), the T3 fake and the GitHub fake: no network, no T3."""
+import dataclasses
 import datetime
 import io
 import json
@@ -11,7 +12,7 @@ import unittest
 
 from queue_runner.config import Config, Repo
 from queue_runner.effort import Effort
-from queue_runner.fallback import KIND, OpusFallback
+from queue_runner.fallback import KIND, SET, OpusFallback
 from queue_runner.gate import Gate
 from queue_runner.github import Issue
 from queue_runner.merge import READY
@@ -111,7 +112,7 @@ class FallbackTest(unittest.TestCase):
         [(_, n, body)] = self.posted('comment')
         self.assertEqual(n, 20)
         self.assertTrue(body.startswith(f'## Sol review 1 · Clean · {LABEL}\n'), body[:120])
-        self.assertIn(f'Reviewed by {LABEL}: Sol is out of usage', body)
+        self.assertIn(f"Reviewed by {LABEL}: Claude reviewed in Sol's place", body)
         self.assertNotIn('GPT-6.1 Sol', body)
         self.assertIn(f'sol-pr-review round=1 verdict=clean sha={H2}', body)   # read as any
         [(_, sha, state, description, _)] = self.posted('status')
@@ -180,14 +181,14 @@ class FallbackTest(unittest.TestCase):
 
     def test_the_gate_holds_the_fallback_back_and_says_so_once(self):
         self.sol_out()
-        r = self.reviewer((0, 'completed', reply()), gate=self.gate(usage(80)))
+        r = self.reviewer((0, 'completed', reply()), gate=self.gate(usage(90)))
         self.assertEqual(r.review_pass(), 'idle')
         self.assertEqual(r.review_pass(), 'idle')
         self.assertEqual(self.t3.starts, [])
         self.assertEqual(self.reviews(), [])
         waits = [s for s in self.said if s.startswith('Opus fallback review waits:')]
         self.assertEqual(len(waits), 1, self.said)
-        self.assertIn('the 5-hour window is 80% used and a review is expected to take 30%',
+        self.assertIn('the 5-hour window is 90% used and a review is expected to take 15%',
                       waits[0])
 
     def test_a_fallback_that_fits_runs_and_its_cost_is_learned_as_a_review(self):
@@ -271,6 +272,123 @@ class FallbackTest(unittest.TestCase):
         self.assertEqual([p for p in self.gh.posts if p[0] == 'merge'], [])
         self.assertEqual([p for p in self.gh.posts if p[0] == 'label'], [('label', 20, READY)])
         self.assertEqual([j.outcome for j in self.jobs.jobs() if j.kind == 'ready'], ['marked'])
+
+
+class ClaudeReviewsTest(unittest.TestCase):
+    """config.toml's `[review] provider = "claude"` (issue #76): Opus reviews every PR, through the
+    usage gate, whether or not Sol is out; "chatgpt" (the default) keeps Sol."""
+
+    SET_LABEL = 'Opus 5.5 high, set in config.toml'
+
+    def setUp(self):
+        FallbackTest.setUp(self)
+        self.use(Repo(name='first', github='owner/first', path=self.dir))
+
+    def use(self, repo, provider='claude'):
+        FallbackTest.use(self, repo)
+        self.config = dataclasses.replace(self.config, review_provider=provider)
+
+    reviewer, reviews, posted, sol_out, gate = (
+        FallbackTest.reviewer, FallbackTest.reviews, FallbackTest.posted, FallbackTest.sol_out,
+        FallbackTest.gate)
+
+    def test_opus_reviews_with_sol_available_and_sol_is_not_asked(self):
+        r = self.reviewer((0, 'completed', reply()), sol=[reply()])
+        self.assertEqual(r.review_pass(), 'started')
+        self.assertEqual(self.sol.briefs, [])
+        [start] = self.t3.starts
+        first = start['message'].split('\n\n')[1]
+        self.assertTrue(first.startswith('You review this PR in place of Sol'), first)
+        self.assertNotIn('out of usage', first)
+        [job] = self.reviews()
+        self.assertEqual((job.reviewer, job.outcome), (SET, 'clean'))
+        self.assertTrue(any('Opus (config.toml says so) reviews' in s for s in self.said),
+                        self.said)
+
+    def test_the_comment_status_and_row_say_config_toml_chose_it(self):
+        self.use(Repo(name='first', github='owner/first', path=self.dir, review_table=True))
+        self.reviewer((0, 'completed', reply())).review_pass()
+        [(_, _, body)] = self.posted('comment')
+        self.assertTrue(body.startswith(f'## Sol review 1 · Clean · {self.SET_LABEL}\n'),
+                        body[:120])
+        self.assertNotIn('fallback', body)
+        [(_, _, _, description, _)] = self.posted('status')
+        self.assertTrue(description.startswith(f'{self.SET_LABEL}: Clean'), description)
+        [(_, _, pr_body)] = self.posted('body')
+        row = next(line for line in pr_body.splitlines() if line.startswith('| ['))
+        self.assertTrue(row.startswith(f'| [Review 1, {self.SET_LABEL}](https://'), row)
+
+    def test_sol_out_of_usage_changes_nothing(self):
+        self.sol_out()
+        self.reviewer((0, 'completed', reply())).review_pass()
+        [job] = self.reviews()
+        self.assertEqual(job.reviewer, SET)
+        self.assertFalse(any(s.startswith('Sol is out of usage') for s in self.said), self.said)
+
+    def test_the_gate_holds_it_back_and_says_so_once(self):
+        r = self.reviewer((0, 'completed', reply()), sol=[reply()], gate=self.gate(usage(90)))
+        self.assertEqual(r.review_pass(), 'idle')
+        self.assertEqual(r.review_pass(), 'idle')
+        self.assertEqual((self.t3.starts, self.sol.briefs), ([], []))
+        waits = [s for s in self.said if s.startswith('Opus review waits:')]
+        self.assertEqual(len(waits), 1, self.said)
+
+    def test_review_one_says_the_gate_holds_it(self):
+        r = self.reviewer((0, 'completed', reply()), gate=self.gate(usage(90)))
+        result, why = r.review_one(self.repo, 20)
+        self.assertEqual(result, 'idle')
+        self.assertTrue(why.startswith('the Opus review waits: '), why)
+
+    def test_without_a_t3_thread_to_start_sol_reviews(self):
+        # The CLI's --review and the live checks build no fallback: they run Sol by name.
+        r = Reviewer(self.config, github=self.gh, git=self.git, sol=FakeSol([reply()]),
+                     jobs=self.jobs, say=self.said.append, now=lambda: NOW)
+        self.assertEqual(r.review_pass(), 'started')
+        [job] = self.reviews()
+        self.assertIsNone(job.reviewer)
+
+    def test_chatgpt_keeps_sol_reviewing(self):
+        self.use(Repo(name='first', github='owner/first', path=self.dir), provider='chatgpt')
+        r = self.reviewer((0, 'completed', reply()), sol=[reply()])
+        r.review_pass()
+        self.assertEqual((len(self.sol.briefs), self.t3.starts), (1, []))
+
+    def test_gate_prints_the_review_as_config_toml_chose_it(self):
+        from queue_runner import cli
+        out = io.StringIO()
+        cli._print_gate(self.gate(usage(10)), out, self.config)
+        self.assertIn('  review (Opus, set in config.toml): starts: review fits', out.getvalue())
+
+    def test_the_snapshot_shows_claude_on_the_reviewing_lane(self):
+        from queue_runner import snapshot
+        facts = snapshot.Facts(now=NOW.astimezone(), repos=[self.repo],
+                               review_provider='claude')
+        lanes = {lane['id']: lane for lane in snapshot.build(facts)['lanes']}
+        self.assertEqual((lanes['sol']['provider'], lanes['sol']['name'], lanes['sol']['model']),
+                         ('claude', 'Claude', lanes['claude']['model']))
+        facts = snapshot.Facts(now=NOW.astimezone(), repos=[self.repo])
+        lanes = {lane['id']: lane for lane in snapshot.build(facts)['lanes']}
+        self.assertEqual(lanes['sol']['name'], 'ChatGPT')
+
+
+class ReviewProviderConfigTest(unittest.TestCase):
+    def load(self, text):
+        from queue_runner.config import load_config
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, 'config.toml')
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write('state_dir = "s"\nlog_dir = "l"\n' + text)
+            return load_config(path)
+
+    def test_the_default_is_chatgpt(self):
+        self.assertEqual(self.load('').review_provider, 'chatgpt')
+
+    def test_claude(self):
+        self.assertEqual(self.load('[review]\nprovider = "claude"\n').review_provider, 'claude')
+
+    def test_anything_else_is_an_error_naming_the_key(self):
+        with self.assertRaisesRegex(ValueError, r'\[review\] provider must be one of'):
+            self.load('[review]\nprovider = "opus"\n')
 
 
 class FallbackFixRoundTest(unittest.TestCase):

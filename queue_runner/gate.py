@@ -52,10 +52,10 @@ class Cost:
 
 # Cautious until learned: a build is a long Opus thread, a fix round shorter, a decision one call.
 # A live run reads the live doc, runs a few connector calls and one check: a little over a decision.
-# A fallback review reads the diff and the code around it and may run the tests: between a
-# decision and a fix round.
+# An Opus review reads the diff and the code around it and may run the tests: about a decision's
+# cost to start with (issue #76), until three real reviews are learned.
 DEFAULTS = {'build': Cost(60, 15), 'fix': Cost(40, 10), 'decision': Cost(15, 4),
-            'live': Cost(20, 5), FALLBACK_REVIEW: Cost(30, 8)}
+            'live': Cost(20, 5), FALLBACK_REVIEW: Cost(15, 4)}
 
 
 @dataclass(frozen=True)

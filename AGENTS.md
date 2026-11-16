@@ -140,8 +140,9 @@ under the dashboard): GitHub issues, builds, Sol reviews, and it merges its own 
 a fix round, a decision thread; a continued job runs inside its decision's pass), after settling
 and choosing it, the Claude lane reads Claude's windows and the job kind's expected cost. **Sol
 isn't gated**, and neither is an Approach-note answer read from Stefan's words (no thread). The
-Opus review while Sol is out of usage is (The Opus fallback, below): the Sol lane checks it as
-kind `review` (default cost 30% of 5 hours, 8% of the week) and records what it spent the same
+Opus review (while Sol is out of usage, or every review when config.toml says Claude reviews: The
+Opus fallback, below) is: the Sol lane checks it as kind `review` (default cost 15% of 5 hours, 4%
+of the week, about a decision's, until three are learned: issue #76) and records what it spent the same
 way; it isn't one of the Claude lane's kinds (`gate.CLAUDE_KINDS`), so that lane's measurement
 never counts it, and `--gate` prints it as its own line, held by the reviewing lane's stop.
 
@@ -1246,6 +1247,35 @@ doesn't wait: a PR that needs a review gets one from a T3 thread on the Claude m
 - **On the dashboard:** the Sol lane's wait says Opus reviews meanwhile, a lane on a fallback
   review names Claude's model, and the work lists and the Inbox's timelines say a review was
   Opus's.
+
+### Claude reviews every PR (`[review] provider`)
+
+Issue #76 (Stefan, 2026-11-16: "Claude for now, until I say so, a full override"). A patch to
+this runner until the TypeScript rebuild makes the reviewer role a setting (#68, #36's grill);
+the key copies that role's shape, provider first.
+
+```toml
+[review]
+provider = "claude"   # "chatgpt" (Sol) is the default
+```
+
+- **With "claude"**, `Reviewer._who` sends every review to the Opus thread above, whether or not
+  Sol is out of usage, through the usage gate (`Opus review waits: ...` said once while it
+  holds). Sol isn't asked, and its out-of-usage wait plays no part: the snapshot drops it, and
+  the reviewing lane shows as Claude's (provider, name and model), so the Settings page's Who
+  does what row for Review says Claude.
+- **What says so:** the label is "Opus 5.5 high, set in config.toml" (`fallback.WHY`), in the
+  same places as the fallback's; the job's `reviewer` is `opus-config` (`fallback.SET`); the log
+  says `Opus (config.toml says so) reviews ...`; `--gate` prints `review (Opus, set in
+  config.toml)`. The preamble says Opus reviews in Sol's place, not that Sol is out.
+- **Reviewers with no T3 thread to start** (`--review NAME#N`, the live checks) still run Sol by
+  name.
+- **Back to Sol:** set `provider = "chatgpt"` (or remove `[review]`) on main; the runner restarts
+  on the merge (Restarting on new code, above). Any other value stops the runner at load, naming
+  the key.
+- **Not yet covered** (issue #77, after #70 and #74): #74's gate doesn't count a running review
+  among the Claude jobs running, and #70 doesn't settle review threads, so they stay in the
+  sidebar until settled by hand.
 
 ## Sol runs tests
 
