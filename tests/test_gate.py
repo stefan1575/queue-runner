@@ -134,7 +134,9 @@ class GateCheckTest(unittest.TestCase):
         self.assertEqual((v.go, v.why, v.until), (False, WEEKLY, None))
 
     def test_a_torn_last_record_is_ignored_and_cut_off_by_the_next(self):
-        book = CostBook(os.path.join(tempfile.mkdtemp(), 'usage.jsonl'))
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        book = CostBook(os.path.join(tmp.name, 'usage.jsonl'))
         for _ in range(3):
             book.record('fix', [], snap(10, 10), snap(20, 12))
         with open(book.path, 'a', encoding='utf-8') as f:
