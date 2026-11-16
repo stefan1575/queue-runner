@@ -202,7 +202,10 @@ class FakeToaster:
 
 class FakeUsage:
     """Plays Claude's usage endpoint: each read gives the next of `reads` (the last one again
-    once they run out); an exception in it is raised. Tests never read the real one."""
+    once they run out); an exception in it is raised. Tests never read the real one. It never
+    answers 429, so it may be asked at any pace: `call_every` 0 leaves `usage.CachedUsage`'s
+    budget out of the tests that use it (the budget's own tests give their endpoint one)."""
+    call_every = 0
 
     def __init__(self, *reads):
         import datetime
@@ -217,6 +220,39 @@ class FakeUsage:
         if isinstance(got, Exception):
             raise got
         return got
+
+
+class StubEndpoint:
+    """Plays `api/oauth/usage` behind a real `usage.OAuthUsage` (its `fetch`), on a test's clock:
+    it answers a response shaped like the real one, or HTTP 429 when it's asked within `limit`
+    seconds of its last call, as the real one does (issue 66). `fail` makes every call answer
+    that status. `calls` is every call, as (time, status). Nothing calls Anthropic."""
+
+    def __init__(self, clock, five=38, week=46, limit=60):
+        self.clock, self.five, self.week, self.limit = clock, five, week, limit
+        self.fail: int | None = None
+        self.calls: list = []
+
+    def __call__(self, request):
+        import json
+        import urllib.error
+        now = self.clock()
+        status = self.fail or (429 if self.calls and
+                               (now - self.calls[-1][0]).total_seconds() < self.limit else 200)
+        self.calls.append((now, status))
+        if status != 200:
+            raise urllib.error.HTTPError(request.full_url, status, 'stub', {}, None)
+        return json.dumps({'five_hour': {'utilization': self.five, 'resets_at': None},
+                           'seven_day': {'utilization': self.week, 'resets_at': None}}).encode()
+
+    def oauth(self, config_dir: str):
+        """A real `OAuthUsage` on this stub, with a fake login written in `config_dir`."""
+        import json
+        import os
+        from queue_runner.usage import OAuthUsage
+        with open(os.path.join(config_dir, '.credentials.json'), 'w', encoding='utf-8') as f:
+            json.dump({'claudeAiOauth': {'accessToken': 'sk-fake'}}, f)
+        return OAuthUsage(config_dir=config_dir, fetch=self, clock=self.clock)
 
 
 class FakeLimits:
