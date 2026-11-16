@@ -27,7 +27,7 @@ from .lock import RunnerBusy, runner_lock  # noqa: F401 (the CLI takes them from
 from .merge import Merger
 from .picker import BuildJob, pick
 from .review import Reviewer
-from .state import NOT_SENT, NOT_STARTED, RESTART_FAILED, USAGE_LIMIT, Job, JobLog
+from .state import NOT_SENT, NOT_STARTED, RESTART_FAILED, USAGE_LIMIT, Job, JobLog, when
 from .stops import Stopper
 from .t3 import T3Error, Thread
 from .toast import NoToaster
@@ -65,7 +65,7 @@ def _exit_code(thread: Thread) -> int:
 
 
 def _when(stamp: str) -> datetime.datetime:
-    return datetime.datetime.fromisoformat(stamp.replace('Z', '+00:00'))
+    return when(stamp)
 
 
 def _quote(text: str) -> str:

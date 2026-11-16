@@ -86,6 +86,13 @@ def read_records(path: str):
             yield json.loads(line)
 
 
+def when(stamp: str) -> datetime.datetime:
+    """A stamp from the job log as a time with its offset. A stamp written without one (the Sol
+    lane's `resume_at` before 2026-11-16) is this PC's local time."""
+    t = datetime.datetime.fromisoformat(stamp.replace('Z', '+00:00'))
+    return t if t.tzinfo else t.astimezone()
+
+
 def _now() -> str:
     return datetime.datetime.now().astimezone().isoformat(timespec='seconds')
 

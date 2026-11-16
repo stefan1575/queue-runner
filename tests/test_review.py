@@ -294,6 +294,17 @@ class ReviewerTest(unittest.TestCase):
         self.sol.replies.append(reply())
         self.assertEqual(r.review_pass(), 'started')
 
+    def test_a_resume_written_without_an_offset_is_local_time(self):
+        # Before 2026-11-16 the lane wrote `resume_at` with no offset; it still pauses the lane.
+        job = self.jobs.started(kind='review', repo='leads-dashboard', issue=9, branch=None,
+                                title='t')
+        self.jobs.ended(job.id, exit_code=None, outcome='out-of-usage',
+                        resume_at='2026-11-09T14:10:00')
+        r = self.one_pr(sol=FakeSol([reply()]))
+        self.assertEqual(r.review_pass(), 'idle')
+        later = self.reviewer(self.gh, self.git, self.sol, now=datetime.datetime(2026, 11, 9, 14, 11))
+        self.assertEqual(later.review_pass(), 'started')
+
     def test_a_failed_sol_run_is_a_failed_review(self):
         r = self.one_pr(sol=FakeSol([SolFailed('codex-sol exit 1')]))
         r.review_pass()
@@ -305,7 +316,8 @@ class ReviewerTest(unittest.TestCase):
         r = self.one_pr(sol=FakeSol([SolOutOfUsage(back), reply()]))
         r.review_pass()
         [job] = self.jobs.jobs()
-        self.assertEqual((job.outcome, job.resume_at), ('out-of-usage', '2026-11-09T14:10:00'))
+        self.assertEqual((job.outcome, job.resume_at), ('out-of-usage', datetime.datetime(
+            2026, 11, 9, 14, 10).astimezone().isoformat(timespec='seconds')))   # with its offset
         self.assertEqual(r.review_pass(), 'idle')
         later = self.reviewer(self.gh, self.git, self.sol, now=datetime.datetime(2026, 11, 9, 14, 11))
         self.assertEqual(later.review_pass(), 'started')
