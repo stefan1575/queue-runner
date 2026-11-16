@@ -598,7 +598,8 @@ def _pr_status(v: View, repo, p: PrRead, cq: list, sq: list) -> tuple[str, str, 
         what = 'Conflict round' if fix.cause == 'conflict' else 'Fix round'
         return f'{what} running', 'Claude is on it; Sol reviews the head it pushes.', FIXING
     if review := next((j for j in on if j.kind == 'review'), None):
-        return 'In review', f'Sol is on review {review.round or 1} of {h7}.', REVIEW
+        who = 'Opus (in place of Sol, out of usage)' if review.reviewer else 'Sol'
+        return 'In review', f'{who} is on review {review.round or 1} of {h7}.', REVIEW
     if any(j.kind == 'merge' for j in on):
         return 'Merging', f'The runner is merging it at {h7}.', REVIEW
     if p.writer:
@@ -685,6 +686,11 @@ def _h7(sha) -> str:
 def _other(j) -> str | None:
     """The sentences `asks.Story` doesn't write: what counted for nothing."""
     h7 = _h7(j.sha)
+    if j.kind == 'review' and j.reviewer:   # the Opus fallback while Sol is out (#69)
+        return {'failed': f"The Opus fallback's review of {h7} failed.",
+                'head-moved': f'The head moved while Opus was to review {h7}, so nothing '
+                              'counted.'}.get(j.outcome, f'Opus started reviewing {h7} in place '
+                                              'of Sol.' if j.open else None)
     if j.kind == 'review':
         return {'failed': f"Sol's review of {h7} failed.",
                 'out-of-usage': f'Sol ran out of usage reviewing {h7}; the PR is reviewed afresh '

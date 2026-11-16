@@ -27,6 +27,10 @@ AFTER_RESET = datetime.timedelta(minutes=2)      # wait this past a reset before
 SAME_WINDOW = datetime.timedelta(minutes=10)     # two reads' resets this close: the same window
 SAMPLES, RECENT = 3, 5
 CLAUDE_KINDS = ('build', 'fix', 'decision', 'live')
+# The Opus review while Sol is out of usage (issue #69) runs in the Sol lane, gated as `review`.
+# It isn't one of the Claude lane's kinds: that lane's measurement counts only its own jobs.
+FALLBACK_REVIEW = 'review'
+GATED_KINDS = CLAUDE_KINDS + (FALLBACK_REVIEW,)
 
 # Gate verdicts: why a job starts or waits.
 FITS = 'fits'
@@ -48,8 +52,10 @@ class Cost:
 
 # Cautious until learned: a build is a long Opus thread, a fix round shorter, a decision one call.
 # A live run reads the live doc, runs a few connector calls and one check: a little over a decision.
+# A fallback review reads the diff and the code around it and may run the tests: between a
+# decision and a fix round.
 DEFAULTS = {'build': Cost(60, 15), 'fix': Cost(40, 10), 'decision': Cost(15, 4),
-            'live': Cost(20, 5)}
+            'live': Cost(20, 5), FALLBACK_REVIEW: Cost(30, 8)}
 
 
 @dataclass(frozen=True)
