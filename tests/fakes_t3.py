@@ -22,6 +22,8 @@ class FakeT3:
         self.messages: dict[str, list] = {}   # thread id -> its last messages (Message)
         self.launches = []        # threads started without waiting (ticket 35's ask threads)
         self.launch_error = None  # a T3Error the next launch raises
+        import threading          # the Claude lane's workers call it at once (#50)
+        self.lock = threading.RLock()
 
     def add(self, thread_id, title, status, created_at='2099-01-01T00:00:00.000Z', **extra):
         self.threads[thread_id] = Thread(
@@ -36,14 +38,16 @@ class FakeT3:
 
     def start(self, project, message, *, title, provider=None, model=None, worktree=None,
               branch=None):
-        self.starts.append(dict(project=project, message=message, title=title,
-                                provider=provider, model=model, worktree=worktree, branch=branch))
-        outcome = self.outcomes.pop(0)
-        if isinstance(outcome, Exception):
-            raise outcome
-        thread_id = f'mcp:t{len(self.starts)}'
-        self.add(thread_id, title, outcome[1], branch=branch,
-                 worktree_path=f'C:/t3/worktrees/{thread_id}')
+        with self.lock:
+            self.starts.append(dict(project=project, message=message, title=title,
+                                    provider=provider, model=model, worktree=worktree,
+                                    branch=branch))
+            outcome = self.outcomes.pop(0)
+            if isinstance(outcome, Exception):
+                raise outcome
+            thread_id = f'mcp:t{len(self.starts)}'
+            self.add(thread_id, title, outcome[1], branch=branch,
+                     worktree_path=f'C:/t3/worktrees/{thread_id}')
         return self._result(thread_id, outcome)
 
     @staticmethod
@@ -66,11 +70,12 @@ class FakeT3:
 
     def send(self, thread_id, message):
         """A message to an existing thread: the next outcome is how its new run ends."""
-        self.sends.append(dict(thread_id=thread_id, message=message))
-        outcome = self.outcomes.pop(0)
-        if isinstance(outcome, Exception):
-            raise outcome
-        self.set_status(thread_id, outcome[1])
+        with self.lock:
+            self.sends.append(dict(thread_id=thread_id, message=message))
+            outcome = self.outcomes.pop(0)
+            if isinstance(outcome, Exception):
+                raise outcome
+            self.set_status(thread_id, outcome[1])
         return self._result(thread_id, outcome)
 
     def show(self, thread_id, messages=3):

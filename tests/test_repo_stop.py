@@ -121,13 +121,12 @@ class FirstRunTest(Harness):
         self.assertNotIn(f'Queue runner live: {LD}', self.titles())
         self.assertEqual([j.kind for j in self.jobs.jobs() if j.repo == LD], ['live'])
 
-    def test_without_the_stop_its_live_steps_would_come_first(self):
+    def test_without_the_stop_its_live_steps_start_beside_game_backdrops_build(self):   # #50
         self.merged_since_live()
         self.put(control([GB, LD], lanes={'claude': None}))
         runner = self.runner()
         runner.take_stops()
-        kind, _, _ = runner.choose()
-        self.assertEqual(kind, 'live')
+        self.assertEqual({s.repo: s.kind for s in runner.choose()}, {GB: 'build', LD: 'live'})
 
 
 class ClaudeLaneTest(Harness):
@@ -176,7 +175,8 @@ class ClaudeLaneTest(Harness):
                 self.put(control([GB, LD]))
                 runner = self.runner()
                 runner.take_stops()
-                self.assertEqual(runner.choose()[0], kind)   # the control: GB's work is due
+                # the control: GB's work is due
+                self.assertEqual({s.repo: s.kind for s in runner.choose()}[GB], kind)
                 self.put(control([GB, LD], **{GB: 'after-job'}))
                 runner = self.runner()
                 runner.run_pass()

@@ -301,11 +301,14 @@ class LiveSteps:
         self._last_why[repo.name] = why
         return None
 
-    def next(self):
-        """(repo, batch) for the first repo whose live steps run now, or None. `wait_until` is
-        then the soonest a live run cut off by a usage limit may run again."""
+    def next(self, repos=None):
+        """(repo, batch) for the first repo whose live steps run now (in `repos`' names, if
+        given: #50), or None. `wait_until` is then the soonest a live run cut off by a usage
+        limit may run again."""
         self.wait_until = None
         for repo in self.served():
+            if repos is not None and repo.name not in repos:
+                continue
             try:
                 if found := self.batch(repo):
                     return repo, found

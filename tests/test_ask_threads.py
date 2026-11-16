@@ -215,7 +215,7 @@ class OpenTest(ThreadCase):
         class Shut:
             kinds = []
 
-            def check(self, kind, then=None):
+            def check(self, kind, then=None, running=()):
                 self.kinds.append((kind, then))
                 return Verdict(False, 'five-hour', 'the session is full')
         self.noted()

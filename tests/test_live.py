@@ -10,7 +10,7 @@ from queue_runner.config import Config, Repo
 from queue_runner.github import Checks
 from queue_runner.live import LiveSteps, parse
 from queue_runner.merge import Merger
-from queue_runner.run import BUSY, Runner
+from queue_runner.run import Runner
 from queue_runner.state import JobLog
 from queue_runner.stops import Stopper
 from queue_runner.t3 import Message, T3Error
@@ -408,7 +408,7 @@ class RestartTest(LiveHarness):
         self.t3.add('mcp:live', 'Queue runner live: first', 'running')
         r = self.runner()
         self.addCleanup(r.out.close)
-        self.assertEqual(r.settle(), BUSY)
+        self.assertEqual(r.settle(), {'first': ('live first#13', 'live')})   # its repo is busy
         self.assertTrue(self.jobs.live('first')[-1].open)
 
     def test_an_ended_thread_is_settled_from_its_reply(self):
@@ -418,7 +418,7 @@ class RestartTest(LiveHarness):
                                                                         failed='two failed'))]
         r = self.runner()
         self.addCleanup(r.out.close)
-        self.assertIsNone(r.settle())
+        self.assertEqual(r.settle(), {})
         job = self.jobs.live('first')[-1]
         self.assertEqual((job.outcome, job.applied), ('partial', [M1]))
         self.assertEqual(self.stops(), [('live', 'filed')])
@@ -438,8 +438,8 @@ class LaneTest(LiveHarness):
         r = Runner(self.config, github=self.gh, t3=self.t3, git=self.git,
                    out=open(os.devnull, 'w'), log_line=self.said.append, now=lambda: NOW)
         self.addCleanup(r.out.close)
-        kind, then, run = r.choose()
-        self.assertEqual((kind, then), ('live', None))
+        [start] = r.choose()
+        self.assertEqual((start.kind, start.then), ('live', None))
 
     def test_an_idle_lane_wakes_for_a_live_runs_limit(self):
         self.first_sight()

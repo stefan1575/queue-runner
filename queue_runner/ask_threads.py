@@ -104,11 +104,13 @@ class AskThreads:
         s = by_id.get(ask_id[len(PREFIX):])
         return s if opens(s) else None
 
-    def next(self, switch):
+    def next(self, switch, only=None):
         """(repo, the stop, its PR open now) for the first ask Stefan asked to open, oldest
-        request first, whose stop still waits on him and has no thread yet; or None."""
+        request first, whose stop still waits on him and has no thread yet; or None. With
+        `only`, in those repos' names alone (#50: each repo's job is chosen apart)."""
         from .config import working
-        repos = {r.name: r for r in working(self.config) if r.github}
+        repos = {r.name: r for r in working(self.config)
+                 if r.github and (only is None or r.name in only)}
         all_jobs, gone = self.jobs.jobs(), self.jobs.released_ids()
         by_id = {j.id: j for j in all_jobs}
         for ask_id, _ in sorted(switch.opened.items(), key=lambda kv: kv[1]):
