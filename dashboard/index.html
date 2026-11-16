@@ -15,16 +15,13 @@
     it builds first, is it up. The column between them is centred in the space they leave.
   - Three pages do three jobs. Overview is the first glance. Inbox is what waits on you. Queue is
     the work.
-  - PROTOTYPE, with sample data only (#30, take 11): the Queue as #107 and #109 decide it,
-    three ways, ?variant=a|b|c, switched from the pill over the sidebar's foot or with the left
-    and right arrow keys. Every one shows one queue per repo with a reason on each entry, every
-    open ticket's state (ready-for-human and needs-triage by name, a blocked one naming the
-    root of its chain), efforts as a tree with a "No effort" group, a stuck item as "fixing
-    itself: #N", and the order changed by dragging. A, repo by repo: a card per repository,
-    its queue, then its build order as an outline. B, side by side: a column per repository,
-    as they run. C, one numbered list: a tab per repository, the build order is the queue
-    (each build numbered in place), the picked row opens on the right. All three read one
-    model (work()); the dragged order lives in the page only. Take 10 is earlier/take-10.html.
+  - PROTOTYPE, with sample data only (#30, take 12): the Queue as the lanes on top (what Claude
+    and ChatGPT run now, then their next three), and the efforts below in three views: List (the
+    build order: efforts closed until opened, remembered; drag an effort among its siblings, and a
+    ticket goes where its effort and its blockers put it), Board (every open ticket by where it
+    stands) and Graph (what waits on what), the last two narrowed by an effort dropdown. Variant
+    A: a ticket with no effort is a row of its own in the order; B: they're one "No effort" row.
+    The rules and reasons are #107's and #109's (work()). Take 11 is earlier/take-11.html.
   - The Overview only summarises, in three cards read top to bottom: what's on your plate (the
     Inbox in counts by kind, and the ask that's first in line), what's running (a line per lane,
     with its Stop button and the one thing it takes up next), and what's next (a bar per
@@ -971,6 +968,136 @@ body.q-dragging .can-drop { outline: 1px dashed var(--btn-line); outline-offset:
 @media (max-width: 1100px) { .qc-grid { grid-template-columns: minmax(0, 1fr); } .qc-side { position: static; } }
 @media (max-width: 700px) { .eq-bar { width: 70px; } .eq-count { display: none; } .tq { grid-template-columns: 16px minmax(0, 1fr); } .tq-state { justify-content: flex-start; grid-column: 2; } }
 .qc-list .tq-why { grid-column: 3 / -1; }
+
+/* ---------------------------------------------------------------- queue, take 12 (PROTOTYPE) */
+.q12 { display: grid; gap: 16px; }
+.q12 .t-n { color: var(--mute); font-weight: 400; margin-right: 7px; }
+.q12 .kind { font: 600 11px/1 var(--sans); letter-spacing: .05em; text-transform: uppercase; color: var(--dim); border: 1px solid var(--line); border-radius: 5px; padding: 3px 5px; margin-left: 10px; vertical-align: 2px; }
+.q12 .qn { grid-row: auto; width: 22px; height: 22px; font-size: 12.5px; flex: none; }
+/* the lanes */
+.q12-now { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+.ln { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px 12px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.ln.on { border-left: 3px solid var(--run); padding-left: 14px; }
+.ln-head { display: flex; align-items: center; gap: 10px; min-height: 36px; }
+.ln-head .who { font-size: 17px; font-weight: 600; }
+.ln-does { color: var(--dim); font-size: 14px; }
+.ln-for { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; font-size: 13.5px; color: var(--mute); white-space: nowrap; }
+.ln-for.run { color: var(--run); font-weight: 600; }
+.ln-stop .btn { height: 32px; }
+.ln-doing { display: grid; gap: 6px; }
+.ln-now { font-weight: 600; min-width: 0; }
+.ln-now .ln-meta { display: block; font-weight: 400; font-size: 14px; color: var(--mute); margin-top: 1px; }
+.ln-now.quiet { font-weight: 500; color: var(--mute); }
+.ln-then { display: grid; gap: 2px; border-top: 1px solid var(--line-soft); padding-top: 8px; }
+.ln-then li { display: grid; grid-template-columns: 24px minmax(0, 1fr); column-gap: 8px; padding: 3px 0; }
+.ln-then .qn { grid-row: span 2; width: 20px; height: 20px; font-size: 12px; margin-top: 1px; }
+.ln-j { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ln-j b { font-weight: 600; }
+.ln-repo { font-size: 13px; color: var(--dim); margin-left: 4px; }
+.ln-why { font-size: 13.5px; color: var(--mute); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ln-none, .ln-more { font-size: 14px; color: var(--mute); }
+.ln-none { border-top: 1px solid var(--line-soft); padding-top: 8px; }
+/* the efforts card */
+.q12-head { display: flex; align-items: center; gap: 12px; min-height: 56px; padding: 10px 16px 10px 20px; border-bottom: 1px solid var(--line-soft); flex-wrap: wrap; }
+.q12-head h2 { font: 600 17px/1.2 var(--display); }
+.q12-hint { color: var(--mute); font-size: 14px; flex: 1 1 200px; }
+.q12-head .seg { margin-left: 0; }
+.seg button[aria-selected="true"] { background: var(--ink); color: var(--page); }
+.q12-pick { height: 32px; border-radius: 9px; border: 1px solid var(--btn-line); background: var(--surface); color: var(--ink); font: 500 14.5px var(--sans); padding: 0 8px; max-width: 240px; }
+.q12-sec { padding: 12px 14px 14px; }
+.q12-sec + .q12-sec { border-top: 1px solid var(--line-soft); }
+.q12-repo { display: flex; align-items: center; gap: 8px; font: 600 15px/1.2 var(--display); margin: 2px 6px 10px; }
+.q12-repo .rlogo { width: 22px; height: 22px; font-size: 11px; border-radius: 6px; }
+/* List: an effort's row, closed or open */
+.er-list, .er-kids { display: grid; gap: 4px; }
+.er { border-radius: 11px; border: 1px solid transparent; position: relative; }
+.er:hover { border-color: var(--line); }
+.er.open { border-color: var(--line); background: var(--sunk); }
+.er.none .er-name { font-style: italic; }
+.er-head { display: grid; grid-template-columns: 16px 22px 24px minmax(0, 1fr) 150px 84px; grid-template-areas: "g r c n b k" ". . . s s s"; align-items: center; column-gap: 8px; padding: 7px 10px 7px 6px; }
+.er-head > .grip { grid-area: g; }
+.er-rank { grid-area: r; font-size: 13px; font-weight: 700; color: var(--dim); text-align: right; font-variant-numeric: tabular-nums; }
+.er-caret { grid-area: c; width: 24px; height: 24px; display: grid; place-items: center; border-radius: 6px; border: 0; background: none; color: var(--mute); cursor: pointer; }
+.er-caret:hover { background: var(--hover); color: var(--ink); }
+.er-caret .i { width: 16px; height: 16px; transition: transform .15s; }
+.er.open > .er-head .er-caret .i { transform: rotate(90deg); }
+.er-caret.dot-only { cursor: default; }
+.er-caret.dot-only i { width: 6px; height: 6px; border-radius: 50%; background: var(--dim); }
+.er-name { grid-area: n; min-width: 0; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: left; background: none; border: 0; padding: 0; color: inherit; font-size: inherit; }
+button.er-name { cursor: pointer; }
+button.er-name:hover { text-decoration: underline; text-underline-offset: 3px; }
+.er-bar { grid-area: b; }
+.er-bar .fbar { height: 8px; gap: 2px; }
+.er-count { grid-area: k; font-size: 13px; color: var(--mute); text-align: right; white-space: nowrap; }
+.er-say { grid-area: s; font-size: 14px; color: var(--mute); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.er-st { grid-area: b / b / b / k; justify-self: end; display: inline-flex; align-items: center; }
+.er-loose .er-name { font-weight: 500; }
+.es { font-weight: 600; color: var(--ink-2); margin-right: 4px; }
+.es.run { color: var(--run); }
+.es.you { color: var(--you); }
+.es.next { color: var(--ink); }
+.es.ok { color: var(--ok); }
+.es.held { color: var(--ink-2); }
+.er-body { padding: 0 10px 10px 58px; }
+.er-body .er { background: var(--surface); }
+.er-body .er-head { grid-template-columns: 16px 0 24px minmax(0, 1fr) 120px 84px; column-gap: 6px; }
+.et { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; grid-template-areas: "q n s" ". w w"; column-gap: 10px; align-items: center; padding: 6px 8px; border-radius: 8px; }
+.et:hover { background: var(--hover); }
+.et > .qn { grid-area: q; }
+.et-name { grid-area: n; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
+.et-st { grid-area: s; display: inline-flex; align-items: center; }
+.et-name .link, .er-name .link, .et-name .pr-ref, .er-name .pr-ref { margin-left: 8px; font-size: 14px; font-weight: 400; color: var(--mute); }
+.et-why { grid-area: w; font-size: 13.5px; color: var(--mute); }
+/* Board */
+.kboard { display: grid; grid-template-columns: repeat(4, minmax(200px, 1fr)) minmax(150px, .7fr); gap: 12px; padding: 14px; overflow-x: auto; align-items: start; }
+.kcol { background: var(--sunk); border-radius: 12px; padding: 10px; min-width: 0; }
+.kcol h3 { display: flex; align-items: baseline; gap: 8px; font: 600 14px/1.2 var(--sans); margin: 2px 4px 10px; }
+.kcol h3 span { color: var(--dim); font-weight: 500; }
+.kcol.you h3 { color: var(--you); }
+.kcol.moving h3 { color: var(--run); }
+.kcol ol { display: grid; gap: 8px; }
+.kc { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 9px 10px; display: grid; gap: 5px; }
+.kc.done { opacity: .75; }
+.kc-t { font-weight: 600; font-size: 14.5px; line-height: 1.35; display: flex; gap: 6px; align-items: baseline; }
+.kc-t .qn { align-self: flex-start; }
+.kc-t .t-n { margin-right: 0; }
+.kc-m { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 12.5px; color: var(--dim); }
+.kc-e { border: 1px solid var(--line); border-radius: 5px; padding: 0 6px; line-height: 20px; color: var(--mute); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.kc-why { font-size: 13px; color: var(--mute); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.kc-more { margin-top: 8px; width: 100%; height: 30px; border-radius: 8px; border: 1px dashed var(--btn-line); background: none; color: var(--mute); font: 500 13.5px var(--sans); cursor: pointer; }
+.kc-more:hover { color: var(--ink); border-style: solid; }
+.kc-empty { font-size: 13.5px; color: var(--dim); margin: 0 4px 4px; }
+.q12-graph .pyramid { padding: 18px 20px 6px; }
+@media (max-width: 760px) {
+  .er-head { grid-template-columns: 16px 18px 24px minmax(0, 1fr) 70px; grid-template-areas: "g r c n k" ". . . s s"; }
+  .er-bar { display: none; }
+  .er-body { padding-left: 14px; }
+  .kboard { grid-template-columns: repeat(5, 240px); }
+}
+/* the Usage card, as the first prototype drew it (take 12) */
+.usage2 .card-head { gap: 8px; }
+.usage2 .u-icon { display: grid; color: var(--dim); }
+.usage2 .u-icon .i { width: 17px; height: 17px; }
+.plan2 + .plan2 { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--line); }
+.plan2-name { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+.plan2-name .who { font-size: 16px; font-weight: 600; }
+.plan2-name .read { font-size: 13.5px; color: var(--dim); white-space: nowrap; }
+.mrow2 { display: grid; grid-template-columns: 96px minmax(0, 1fr) 3em; align-items: center; column-gap: 14px; padding: 5px 0; }
+.m-label { color: var(--ink-2); line-height: 1.25; }
+.m-when { display: block; font-size: 12.5px; color: var(--dim); }
+.m-bar { height: 6px; border-radius: 3px; background: var(--line); position: relative; overflow: hidden; }
+.m-bar .fill { position: absolute; inset: 0 auto 0 0; background: var(--ink-2); border-radius: 3px; }
+.m-bar .kept { position: absolute; inset: 0 auto 0 0; background: var(--you); opacity: .55; }
+.m-pct { text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
+.mrow2.sub { padding-top: 0; }
+.mrow2.sub .m-label { padding-left: 12px; font-size: 13.5px; color: var(--mute); }
+.mrow2.sub .m-bar { height: 4px; }
+.mrow2.sub .m-pct { font-size: 13.5px; font-weight: 600; }
+.mrow2.near .fill { background: var(--run); }
+.mrow2.near .m-pct { color: var(--run); }
+.mrow2.full .fill { background: var(--bad); }
+.mrow2.full .m-pct { color: var(--bad); }
+.plan2-note { font-size: 13.5px; color: var(--mute); margin-top: 8px; }
 </style>
 </head>
 <body>
@@ -1039,10 +1166,10 @@ let faultStart = ""; // with "missing": how to start the runner, as the server s
 const PAGES = [["overview", "Overview"], ["inbox", "Inbox"], ["queue", "Queue"], ["activity", "Activity"], ["usage", "Usage"], ["settings", "Settings"]];
 const UNBUILT = [];   // pages still as they were before the split
 // PROTOTYPE (ticket 21): the Queue page's three arrangements, ?variant=a|b|c
-const VARIANTS = [["a", "Repo by repo"], ["b", "Side by side"], ["c", "One numbered list"]];   // take 11 (#30)
+const VARIANTS = [["a", "Tickets in the order"], ["b", "No effort, one row"]];   // take 12 (#30)
 const sampleName = new URLSearchParams(location.search).get("sample");
 const ui = { page: "overview", repo: "", view: "list", pr: null, ask: null, hold: null, sel: null, pop: null, nav: false, rail: false,
-  variant: "a", feature: "", open: [], qrepo: "", qsel: null };   // qrepo, qsel: the Queue, C (take 11)   // the Queue: which arrangement, the feature it's narrowed to (A), the features unfolded (B)
+  variant: "a", feature: "", open: [], qview: "", qeffort: "" };   // qview, qeffort: the Queue (take 12)   // the Queue: which arrangement, the feature it's narrowed to (A), the features unfolded (B)
 
 function recall(k) { try { return localStorage.getItem("qr." + k); } catch { return null; } }
 function remember(k, v) { try { localStorage.setItem("qr." + k, v); } catch { /* a private window */ } }
@@ -1680,7 +1807,7 @@ function work() {
   for (const r of repos) nodes.set(`repo:${r}`, { t: "repo", id: `repo:${r}`, repo: r, kids: [] });
   for (const e of snap.efforts || []) nodes.set(e.id, { t: "effort", ...e, parent: e.parent || `repo:${e.repo}`, kids: [] });
   for (const r of repos) nodes.set(`none:${r}`, { t: "none", id: `none:${r}`, repo: r, n: null, title: "No effort", parent: `repo:${r}`, blocked_by: [], kids: [] });
-  for (const i of issues) nodes.set(key(i), { t: "ticket", id: key(i), i, repo: i.repo, parent: i.feature && nodes.has(i.feature) ? i.feature : `none:${i.repo}` });
+  for (const i of issues) nodes.set(key(i), { t: "ticket", id: key(i), i, repo: i.repo, parent: i.feature && nodes.has(i.feature) ? i.feature : ui.variant === "b" ? `none:${i.repo}` : `repo:${i.repo}` });
   for (const n of nodes.values()) if (n.parent && nodes.has(n.parent)) nodes.get(n.parent).kids.push(n.id);
   const tickets = (id) => { const n = nodes.get(id); return n.t === "ticket" ? [n.i] : n.kids.flatMap(tickets); };
   const openIn = (id) => tickets(id).filter(isOpen);
@@ -1720,8 +1847,9 @@ function work() {
         let why;
         if (i.runner_filed) why = `${i.note}. The fix is built like any ticket, and the stuck item tries again once it closes`;
         else if (!prev) why = t === root.order[0] ? `The first ready ticket in ${nameOf(nodes.get(t))}, the top of the order${mine}`
+          : nodes.get(root.order[0]).t === "ticket" ? `First in the order, #${nodes.get(root.order[0]).i.n} is ${(STATE[nodes.get(root.order[0]).i.state] || [nodes.get(root.order[0]).i.state])[0].toLowerCase()}, so it builds from ${nameOf(nodes.get(t))}${mine}`
           : `${nameOf(nodes.get(root.order[0]))} has nothing ready to build, so it builds from ${nameOf(nodes.get(t))}${mine}`;
-        else if (nodes.get(prev).parent === e.id) why = `Next in ${nameOf(e)}, ${ord.kids[e.id] ? "in the order you set" : "lowest number first"}`;
+        else if (nodes.get(prev).parent === e.id && e.t !== "repo") why = `Next in ${nameOf(e)}, ${ord.kids[e.id] ? "in the order you set" : "lowest number first"}`;
         else if (top(prev) === t) why = `${nameOf(e)} is next inside ${nameOf(nodes.get(t))}`;
         else why = `${nameOf(nodes.get(t))} comes next in the order${mine}`;
         jobs.push({ kind: "build", ref: `#${i.n}`, title: i.title, why, key: k });
@@ -1733,7 +1861,7 @@ function work() {
   }
   return { repos: scoped(repos.map((r) => ({ repo: r }))).map((x) => x.repo), allRepos: repos, byKey, outside, nodes, tickets, openIn, flat, pos, ancestors, top, blockersOf, queues, qpos, doing };
 }
-const nameOf = (n) => (!n ? "" : n.t === "none" ? "No effort" : n.t === "ticket" ? `#${n.i.n}` : n.title);
+const nameOf = (n) => (!n ? "" : n.t === "none" ? "No effort" : n.t === "repo" ? n.repo : n.t === "ticket" ? `#${n.i.n} ${n.i.title}` : n.title);
 const refOf = (x, from) => (x.repo === from ? `#${x.n}` : `${x.repo}#${x.n}`);
 
 // Why a ticket stands where it does, in one sentence (#107). A blocked one names the root of its
@@ -1807,7 +1935,7 @@ const closedSay = (n, W) => {
 const yoursIn = (r, W) => (snap.issues || []).filter((i) => i.repo === r && ["you", "ready-for-human", "needs-triage"].includes(i.state));
 const isFlash = (id) => lastMove && Date.now() - lastMove.at < 4000 && lastMove.ids.has(id);
 const GRIP = `<span class="grip" aria-hidden="true"><svg viewBox="0 0 10 16"><circle cx="2.5" cy="3" r="1.3"/><circle cx="7.5" cy="3" r="1.3"/><circle cx="2.5" cy="8" r="1.3"/><circle cx="7.5" cy="8" r="1.3"/><circle cx="2.5" cy="13" r="1.3"/><circle cx="7.5" cy="13" r="1.3"/></svg></span>`;
-const dragAttrs = (n) => (repoOff(n.repo) ? "" : `draggable="true" tabindex="0" data-drag="${esc(n.id)}" data-parent="${esc(n.parent)}" aria-roledescription="${n.t === "ticket" ? "ticket" : "effort"}, drag to reorder"`);
+const dragAttrs = (n) => (repoOff(n.repo) || (n.t === "ticket" && !n.parent.startsWith("repo:")) ? "" : `draggable="true" tabindex="0" data-drag="${esc(n.id)}" data-parent="${esc(n.parent)}" aria-roledescription="${n.t === "ticket" ? "ticket" : "effort"}, drag to reorder"`);
 const KINDNAME = { map: "Map", spec: "Spec" };
 
 // What a repo is doing now and takes up next, in order, each with why.
@@ -1830,26 +1958,6 @@ function moveNote() {
   return `<div class="q-moved${says ? " has" : ""}" role="status">${says ? `<ul>${says}</ul>` : `<p class="mute">The order you set holds in this page until you reload it (prototype).</p>`}<span class="q-tools">${tools}</span></div>`;
 }
 
-// A ticket as a row, and an effort as a block holding its children, for A and C.
-function ticketRowQ(n, W, opt = {}) {
-  const i = n.i, at = W.qpos.get(n.id);
-  const num = opt.numbered ? (i.state === "ready" && at ? `<span class="qn" title="${nth(at)} in ${esc(i.repo)}'s queue">${at}</span>` : `<span class="qn none"></span>`) : "";
-  return `<li class="tq${opt.sel === n.id ? " sel" : ""}${isFlash(n.id) ? " flash" : ""}" ${dragAttrs(n)}>${GRIP}${num}
-    <span class="tq-main">${opt.pick ? `<button class="tq-pick" data-act="q-sel" data-id="${esc(n.id)}">` : "<span class=\"tq-pick\">"}<span class="t-n">#${i.n}</span><span class="t-t">${esc(i.title)}</span>${opt.pick ? "</button>" : "</span>"}${prText(i)}${filedTag(i)}</span>
-    <span class="tq-state">${stateTag(i)}${fixTag(i)}</span>
-    ${opt.why === false ? "" : `<span class="tq-why">${esc(whyOf(i, W))}</span>`}</li>`;
-}
-function effortBlock(n, W, depth, opt = {}) {
-  const s = effortSum(n, W), shut = closedSay(n, W);
-  const held = (n.blocked_by || []).map((b) => W.byKey.get(b)).filter((b) => b && isOpen(b));
-  const kids = n.order.map((k) => (W.nodes.get(k).t === "ticket" ? ticketRowQ(W.nodes.get(k), W, opt) : effortBlock(W.nodes.get(k), W, depth + 1, opt))).join("");
-  const name = n.t === "none" ? `<b class="e-name">No effort</b><span class="mute">tickets with no spec or map</span>`
-    : `<span class="kind">${esc(KINDNAME[n.kind] || "Effort")}</span>${opt.pick ? `<button class="e-name" data-act="q-sel" data-id="${esc(n.id)}">` : `<b class="e-name">`}<span class="t-n">#${n.n}</span>${esc(n.title)}${opt.pick ? "</button>" : "</b>"}`;
-  return `<li class="eq d${depth}${n.t === "none" ? " none" : ""}${opt.sel === n.id ? " sel" : ""}${isFlash(n.id) ? " flash" : ""}" ${dragAttrs(n)}>
-    <div class="eq-head">${GRIP}${name}<span class="eq-bar">${s.bar}</span><span class="eq-count">${esc(s.count)}</span></div>
-    <p class="eq-say">${s.say}${held.length ? ` <span class="held">${ICON.pause}Waits on ${held.map((b) => `${refOf(b, n.repo)} ${esc(b.title)}`).join(", ")}: every ticket under it is held.</span>` : ""}</p>
-    <ol class="eq-kids">${kids}</ol>${shut ? `<p class="eq-shut">${ICON.check}${esc(shut)}</p>` : ""}</li>`;
-}
 function finished(r, W) {
   const root = W.nodes.get(`repo:${r}`), done = root.closed.map((k) => W.nodes.get(k)).filter((n) => n.t !== "none");
   return done.length ? `<p class="q-finished">${ICON.done}Finished: ${done.map((n) => `${esc(n.title)} <span class="mute">#${n.n}</span>`).join(", ")}. A finished effort leaves the order.</p>` : "";
@@ -1860,94 +1968,182 @@ const repoHead = (r, W, extra = "") => {
     ${mine ? `<span class="q-yours" title="Asks, ready-for-human and needs-triage">${plural(mine, "waits on you", "wait on you")}</span>` : ""}${extra}</header>`;
 };
 
+// ------------------------------------------------------------------ queue, take 12
+// PROTOTYPE (#30, take 12, Stefan 2026-11-17): what runs now on top, a lane per provider with what
+// it takes up next; then the efforts in the order they're built, three ways: a list you drag (an
+// effort among its siblings; a ticket goes where its effort and what it waits on put it), a board
+// by state, and the graph of what waits on what. An effort is closed until you open it, and stays
+// as you left it. Variant A: a ticket with no effort is a row of its own in the order. Variant B:
+// they're one "No effort" row.
+const QVIEWS = [["list", "List"], ["board", "Board"], ["graph", "Graph"]];
+const qOpen = new Set((() => { try { return JSON.parse(recall("qopen") || "[]"); } catch { return []; } })());
+// The sample addresses can open efforts and pick a view (?qopen=id,id&qview=board), for screenshots.
+{ const q = new URLSearchParams(location.search); if (q.get("qopen")) q.get("qopen").split(",").forEach((id) => qOpen.add(id)); if (q.get("qview")) ui.qview = q.get("qview"); }
+function toggleOpen(id) { if (qOpen.has(id)) qOpen.delete(id); else qOpen.add(id); remember("qopen", JSON.stringify([...qOpen])); }
+const qMore = new Set();   // board columns shown whole
+
 function queue() {
+  if (!QVIEWS.some((v) => v[0] === ui.qview)) ui.qview = QVIEWS.some((v) => v[0] === recall("qview")) ? recall("qview") : "list";
   const W = work();
-  return `<div class="q11 q11-${ui.variant}">${moveNote()}${{ a: queueA, b: queueB, c: queueC }[ui.variant](W)}</div>${protoBar()}`;
+  if (ui.qeffort && !(W.nodes.has(ui.qeffort) && W.repos.includes(W.nodes.get(ui.qeffort).repo))) ui.qeffort = "";
+  const view = { list: qList, board: qBoard, graph: qGraph }[ui.qview];
+  const hint = { list: "In the order they're built. Drag an effort to build it sooner or later.", board: "Every open ticket by where it stands.", graph: "A blocker above what it blocks." }[ui.qview];
+  return `<div class="q12">${moveNote()}${qNow(W)}
+    <section class="card q12-work" aria-label="Efforts"><header class="q12-head"><h2>Efforts</h2><span class="q12-hint">${hint}</span>
+      ${ui.qview === "list" ? "" : effortPick(W)}
+      <span class="seg" role="tablist" aria-label="View">${QVIEWS.map(([k, label]) => `<button role="tab" aria-selected="${ui.qview === k}" data-act="q-view" data-view="${k}">${label}</button>`).join("")}</span></header>
+      ${view(W)}</section></div>${protoBar()}`;
 }
 
-// ---- A, repo by repo. A card per repository, one under another: what's running, what it takes
-// up next with why, then its build order as an outline you drag.
-function queueA(W) {
-  if (!W.repos.length) return `<section class="card"><p class="empty">No repository.</p></section>`;
+// ---- the lanes: what each provider runs now, then what it takes up next.
+function qNow(W) {
+  const lanes = snap.lanes || [];
+  return `<div class="q12-now">${lanes.map((l) => (l.provider === "claude" ? claudeLane(l, W) : reviewLane(l, W))).join("")}</div>`;
+}
+function laneCard(l, doing, then, more) {
+  const { how, moving } = laneSays(l);
+  return `<article class="ln${moving ? " on" : ""}" aria-label="${esc(l.name)}">
+    <header class="ln-head">${who(l.provider, l.name)}<span class="ln-does">${esc(l.does || "")}</span>
+      <span class="ln-for${moving ? " run" : ""}">${moving ? `<i class="dot run"></i>` : ""}${how}</span><span class="ln-stop">${stopButton(l)}</span></header>
+    <div class="ln-doing">${doing}</div>
+    ${then.length ? `<ol class="ln-then">${then.join("")}</ol>` : `<p class="ln-none">Nothing waits for it${ui.repo ? ` in ${esc(ui.repo)}` : ""}.</p>`}
+    ${more ? `<p class="ln-more">${more}</p>` : ""}</article>`;
+}
+const thenRow = (x, label, title, why, repo) => `<li><span class="qn">${x}</span><span class="ln-j"><b>${esc(label)}</b> ${esc(title)}${repo ? ` <span class="ln-repo">${esc(repo)}</span>` : ""}</span><span class="ln-why">${esc(why || "")}</span></li>`;
+function doingLine(j) {
+  return `<p class="ln-now"><b>${esc(kind(j.kind)[0])} ${esc(j.ref)}</b> ${esc(j.title)}<span class="ln-meta">${esc(j.repo)} · ${esc(ago(j.started_at))}${j.thread ? ` · <a class="link" href="${esc(j.thread)}" target="_blank" rel="noreferrer">Thread</a>` : ""}${j.pr ? ` · ${prLink(j.repo, j.pr, "PR history")}` : ""}</span></p>`;
+}
+function claudeLane(l, W) {
+  const jobs = laneJobs(l).filter((j) => W.repos.includes(j.repo));
+  const s = laneSays(l);
+  const elsewhere = laneJobs(l).filter((j) => !W.repos.includes(j.repo)).map((j) => j.repo);
+  const one = W.repos.length === 1 ? W.queues.get(W.repos[0]) : null;
+  const doing = jobs.length ? jobs.map(doingLine).join("")
+    : elsewhere.length ? `<p class="ln-now quiet">Nothing running in ${esc(W.repos.join(", "))}<span class="ln-meta">It's on ${esc(elsewhere.join(", "))} now.${one && one.starts ? ` ${esc(one.starts)}` : ""}</span></p>`
+    : `<p class="ln-now quiet">${s.head}${s.sub ? `<span class="ln-meta">${s.sub}</span>` : ""}</p>`;
+  let then = [], more = "";
+  if (W.repos.length === 1) {
+    const q = W.queues.get(W.repos[0]);
+    then = q.jobs.slice(0, 3).map((j, x) => thenRow(x + 1, jobLabel(j), j.title, j.why));
+    if (q.jobs.length > 3) more = `Then ${plural(q.jobs.length - 3, "more", "more")}, in the order below.`;
+    else if (!q.jobs.length && !elsewhere.length) more = esc(q.starts || "");
+  } else {
+    // A job per repository at once (#50): each repository's next.
+    then = W.repos.map((r) => W.queues.get(r)).filter((q) => q.jobs.length).map((q, x) => thenRow(x + 1, jobLabel(q.jobs[0]), q.jobs[0].title, q.jobs[0].why, q.repo));
+    more = "One job per repository at once. Pick a repository to see its whole queue.";
+  }
+  return laneCard(l, doing, then, more);
+}
+function reviewLane(l, W) {
+  const s = laneSays(l), job = l.job && W.repos.includes(l.job.repo) ? l.job : null;
+  const doing = job ? doingLine(job) : `<p class="ln-now quiet">${l.job ? `Reviewing in ${esc(l.job.repo)}` : s.head}</p>`;
+  const rank = new Map((snap.repos || []).map((r, n) => [r.name, n]));
+  const waiting = (snap.issues || []).filter((i) => W.repos.includes(i.repo) && i.state === "review" && i.pr && !(l.job && l.job.repo === i.repo && l.job.pr === i.pr))
+    .sort((a, b) => (rank.get(a.repo) ?? 99) - (rank.get(b.repo) ?? 99) || a.pr - b.pr);
+  const then = waiting.slice(0, 3).map((i, x) => thenRow(x + 1, `Review PR #${i.pr}`, i.title, i.note, W.repos.length > 1 ? i.repo : ""));
+  return laneCard(l, doing, then, waiting.length > 3 ? `Then ${waiting.length - 3} more.` : "");
+}
+
+// ---- where an effort stands, in a line: what's moving, what's next, what waits on you.
+function effortStatus(n, W) {
+  const its = W.openIn(n.id);
+  if (!its.length) return `<span class="es ok">Usable</span> Every ticket is live.`;
+  const yours = its.filter((i) => ["you", "ready-for-human", "needs-triage"].includes(i.state));
+  const building = its.find((i) => i.state === "building");
+  const queued = its.filter((i) => W.qpos.get(key(i))).sort((a, b) => W.qpos.get(key(a)) - W.qpos.get(key(b)))[0];
+  const inPr = its.find((i) => ["review", "fixing", "fixing-itself"].includes(i.state));
+  const heldBy = (n.blocked_by || []).map((b) => (W.outside.has(b) ? { ...W.outside.get(b), outside: true } : W.byKey.get(b))).filter((b) => b && (b.outside || isOpen(b)));
+  const youSay = yours.length ? `<span class="es you">${plural(yours.length, "waits on you", "wait on you")}</span>` : "";
+  let lead;
+  if (heldBy.length) { const b = heldBy[0], root = rootOf(b, W); lead = `<span class="es held">Held</span> Waits on ${esc(refOf(b, n.repo))}${heldSay(root) ? `, which ${esc(heldSay(root))}` : ""}`; }
+  else if (building) { const j = W.doing.get(building.repo); lead = `<span class="es run">Building #${building.n}</span> ${esc(building.title)}${j && j.ref === `#${building.n}` ? `, ${esc(ago(j.started_at))}` : ""}`; }
+  else if (queued) lead = `<span class="es next">Next: #${queued.n}</span> ${esc(queued.title)}, ${W.qpos.get(key(queued)) === 1 ? "first" : nth(W.qpos.get(key(queued)))} in line`;
+  else if (inPr) lead = `<span class="es run">${esc(stateOf(inPr)[0])}: #${inPr.n}</span> ${esc(inPr.title)}`;
+  else if (yours.length) { const i = yours[0]; return `<span class="es you">Waits on you: #${i.n}</span> ${esc(i.title)}${yours.length > 1 ? `, and ${yours.length - 1} more` : ""}`; }
+  else { const i = its.find((x) => x.state === "blocked") || its[0]; lead = `<span class="es">#${i.n}</span> ${esc(whyOf(i, W))}`; }
+  return `${lead}${youSay ? ` · ${youSay}` : ""}`;
+}
+
+// ---- List: the order itself. Efforts closed until opened; a ticket isn't dragged on its own.
+function qList(W) {
+  if (!W.repos.length) return `<p class="empty">No repository.</p>`;
   return W.repos.map((r) => {
-    const q = W.queues.get(r), root = W.nodes.get(`repo:${r}`);
-    return `<section class="card qa" aria-label="${esc(r)}">${repoHead(r, W)}
-      <div class="qa-next"><h3>Takes up next</h3>${nowLine(q)}${queueList(q)}</div>
-      <div class="qa-order"><h3>Build order<span class="mute">drag an effort among its siblings, a ticket within its effort</span></h3>
-        <ol class="otree">${root.order.map((k) => effortBlock(W.nodes.get(k), W, 0)).join("")}</ol>${finished(r, W)}</div></section>`;
+    const root = W.nodes.get(`repo:${r}`);
+    const head = W.repos.length > 1 ? `<h3 class="q12-repo">${repoLogo(r)}${esc(r)}${offTag(r)}</h3>` : "";
+    const rows = root.order.length ? `<ol class="er-list">${root.order.map((k, x) => erRow(W.nodes.get(k), W, x + 1)).join("")}</ol>` : `<p class="empty small">Nothing open.</p>`;
+    return `<div class="q12-sec">${head}${rows}${finished(r, W)}</div>`;
   }).join("");
 }
-
-// ---- B, side by side. A column per repository, as they run: side by side. Each column reads down:
-// what waits on you there, what's running, the queue, then the build order, compact.
-function queueB(W) {
-  const col = (r) => {
-    const q = W.queues.get(r), root = W.nodes.get(`repo:${r}`), mine = yoursIn(r, W);
-    const yours = mine.length ? `<div class="qb-yours"><h3>${plural(mine.length, "waits on you", "wait on you")}</h3><ul>${mine.map((i) =>
-      `<li>${stateTag(i)}<span class="t-n">#${i.n}</span><span class="t-t">${esc(i.title)}</span></li>`).join("")}</ul></div>` : "";
-    return `<section class="qb-col" aria-label="${esc(r)}">${repoHead(r, W)}${yours}
-      <div class="qb-sec"><h3>Now</h3>${nowLine(q)}</div>
-      <div class="qb-sec"><h3>Then, in this order</h3>${queueList(q, "compact")}</div>
-      <div class="qb-sec"><h3>Build order</h3><ol class="otree compact">${root.order.map((k) => effortBlock(W.nodes.get(k), W, 0)).join("")}</ol>${finished(r, W)}</div></section>`;
-  };
-  return `<div class="qb-cols" style="--cols:${Math.max(1, W.repos.length)}">${W.repos.map(col).join("")}</div>`;
-}
-
-// ---- C, one numbered list. A tab per repository. The build order is the queue: each ticket the
-// runner will build carries its number in line, what goes before any build is pinned above it,
-// and the picked row opens on the right: why, its chain, what it holds up.
-function queueC(W) {
-  const r = W.repos.includes(ui.qrepo) ? ui.qrepo : W.repos[0];
-  if (!r) return `<section class="card"><p class="empty">No repository.</p></section>`;
-  const q = W.queues.get(r), root = W.nodes.get(`repo:${r}`);
-  const tabs = W.repos.length > 1 ? `<div class="qc-tabs" role="tablist">${W.repos.map((x) => {
-    const n = yoursIn(x, W).length;
-    return `<button role="tab" aria-selected="${x === r}" data-act="q-repo" data-repo="${esc(x)}">${repoLogo(x)}${esc(x)}${n ? `<span class="badge you" title="${n} waiting on you">${n}</span>` : ""}</button>`;
-  }).join("")}</div>` : "";
-  const pre = q.jobs.filter((j) => j.kind !== "build");
-  const pinned = `<div class="qc-pin">${nowLine(q)}${pre.length ? `<ol class="jobs">${pre.map((j, x) => `<li class="pre"><span class="n">${x + 1}</span><span class="j"><b>${esc(jobLabel(j))}</b> ${esc(j.title)}</span><span class="why">${esc(j.why)}</span></li>`).join("")}</ol>` : ""}
-    <p class="mute small">${pre.length ? `Then the builds, numbered in the order below from ${pre.length + 1}.` : "The builds follow, numbered in the order below."}</p></div>`;
-  const sel = W.nodes.has(ui.qsel) && W.nodes.get(ui.qsel).repo === r ? ui.qsel : null;
-  return `${tabs}<div class="qc-grid"><section class="card qc-list" aria-label="${esc(r)}">${repoHead(r, W)}${pinned}
-      <ol class="otree">${root.order.map((k) => effortBlock(W.nodes.get(k), W, 0, { numbered: true, pick: true, sel, why: true })).join("")}</ol>${finished(r, W)}</section>
-    <aside class="card qc-side" aria-label="The picked row">${sel ? detail(W.nodes.get(sel), W) : sideSummary(r, W)}</aside></div>`;
-}
-function sideSummary(r, W) {
-  const mine = yoursIn(r, W), stuck = (snap.issues || []).filter((i) => i.repo === r && i.state === "fixing-itself");
-  return `<div class="qc-d"><p class="mute">Pick a row to see why it stands where it does, what it waits on and what it holds up.</p>
-    ${mine.length ? `<h3>Waits on you in ${esc(r)}</h3><ul class="qc-mini">${mine.map((i) => `<li><button class="link" data-act="q-sel" data-id="${esc(key(i))}">#${i.n} ${esc(i.title)}</button> ${stateTag(i)}</li>`).join("")}</ul>` : ""}
-    ${stuck.length ? `<h3>Fixing itself</h3><ul class="qc-mini">${stuck.map((i) => `<li><button class="link" data-act="q-sel" data-id="${esc(key(i))}">#${i.n} ${esc(i.title)}</button> ${fixTag(i)}</li>`).join("")}</ul>` : ""}</div>`;
-}
-function detail(n, W) {
-  const path = W.ancestors(n.id).reverse().slice(1).map((a) => nameOf(W.nodes.get(a)));
-  const crumbs = `<p class="qc-path">${esc(n.repo)}${path.map((p) => ` › ${esc(p)}`).join("")}</p>`;
-  if (n.t !== "ticket") {
-    const s = effortSum(n, W), open = W.openIn(n.id), next = open.filter((i) => W.qpos.get(key(i))).sort((a, b) => W.qpos.get(key(a)) - W.qpos.get(key(b)))[0];
-    return `<div class="qc-d">${crumbs}<h2>${n.t === "none" ? "No effort" : `${esc(KINDNAME[n.kind] || "")} #${n.n} ${esc(n.title)}`}</h2>${s.bar}<p>${s.say}</p>
-      <p>${next ? `Its next build is #${next.n} ${esc(next.title)}, ${nth(W.qpos.get(key(next)))} in line.` : "Nothing in it is ready to build."}</p>
-      <p class="mute">Drag it among its siblings to build it sooner or later. Anything it waits on comes up with it.</p></div>`;
+function erRow(n, W, rank) {
+  const flash = isFlash(n.id) ? " flash" : "", num = rank ? `<span class="er-rank">${rank}</span>` : "";
+  if (n.t === "ticket") {   // a ticket with no effort: a row of its own in the order (variant A)
+    const i = n.i;
+    return `<li class="er er-loose${flash}" ${dragAttrs(n)}><div class="er-head">${GRIP}${num}<span class="er-caret dot-only"><i></i></span>
+      <span class="er-name"><span class="t-n">#${i.n}</span>${esc(i.title)}<span class="kind">Ticket</span>${prText(i)}</span>
+      <span class="er-st">${stateTag(i)}</span><span class="er-say">${esc(whyOf(i, W))}</span></div></li>`;
   }
-  const i = n.i, k = n.id;
-  // the chain: each blocker in turn, down to the root
-  const chain = [];
-  let cur = i;
-  const seen = new Set([k]);
-  while (cur && !cur.outside) {
-    const bs = W.blockersOf(cur);
-    if (!bs.length) break;
-    const pick = bs.map((x) => (W.outside.has(x.b) ? { ...W.outside.get(x.b), outside: true, via: x.via } : { ...W.byKey.get(x.b), via: x.via }))
-      .sort((a, b) => !!heldSay(rootOf(b, W)) - !!heldSay(rootOf(a, W)))[0];
-    if (!pick || seen.has(`${pick.repo}#${pick.n}`)) break;
-    seen.add(`${pick.repo}#${pick.n}`); chain.push(pick); cur = pick.outside ? null : W.byKey.get(`${pick.repo}#${pick.n}`);
-  }
-  const deps = (snap.issues || []).filter((d) => isOpen(d) && W.blockersOf(d).some(({ b }) => b === k));
-  const ask = i.state === "you" ? askFor(i) : null;
-  return `<div class="qc-d">${crumbs}<h2>#${i.n} ${esc(i.title)}</h2><p class="qc-st">${stateTag(i)}${fixTag(i)}${filedTag(i)}${prText(i)}</p>
-    <p class="qc-why">${esc(whyOf(i, W))}.</p>
-    ${ask ? `<p><a class="btn go sm" ${goto("inbox", ask)}>${ICON.inbox}Open it in the Inbox</a></p>` : ""}
-    ${chain.length ? `<h3>Waits on, down to the root</h3><ol class="chain">${chain.map((c) => `<li class="${heldSay(c) ? "held" : ""}"><b>${esc(refOf(c, i.repo))}</b> ${esc(c.title)}${c.via ? ` <span class="mute">(through ${esc(c.via.title)})</span>` : ""}<span class="why">${esc(c.outside ? heldSay(c) : heldSay(c) || (STATE[c.state] || [c.state])[0])}</span></li>`).join("")}</ol>` : ""}
-    ${deps.length ? `<h3>Holds up</h3><ul class="qc-mini">${deps.map((d) => `<li>${esc(refOf(d, i.repo))} ${esc(d.title)}</li>`).join("")}</ul>` : `<p class="mute">Holds nothing up.</p>`}
-    <p class="mute">It moves only within ${esc(nameOf(W.nodes.get(n.parent)))}. To build it sooner, move its effort.</p></div>`;
+  const open = qOpen.has(n.id), s = effortSum(n, W), shut = closedSay(n, W);
+  const title = n.t === "none" ? `No effort<span class="kind">Tickets</span>` : `${esc(n.title)}<span class="kind">${esc(KINDNAME[n.kind] || "Effort")}</span>`;
+  const kids = open ? n.order.map((k) => { const c = W.nodes.get(k); return c.t === "ticket" ? etRow(c, W) : erRow(c, W, null); }).join("") : "";
+  return `<li class="er${open ? " open" : ""}${n.t === "none" ? " none" : ""}${flash}" ${dragAttrs(n)}>
+    <div class="er-head">${GRIP}${num}<button class="er-caret" data-act="q-open" data-id="${esc(n.id)}" aria-expanded="${open}" aria-label="${open ? "Close" : "Open"} ${esc(nameOf(n))}">${ICON.right}</button>
+      <button class="er-name" data-act="q-open" data-id="${esc(n.id)}">${title}</button>
+      <span class="er-bar">${s.bar}</span><span class="er-count">${esc(s.count)}</span>
+      <span class="er-say">${effortStatus(n, W)}</span></div>
+    ${open ? `<div class="er-body"><ol class="er-kids">${kids}</ol>${shut ? `<p class="eq-shut">${ICON.check}${esc(shut)}</p>` : ""}</div>` : ""}</li>`;
+}
+function etRow(n, W) {
+  const i = n.i, at = W.qpos.get(n.id);
+  return `<li class="et${isFlash(n.id) ? " flash" : ""}"><span class="qn${at ? "" : " none"}"${at ? ` title="${nth(at)} in ${esc(i.repo)}'s queue"` : ""}>${at || ""}</span>
+    <span class="et-name"><span class="t-n">#${i.n}</span>${esc(i.title)}${prText(i)}${filedTag(i)}</span>
+    <span class="et-st">${stateTag(i)}${fixTag(i)}</span><span class="et-why">${esc(whyOf(i, W))}</span></li>`;
+}
+
+// ---- the efforts to narrow the board and the graph to: a dropdown, however many there are.
+function effortPick(W) {
+  const opts = [];
+  const walk = (id, depth) => { const n = W.nodes.get(id); for (const k of n.order) { const c = W.nodes.get(k); if (c.t === "ticket") continue; opts.push([k, `${"   ".repeat(depth)}${nameOf(c)}`]); walk(k, depth + 1); } };
+  for (const r of W.repos) { if (W.repos.length > 1) opts.push([`repo:${r}`, r, true]); walk(`repo:${r}`, W.repos.length > 1 ? 1 : 0); }
+  return `<select class="q12-pick" data-change="q-effort" aria-label="Narrow to an effort"><option value="">All efforts</option>${opts.map(([v, label, grp]) =>
+    `<option value="${esc(v)}"${ui.qeffort === v ? " selected" : ""}${grp ? ' class="grp"' : ""}>${esc(label)}</option>`).join("")}</select>`;
+}
+const effortSet = (W) => (ui.qeffort ? new Set(W.tickets(ui.qeffort).map(key)) : null);
+const effortOf = (k, W) => { const p = W.nodes.get(W.nodes.get(k).parent); return p && p.t !== "repo" ? nameOf(p) : "No effort"; };
+
+// ---- Board: every open ticket by where it stands, each column in build order.
+const QCOLS = [
+  ["next", "Up next", (i, W) => i.state === "ready" && !!W.qpos.get(key(i))],
+  ["moving", "Moving", (i) => ["building", "review", "fixing", "fixing-itself", "merged"].includes(i.state)],
+  ["you", "Waits on you", (i) => ["you", "ready-for-human", "needs-triage"].includes(i.state)],
+  ["blocked", "Blocked", (i, W) => i.state === "blocked" || (i.state === "ready" && !W.qpos.get(key(i)))],
+  ["done", "Done", (i) => i.state === "done"],
+];
+const QLIMIT = 6;
+function qBoard(W) {
+  const only = effortSet(W);
+  const its = (snap.issues || []).filter((i) => W.repos.includes(i.repo) && (!only || only.has(key(i))));
+  const byPos = (a, b) => (W.qpos.get(key(a)) || 999) - (W.qpos.get(key(b)) || 999) || (W.repos.indexOf(a.repo) - W.repos.indexOf(b.repo)) || (W.pos.get(key(a)) ?? 999) - (W.pos.get(key(b)) ?? 999);
+  const cols = QCOLS.map(([id, label, test]) => {
+    const all = its.filter((i) => test(i, W)).sort(byPos), whole = qMore.has(id), limit = id === "done" ? 0 : QLIMIT;
+    const shown = whole ? all : all.slice(0, limit), rest = all.length - shown.length;
+    const cards = shown.map((i) => {
+      const at = W.qpos.get(key(i));
+      return `<li class="kc ${id}"><p class="kc-t">${id === "next" && at ? `<span class="qn">${at}</span>` : ""}<span class="t-n">#${i.n}</span>${esc(i.title)}</p>
+        <p class="kc-m">${id === "next" || id === "blocked" || id === "done" ? "" : stateTag(i)}<span class="kc-e">${esc(effortOf(key(i), W))}</span>${W.repos.length > 1 ? `<span class="kc-r">${esc(i.repo)}</span>` : ""}</p>
+        ${id === "done" ? "" : `<p class="kc-why">${esc(whyOf(i, W))}</p>`}</li>`;
+    }).join("");
+    const toggle = rest > 0 ? `<button class="kc-more" data-act="q-more" data-col="${id}">${id === "done" && !whole ? `Show ${all.length}` : `${rest} more`}</button>`
+      : whole && all.length > limit ? `<button class="kc-more" data-act="q-more" data-col="${id}">Show fewer</button>` : "";
+    return `<section class="kcol ${id}" aria-label="${label}"><h3>${label}<span>${all.length}</span></h3>${cards ? `<ol>${cards}</ol>` : id === "done" ? "" : `<p class="kc-empty">None</p>`}${toggle}</section>`;
+  }).join("");
+  return `<div class="kboard">${cols}</div>`;
+}
+
+// ---- Graph: the pyramid (take 9), narrowed to the effort picked.
+function qGraph(W) {
+  const m = model(), only = effortSet(W);
+  m.shown = m.issues.filter((i) => W.repos.includes(i.repo) && (!only || only.has(key(i))));
+  return `<div class="q12-graph">${pyramid(m)}</div>`;
 }
 
 // ---- dragging (#109): an effort among its siblings, a ticket within its effort; whatever it
@@ -2164,12 +2360,38 @@ function meter(w, full) {
 }
 // A plan's reset credits (ticket 42): said only while it has some. Redeeming one is T3's.
 const resetsLeft = (p) => (p.resets && p.resets.available > 0 ? plural(p.resets.available, "reset", "resets") + " left, " : "");
-const plan = (p, full) => `<div class="plan">
+const plan = (p, full) => (full ? planFull(p) : planCard(p));
+const planFull = (p) => `<div class="plan">
     <p class="plan-name">${who(p.provider, p.name)}<span class="read">${p.plan ? esc(p.plan) + ", " : ""}${resetsLeft(p)}${p.read_at ? `<span title="${esc(stamp(p.read_at))}, ${esc(ago(p.read_at))} ago">read ${esc(hm(p.read_at))}</span>` : "not read yet"}</span></p>
     ${p.error ? `<p class="plan-note bad">${esc(p.error)}</p>` : ""}
-    ${(p.windows || []).map((w) => meter(w, full)).join("")}
+    ${(p.windows || []).map((w) => meter(w, true)).join("")}
     ${(p.windows || []).filter((w) => w.reserve).map((w) => `<p class="plan-note">${w.reserve}% of the week is kept for you.</p>`).join("")}
   </div>`;
+// PROTOTYPE (take 12, Stefan 2026-11-17): the card as the first prototype (localhost:5288) drew it:
+// a row per window, its name, a thin bar and the bold figure, with when it resets small under the
+// name. A model's own week (Fable's) is a line under Weekly, not a window of its own; it says its
+// reset only when that isn't Weekly's.
+function meterRow(w, sub, week) {
+  const known = typeof w.used === "number", left = known ? Math.max(0, Math.min(100, Math.round(100 - w.used))) : null;
+  const cls = known && left <= 0 ? " full" : known && left <= 15 ? " near" : "";
+  const kept = known && w.reserve > 0 ? Math.min(w.reserve, left) : 0;
+  const same = sub && week && w.resets_at && week.resets_at && Math.abs(ms(w.resets_at) - ms(week.resets_at)) < 90e3;
+  const label = sub ? w.label.replace(/^Weekly,?\s*/, "") : w.label;
+  const when = !w.resets_at ? (sub ? "" : "not started") : same ? "" : `resets ${clock(w.resets_at)}`;
+  return `<div class="mrow2${sub ? " sub" : ""}${cls}" title="${esc([w.note, w.resets_at ? `Resets ${stamp(w.resets_at)}` : ""].filter(Boolean).join(". "))}">
+    <span class="m-label">${esc(label)}${when ? `<span class="m-when">${esc(when)}</span>` : ""}</span>
+    <span class="m-bar" role="img" aria-label="${esc(w.label)}: ${known ? left + "% left" : "unknown"}">${known ? `<i class="fill" style="width:${left}%"></i>` : ""}${kept > 0 ? `<i class="kept" style="width:${kept}%"></i>` : ""}</span>
+    <span class="m-pct">${known ? left + "%" : "?"}</span></div>`;
+}
+function planCard(p) {
+  const ws = p.windows || [], week = ws.find((w) => w.id === "week");
+  const rows = ws.map((w) => meterRow(w, w.id.startsWith("week_"), week)).join("");
+  const kept = ws.find((w) => w.reserve);
+  return `<div class="plan2">
+    <p class="plan2-name">${who(p.provider, p.name)}<span class="read">${p.plan ? esc(p.plan) + " · " : ""}${p.resets && p.resets.available > 0 ? `${plural(p.resets.available, "reset", "resets")} · ` : ""}${p.read_at ? `<span title="${esc(stamp(p.read_at))}">read ${esc(hm(p.read_at))}</span>` : "not read yet"}</span></p>
+    ${p.error ? `<p class="plan-note bad">${esc(p.error)}</p>` : ""}${rows}
+    ${kept ? `<p class="plan2-note">Your ${kept.reserve}% of the week${kept.reserve_opens_at ? ` opens to the runner ${esc(clock(kept.reserve_opens_at))}` : " is kept for you"}.</p>` : ""}</div>`;
+}
 
 // Is it up, and is everything it leans on up. One line while all is well.
 // Sources are grouped the way Stefan sorts them: the providers, what runs on this PC, what's outside.
@@ -2202,7 +2424,7 @@ function repoRows() {
     const btn = stale ? "" : off
       ? `<button class="btn sm icon solid" data-act="repostop" data-repo="${esc(name)}" data-how="" aria-label="Resume ${esc(name)}" title="Resume: both lanes take up its work again">${ICON.play}</button>`
       : `<button class="btn sm icon" data-act="repostop" data-repo="${esc(name)}" data-how="after-job" aria-label="Stop ${esc(name)}" title="Stop: a job running on it finishes; then neither lane takes up its work">${ICON.pause}</button>`;
-    return `<li${r.stopped ? ' class="off"' : ""}>${repoLogo(name)}<span class="name">${esc(name)}<span>${esc(sub)}</span></span>${btn}</li>`;
+    return `<li${r.stopped ? ' class="off"' : ""}><span class="name">${esc(name)}<span>${esc(sub)}</span></span>${btn}</li>`;
   }).join("");
   return `<ul class="order">${rows}</ul>`;
 }
@@ -2234,7 +2456,7 @@ function rail() {
   clearTimeout(refreshPoll);
   if (refreshPending()) refreshPoll = setTimeout(load, 2000);
   const notes = refreshNotes().map((n) => `<p class="plan-note${n.bad ? " bad" : ""}" style="margin:0 0 14px">${esc(n.text)}</p>`).join("");
-  const usage = `<section class="card"><header class="card-head"><h2>Usage</h2><a class="details" href="${esc(href({ page: "usage", pr: null }))}" data-act="page" data-page="usage">Details</a>${refreshButton()}</header>
+  const usage = `<section class="card usage2"><header class="card-head"><span class="u-icon">${ICON.usage}</span><h2>Usage</h2><a class="details" href="${esc(href({ page: "usage", pr: null }))}" data-act="page" data-page="usage">Details</a>${refreshButton()}</header>
     <div class="card-pad">${notes}${(snap.usage || []).map((p) => plan(p, false)).join("")}</div></section>`;
   const repos = `<section class="card"><header class="card-head"><h2>Repositories</h2></header><div class="card-pad" style="padding-top:8px">${repoRows()}</div></section>`;
   return (ui.page === "usage" ? "" : usage) + repos + status();
@@ -2335,7 +2557,7 @@ function beat() {
 
 function draw() {
   if (dragging) return;   // a row is held (the Queue, take 11): redrawing would drop it
-  document.body.classList.toggle("page-wide", ui.page === "queue" && ui.variant !== "a");
+  document.body.classList.toggle("page-wide", ui.page === "queue" && ui.qview === "board");
   document.body.classList.toggle("nav-open", ui.nav);
   document.body.classList.toggle("rail-open", ui.rail);
   document.body.classList.toggle("page-inbox", ui.page === "inbox");
@@ -2428,8 +2650,9 @@ document.addEventListener("click", (e) => {
     case "feature": ui.feature = ui.feature === d.id ? "" : d.id; ui.sel = null; scrollTo(0, 0); break;   // the Queue, A
     case "open": ui.open = ui.open.includes(d.id) ? ui.open.filter((x) => x !== d.id) : [...ui.open, d.id]; break;   // the Queue, B
     case "variant": turnVariant(Number(d.by)); break;   // PROTOTYPE
-    case "q-sel": ui.qsel = ui.qsel === d.id ? null : d.id; break;   // PROTOTYPE (#30, take 11)
-    case "q-repo": ui.qrepo = d.repo; ui.qsel = null; break;
+    case "q-open": toggleOpen(d.id); break;   // PROTOTYPE (#30, take 12)
+    case "q-view": ui.qview = d.view; remember("qview", d.view); break;
+    case "q-more": if (qMore.has(d.col)) qMore.delete(d.col); else qMore.add(d.col); break;
     case "q-undo": { const was = JSON.parse(undo.pop() || "null"); if (was) { ord.kids = was.kids; ord.touched = new Set(was.touched); } lastMove = null; break; }
     case "q-reset": undo.push(JSON.stringify({ kids: ord.kids, touched: [...ord.touched] })); ord.kids = {}; ord.touched = new Set(); lastMove = null; break;
     case "stop": ui.pop = null; send([{ lane: d.lane, stop: d.how || null }]); return;
@@ -2484,6 +2707,10 @@ document.addEventListener("keydown", (e) => {
   address(); draw();
   const row = document.querySelector('.mrow[aria-current="true"]');
   if (row) { row.focus(); row.scrollIntoView({ block: "nearest" }); }
+});
+// PROTOTYPE (#30, take 12): the board's and the graph's effort dropdown.
+document.addEventListener("change", (e) => {
+  if (e.target.dataset && e.target.dataset.change === "q-effort") { ui.qeffort = e.target.value; draw(); }
 });
 // PROTOTYPE: on the Queue the left and right arrow keys turn to the next arrangement.
 document.addEventListener("keydown", (e) => {
