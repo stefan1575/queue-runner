@@ -6,6 +6,10 @@ the review's run folder, then `post.GitHubPoster` posts them on the PR (ticket 0
 posts nothing (the live check). One Sol job at a time: each review holds `<state_dir>/sol.lock`.
 A clean review merges (`merge.Merger`) once the PR is read again; each pass first merges any PR
 still waiting at a head the runner found clean.
+
+While Sol is out of usage, stops and merges go on, and a review runs as an Opus thread in T3
+instead, through Claude's usage gate (`fallback.py`, issue #69); once Sol's reset has passed,
+reviews go to Sol again.
 """
 import dataclasses
 import datetime
@@ -15,6 +19,7 @@ from importlib import resources
 from string import Template
 
 from .config import Config, Repo, working
+from .fallback import KIND as FALLBACK
 from .github import Comment, PullRequest
 from .ledger import TAGS, OPEN, SolFailed, decide, next_round, norm, read_reviews, runner_post, \
     state
@@ -32,6 +37,12 @@ RESUME_AFTER = datetime.timedelta(minutes=10)    # after Sol's reset
 RETRY_UNKNOWN = datetime.timedelta(minutes=30)   # when Sol didn't say when
 # The job log's outcome for each of decide()'s.
 OUTCOMES = {'merge': 'clean', 'fix': 'blocking', 'stop': 'stop', 'approach-note': 'approach-note'}
+
+
+def ran(sol) -> dict:
+    """The end record's thread fields for a review the Opus fallback ran (its thread, run and
+    effort read back); nothing for Sol's."""
+    return dict(getattr(sol, 'record', None) or {})
 
 
 def review_title(repo: Repo, number: int) -> str:
@@ -106,8 +117,13 @@ def _tests(prepared) -> str:
 
 class Reviewer:
     def __init__(self, config: Config, *, github, git, sol, jobs: JobLog, say,
-                 now=datetime.datetime.now, poster=None, merger=None, toaster=None, deps=None):
+                 now=datetime.datetime.now, poster=None, merger=None, toaster=None, deps=None,
+                 fallback=None):
         self.config, self.github, self.git, self.sol, self.jobs = config, github, git, sol, jobs
+        # fallback.OpusFallback: who reviews while Sol is out of usage (issue #69); None waits
+        # for Sol's reset (the CLI's --review, the live checks, most tests).
+        self.fallback = fallback
+        self._said_gate: str | None = None
         # deps.Deps: the checkout's node_modules from a cache, so Sol can run the tests (ticket
         # 16); None installs nothing (the tests, live_merge.py).
         self.deps = deps
@@ -129,9 +145,8 @@ class Reviewer:
     def review_pass(self) -> str:
         """Reviews the first PR that needs one, lowest number first in each repo. STARTED if a
         review ran (whatever its outcome), BUSY if another Sol job holds the lock, IDLE if none
-        was needed or the lane is waiting on Sol's usage."""
-        if self._paused():
-            return IDLE
+        was needed, or none may start: Sol is out of usage and there's no fallback, or the usage
+        gate holds the fallback back. Stops and merges go on either way."""
         try:
             with runner_lock(self.config.state_dir, 'sol.lock'):
                 self.settle()
@@ -147,22 +162,27 @@ class Reviewer:
                     for pr, why in self._candidates(repo):
                         self._note(repo, pr, why)
                         if why is None:
-                            return self.review(repo, pr)
+                            who = self._who()
+                            return IDLE if who is None else self.review(repo, pr, by=who)
                 return IDLE
         except RunnerBusy:
             return BUSY
 
     def review_one(self, repo: Repo, number: int) -> tuple[str, str | None]:
         """Reviews one PR now if it needs it: (lane result, why not)."""
-        if self._paused():
-            return IDLE, f'Sol is out of usage until {self.jobs.sol_resume_at()}'
         with runner_lock(self.config.state_dir, 'sol.lock'):
             self.settle()
             pr = next((p for p in self.github.open_pulls(repo) if p.number == number), None)
             if pr is None:
                 return IDLE, f'#{number} is not an open PR in {repo.github}'
             why = self.why_not(repo, pr)
-            return (IDLE, why) if why else (self.review(repo, pr), None)
+            if why:
+                return IDLE, why
+            if (who := self._who()) is None:
+                return IDLE, (f'Sol is out of usage until {self.jobs.sol_resume_at()}'
+                              + (f', and the Opus fallback waits: {self._said_gate}'
+                                 if self._said_gate else ''))
+            return self.review(repo, pr, by=who), None
 
     def settle(self) -> None:
         """A review left open was cut off with its runner (the caller holds sol.lock, so no
@@ -189,13 +209,37 @@ class Reviewer:
             yield pr, why
 
     def _paused(self) -> bool:
+        """Whether Sol is out of usage now (its newest review said so, and the reset it named
+        hasn't passed): said once per resume time."""
         resume = self.jobs.sol_resume_at()
         if resume and self.now().astimezone() < when(resume):
             if self._said_paused != resume:
-                self.say(f'Sol is out of usage: no review starts before {resume}')
+                self.say(f'Sol is out of usage: no Sol review starts before {resume}'
+                         + ('; reviews go to the Opus fallback meanwhile, through the usage '
+                            'gate' if self.fallback else ''))
                 self._said_paused = resume
             return True
         return False
+
+    def _who(self):
+        """Who reviews now: Sol (('sol', None)), the Opus fallback while Sol is out of usage
+        (('fallback', the gate's verdict, or None with no gate)), or None: Sol is out and there's
+        no fallback, or the usage gate holds the fallback back (said once, until that changes)."""
+        if not self._paused():
+            self._said_gate = None
+            return 'sol', None
+        if self.fallback is None:
+            return None
+        verdict = self.fallback.check()
+        if verdict is not None and not verdict.go:
+            if verdict.text != self._said_gate:
+                self.say(f'Opus fallback review waits: {verdict.text}')
+            self._said_gate = verdict.text
+            return None
+        self._said_gate = None
+        if verdict is not None:
+            self.say(f'Usage gate: {verdict.text}')
+        return 'fallback', verdict
 
     def _note(self, repo: Repo, pr: PullRequest, why: str | None) -> None:
         """Says why a PR is left alone, once, not every pass."""
@@ -252,13 +296,19 @@ class Reviewer:
                      f"(AGENTS.md, Sol runs tests). Kept; the next review tries again.")
         self._said_kept = kept
 
-    def review(self, repo: Repo, pr: PullRequest) -> str:
+    def review(self, repo: Repo, pr: PullRequest, by=('sol', None)) -> str:
+        """Reviews H by Sol, or with `by` ('fallback', the gate's verdict) by the Opus fallback
+        in a T3 thread, which is posted the same way, naming its reviewer."""
         n, h = pr.number, pr.head_sha
         self.titles[(repo.name, n)] = pr.title
         earlier = read_reviews(self.github.issue_comments(repo, n))
         rnd = next_round(earlier)
+        opus = by[0] == 'fallback'
         job = self.jobs.started(kind='review', repo=repo.name, issue=n, branch=pr.branch,
-                                title=review_title(repo, n), sha=h, round=rnd)
+                                title=review_title(repo, n), sha=h, round=rnd,
+                                reviewer=FALLBACK if opus else None)
+        sol = self.fallback.thread(repo, review_title(repo, n)) if opus else self.sol
+        who = 'Opus (the fallback while Sol is out of usage)' if opus else 'Sol'
         run_dir = os.path.join(self.config.runs_dir,
                                f'{repo.name}-pr{n}-r{rnd}-{self.now():%Y%m%d-%H%M%S}')
         os.makedirs(run_dir, exist_ok=True)
@@ -287,12 +337,12 @@ class Reviewer:
                                 guidelines, prepared)
             brief_path = os.path.join(run_dir, 'brief.md')
             _write(brief_path, brief)
-            self.say(f'{name}: Sol reviews {h[:7]} (review {rnd}) in {run_dir}')
-            reply = self.sol.review(brief_path, os.path.join(run_dir, 'reply.md'), wt,
+            self.say(f'{name}: {who} reviews {h[:7]} (review {rnd}) in {run_dir}')
+            reply = sol.review(brief_path, os.path.join(run_dir, 'reply.md'), wt,
                                     os.path.join(run_dir, 'run.out'),
                                     writable=list(prepared.writable) if prepared else [])
             d = decide(repo.github, n, h, rnd, earlier, guidelines is not None, reply, wt,
-                       run_dir, gone)
+                       run_dir, gone, reviewer=sol.label if opus else None)
         except SolOutOfUsage as e:
             resume = (e.back + RESUME_AFTER) if e.back else self.now() + RETRY_UNKNOWN
             self.jobs.ended(job.id, exit_code=None, outcome=OUT_OF_USAGE, run_dir=run_dir,
@@ -304,11 +354,13 @@ class Reviewer:
             error = str(e) if isinstance(e, SolFailed) else f'{type(e).__name__}: {e}'
             _write(os.path.join(run_dir, 'failed.txt'), error + '\n')
             self.jobs.ended(job.id, exit_code=None, outcome=FAILED_REVIEW, run_dir=run_dir,
-                            error=error)
+                            error=error, **ran(sol))
             self.say(f'{name}: review failed, nothing counts: {error}')
             return STARTED
         finally:
             self._said_moved(name, self.git.remove_checkout(repo.path, wt, ref))
+            if opus and sol.ran:   # a thread ran: what it cost teaches the gate (as run.py's)
+                self.fallback.measured([job.id], by[1])
 
         _write(os.path.join(run_dir, 'comment.md'), d['body'])
         _write(os.path.join(run_dir, 'decision.json'), json.dumps({
@@ -316,21 +368,25 @@ class Reviewer:
             'outcome': d['outcome'], 'signals': d['signals'], 'status': d['status'],
             'kept': d['kept'], 'unaddressed': d['unaddressed'],
             'issues': [{'id': i['id'], 'title': i['title']} for i in d['issues']],
-            'findings': d['findings']}, indent=2, ensure_ascii=False) + '\n')
+            'findings': d['findings'], 'reviewer': d['reviewer']}, indent=2,
+            ensure_ascii=False) + '\n')
         try:
             url = self.poster.post(repo, pr, d, run_dir)
         except PostFailed as e:   # nothing on the PR, so nothing counts: reviewed again later
             _write(os.path.join(run_dir, 'failed.txt'), f'{e}\n')
             self.jobs.ended(job.id, exit_code=None, outcome=FAILED_REVIEW, run_dir=run_dir,
-                            verdict=d['verdict'], error=str(e))
+                            verdict=d['verdict'], error=str(e), **ran(sol))
             self.say(f'{name}: review {rnd} on {h[:7]} was {d["verdict"]} but not posted, '
                      f'so it failed: {e}')
             return STARTED
         outcome = OUTCOMES[d['outcome']]
         self.jobs.ended(job.id, exit_code=None, outcome=outcome, verdict=d['verdict'],
-                        signals=[s['signal'] for s in d['signals']], run_dir=run_dir, link=url)
+                        signals=[s['signal'] for s in d['signals']], run_dir=run_dir, link=url,
+                        **ran(sol))
         why = f' ({"; ".join(s["text"] for s in d["signals"])})' if d['signals'] else ''
-        self.say(f'{name}: review {rnd} on {h[:7]} is {d["verdict"]}, next: {d["outcome"]}{why}')
+        by_ = f' by {d["reviewer"]}' if d['reviewer'] else ''
+        self.say(f'{name}: review {rnd} on {h[:7]} is {d["verdict"]}{by_}, next: '
+                 f'{d["outcome"]}{why}')
         if self.stopped_now(repo):   # the review was the job: what follows waits for Resume
             what = repo.name if repo.name in self._repo_stops() else 'the reviewing lane'
             self.say(f'{name}: {what} was stopped during the review; '

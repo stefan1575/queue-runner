@@ -73,7 +73,8 @@ def review_row(d: dict, url: str, at: datetime.datetime) -> str:
             ('left open', lambda f: f['tag'] == 'important' and f['status'] in OPEN)):
         if got := ids(ok):
             parts.append(f'{label}: {got}')
-    return (f"| [Sol review {rnd}]({url}) | {at:%Y-%m-%d %H:%M} | `{d['sha'][:7]}` | "
+    name = f"Review {rnd}, {d['reviewer']}" if d.get('reviewer') else f'Sol review {rnd}'
+    return (f"| [{_cell(name)}]({url}) | {at:%Y-%m-%d %H:%M} | `{d['sha'][:7]}` | "
             f"{_cell('; '.join(parts))} |")
 
 
