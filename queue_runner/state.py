@@ -9,7 +9,10 @@ the PR or the issue; `failed` if the issue couldn't be filed, so the next pass f
 `rerun` (one failed Actions run on a PR's head H re-run once before it's a stop, `stops.py`;
 its start record has the run and the failed checks, so a runner cut off before asking GitHub is
 settled from the run: `rerun`, then `passed` once its re-run passed and that was said on the PR;
-`failed` if GitHub refused it; `not-started` if GitHub was never asked) and `decision` (a one-off Claude decision thread, or Stefan's reply read directly, on a case the flow
+`failed` if GitHub refused it; `not-started` if GitHub was never asked), `base` (the repo's
+base branch failing its checks, `stops.py`, issue #98: `issue` null, `branch` the base; `filed`,
+then `closed` once the base passed) and `base-hold` (a PR held on H because the base fails the
+same checks: `held`, then `updated`, `update-failed` or `moved`) and `decision` (a one-off Claude decision thread, or Stefan's reply read directly, on a case the flow
 doesn't cover: `about` the job it decides on, its outcome the action taken) and `live` (a repo's
 live steps after merges, `live.py`: `sha` where the last live run reached, `head` the base's
 commit this one brings live).

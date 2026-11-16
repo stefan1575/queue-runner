@@ -475,7 +475,11 @@ any other name is refused with exit 2).
 
    **A conflict round** (ticket 15; Conflict rounds, below) is a fix round too, for a PR with
    no blocking review whose head conflicts with its base.
-5. **Pick and build** (`run.py`): a repo with a pickable issue gets one build. The runner
+5. **Pick and build** (`run.py`): a repo with a pickable issue gets one build, **unless its
+   base fails its checks** (an open base stop, `stops.red_base`: Stops for Stefan, Main's own
+   failure): then no build starts there, said once per base head (`first: no build starts while
+   main fails its checks (...)`), and the dashboard's Claude queue lists none; fix rounds,
+   conflict rounds and decisions above still run. The runner
    fetches `origin/<base>`, writes a start record, then blocks on
    `t3 thread start --wait --json --worktree origin/<base> --branch claude/<slug>-<n>` with the
    brief on stdin. Afterwards it records the outcome.
@@ -899,6 +903,31 @@ closed issue puts the PR back in the loop; a reply holds it until a decision act
 (Decision threads, above). Every comment the runner posts outside a review carries a hidden
 `<!-- queue-runner ... -->` line (`ledger.RUNNER_MARK`), so none counts as a reply.
 
+**Main's own failure** (issue #98; `Stopper.base_pass`, `hold_for_base`; on 2026-11-16 a red
+`main` stopped PRs #87 and #95 for Stefan one by one, each failing only main's broken test, and a
+build started from it). Each Sol pass, before any PR's stops, the runner reads the checks on the
+head of the repo's base (`base` in config.toml, `GhCli.branch_head`). Then, for a PR into that
+base with a failed check on H, before #93's re-run (re-running what main fails wastes a run): when
+**every** check that failed on H fails on the base too, by name, the failure is the base's. The PR
+gets no stop and no re-run, and is held on H (a `base-hold` job, `held`, its `reason` the checks;
+the log and the Sol lane's line say `not now, main fails tests too`). The repo gets **one** stop
+instead, the first time the base is seen red: a `needs-info` issue "main fails its checks" (the
+failing checks, the base's head, its Actions runs; hidden line `stops.base_mark`), a toast, and a
+`base` job (`issue` null, `branch` the base, `sha` its head, `link` the issue, `signals` the
+failing checks), `filed` (or `failed`, filed next pass). A second PR held by the same red base
+files nothing. While it's `filed`, no build starts in the repo (A Claude pass, step 5). **It
+resolves itself, so no ask thread opens for it:** once the base's checks pass, each PR still at
+its held head is brought up to date with GitHub's update-branch (`PUT pulls/<n>/update-branch`
+with `expected_head_sha`, as `gh pr update-branch`; no AI): `updated`, and it goes through checks
+and review as usual; GitHub refusing (a conflict) is `update-failed` and left to the conflict
+round; a PR that moved or closed meanwhile is `moved`. Then the runner comments on the issue,
+closes it as completed (`closed`, `head` the passing commit), or tries again next pass if it
+can't. A base with no checks reported yet isn't red; one whose new head is still running its
+checks, with the stop open, counts its last failing checks. A check that fails on H but passes on
+the base (or a PR failing more than the base does) is the PR's, and stops as below. A stacked PR
+(into another branch) is never compared. The Inbox lists the base stop once, as `broken`, on its
+issue (`base-<job>`), holding up the held PRs and every new build.
+
 **A failed check is re-run once** (issue #93; `Stopper.retry_checks` and `_failed_check`;
 game-backdrop PR #18 was stopped on 2026-11-16 by `actions/checkout` failing with `Repository
 not found`, and attempt 2 of the same run passed untouched). Each Sol pass, before looking for
@@ -1159,10 +1188,11 @@ python3 -m dashboard    # http://queue.localhost/ is the runner's; http://localh
   build, each review and the kinds of problem it raised, each fix or conflict round, decisions,
   stops, answers, ready marks, merges, live runs, `--release`s; a tie goes to the job written
   first). **Kinds:** a review stop, approach note, `no-push` and `conflict` are `stuck`; a
-  failed check and a `live` stop `broken`; a decision's stop on a PR, a build a decision left to
-  him, a waiting thread and `live-todo` `decision`; a ready PR `merge`. Listed broken, stuck,
-  decision, merge, oldest first inside a kind. **Ids** are stable: `stop-<job>`,
-  `decision-<decision job>`, `thread-<job>`, `merge-<repo>-<n>-<head7>`. An approach note
+  failed check, a `live` stop and a base stop (once per repo, #98) `broken`; a decision's stop
+  on a PR, a build a decision left to him, a waiting thread and `live-todo` `decision`; a ready
+  PR `merge`. Listed broken, stuck, decision, merge, oldest first inside a kind. **Ids** are
+  stable: `stop-<job>`, `decision-<decision job>`, `thread-<job>`, `merge-<repo>-<n>-<head7>`,
+  `base-<job>`. An approach note
   offers rework, fix on and hold with its recommendation marked; a PR stop offers a reply, hold
   or closing the issue; a merge, a waiting thread none. **Answered** (`inbox.finished`): the
   newest answered stop on an open PR stays until the runner has acted: after a reply, the
@@ -1798,7 +1828,7 @@ network: GitHub is the `GhCli` adapter in `queue_runner/github.py`, faked in tes
 (`tests/test_run.py`). The Sol lane is tested against `FakeGitHubForReviews` (every write goes to its `posts`, in
 order; a call named in `fail` raises), `FakeReviewGit` and `FakeSol` (`tests/test_review.py`); `decide()` and the marker formats in
 `tests/test_ledger.py`; the codex-sol.sh adapter in `tests/test_sol.py`; dependencies in `tests/test_deps.py` (a
-fake install) and the junction kept on removal and a checkout git can't delete (a deny-delete ACL) in `tests/test_git.py`. Stops and toasts are in `tests/test_stops.py` (a fake toaster), with a failed Actions check's one re-run per run and head (`FakeGitHubForReviews.workflow_runs` and `rerun_failed`). Merging
+fake install) and the junction kept on removal and a checkout git can't delete (a deny-delete ACL) in `tests/test_git.py`. Stops and toasts are in `tests/test_stops.py` (a fake toaster), with a failed Actions check's one re-run per run and head (`FakeGitHubForReviews.workflow_runs` and `rerun_failed`). Main's own failure (#98): `tests/test_base_red.py`, through the real `Runner` (`FakeGitHubForReviews.base_heads`, `update_branch`, `close_completed`): a PR held and one base stop, a second PR filing nothing, no build but a fix round while main is red, each held PR updated and the stop closed once main passes, a refused update, the PR's own failure still a stop, and the Inbox's one broken ask. Merging
 (`tests/test_merge.py`) plays GitHub moving on through `FakeGitHubForReviews.now` (a PR's fields
 now), `threads` and `push_before_merge`; fix rounds (`tests/test_fix.py`) run the real `Runner`
 with a T3 fake whose thread pushes; `AdoptedReviewTest` runs them all again with a cutover
