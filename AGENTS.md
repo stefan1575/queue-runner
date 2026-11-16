@@ -907,7 +907,8 @@ stops, a failed check on H whose failures are all GitHub Actions check runs
 failed jobs re-run (`POST actions/runs/<id>/rerun-failed-jobs`, as `gh run rerun <id>
 --failed`), **once per run and head** (PR #105's F1: a run that fails after another's re-run
 passed gets its own): a `rerun` job per run on H (`runs` the run's id, failed attempt and URL;
-`reason` the checks), its start record written before GitHub is asked, so one a dead runner left
+`reason` that run's own failed checks, `Checks.by_run`, so its pass or its stop names
+only them: F5), its start record written before GitHub is asked, so one a dead runner left
 open is settled from the run (F2: moved past that attempt, `rerun`; else `not-started` and asked
 again). Meanwhile it's no stop and Sol waits for the checks as for pending ones. It's a
 `failed-check` stop when a re-run's attempt has ended and its conclusion isn't a pass (the run's

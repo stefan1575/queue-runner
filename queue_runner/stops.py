@@ -150,23 +150,25 @@ class Stopper:
         The run's own conclusion decides, since check-runs can still list the old failure
         after the re-run passed (F4)."""
         h7 = pr.head_sha[:7]
-        why = f'a check failed on {h7} ({", ".join(checks.failed)})'
         if not checks.runs:
-            return why
+            return f'a check failed on {h7} ({", ".join(checks.failed)})'
+        # Each run that stops names only its own checks (PR #105's F5): check-runs may still
+        # list another run's failure after its re-run passed.
         reruns, stops = self._reruns(repo, pr), []
         for run_id in checks.runs:
             job, run = reruns.get(run_id), self.github.workflow_run(repo, run_id)
+            names = f'({", ".join(checks.failed_in(run_id))})'
             if job is None:
                 if run.attempt > 1:
-                    stops.append(f'on attempt {run.attempt} of {_run_link(run)}, re-run '
-                                 'already')
+                    stops.append(f'{names} on attempt {run.attempt} of {_run_link(run)}, '
+                                 're-run already')
             elif job.outcome == 'failed':
-                stops.append(f'and re-running it failed ({job.error})')
+                stops.append(f'{names} and re-running it failed ({job.error})')
             elif (not job.open and run.status == 'completed'
                   and run.attempt > _asked_on(job, run_id) and run.conclusion not in PASSED):
-                stops.append(f'again after one re-run (attempt {run.attempt} of '
+                stops.append(f'{names} again after one re-run (attempt {run.attempt} of '
                              f'{_run_link(run)})')
-        return f'{why} ' + '; '.join(stops) if stops else None
+        return f'a check failed on {h7} ' + '; '.join(stops) if stops else None
 
     def _settle_reruns(self, repo, pr, name) -> None:
         """A re-run left open was cut off with its runner (PR #105's F2): GitHub was asked if
@@ -223,10 +225,10 @@ class Stopper:
         checks = self.github.checks(repo, h)
         if checks.state != 'failed' or not checks.runs:
             return
-        what = ', '.join(checks.failed)
         for run_id in checks.runs:
             if run_id in reruns:
                 continue
+            what = ', '.join(checks.failed_in(run_id))   # this run's own checks (F5)
             run = self.github.workflow_run(repo, run_id)
             if run.attempt > 1 or run.status != 'completed':
                 continue   # re-run by hand (a stop), or GitHub is between attempts

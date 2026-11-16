@@ -69,6 +69,13 @@ class Checks:
     # check run, so re-running them may settle it (issue #93). A failed commit status, or a
     # check run from another app, can't be re-run: then none.
     runs: tuple = ()
+    # Each of those runs with the failed checks it holds, `(run id, (names...))`, so a re-run
+    # and its stop name only their own run's checks (PR #105's F5).
+    by_run: tuple = ()
+
+    def failed_in(self, run_id) -> tuple:
+        """The failed checks in Actions run `run_id` (all of them if not known per run)."""
+        return dict(self.by_run).get(run_id, self.failed if not self.by_run else ())
 
 
 @dataclass(frozen=True)
@@ -262,8 +269,12 @@ class GhCli:
         pending = tuple(n for n, s, _ in seen if s == 'pending')
         state = ('none' if not seen else 'failed' if failed else 'pending' if pending
                  else 'passed')
-        reruns = () if any(run is None for _, run in bad) else             tuple(dict.fromkeys(run for _, run in bad))
-        return Checks(state, failed=failed, pending=pending, runs=reruns)
+        if any(run is None for _, run in bad):
+            reruns, by_run = (), ()
+        else:
+            reruns = tuple(dict.fromkeys(run for _, run in bad))
+            by_run = tuple((r, tuple(n for n, run in bad if run == r)) for r in reruns)
+        return Checks(state, failed=failed, pending=pending, runs=reruns, by_run=by_run)
 
     def workflow_run(self, repo, run_id) -> WorkflowRun:
         """An Actions run's latest attempt and where it stands (issue #93)."""

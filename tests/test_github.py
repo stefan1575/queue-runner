@@ -148,6 +148,14 @@ class GhCliTest(unittest.TestCase):
                 f'repos/owner/demo/commits/{sha}/status': {'statuses': list(statuses)},
             })).checks(REPO, sha)
         self.assertEqual(checks().runs, (437,))
+        # Each run's own failed checks (PR #105's F5).
+        lint2 = {'name': 'e2e', 'status': 'completed', 'conclusion': 'failure',
+                 'app': {'slug': 'github-actions'},
+                 'details_url': 'https://github.com/owner/demo/actions/runs/440/job/12'}
+        c = checks(more=[lint2])
+        self.assertEqual((c.runs, c.by_run),
+                         ((437, 440), ((437, ('tests', 'lint')), (440, ('e2e',)))))
+        self.assertEqual((c.failed_in(440), c.failed_in(999)), (('e2e',), ()))
         # A failed commit status, or a check run from outside Actions, can't be re-run: no runs.
         self.assertEqual(checks([{'context': 'deploy', 'state': 'failure'}]).runs, ())
         self.assertEqual(checks(more=[{'name': 'x', 'status': 'completed',

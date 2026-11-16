@@ -277,6 +277,40 @@ class StopsTest(unittest.TestCase):
         self.assertEqual(self.stops(), [])
         self.assertEqual(len(self.calls('rerun')), 1)
 
+    # --- PR #105's review 2 -------------------------------------------------------------------
+
+    def test_f5_each_re_run_names_only_its_own_runs_checks(self):
+        # Runs 437 (tests) and 440 (lint) fail attempt 1 together.
+        self.gh.check_states[H2] = Checks('failed', failed=('tests', 'lint'), runs=(437, 440),
+                                          by_run=((437, ('tests',)), (440, ('lint',))))
+        self.gh.workflow_runs[437] = WorkflowRun(437, 1, 'completed', 'failure', self.RUN)
+        self.gh.workflow_runs[440] = WorkflowRun(440, 1, 'completed', 'failure', self.RUN2)
+        self.reviewer().review_pass()
+        self.assertEqual(sorted(j.reason for j in self.jobs.on('rerun', 'first', 20, H2)),
+                         ['lint', 'tests'])
+        # 437 passes its re-run, 440 fails again; check-runs still list 437's old failure.
+        self.gh.check_states[H2] = Checks('failed', failed=('tests', 'lint'), runs=(437, 440),
+                                          by_run=((437, ('tests',)), (440, ('lint',))))
+        self.gh.workflow_runs[437] = WorkflowRun(437, 2, 'completed', 'success', self.RUN)
+        self.gh.workflow_runs[440] = WorkflowRun(440, 2, 'completed', 'failure', self.RUN2)
+        self.reviewer().review_pass()
+        [said] = [b for n, b in self.calls('comment') if 'passed on a re-run' in b]
+        self.assertIn('tests failed on', said)
+        self.assertNotIn('lint', said)
+        [stop] = self.stops()
+        self.assertIn('(lint) again after one re-run (attempt 2 of [run 440]', stop.reason)
+        self.assertNotIn('tests', stop.reason)
+
+    def test_f5_a_stop_names_each_runs_own_checks(self):
+        self.gh.check_states[H2] = Checks('failed', failed=('tests', 'lint'), runs=(437, 440),
+                                          by_run=((437, ('tests',)), (440, ('lint',))))
+        self.gh.workflow_runs[437] = WorkflowRun(437, 2, 'completed', 'failure', self.RUN)
+        self.gh.workflow_runs[440] = WorkflowRun(440, 2, 'completed', 'failure', self.RUN2)
+        self.reviewer().review_pass()   # both re-run by hand already: a stop at once
+        [stop] = self.stops()
+        self.assertIn('(tests) on attempt 2 of [run 437]', stop.reason)
+        self.assertIn('(lint) on attempt 2 of [run 440]', stop.reason)
+
     def test_a_conflict_is_no_stop_until_a_conflict_round_tried(self):
         self.gh.conflicts.add(20)
         self.reviewer().review_pass()
