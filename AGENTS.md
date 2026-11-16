@@ -1462,7 +1462,9 @@ This runs one real build job, a small Haiku thread, through `Runner.run_build` o
 issue ("Add a line to README") in the sandbox. The sandbox is `~/.queue-runner/sandbox/repo`: T3
 project "queue-runner sandbox", with a bare `../origin.git` as its `origin` and no GitHub. Its
 job log and runner log stay in `~/.queue-runner/sandbox/`. It says how the sandbox's jobs start
-(The effort, above) and its record has the `effort` read back. Before running it again, delete the
+(The effort, above) and its record has the `effort` read back. Its thread is settled at its end
+(Settling threads, above): that signs in to T3's MCP endpoint, which signs a running runner out
+until its next settle. Before running it again, delete the
 `claude/add-a-line-to-1` branch locally and in `origin.git`, or the job is held as
 `branch-exists`.
 
