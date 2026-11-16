@@ -244,6 +244,10 @@ class Runner:
                 # A decision that continued a build or fix counts as that job's cost, so a
                 # plain decision's estimate stays a decision's.
                 learned = next((j.kind for j in new if j.kind != 'decision'), kind)
+                if (wait := self.gate.after_wait()) > 0:   # one call every 5 minutes (issue 66)
+                    at = self.now() + datetime.timedelta(seconds=wait)
+                    self.say(f"Reading Claude's usage after the job at {at.astimezone():%H:%M:%S}:"
+                             ' the usage endpoint is asked at most once every 5 minutes')
                 self.gate.measured(learned, [j.id for j in new], verdict.usage)
             return did
         return measured

@@ -7,7 +7,9 @@
   stay empty until ticket 32 fills them from facts it adds to `Facts`.
 - `Snapshots` gathers the facts: the job log, `gate.json`, the learned costs, what the runner's
   passes last saw (`Calls`, `Watch`) and the runner's own state. GitHub is read by the passes, never
-  for the snapshot; Claude's and ChatGPT's usage are read for it at most every `READ_EVERY`.
+  for the snapshot; Claude's and ChatGPT's usage are read for it at most every `READ_EVERY`, and
+  Claude's through the gate's own reader (`usage.CachedUsage`), which asks the endpoint at most
+  once every 5 minutes whoever asks (issue 66).
 - `Publisher` writes it (a temp file, then `os.replace`) after every pass of either lane and every
   `WRITE_EVERY` seconds from its own thread, so it goes on while a lane is blocked in a job.
 """
@@ -23,11 +25,11 @@ from dataclasses import dataclass, field
 from . import control
 from .config import toml_order
 from .gate import RECENT, RESERVE_RELEASE, SAMPLES, Knob
+from .usage import STALE_AFTER, Reading
 
 VERSION = 1
 WRITE_EVERY = 30    # seconds: the longest the runner goes between writes
 READ_EVERY = 300    # seconds: the snapshot reads usage itself no more often than this
-FORCE_EVERY = 60    # seconds: Refresh on the page reads usage again no more often than this
 
 
 CLAUDE_KINDS = ('build', 'fix', 'decision', 'live')   # the Claude lane's jobs (gate.CLAUDE_KINDS)
@@ -75,15 +77,6 @@ class Call:
     ok: bool
     note: str | None                       # what went wrong, when it failed
     good_at: datetime.datetime | None      # the last call that answered
-
-
-@dataclass(frozen=True)
-class Reading:
-    """A usage reading: the last good value (usage.Usage, or sol.Limits) and when it was read,
-    and the newest read's error if that one failed."""
-    value: object | None
-    at: datetime.datetime | None
-    error: str | None = None
 
 
 @dataclass(frozen=True)
@@ -318,6 +311,9 @@ def _sources(facts: Facts) -> list[dict]:
             note, ok, at = 'Not called yet', True, None
         elif call.ok:
             note, ok, at = answered, True, call.at
+        elif id == 'claude_usage' and _claude_stands(facts):
+            # A failed call beside a recent Claude reading isn't shown (issue 66): it stands.
+            note, ok, at = answered, True, call.good_at
         else:   # the page shows a failing source's time as its last good one
             note, ok, at = call.note or 'Failed', False, call.good_at
         out.append({'id': id, 'group': group, 'name': name, 'short': short, 'ok': ok,
@@ -325,17 +321,28 @@ def _sources(facts: Facts) -> list[dict]:
     return out
 
 
+def _claude_stands(facts: Facts) -> bool:
+    """Whether Claude's reading stands though its latest call failed: it's good, under
+    `STALE_AFTER` old, and the login isn't the trouble (`usage.Reading.failing`)."""
+    r = facts.claude_usage
+    return r is not None and r.value is not None and not r.failing(facts.now)
+
+
 def _plan(id: str, provider: str, name: str, reading: Reading | None, windows,
-          plan=None) -> dict:
+          plan=None, error: str | None = None, next_read_at=None) -> dict:
     """`resets` (ticket 42): the reset credits the plan has left, from the same read as its
-    windows, or None when it has none to give (or isn't read yet)."""
+    windows, or None when it has none to give (or isn't read yet). `error`: what to say instead
+    of the reading's own ('' for nothing). `next_read_at` (issue 66): when the endpoint may be
+    asked again, while that's ahead; None for a plan that's read whenever it's asked."""
     good = reading is not None and reading.value is not None
-    error = reading.error if reading and reading.error else None if good else 'Not read yet'
+    if error is None:
+        error = reading.error if reading and reading.error else None if good else 'Not read yet'
     resets = getattr(reading.value, 'resets', None) if good else None
     return {'id': id, 'provider': provider, 'name': name, 'plan': plan,
             'read_at': _iso(reading.at) if good else None,
             'error': _sentence(error) if error else None, 'windows': windows,
-            'resets': {'available': resets} if resets is not None else None}
+            'resets': {'available': resets} if resets is not None else None,
+            'next_read_at': _iso(next_read_at)}
 
 
 def _claude_usage(facts: Facts) -> dict:
@@ -351,7 +358,22 @@ def _claude_usage(facts: Facts) -> dict:
              'reserve_opens_at': _iso(week.resets_at - RESERVE_RELEASE)
              if week.resets_at else None},
         ]
-    return _plan('claude', 'claude', 'Claude', reading, windows)
+    return _plan('claude', 'claude', 'Claude', reading, windows, error=_claude_error(facts),
+                 next_read_at=getattr(reading, 'next_at', None))
+
+
+def _claude_error(facts: Facts) -> str:
+    """What Claude's plan says went wrong (issue 66): nothing while a failed call stands beside
+    a recent reading; a stale reading says no Claude job starts on it."""
+    r = facts.claude_usage
+    if r is None or r.value is None and r.error is None:
+        return 'Not read yet'
+    if not r.failing(facts.now):
+        return ''
+    if r.value is not None and not r.login:
+        return (f'{r.error}; the reading is over {STALE_AFTER.total_seconds() / 60:g} minutes '
+                'old, so no Claude job starts until a read answers')
+    return r.error
 
 
 def _sol_usage(facts: Facts) -> dict:
@@ -571,9 +593,10 @@ class Snapshots:
 
     def facts(self, fresh: bool = False) -> Facts:
         """With `fresh`, usage is read when `READ_EVERY` has passed since the last read, or when
-        Stefan asked for a Refresh since the last one acted on and none was forced in the last
-        `FORCE_EVERY` (ticket 42), and an open Claude job's thread is looked up in T3 until
-        it's found."""
+        Stefan asked for a Refresh since the last one acted on (ticket 42), and an open Claude
+        job's thread is looked up in T3 until it's found. Claude's reader asks its endpoint only
+        when its 5-minute budget allows (issue 66), so a Refresh inside it is taken and gives
+        back the cached reading; ChatGPT's is read."""
         from .gate import CLAUDE_KINDS as KINDS, CostBook, read_knob
         from .state import JobLog
         state = self.config.state_dir
@@ -582,12 +605,12 @@ class Snapshots:
         now = self.clock()
         switch = control.read(state)   # once: the stops, the build order (ticket 33), a Refresh
         if fresh:
-            forced = self._refresh(switch, now)
+            asked = self._refresh(switch)
             for watch in (self.claude, self.sol):
-                if watch is not None and (forced or watch.due(READ_EVERY)):
+                if watch is not None and (asked or watch.due(READ_EVERY)):
                     with contextlib.suppress(Exception):   # kept in the reading as its error
                         watch.read()
-            if forced:
+            if asked:
                 self._refreshed = (switch.refresh_at, self.clock())
             self._find_threads(jobs)
         try:
@@ -616,13 +639,11 @@ class Snapshots:
             usage_refresh=self._refreshed,
             **self._inbox(log))
 
-    def _refresh(self, switch, now) -> bool:
-        """Whether a Refresh asked on the page is due to be read now: newer than the last one
-        acted on, and none forced in the last `FORCE_EVERY` (it waits for a later tick)."""
+    def _refresh(self, switch) -> bool:
+        """Whether a Refresh asked on the page is to be taken now: newer than the last one acted
+        on."""
         asked = switch.refresh_at if switch.error is None else None
-        if asked is None or self._refreshed is not None and asked <= self._refreshed[0]:
-            return False
-        return self._refreshed is None or             (now - self._refreshed[1]).total_seconds() >= FORCE_EVERY
+        return asked is not None and (self._refreshed is None or asked > self._refreshed[0])
 
     def _inbox(self, log) -> dict:
         """The Sol lane's last Inbox read (ticket 31) and work read (ticket 32), the releases
