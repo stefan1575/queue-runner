@@ -31,7 +31,7 @@ from importlib import resources
 from string import Template
 
 from .ledger import RUNNER_MARK, said_since
-from .state import NOT_STARTED, USAGE_LIMIT, Job, JobLog
+from .state import NOT_STARTED, USAGE_LIMIT, Job, JobLog, when
 from .stops import number_of, positions, utc
 from .t3 import T3Error
 
@@ -239,7 +239,7 @@ class LiveSteps:
         if last.open:
             return f'the live run {last.id} is still open'
         if last.outcome == USAGE_LIMIT:
-            at = datetime.datetime.fromisoformat(last.resume_at) if last.resume_at else None
+            at = when(last.resume_at) if last.resume_at else None
             if at and self.now() < at:
                 self.wait_until = min(filter(None, (self.wait_until, at)))
                 return (f'the last live run was cut off by a usage limit; again after '
