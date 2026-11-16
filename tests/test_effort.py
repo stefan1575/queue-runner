@@ -313,8 +313,17 @@ class BuildTest(RunnerHarness):
                          [('claudeAgent', 'claude-opus-5-5')] * 2)
         [line] = self.told('start with --model')
         self.assertIn('first', line)
-        self.assertIn('Settings', line)
-        self.assertIn('Reasoning: high', line)
+        self.assertNotIn('New threads', line)
+        self.assertIn('projectSettingsOverrides[<its project id>].defaultModelSelection', line)
+        self.assertIn('{"instanceId": "claudeAgent", "model": "claude-opus-5-5", '
+                      '"options": [{"id": "effort", "value": "high"}]}', line)
+        self.assertIn('with T3 closed', line)
+
+    def test_a_project_with_another_default_names_its_id_in_the_step(self):
+        r = self.runner(FakeFiles(set_high(self.dir, effort='medium')))
+        r.run_pass()
+        [line] = self.told('start with --model')
+        self.assertIn('projectSettingsOverrides["p1"].defaultModelSelection', line)
 
     def test_another_model_effort_or_a_fallback_is_not_the_configs(self):
         fallback = {'instanceId': 'codex', 'model': 'gpt-6.1-sol'}
@@ -486,7 +495,12 @@ class StartTest(unittest.TestCase):
         said = self.run_main(set_up=False)
         self.assertIn('first: its Claude jobs start with --model claude-opus-5-5', said)
         self.assertIn('it has no default model', said)
-        self.assertIn('New threads, Model: claude-opus-5-5, Reasoning: high', said)
+        self.assertNotIn('New threads', said)
+        self.assertIn('settings.json, under projectSettingsOverrides["p1"].defaultModelSelection',
+                      said)
+        self.assertIn('{"instanceId": "claudeAgent", "model": "claude-opus-5-5", '
+                      '"options": [{"id": "effort", "value": "high"}]}', said)
+        self.assertIn('with T3 closed', said)
 
     def test_a_repo_whose_project_is_set_is_said_at_start_too(self):
         said = self.run_main(set_up=True)
