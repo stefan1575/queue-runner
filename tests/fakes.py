@@ -228,8 +228,9 @@ class StubEndpoint:
     seconds of its last call, as the real one does (issue 66). `fail` makes every call answer
     that status. `calls` is every call, as (time, status). Nothing calls Anthropic."""
 
-    def __init__(self, clock, five=38, week=46, limit=60):
+    def __init__(self, clock, five=38, week=46, limit=60, resets=None):
         self.clock, self.five, self.week, self.limit = clock, five, week, limit
+        self.resets = resets or (None, None)   # the windows' resets_at: datetimes, or None
         self.fail: int | None = None
         self.calls: list = []
 
@@ -242,8 +243,9 @@ class StubEndpoint:
         self.calls.append((now, status))
         if status != 200:
             raise urllib.error.HTTPError(request.full_url, status, 'stub', {}, None)
-        return json.dumps({'five_hour': {'utilization': self.five, 'resets_at': None},
-                           'seven_day': {'utilization': self.week, 'resets_at': None}}).encode()
+        five, week = (r.isoformat() if r else None for r in self.resets)
+        return json.dumps({'five_hour': {'utilization': self.five, 'resets_at': five},
+                           'seven_day': {'utilization': self.week, 'resets_at': week}}).encode()
 
     def oauth(self, config_dir: str):
         """A real `OAuthUsage` on this stub, with a fake login written in `config_dir`."""
