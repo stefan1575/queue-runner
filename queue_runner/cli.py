@@ -105,8 +105,15 @@ def _print_gate(gate, out, config) -> None:
         resets = (f', resets {w.resets_at.astimezone().isoformat(timespec="minutes")}'
                   if w.resets_at else ', not started')
         print(f'  {name}: {w.used:g}% used{resets}', file=out)
-    jobs = [j for j in _jobs(config).open_jobs() if j.kind in CLAUDE_KINDS]
-    running = gate.running([(f'{j.kind} {j.repo}#{j.issue}', j.kind, None) for j in jobs])
+    from .fallback import REVIEWERS
+    open_jobs = _jobs(config).open_jobs()
+    jobs = [j for j in open_jobs if j.kind in CLAUDE_KINDS]
+    claude = gate.running([(f'{j.kind} {j.repo}#{j.issue}', j.kind, None) for j in jobs])
+    # An Opus review in the reviewing lane is a Claude job too (PR #74's review 1, F1).
+    reviews = [j for j in open_jobs if j.kind == 'review' and j.reviewer in REVIEWERS]
+    running = claude
+    for j in reviews:
+        running = running.plus(f'review {j.repo}#{j.issue}', gate.book.expected(FALLBACK_REVIEW))
     free = [r.name for r in working(config) if r.name not in {j.repo for j in jobs}]
     print(f'  running: {", ".join(running.jobs) if running else "no Claude job"}; '
           f'{len(free)} working repo{"" if len(free) == 1 else "s"} with none running'
@@ -123,8 +130,8 @@ def _print_gate(gate, out, config) -> None:
                   file=out)
             continue
         if kind == FALLBACK_REVIEW:
-            # The Sol lane's one review at a time, checked alone (fallback.py), as it starts.
-            v = decide(usage, kind, cost, knob, gate.clock())
+            # The Sol lane's one review at a time, beside the Claude lane's jobs (fallback.py).
+            v = decide(usage, kind, cost, knob, gate.clock(), claude)
             print(f'  {name}: {"starts" if v.go else "waits"}: {v.text}{learned}', file=out)
             continue
         v = decide(usage, kind, cost, knob, gate.clock(), running)

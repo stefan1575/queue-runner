@@ -20,7 +20,7 @@ from importlib import resources
 from string import Template
 
 from .config import Config, Repo, working
-from .fallback import WHO, chosen
+from .fallback import WHO, chosen, gate_label
 from .github import Comment, PullRequest
 from .ledger import TAGS, OPEN, SolFailed, decide, next_round, norm, read_reviews, runner_post, \
     state
@@ -164,7 +164,7 @@ class Reviewer:
                     for pr, why in self._candidates(repo):
                         self._note(repo, pr, why)
                         if why is None:
-                            who = self._who()
+                            who = self._who(gate_label(repo.name, pr.number))
                             return IDLE if who is None else self.review(repo, pr, by=who)
                 return IDLE
         except RunnerBusy:
@@ -180,7 +180,7 @@ class Reviewer:
             why = self.why_not(repo, pr)
             if why:
                 return IDLE, why
-            if (who := self._who()) is None:
+            if (who := self._who(gate_label(repo.name, pr.number))) is None:
                 if self._opus_always():
                     return IDLE, f'the Opus review waits: {self._said_gate}'
                 return IDLE, (f'Sol is out of usage until {self.jobs.sol_resume_at()}'
@@ -229,18 +229,19 @@ class Reviewer:
         """config.toml has Claude review every PR (issue #76), and this Reviewer can start one."""
         return self.fallback is not None and chosen(self.config)
 
-    def _who(self):
+    def _who(self, label: str):
         """Who reviews now: Sol (('sol', None)), an Opus thread (('fallback', the gate's verdict,
         or None with no gate)) when config.toml says Claude reviews or while Sol is out of usage,
         or None: Sol is out and there's no fallback, or the usage gate holds the Opus review back
-        (said once, until that changes)."""
+        (said once, until that changes). An Opus review let in counts among the Claude jobs
+        running (`label`, `fallback.gate_label`) until `review` ends it."""
         always = self._opus_always()
         if not always and not self._paused():
             self._said_gate = None
             return 'sol', None
         if self.fallback is None:
             return None
-        verdict = self.fallback.check()
+        verdict = self.fallback.check(label)
         if verdict is not None and not verdict.go:
             if verdict.text != self._said_gate:
                 what = 'Opus review' if always else 'Opus fallback review'
@@ -310,6 +311,13 @@ class Reviewer:
     def review(self, repo: Repo, pr: PullRequest, by=('sol', None)) -> str:
         """Reviews H by Sol, or with `by` ('fallback', the gate's verdict) by Opus in a T3
         thread (`fallback.py`), which is posted the same way, naming its reviewer and why."""
+        try:
+            return self._review(repo, pr, by)
+        finally:
+            if by[0] == 'fallback':   # no longer among the Claude jobs running (`_who`)
+                self.fallback.ended(gate_label(repo.name, pr.number))
+
+    def _review(self, repo: Repo, pr: PullRequest, by) -> str:
         n, h = pr.number, pr.head_sha
         self.titles[(repo.name, n)] = pr.title
         earlier = read_reviews(self.github.issue_comments(repo, n))
@@ -371,7 +379,7 @@ class Reviewer:
         finally:
             self._said_moved(name, self.git.remove_checkout(repo.path, wt, ref))
             if opus and sol.ran:   # a thread ran: what it cost teaches the gate (as run.py's)
-                self.fallback.measured([job.id], by[1])
+                self.fallback.measured([job.id], by[1], gate_label(repo.name, n))
 
         _write(os.path.join(run_dir, 'comment.md'), d['body'])
         _write(os.path.join(run_dir, 'decision.json'), json.dumps({

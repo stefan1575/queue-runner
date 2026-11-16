@@ -24,7 +24,7 @@ from .config import Config, Repo, set_stopped, stopped, working
 from .decisions import Decider
 from .fix import Fixer, fix_branch, fix_title
 from .stops import CONFLICT
-from .gate import CLAUDE_KINDS
+from .gate import CLAUDE_KINDS, FALLBACK_REVIEW
 from . import limits as lim
 from .live import LiveSteps
 from .lock import RunnerBusy, runner_lock  # noqa: F401 (the CLI takes them from here)
@@ -137,6 +137,13 @@ class Runner:
         self._workers_lock = threading.Lock()
         self._ended = threading.Event()
         self._busy: dict[str, tuple[str, str]] = {}
+        # The jobs the gate let in this pass and not yet in a worker, and the Sol lane's Opus
+        # review while it runs (label: the Claude jobs it ran beside), so each lane's gate counts
+        # the other's Claude jobs (PR #74's review 1, F1). `_gate_lock` keeps one lane's check
+        # and its admission together, so neither lets a job in unseen by the other.
+        self._admitted: list[tuple[str, str, str | None]] = []
+        self._reviews: dict[str, set] = {}
+        self._gate_lock = threading.Lock()
         self._rests = False
         self._rest: dict[str, datetime.datetime] = {}
         # Each repo's wait as the last pass left it (a snapshot.Wait), for the Repositories card.
@@ -154,7 +161,8 @@ class Runner:
         self.reviewer = Reviewer(config, github=github, git=git, sol=sol, jobs=self.jobs,
                                  say=self.say, toaster=self.toaster, deps=deps,
                                  fallback=OpusFallback(config, t3=t3, gate=gate,
-                                                       effort=self.effort, say=self.say),
+                                                       effort=self.effort, say=self.say,
+                                                       beside=self),
                                  t3=t3) if sol is not None else None
         self.fixer = Fixer(config, github=github, git=git, jobs=self.jobs)
         stopper = Stopper(config, github=github, jobs=self.jobs, say=self.say,
@@ -332,7 +340,14 @@ class Runner:
         """The usage gate before each chosen job, in order (`gate.py`): a job starts only when
         its expected cost fits after the cost of every Claude job still running and every one
         let in before it this pass (#50). One that waits is said once per repo (until that
-        changes) and doesn't hold back a later repo's job that fits."""
+        changes) and doesn't hold back a later repo's job that fits. The Sol lane's Opus review
+        counts among the jobs running, and holds off while this lane admits (`_gate_lock`)."""
+        with self._gate_lock:
+            with self._workers_lock:
+                self._admitted = []   # an earlier pass's are in their workers by now
+            return self._admit_locked(chosen, busy)
+
+    def _admit_locked(self, chosen, busy) -> list:
         running = self._running(busy)
         starts, waits = [], {}
         for start in chosen:
@@ -351,6 +366,8 @@ class Runner:
             self._last_gate.pop(start.repo, None)
             self.say(f'Usage gate, {start.repo}: {verdict.text}')
             running = running + [(start.label, start.kind, start.then)]
+            with self._workers_lock:
+                self._admitted.append((start.label, start.kind, start.then))
             starts.append(replace(start, usage=verdict.usage))
         self.repo_waits = waits
         first = next(iter(waits.values()), None)
@@ -359,12 +376,59 @@ class Runner:
 
     def _running(self, busy) -> list:
         """The Claude jobs still running, as the gate counts them: (label, kind, then) each,
-        this runner's workers and the jobs a dead runner left running (`settle`)."""
+        this runner's workers (and those let in and not yet started), the jobs a dead runner
+        left running (`settle`), and the Sol lane's Opus review: the one it let in, or one open
+        in the job log (a dead runner's, before the Sol lane settles it)."""
+        jobs = self._claude_jobs(busy)
+        with self._workers_lock:
+            reviews = list(self._reviews)
+        reviews += [label for label in self._open_reviews() if label not in reviews]
+        return jobs + [(label, FALLBACK_REVIEW, None) for label in reviews]
+
+    def _claude_jobs(self, busy) -> list:
+        """The Claude lane's own jobs running, as (label, kind, then) each: its workers, those
+        let in and not yet in one, and a dead runner's (`busy`)."""
         with self._workers_lock:
             mine = [(w.start.label, w.start.kind, w.start.then)
                     for w in self._workers.values() if w.start.kind]
+            mine += [a for a in self._admitted if a[0] not in {m[0] for m in mine}]
         return mine + [(label, kind, None) for label, kind in busy.values()
                        if kind in CLAUDE_KINDS]
+
+    def _open_reviews(self) -> list[str]:
+        """The Opus reviews open in the job log, by label (`review <repo>#<PR>`)."""
+        from .fallback import REVIEWERS, gate_label
+        return [gate_label(j.repo, j.issue) for j in self.jobs.open_jobs()
+                if j.kind == 'review' and j.reviewer in REVIEWERS]
+
+    # --- the Sol lane's Opus review, beside this lane's jobs (`fallback.OpusFallback`) ------
+
+    @property
+    def gate_lock(self) -> threading.Lock:
+        return self._gate_lock
+
+    def claude_jobs(self) -> list:
+        """What an Opus review's gate counts: the Claude lane's jobs running now."""
+        return self._claude_jobs(self._busy)
+
+    def review_began(self, label: str) -> None:
+        """The Sol lane let an Opus review in: from now each lane's jobs count the other's
+        spending (`shared_with`)."""
+        with self._workers_lock:
+            shared = {w.start.label for w in self._workers.values()}
+            shared.update(label for label, _ in self._busy.values())
+            for w in self._workers.values():
+                w.shared.add(label)
+            self._reviews[label] = shared
+
+    def review_shared(self, label: str) -> list[str]:
+        """The Claude jobs that ran beside the Opus review `label` so far, sorted."""
+        with self._workers_lock:
+            return sorted(self._reviews.get(label, ()))
+
+    def review_ended(self, label: str) -> None:
+        with self._workers_lock:
+            self._reviews.pop(label, None)
 
     # --- workers: one Claude job per repo at once (#50) -------------------------------------
 
@@ -381,11 +445,16 @@ class Runner:
 
     def _launch(self, start: 'Start') -> 'Worker':
         w = Worker(start)
+        w.shared.update(self._open_reviews())   # an Opus review open in the job log
         with self._workers_lock:
             for other in self._workers.values():   # each counts the other's spending
                 other.shared.add(start.label)
                 w.shared.add(other.start.label)
             w.shared.update(label for label, _ in self._busy.values())
+            for label, shared in self._reviews.items():   # and the Sol lane's Opus review's
+                shared.add(start.label)
+                w.shared.add(label)
+            self._admitted = [a for a in self._admitted if a[0] != start.label]
             self._workers[start.repo] = w
         w.thread = threading.Thread(target=self._work, args=(w,), daemon=True,
                                     name=f'claude-{start.repo}')
