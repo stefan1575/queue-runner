@@ -1004,7 +1004,8 @@ python3 -m dashboard    # http://queue.localhost/ is the runner's; http://localh
   `"now"` or null to carry on), `{"repo", "stop"}` (`"after-job"` or null: Stopping one repo,
   above), an ask's `{"ask", "read"}` (true or false) and `{"ask",
   "snooze_until"}` (an ISO time with its offset, kept in this PC's, or null), or `{"ask": <id>,
-  "open": true}` (`asks.<id>.open`: Deciding an ask in T3, above), or `{"usage": "refresh"}`
+  "open": true}` (`asks.<id>.open`: Deciding an ask in T3, above), or `{"ask": <id>, "fresh":
+  true}` (`asks.<id>.fresh`: A stale waiting thread, below), or `{"usage": "refresh"}`
   (`usage.refresh_at`: Usage, below), and anything else is refused, `{"repo_order"}` too
   since #61 (and a `repo_order` already in the file is dropped, #50);
   each write keeps what the others wrote. The page shows a request as asked until
@@ -1432,7 +1433,8 @@ didn't start: only ids from its own job records.
   or on one of those jobs, its Opus fallback reviews), the latest point one can still be open:
   so one that waited, asked back or whose settle failed goes then (review 1's F1). **An ask
   thread, and a job whose question waits on Stefan,** are settled once they no longer need him
-  (Threads that need Stefan, below); an ask thread never at a merge (a decision acted on from
+  (Threads that need Stefan, below), or once their prompt cache expires (A stale waiting thread,
+  below); an ask thread never at a merge (a decision acted on from
   one carries its id). **Not settled:** live threads. A fallback review cut off with its runner
   records no thread id, so its thread stays.
 - **A settled thread stays readable:** `thread show` and `thread list` still give it and its
@@ -1483,6 +1485,44 @@ settled), and only on threads the runner started (ids from its job records):
   run ends. A rename or settle that fails is said once (`<job>: renaming its thread <id> in T3
   failed (...); tried again next pass`) and tried again next pass; nothing stops on one. What's
   in order is remembered for the process, so a quiet pass calls T3 for nothing.
+
+### A stale waiting thread
+
+Issue #72 (spec #68). A thread that needs Stefan goes cold once its prompt cache expires: answering
+it then re-reads its whole context uncached.
+
+- **Stale** (`limits.stale`): T3 says when the thread's prompt cache expires, and that time has
+  passed. T3's CLI doesn't show it; `T3Store.cache_expires_at` reads the newest
+  `tokenUsage.promptCacheExpiresAt` on the thread's rows in `orchestration_v2_projection_provider_turns`
+  (T3 sets it on a Claude turn as its request's start plus the cache's TTL, an hour: read in
+  `server.asar` 2026-11-16, where T3's own idle compaction reads it too;
+  `tests/fixtures/t3/provider-turn-claude.json` is a real row). **No expiry reported is never
+  stale.**
+- **Settled** (`Prefixes.sync`, each pass): a "Decide:" or "Answer:" thread that is stale and not
+  running is settled, keeping its prefix; its Inbox item stays (the job log doesn't change), and
+  the log says `<job>: its prompt cache expired at ..., so its thread <id> is settled; ...`. One
+  Stefan writes in again (T3 unsettles it) is settled again only once its new cache expires.
+- **The Inbox** (`ask_threads.mark`, from the snapshot's `stale`: `Snapshots._stale`, the
+  runner's `T3Store`): a stale item's `decide` is `{state: "stale", label, note}` (Decide in a
+  fresh T3 thread, or Answer in a fresh T3 thread), then `asked` once clicked, then `open` on the
+  fresh thread. A fresh (not stale) item is as before: an ask thread opens itself, and a thread
+  waiting for his answer has `decide` null and its own link. The page posts `{"ask": <id>,
+  "fresh": true}` (`asks.<id>.fresh`, `{"at"}`, the latest click standing; `Switch.fresh`).
+- **The fresh thread** (`AskThreads.next`, `open`; gated as a decision): only for a request made
+  after the newest thread on that ask was opened, and only while that thread is stale (one that
+  isn't is said once and left). An ask on a stop gets a new `ask` job with the ask's brief plus
+  `templates/stale.md` (the cold thread's link and its last 3 messages, as a limit restart
+  carries them); the newest ask thread on a stop is the one read and prefixed, and the cold one's
+  "Decide: " comes off. **A thread waiting for his answer** gets a conversation thread with no
+  worktree, `Answer: Queue runner answer: <repo>#<n>` (an `ask` job `about` the waiting job,
+  `question` `waiting`, `resume` `{how: fresh, after, cold, why}`), briefed with the question,
+  the job's sources, the cold thread and `templates/answer.md`; its `answer` block (`text`) is
+  sent to the waiting job (`AskThreads.reply`, `Runner.continue_job`, in place or fresh by the
+  same rule, gated as the job's kind), which ends `continued` with `reason` `thread`. Not the
+  build itself restarted fresh: that would spend a whole reorienting run before Stefan said
+  anything, and its turn would end `done` or `no-push`. A GitHub reply read in the same pass
+  goes first (`waiting.py`), and the fresh thread's block is then never read.
+- `--once --dry-run` prints a fresh ask thread's brief too, but reads no expiry (none is stale).
 
 **The token.** T3's MCP endpoint (`<origin>/mcp`, the origin read from
 `~/.t3/userdata/server-runtime.json` on every call) takes only an MCP client session: subject
@@ -1755,6 +1795,14 @@ GitHub or released, kept while running, a failed rename said once; a build and a
 stopped on a question "Answer:", off and settled once answered in the thread or on GitHub (a
 reply sent to the thread once, a closed issue, a merged PR) or released, kept when it asks again,
 and a quiet pass that calls T3 for nothing).
+A stale waiting thread: `CacheExpiryTest` in `tests/test_limits.py` (a real provider turn, the
+newest, none reported), `StaleAskTest` in `tests/test_prefixes.py` (settled once, prefix kept,
+warmed and settled again; a build waiting on Stefan too, its Inbox item kept) and
+`tests/test_stale_threads.py` (the request; through the real `Runner` with `FakeLimits.expires`:
+a stale ask opened afresh with the old thread's link and messages, taken once, a thread not
+stale left, an old request ignored; a stale waiting build's answer thread, its answer sent once,
+GitHub's winning; the snapshot's `decide` from `mark`, held to the sample's `stale` state, and
+the sample's pretend runner).
 Read and snoozed: `tests/test_read_snoozed.py` (control.json's `asks` read and kept by
 `control.py`, and the snapshot's `read` and `snoozed_until` from `snapshot.build` on the Inbox's
 fixtures); the requests, dropping gone asks and the sample's pretend runner in `test_dashboard.py`.
@@ -1841,7 +1889,9 @@ temp folder.
 - `queue_runner/run.py`: the two lanes (the Claude lane's plan, gate and one worker per repo),
   a build job, a fix round's thread, a continued job and the loop.
 - `queue_runner/ask_threads.py` and `templates/ask.md`: an ask decided in a T3 thread Stefan
-  opens from the Inbox: opening it, reading its answer, and the ask's `decide` in the snapshot.
+  opens from the Inbox: opening it, reading its answer, and the ask's `decide` in the snapshot;
+  a fresh thread in place of a stale one (`templates/stale.md`, and `templates/answer.md` for a
+  question a waiting job asked: issue #72).
 - `queue_runner/decisions.py` and `templates/decision.md`: decision threads: the cases, the
   brief, the answer and acting on it.
 - `queue_runner/fix.py`, `templates/fix.md` and `templates/conflict.md`: which PRs get a fix

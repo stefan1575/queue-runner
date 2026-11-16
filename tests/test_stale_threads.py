@@ -167,6 +167,9 @@ class StaleSnapshotTest(ta.ThreadCase):
         a = the_ask()
         self.assertEqual(a['decide']['state'], 'open')
         self.assertEqual(a['go']['url'], self.jobs('ask')[-1].link)
+        texts = [t['text'] for t in a['timeline']]
+        self.assertIn('You opened a thread in T3 to decide it.', texts)
+        self.assertIn('Its thread went cold, so you opened a fresh one in T3 to decide it.', texts)
 
     def test_the_samples_pretend_runner_takes_the_click(self):
         from dashboard import sample
