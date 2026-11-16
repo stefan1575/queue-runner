@@ -206,14 +206,17 @@ def _work(facts: Facts) -> dict:
     """The work lists: the Inbox's asks (`asks.py`, ticket 31); the features, issues, PRs and
     activity (`work.py`, ticket 32). Before the Sol lane's first Inbox read, `asks` and
     `answered` are null, not empty (issue #92): the page's control writes drop the marks of asks
-    the snapshot doesn't list, and an Inbox not read yet lists nothing to go by."""
+    the snapshot doesn't list, and an Inbox not read yet lists nothing to go by. So is one with a
+    repo GitHub has never been read for (a first read that failed: PR #104's review 1, F1): marks
+    are keyed by ask id alone, so none is dropped until every repo has been read once."""
     from .asks import render
     from .work import lists
     asks, answered = render(facts.inbox, facts.jobs, facts.releases, facts.repos)
     _decide(facts, asks, answered)
     for a in asks + answered:
         a.update(_marks(facts, a['id']))
-    unread = facts.inbox is None   # issue #92: not read yet is no list, so the page drops no marks
+    # issue #92: not read yet is no list, so the page drops no marks
+    unread = facts.inbox is None or bool(facts.inbox.unread)
     return {'asks': None if unread else asks, 'answered': None if unread else answered,
             **lists(_view(facts), asks, facts.releases, facts.inbox)}
 

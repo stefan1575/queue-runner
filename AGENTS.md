@@ -1003,8 +1003,10 @@ python3 -m dashboard    # http://queue.localhost/ is the runner's; http://localh
   shaped as a lane's `job`, or null; and `wait`, `{until, reason}` while none starts in it
   because the gate held its job or something holds every repo, or null: #50), `asks` (below; each with `read` and
   `snoozed_until`: Read and snoozed, below; null, as `answered` is, until the Sol lane's first
-  Inbox read, so a control written meanwhile drops no ask's marks and the page says "Inbox not
-  read yet": issue #92, the sample's `inbox-unread` state), `answered` (asks Stefan has answered that the runner hasn't acted on
+  Inbox read, and while any repo has had no read GitHub answered (`Inbox.unread`: a first read
+  that failed lists only the job log's part, PR #104's review 1, F1), so a control written
+  meanwhile drops no ask's marks and the page says "Inbox not read yet": issue #92, the
+  sample's `inbox-unread` state), `answered` (asks Stefan has answered that the runner hasn't acted on
   yet: an ask plus `answered`: `at`, `said`, `next`; not counted as waiting on him), `lanes` (each with `job`, the newest job it runs, and `jobs`, every one,
   oldest first: the Claude lane's one per repo, #50; and its `queue`, what it takes up next, in
   order, across repositories, a job a limit cut off first, and for the reviewing lane the PRs waiting for their review; `queue_empty` says why there's none), `usage` (a plan
