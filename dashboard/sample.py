@@ -3,7 +3,7 @@
 `build(name)` returns a whole `snapshot.json` (version 1) with its times set around now, so the
 page can be judged without a runner. The shape here is the contract the runner's side is built
 to. It also plays the runner reading `control.json` (a few seconds after it's written), so the
-stop buttons and the build order can be tried; that part is the sample's only pretence.
+stop buttons can be tried; that part is the sample's only pretence.
 
 Every time is an ISO string with its UTC offset; the page does the formatting.
 """
@@ -25,6 +25,8 @@ STATES = {
     "no-interrupt": "T3 refuses the interrupt, so Stop now is off for Claude",
     "dead": "The runner stopped writing 42 minutes ago",
     "repo-stopped": "leads-dashboard is stopped: its running jobs finish, then only queue-runner is worked on",
+    "side-by-side": "Claude runs a job in each repo at once",
+    "usage-stale": "Claude's usage hasn't been read for 40 minutes: every call answered 429",
 }
 DEFAULT = "busy"
 # Takes of the page before this one, kept while its look is being agreed: `serve.py` serves the
@@ -79,6 +81,8 @@ def build(name: str = DEFAULT, base: datetime | None = None, control: dict | Non
         # `stopped` (ticket 37): when Stefan stopped the repo (`at`), or null. A stopped repo
         # gets nothing from either lane; its asks stay in the Inbox.
         "repos": [
+            # `doing`: the Claude job running in it (as a lane's `job`), and `wait`: why none
+            # starts in it now (#50; both filled in by `_doing`, below).
             {"name": LD, "github": GH[LD], "merge": "stefan", "stopped": None},
             {"name": QR, "github": GH[QR], "merge": "runner", "stopped": None},
         ],
@@ -214,8 +218,10 @@ def build(name: str = DEFAULT, base: datetime | None = None, control: dict | Non
         "usage": [
             # A model's own weekly window (Fable's here) is listed only when the account has one.
             # `resets`: the reset credits a plan has left (ticket 42), or None when it has none to give.
+            # `next_read_at` (issue 66): when Claude's usage endpoint may be asked again (once every
+            # 5 minutes), while that's ahead; None for a plan read whenever it's asked.
             {"id": "claude", "provider": "claude", "name": "Claude", "plan": None, "read_at": ago(1), "error": None,
-             "resets": {"available": 2}, "windows": [
+             "resets": {"available": 2}, "next_read_at": ahead(4), "windows": [
                 {"id": "five_hour", "label": "Session", "used": 38, "resets_at": ahead(60), "gates": True},
                 {"id": "week", "label": "Weekly", "used": 46, "resets_at": ahead(60 * 49.7), "gates": True,
                  "reserve": 5, "reserve_opens_at": ahead(60 * 25.7)},
@@ -223,7 +229,7 @@ def build(name: str = DEFAULT, base: datetime | None = None, control: dict | Non
                  "gates": False, "note": "The runner doesn't use Fable."},
             ]},
             {"id": "sol", "provider": "chatgpt", "name": "ChatGPT", "plan": None, "read_at": ago(9), "error": None,
-             "resets": None, "windows": [
+             "resets": None, "next_read_at": None, "windows": [
                 {"id": "five_hour", "label": "Session", "used": 26, "resets_at": ahead(94), "gates": True},
                 {"id": "week", "label": "Weekly", "used": 6, "resets_at": ahead(60 * 152.9), "gates": True},
             ]},
@@ -271,6 +277,7 @@ def build(name: str = DEFAULT, base: datetime | None = None, control: dict | Non
         snap["written_at"] = (now - timedelta(minutes=42)).isoformat(timespec="seconds")
     else:
         _obey(snap, control or {}, now)
+    _doing(snap)
     _number(snap)
     _order(snap)
     _tickets(snap)
@@ -562,8 +569,23 @@ def _vary(snap: dict, name: str, ago, ahead) -> None:
     elif name == "github-down":
         _source(snap, "github").update(ok=False, note="No answer since then (HTTP 503)", checked_at=ago(18),
                                        affects="Asks, PRs and the work list are as they were then; some may be missing.")
+    elif name == "usage-stale":   # a failure shows only past 30 minutes (issue 66)
+        snap["usage"][0].update(read_at=ago(40), next_read_at=ahead(3), error=(
+            "The usage endpoint answered HTTP 429; the reading is over 30 minutes old, so no Claude job "
+            "starts until a read answers."))
+        _source(snap, "claude_usage").update(ok=False, note="the usage endpoint answered HTTP 429", checked_at=ago(40))
+        _lane(snap, "claude").update(state="waiting", job=None, wait={
+            "until": ahead(3), "reason": "Claude usage was last read 40 minutes ago (the latest read failed: the "
+            "usage endpoint answered HTTP 429): no Claude job starts until the next read."})
     elif name == "repo-stopped":
         _repo(snap, LD)["stopped"] = {"at": ago(6)}   # after the jobs on it began
+    elif name == "side-by-side":   # #50: each repo runs its own Claude job
+        claude = _lane(snap, "claude")
+        _issue(snap, QR, 5).update(state="building", note="Claude is building it")
+        claude["jobs"] = [claude["job"], {
+            "kind": "build", "repo": QR, "ref": "#5", "title": "Publish the snapshot the dashboard reads",
+            "started_at": ago(8), "sha": None, "pr": None, "thread": T3 + "6b1d0a52-5d0e-4c7b-9f4e-2f0c0c1b8e11"}]
+        claude["job"] = claude["jobs"][-1]
     elif name == "no-interrupt":
         # Stop now isn't a source the runner depends on (ticket 43): it shows on the Stop button.
         _lane(snap, "claude")["stop_now"].update(available=False, note="T3 refuses the interrupt since its last update: stop after the job instead.")
@@ -619,12 +641,26 @@ def _obey(snap: dict, control: dict, now: datetime) -> None:
     if isinstance(usage, dict) and isinstance(usage.get("refresh_at"), str):
         read = (datetime.fromisoformat(written) + timedelta(seconds=ACK_SECONDS)).isoformat(timespec="seconds")
         snap["usage_refresh"] = {"asked_at": usage["refresh_at"], "done_at": read}
-        for plan in snap["usage"]:
+        for plan in snap["usage"]:   # Claude's inside its 5-minute budget keeps its reading (issue 66)
+            if plan["next_read_at"] and datetime.fromisoformat(plan["next_read_at"]) > datetime.fromisoformat(read):
+                continue
             plan["read_at"] = read
-    order = control.get("repo_order") or []
-    names = [r["name"] for r in snap["repos"]]
-    if sorted(order) == sorted(names):
-        snap["repos"].sort(key=lambda r: order.index(r["name"]))
+            if plan["id"] == "claude":
+                plan["next_read_at"] = (datetime.fromisoformat(read) + timedelta(minutes=5)).isoformat(timespec="seconds")
+
+
+def _doing(snap: dict) -> None:
+    """The Claude lane's `jobs` (one per repo, #50; `job` the newest), and what each repo is
+    doing: `doing`, the job running in it, else `wait`, why none starts (the lane's wait)."""
+    claude = _lane(snap, "claude")
+    running = claude["state"] in ("working", "stopping") and claude["job"]
+    claude["jobs"] = (claude.get("jobs") or [claude["job"]]) if running else []
+    for lane in snap["lanes"]:
+        lane.setdefault("jobs", [lane["job"]] if lane["job"] else [])
+    for repo in snap["repos"]:
+        repo["doing"] = next((j for j in claude["jobs"] if j["repo"] == repo["name"]), None)
+        repo["wait"] = (claude["wait"] if claude["state"] == "waiting" and not repo["doing"]
+                        and not repo["stopped"] else None)
 
 
 def _order(snap: dict) -> None:

@@ -20,7 +20,7 @@ from importlib import resources
 from string import Template
 
 from .config import Config, Repo, working
-from .fallback import WHO, chosen
+from .fallback import OPUS_KINDS, WHO, chosen, gate_label
 from .github import Comment, PullRequest
 from .ledger import TAGS, OPEN, SolFailed, decide, next_round, norm, read_reviews, runner_post, \
     state
@@ -31,6 +31,7 @@ from .post import GitHubPoster, PostFailed
 from .sol import SolOutOfUsage
 from .state import FAILED_REVIEW, OUT_OF_USAGE, REVIEWED, JobLog, when
 from .stops import Stopper, held
+from .t3 import T3Error, find_job_thread
 
 STARTED, BUSY, IDLE = 'started', 'busy', 'idle'   # as run.py's lane results
 MAX_FAILED = 2   # failed reviews on one head before the lane leaves it until a release or a push
@@ -126,6 +127,10 @@ class Reviewer:
         # reset (the CLI's --review, the live checks, most tests), whatever config.toml says.
         self.fallback = fallback
         self._said_gate: str | None = None
+        # The review this Reviewer runs now (its job id), so the Claude lane can tell it from a
+        # dead runner's fallback review whose thread runs on (PR 67's review 2, F2).
+        self.live: str | None = None
+        self._said_running: set[str] = set()
         # deps.Deps: the checkout's node_modules from a cache, so Sol can run the tests (ticket
         # 16); None installs nothing (the tests, live_merge.py).
         self.deps = deps
@@ -164,7 +169,7 @@ class Reviewer:
                     for pr, why in self._candidates(repo):
                         self._note(repo, pr, why)
                         if why is None:
-                            who = self._who()
+                            who = self._who(gate_label(repo.name, pr.number))
                             return IDLE if who is None else self.review(repo, pr, by=who)
                 return IDLE
         except RunnerBusy:
@@ -180,7 +185,7 @@ class Reviewer:
             why = self.why_not(repo, pr)
             if why:
                 return IDLE, why
-            if (who := self._who()) is None:
+            if (who := self._who(gate_label(repo.name, pr.number))) is None:
                 if self._opus_always():
                     return IDLE, f'the Opus review waits: {self._said_gate}'
                 return IDLE, (f'Sol is out of usage until {self.jobs.sol_resume_at()}'
@@ -190,13 +195,41 @@ class Reviewer:
 
     def settle(self) -> None:
         """A review left open was cut off with its runner (the caller holds sol.lock, so no
-        live one is open): it counts as failed."""
+        live one is open): it counts as failed. An Opus review's thread (the fallback, or
+        config.toml's) may run on in T3 (PR 67's review 2, F2): it's found by its title, and while it runs the job stays open
+        (the Claude lane is busy meanwhile: `Runner.settle`); once it has ended the review
+        counts as failed, with its thread, and the gate is told a Claude job ended. A Reviewer
+        that can't read T3 (no fallback: `--review`) leaves such a review to the runner's."""
         for job in self.jobs.open_jobs():
-            if job.kind == 'review':
-                self.jobs.ended(job.id, exit_code=None, outcome=FAILED_REVIEW,
-                                error='The runner stopped mid-review.')
-                self.say(f'review {job.repo}#{job.issue}: cut off with its runner; '
-                         'counted as failed')
+            if job.kind != 'review':
+                continue
+            name = f'review {job.repo}#{job.issue}'
+            thread = None
+            if job.reviewer in OPUS_KINDS:
+                if self.fallback is None:
+                    continue
+                repo = next((r for r in self.config.repos if r.name == job.repo), None)
+                try:
+                    thread = find_job_thread(self.fallback.t3, job, repo.path if repo else None)
+                except T3Error as e:
+                    if job.id not in self._said_running:
+                        self.say(f"{name}: cut off with its runner; T3 can't say whether its "
+                                 f'Opus thread runs on ({e}): left open until it can')
+                        self._said_running.add(job.id)
+                    continue
+                if thread is not None and thread.active and not thread.pending_requests:
+                    if job.id not in self._said_running:
+                        self.say(f'{name}: cut off with its runner, but its Opus thread runs on '
+                                 f'in {thread.link}: counted as failed once it ends')
+                        self._said_running.add(job.id)
+                    continue
+            ran_on = {'thread_id': thread.thread_id, 'run_id': thread.latest_run_id}                 if thread else {}
+            self.jobs.ended(job.id, exit_code=None, outcome=FAILED_REVIEW,
+                            error='The runner stopped mid-review.', **ran_on)
+            self._said_running.discard(job.id)
+            if thread is not None:   # a Claude thread ran and has ended
+                self.fallback.thread_ended(job.id)
+            self.say(f'{name}: cut off with its runner; counted as failed')
         if self.merger:
             self.merger.settle()
 
@@ -229,18 +262,19 @@ class Reviewer:
         """config.toml has Claude review every PR (issue #76), and this Reviewer can start one."""
         return self.fallback is not None and chosen(self.config)
 
-    def _who(self):
+    def _who(self, label: str):
         """Who reviews now: Sol (('sol', None)), an Opus thread (('fallback', the gate's verdict,
         or None with no gate)) when config.toml says Claude reviews or while Sol is out of usage,
         or None: Sol is out and there's no fallback, or the usage gate holds the Opus review back
-        (said once, until that changes)."""
+        (said once, until that changes). An Opus review let in counts among the Claude jobs
+        running (`label`, `fallback.gate_label`) until `review` ends it."""
         always = self._opus_always()
         if not always and not self._paused():
             self._said_gate = None
             return 'sol', None
         if self.fallback is None:
             return None
-        verdict = self.fallback.check()
+        verdict = self.fallback.check(label)
         if verdict is not None and not verdict.go:
             if verdict.text != self._said_gate:
                 what = 'Opus review' if always else 'Opus fallback review'
@@ -272,6 +306,10 @@ class Reviewer:
                     f'a {job.kind} job is still writing to its branch')
         if why := held(self.jobs, repo, pr.number):
             return why
+        if any(j.open and j.reviewer in OPUS_KINDS and j.id != self.live
+               for j in self.jobs.on('review', repo.name, pr.number)):
+            return ("a stopped runner's Opus fallback review of it runs on in T3: counted as "
+                    'failed once it ends')
         done = self.jobs.reviews_of(repo.name, pr.number, h)
         if ran := [j for j in done if j.outcome in REVIEWED]:
             return (f'the runner reviewed {h7} already (review {ran[-1].round}, '
@@ -310,6 +348,13 @@ class Reviewer:
     def review(self, repo: Repo, pr: PullRequest, by=('sol', None)) -> str:
         """Reviews H by Sol, or with `by` ('fallback', the gate's verdict) by Opus in a T3
         thread (`fallback.py`), which is posted the same way, naming its reviewer and why."""
+        try:
+            return self._started(repo, pr, by)
+        finally:
+            if by[0] == 'fallback':   # no longer among the Claude jobs running (`_who`)
+                self.fallback.ended(gate_label(repo.name, pr.number))
+
+    def _started(self, repo: Repo, pr: PullRequest, by) -> str:
         n, h = pr.number, pr.head_sha
         self.titles[(repo.name, n)] = pr.title
         earlier = read_reviews(self.github.issue_comments(repo, n))
@@ -319,6 +364,14 @@ class Reviewer:
         job = self.jobs.started(kind='review', repo=repo.name, issue=n, branch=pr.branch,
                                 title=review_title(repo, n), sha=h, round=rnd,
                                 reviewer=sol.kind if opus else None)
+        self.live = job.id
+        try:
+            return self._review(repo, pr, by, job, earlier, rnd, opus, sol)
+        finally:
+            self.live = None
+
+    def _review(self, repo, pr, by, job, earlier, rnd, opus, sol) -> str:
+        n, h = pr.number, pr.head_sha
         who = WHO[sol.kind] if opus else 'Sol'
         run_dir = os.path.join(self.config.runs_dir,
                                f'{repo.name}-pr{n}-r{rnd}-{self.now():%Y%m%d-%H%M%S}')
@@ -371,7 +424,7 @@ class Reviewer:
         finally:
             self._said_moved(name, self.git.remove_checkout(repo.path, wt, ref))
             if opus and sol.ran:   # a thread ran: what it cost teaches the gate (as run.py's)
-                self.fallback.measured([job.id], by[1])
+                self.fallback.measured([job.id], by[1], gate_label(repo.name, n))
 
         _write(os.path.join(run_dir, 'comment.md'), d['body'])
         _write(os.path.join(run_dir, 'decision.json'), json.dumps({

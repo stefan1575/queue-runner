@@ -2,11 +2,11 @@
 
 On a stopped PR's ask in the dashboard's Inbox, Stefan clicks "Decide in T3": the page writes
 `asks.<ask id>.open` in control.json (`dashboard/serve.py`'s `apply_control`). The Claude lane's
-next pass starts one thread for it, `Queue runner ask: <repo>#<n>`, in the repo's T3 project with
-no worktree, and doesn't wait on it (`t3 thread start` without `--wait`): Stefan talks it through
-there. Its brief (`templates/ask.md`) is the ask as the Inbox writes it, the PR's open findings
-and the earlier threads, and it tells the thread to end with a `queue-runner-decision` block once
-Stefan has decided.
+next pass starts one thread for it, `Decide: Queue runner ask: <repo>#<n>` (issue #71), in the
+repo's T3 project with no worktree, and doesn't wait on it (`t3 thread start` without
+`--wait`): Stefan talks it through there. Its brief (`templates/ask.md`) is the ask as the Inbox
+writes it, the PR's open findings and the earlier threads, and it tells the thread to end with a
+`queue-runner-decision` block once Stefan has decided.
 
 - **Only on his click**, once per ask (an `ask` job, `about` the stop, ended `opened` with the
   thread). It's a Claude job, gated as a decision; a stopped Claude lane or repo keeps the request
@@ -28,6 +28,7 @@ from importlib import resources
 from string import Template
 
 from .decisions import ACTIONS, QUESTIONS, VERSION, Answer, Case, parse
+from .prefixes import DECIDE, titled
 from .state import NOT_STARTED
 from .t3 import RunResult, T3Error, settle_quietly
 
@@ -127,11 +128,13 @@ class AskThreads:
         s = by_id.get(ask_id[len(PREFIX):])
         return s if opens(s) else None
 
-    def next(self, switch):
+    def next(self, switch, only=None):
         """(repo, the stop, its PR open now) for the first ask Stefan asked to open, oldest
-        request first, whose stop still waits on him and has no thread yet; or None."""
+        request first, whose stop still waits on him and has no thread yet; or None. With
+        `only`, in those repos' names alone (#50: each repo's job is chosen apart)."""
         from .config import working
-        repos = {r.name: r for r in working(self.config) if r.github}
+        repos = {r.name: r for r in working(self.config)
+                 if r.github and (only is None or r.name in only)}
         all_jobs, gone = self.jobs.jobs(), self.jobs.released_ids()
         by_id = {j.id: j for j in all_jobs}
         for ask_id, _ in sorted(switch.opened.items(), key=lambda kv: kv[1]):
@@ -214,7 +217,10 @@ class AskThreads:
                                 question=QUESTION)
         if failed is None:
             try:
-                launched = self.t3.launch(repo.path, brief, title=job.title, **flags)
+                # Titled "Decide: ..." from the start: it waits on Stefan's decision
+                # (issue #71).
+                launched = self.t3.launch(repo.path, brief, title=titled(DECIDE, job.title),
+                                          **flags)
             except Exception as e:   # T3 down
                 failed = e
         if failed is not None:
@@ -345,7 +351,8 @@ def mark(asks: list, answered: list, jobs, opened_at: dict, waits, released=froz
 
 
 def waits_text(switch, repo: str, lane_job, wait_reason: str | None) -> str | None:
-    """Why the Claude lane wouldn't start an asked thread now: what the page says."""
+    """Why the Claude lane wouldn't start an asked thread now: what the page says. `lane_job`
+    is the Claude job running in that repo (one per repo, #50), or None."""
     if switch.error is not None:
         return 'It starts once control.json is readable again.'
     if switch.stop('claude').stopped:

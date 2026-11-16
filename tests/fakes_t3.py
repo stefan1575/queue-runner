@@ -24,7 +24,11 @@ class FakeT3:
         self.launch_error = None  # a T3Error the next launch raises
         self.settles = []         # thread ids settled, in order (ticket 70)
         self.settle_error = None  # an exception every settle raises
-        self.renames = []
+        self.renames = []         # (thread id, title), in order (issue #71)
+        self.rename_error = None  # an exception every rename raises
+        self.lists = []           # the projects `list` was asked for, in order
+        import threading          # the Claude lane's workers call it at once (#50)
+        self.lock = threading.RLock()
 
     def add(self, thread_id, title, status, created_at='2099-01-01T00:00:00.000Z', **extra):
         self.threads[thread_id] = Thread(
@@ -39,14 +43,16 @@ class FakeT3:
 
     def start(self, project, message, *, title, provider=None, model=None, worktree=None,
               branch=None):
-        self.starts.append(dict(project=project, message=message, title=title,
-                                provider=provider, model=model, worktree=worktree, branch=branch))
-        outcome = self.outcomes.pop(0)
-        if isinstance(outcome, Exception):
-            raise outcome
-        thread_id = f'mcp:t{len(self.starts)}'
-        self.add(thread_id, title, outcome[1], branch=branch,
-                 worktree_path=f'C:/t3/worktrees/{thread_id}')
+        with self.lock:
+            self.starts.append(dict(project=project, message=message, title=title,
+                                    provider=provider, model=model, worktree=worktree,
+                                    branch=branch))
+            outcome = self.outcomes.pop(0)
+            if isinstance(outcome, Exception):
+                raise outcome
+            thread_id = f'mcp:t{len(self.starts)}'
+            self.add(thread_id, title, outcome[1], branch=branch,
+                     worktree_path=f'C:/t3/worktrees/{thread_id}')
         return self._result(thread_id, outcome)
 
     @staticmethod
@@ -69,13 +75,14 @@ class FakeT3:
 
     def send(self, thread_id, message):
         """A message to an existing thread: the next outcome is how its new run ends."""
-        self.sends.append(dict(thread_id=thread_id, message=message))
-        outcome = self.outcomes.pop(0)
-        if isinstance(outcome, Exception):
-            raise outcome
-        from dataclasses import replace   # a new turn unsettles a settled thread, as in T3
-        self.threads[thread_id] = replace(self.threads[thread_id], status=outcome[1],
-                                          settled=False)
+        with self.lock:
+            self.sends.append(dict(thread_id=thread_id, message=message))
+            outcome = self.outcomes.pop(0)
+            if isinstance(outcome, Exception):
+                raise outcome
+            from dataclasses import replace   # a new turn unsettles a settled thread, as in T3
+            self.threads[thread_id] = replace(self.threads[thread_id], status=outcome[1],
+                                              settled=False)
         return self._result(thread_id, outcome)
 
     def show(self, thread_id, messages=3):
@@ -86,17 +93,28 @@ class FakeT3:
     def settle(self, thread_id):
         """Settled threads stay readable (`show`, `list`), as in T3 (checked 2026-11-16)."""
         from dataclasses import replace
-        if self.settle_error is not None:
-            raise self.settle_error
-        self.settles.append(thread_id)
-        if thread_id in self.threads:
-            self.threads[thread_id] = replace(self.threads[thread_id], settled=True)
+        with self.lock:
+            if self.settle_error is not None:
+                raise self.settle_error
+            self.settles.append(thread_id)
+            if thread_id in self.threads:
+                self.threads[thread_id] = replace(self.threads[thread_id], settled=True)
 
     def rename(self, thread_id, title):
-        self.renames.append((thread_id, title))
+        """The thread's title changes; a settled thread stays settled (T3 unsettles only on a
+        new turn)."""
+        from dataclasses import replace
+        with self.lock:
+            if self.rename_error is not None:
+                raise self.rename_error
+            self.renames.append((thread_id, title))
+            if thread_id in self.threads:
+                self.threads[thread_id] = replace(self.threads[thread_id], title=title)
 
     def list(self, project):
-        return sorted(self.threads.values(), key=lambda t: t.created_at, reverse=True)
+        with self.lock:
+            self.lists.append(project)
+            return sorted(self.threads.values(), key=lambda t: t.created_at, reverse=True)
 
 
 class FakeGit:

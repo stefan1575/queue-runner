@@ -12,14 +12,25 @@ Limits). Sol isn't gated.
 - **Expected cost** per job kind (build, fix, decision), in percent of each window, is learned from
   `<state_dir>/usage.jsonl`: one record per Claude job pass, usage before and after. With fewer
   than `SAMPLES` usable records it's the cautious `DEFAULTS`; then the largest of the last `RECENT`.
+  A pass that ran beside another Claude job (`shared_with`, #50) measured both, so it teaches
+  nothing.
+- **Jobs still running** (#50: each repo runs its own Claude job at once): a job starts only when
+  its expected cost fits after the expected cost of every Claude job still running (`Running`),
+  counted whole, whatever they have spent so far, so it errs high. One that would fit alone but
+  not beside them waits for one of them to end (`RUNNING`), not for a reset.
+- **The reading** (issue 66) is `usage.CachedUsage`'s, shared with the snapshot: the endpoint is
+  asked at most once every 5 minutes. A check decides only on a reading taken after the last
+  Claude job ended and no older than `STALE_AFTER`, even if the latest call failed; with none,
+  the lane waits until the endpoint may be asked again. The after-job read waits for that too.
 """
 import datetime
 import json
 import os
+import threading
 from dataclasses import dataclass
 
 from .state import append_record, read_records
-from .usage import Usage, UsageError, Window
+from .usage import STALE_AFTER, CachedUsage, Usage, UsageError, Window
 
 DEFAULT_RESERVE = 5.0
 RESERVE_RELEASE = datetime.timedelta(hours=24)   # before the weekly reset, the reserve is free
@@ -38,7 +49,10 @@ RELEASED = 'reserve-released'   # fits only because the last 24 hours release th
 FIVE_HOUR = 'five-hour'         # waits for the 5-hour reset
 RESERVE = 'weekly-reserve'      # waits for the reserve's release, 24 hours before the weekly reset
 WEEKLY = 'weekly-full'          # waits for the weekly reset
-UNREADABLE = 'unreadable'       # usage couldn't be read: nothing starts; read again next pass
+# No reading to decide on (none, from before the last job, or stale), or gate.json or usage.jsonl
+# unreadable: nothing starts until the endpoint may be asked again, or the next pass.
+UNREADABLE = 'unreadable'
+RUNNING = 'running'             # fits alone, not beside the Claude jobs still running (#50)
 
 
 @dataclass(frozen=True)
@@ -56,6 +70,27 @@ class Cost:
 # cost to start with (issue #76), until three real reviews are learned.
 DEFAULTS = {'build': Cost(60, 15), 'fix': Cost(40, 10), 'decision': Cost(15, 4),
             'live': Cost(20, 5), FALLBACK_REVIEW: Cost(15, 4)}
+
+
+@dataclass(frozen=True)
+class Running:
+    """The Claude jobs still running (#50), as the gate counts them: their expected cost, summed,
+    and what each is (`build game-backdrop#5`), for the log."""
+    cost: Cost = Cost(0, 0)
+    jobs: tuple = ()
+
+    def __bool__(self) -> bool:
+        return bool(self.jobs)
+
+    def plus(self, label: str, cost: Cost) -> 'Running':
+        return Running(self.cost + cost, self.jobs + (label,))
+
+    def text(self) -> str:
+        n = len(self.jobs)
+        one = n == 1
+        return (f'{"the" if one else f"the {n}"} Claude job{"" if one else "s"} running '
+                f'({", ".join(self.jobs)}) {"is" if one else "are"} expected to take '
+                f'{_pct(self.cost.five_hour)} of 5 hours, {_pct(self.cost.seven_day)} of the week')
 
 
 @dataclass(frozen=True)
@@ -81,7 +116,25 @@ def _pct(x: float) -> str:
 
 
 def decide(usage: Usage, kind: str, cost: Cost, knob: Knob,
-           now: datetime.datetime) -> Verdict:
+           now: datetime.datetime, running: Running = Running()) -> Verdict:
+    """Whether a `kind` job expected to take `cost` fits now, beside the Claude jobs `running`.
+    One that doesn't fit alone waits as it always has (for a reset or the reserve's release);
+    one that fits alone but not beside them waits for one of them to end."""
+    alone = _decide(usage, kind, cost, knob, now)
+    if not alone.go or not running:
+        return alone
+    together = _decide(usage, kind, cost + running.cost, knob, now, any_in_new=False)
+    if together.go:
+        return Verdict(True, together.why, f'{alone.text}; {running.text()}, and it fits '
+                       'beside them', None, usage)
+    return Verdict(False, RUNNING, f'{kind} would fit alone, but {running.text()}: it waits for '
+                   'one of them to end', None, usage)
+
+
+def _decide(usage: Usage, kind: str, cost: Cost, knob: Knob, now: datetime.datetime,
+            any_in_new: bool = True) -> Verdict:
+    """`decide` for one job alone. With `any_in_new`, a window with nothing used takes any job;
+    beside running jobs it doesn't (they are spending it already)."""
     def wait(why, text, until=None):
         return Verdict(False, why, text, until, usage)
 
@@ -89,20 +142,20 @@ def decide(usage: Usage, kind: str, cost: Cost, knob: Knob,
     expect = f'a {kind} is expected to take {_pct(cost.five_hour)} of 5 hours, ' \
              f'{_pct(cost.seven_day)} of the week'
     released = False
-    if week.used > 0 and week.used + cost.seven_day > 100:
+    if (week.used > 0 or not any_in_new) and week.used + cost.seven_day > 100:
         reset = week.resets_at if week.resets_at and week.resets_at > now else None
         until = reset + AFTER_RESET if reset else None
         return wait(WEEKLY, f'the week is {_pct(week.used)} used and {expect}: waiting for the '
                     f'weekly reset' + (f' at {_local(reset)}' if reset else ''),
                     until)
-    if week.used > 0 and week.used + cost.seven_day > 100 - knob.reserve:
+    if (week.used > 0 or not any_in_new) and week.used + cost.seven_day > 100 - knob.reserve:
         release = week.resets_at - RESERVE_RELEASE if week.resets_at else None
         if release is None or now < release:
             return wait(RESERVE, f'the weekly reserve holds: the week is {_pct(week.used)} used, '
                         f'{expect}, and {_pct(knob.reserve)} is kept for Stefan'
                         + (f' until {_local(release)}' if release else ''), release)
         released = True
-    if five.used > 0 and five.used + cost.five_hour > 100:
+    if (five.used > 0 or not any_in_new) and five.used + cost.five_hour > 100:
         reset = five.resets_at if five.resets_at and five.resets_at > now else None
         return wait(FIVE_HOUR, f'the 5-hour window is {_pct(five.used)} used and {expect}: '
                     f'waiting for its reset' + (f' at {_local(reset)}' if reset else ''),
@@ -161,10 +214,12 @@ class CostBook:
         return DEFAULTS[kind]
 
     def record(self, kind: str, jobs: list, before: Usage, after: Usage | None,
-               error: str | None = None) -> None:
+               error: str | None = None, shared_with: list | None = None) -> None:
         rec = {'at': datetime.datetime.now().astimezone().isoformat(timespec='seconds'),
                'kind': kind, 'jobs': jobs, 'before': before.record(),
                'after': after.record() if after else None}
+        if shared_with:   # other Claude jobs ran meanwhile: their spending is in it too (#50)
+            rec['shared_with'] = shared_with
         if after:
             rec['spent'] = {'five_hour': _spent(before.five_hour, after.five_hour),
                             'seven_day': _spent(before.seven_day, after.seven_day)}
@@ -174,7 +229,7 @@ class CostBook:
 
     def _spent(self, kind: str, window: str) -> list[float]:
         return [r['spent'][window] for r in read_records(self.path)
-                if r.get('kind') == kind and r.get('spent')
+                if r.get('kind') == kind and r.get('spent') and not r.get('shared_with')
                 and r['spent'].get(window) is not None]
 
     def expected(self, kind: str) -> Cost:
@@ -193,43 +248,126 @@ class CostBook:
 
 
 class Gate:
-    """`check(kind)` before a Claude job; `measured(...)` after it."""
+    """`check(kind)` before a Claude job; `measured(...)` after it. `reader` is the shared
+    `usage.CachedUsage` (an endpoint's reader is wrapped in one); `sleep` waits on the wall clock
+    for the after-job read (`run.wall_sleep` unless given)."""
 
-    def __init__(self, state_dir: str, reader, clock=None):
-        self.state_dir, self.reader = state_dir, reader
+    def __init__(self, state_dir: str, reader, clock=None, sleep=None):
+        self.state_dir = state_dir
         self.clock = clock or (lambda: datetime.datetime.now(datetime.timezone.utc))
+        self.reader = reader if isinstance(reader, CachedUsage) else \
+            CachedUsage(reader, self.clock)
+        self.sleep = sleep
         self.book = CostBook(os.path.join(state_dir, 'usage.jsonl'))
+        self.ended: datetime.datetime | None = None   # when the last measured Claude job ended
+        self._told: dict[str, datetime.datetime] = {}   # job_ended(job_id): each told once
+        self._ended_lock = threading.Lock()   # both lanes say a job ended (the Opus fallback)
 
     def knob(self) -> Knob:
         return read_knob(self.state_dir)
 
-    def check(self, kind: str, then: str | None = None) -> Verdict:
+    def cost(self, kind: str, then: str | None = None) -> Cost:
+        """A `kind` job's expected cost, with the `then` job it may continue. Raises OSError or
+        ValueError when usage.jsonl can't be read."""
+        cost = self.book.expected(kind)
+        return cost + self.book.expected(then) if then else cost
+
+    def running(self, jobs) -> Running:
+        """The Claude jobs still running, as (label, kind, then) each, counted for `check`.
+        Raises as `cost` does."""
+        found = Running()
+        for label, kind, then in jobs:
+            found = found.plus(label, self.cost(kind, then))
+        return found
+
+    def check(self, kind: str, then: str | None = None, running=()) -> Verdict:
         """Whether a `kind` job fits now. With `then`, the kind of job it may continue in the
-        same pass (a decision's retry or answer), whose cost counts too."""
+        same pass (a decision's retry or answer), whose cost counts too. `running`: the Claude
+        jobs still running, as (label, kind, then) each (#50), whose costs count first."""
         label = f'{kind} (and the {then} it may continue)' if then else kind
         try:
             knob = self.knob()
         except (OSError, ValueError) as e:
             return Verdict(False, UNREADABLE, f'gate.json is unreadable ({e}): no Claude job '
                            'starts until it is fixed or removed')
+        usage, wait = self.usage()
+        if usage is None:
+            return wait
         try:
-            usage = self.reader.read()
-        except UsageError as e:
-            return Verdict(False, UNREADABLE, f'Claude usage is unreadable ({e}): no Claude job '
-                           'starts; trying again next pass')
-        try:
-            cost = self.book.expected(kind)
-            if then:
-                cost = cost + self.book.expected(then)
+            cost, others = self.cost(kind, then), self.running(running)
         except (OSError, ValueError) as e:
             return Verdict(False, UNREADABLE, f'usage.jsonl is unreadable ({e}): no Claude job '
                            'starts until it is fixed or removed')
-        return decide(usage, label, cost, knob, self.clock())
+        return decide(usage, label, cost, knob, self.clock(), others)
 
-    def measured(self, kind: str, jobs: list, before: Usage) -> None:
-        """Records usage after a Claude job pass, against `before` (read by its check)."""
+    def usage(self) -> tuple[Usage | None, Verdict | None]:
+        """The reading a check decides on (the endpoint asked if the budget allows), or None and
+        the wait: until the endpoint may be asked again, or the next pass when it may be now."""
         try:
-            after, error = self.reader.read(), None
-        except UsageError as e:
-            after, error = None, str(e)
-        self.book.record(kind, jobs, before, after, error)
+            self.reader.read()
+        except UsageError:
+            pass   # kept in the reading
+        r, now, next_at = self.reader.reading(), self.clock(), self.reader.next_call_at()
+        then = f'until the next read at {_local(next_at)}' if next_at else 'trying again next pass'
+        failed = f' (the latest read failed: {r.error})' if r is not None and r.error else ''
+        if r is None or r.value is None:
+            text = (f'Claude usage is unreadable ({r.error if r else "not read yet"}): no Claude '
+                    f'job starts, {then}')
+        elif self.ended is not None and r.at < self.ended:
+            text = (f'Claude usage was last read at {_local(r.at)}, before the last Claude job '
+                    f'ended{failed}: no Claude job starts, {then}')
+        elif now - r.at > STALE_AFTER:
+            text = (f'Claude usage was last read at {_local(r.at)}, over '
+                    f'{STALE_AFTER.total_seconds() / 60:g} minutes ago{failed}: no Claude job '
+                    f'starts, {then}')
+        else:
+            return r.value, None
+        return None, Verdict(False, UNREADABLE, text, next_at)
+
+    def job_ended(self, job_id: str | None = None) -> datetime.datetime:
+        """A Claude job's thread has ended (now): the next check decides only on a reading taken
+        after it. `measured` says so itself; the runner says so for a thread that ended outside
+        a measured pass (a dead runner's job settled, a decision whose retry never ran). With
+        `job_id`, a job already told is told nothing again: both lanes may see a dead runner's
+        Opus fallback review end (PR 67's review 2, F2), and a second telling would discard a
+        reading taken since the first. Returns when this job's end counts from."""
+        with self._ended_lock:
+            if job_id is not None:
+                if job_id in self._told:
+                    return self._told[job_id]
+                self._told[job_id] = self.clock()
+                self.ended = self._told[job_id]
+                return self.ended
+            self.ended = self.clock()
+            return self.ended
+
+    def after_wait(self) -> float:
+        """How long the after-job read will wait for the endpoint's budget, in seconds."""
+        return self.reader.wait_seconds()
+
+    def measured(self, kind: str, jobs: list, before: Usage,
+                 shared_with: list | None = None) -> None:
+        """Records usage after a Claude job pass, against `before` (read by its check).
+        `shared_with`: the other Claude jobs that ran meanwhile (#50), so it teaches nothing. The read
+        after it waits for the endpoint's budget (a job under 5 minutes), since the next check
+        waits for that reading anyway; a reading another caller took after the job ended serves
+        too. A failed read is recorded with its error and no `after`."""
+        # Its own end, not `self.ended`: the other lane may say a job ended while this one
+        # reads, and this job's reading is still its own (PR 67's review 2, a nit).
+        ended = self.job_ended()
+        wait = self.reader.wait_seconds()
+        if wait > 0:
+            if self.sleep is None:
+                from .run import wall_sleep
+                self.sleep = wall_sleep
+            self.sleep(wait)
+        try:
+            self.reader.read()
+        except UsageError:
+            pass
+        r = self.reader.reading()
+        if r is not None and r.value is not None and r.at >= ended:
+            after, error = r.value, None
+        else:
+            after, error = None, (r.error if r and r.error else 'no reading after the job')
+        self.book.record(kind, jobs, before, after, error, shared_with)

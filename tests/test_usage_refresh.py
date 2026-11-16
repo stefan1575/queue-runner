@@ -1,6 +1,7 @@
 """Refresh on the Usage card (ticket 42): the page asks through control.json's `usage`, the
-runner's publisher reads both plans on its next tick (no more than once a minute) and says in the
-snapshot which request it acted on. Usage is played by fakes: nothing calls Anthropic or OpenAI."""
+runner's publisher takes it on its next tick and says in the snapshot which request it acted on.
+Claude's endpoint is asked only when its 5-minute budget allows (issue 66). Usage is played by
+stubs: nothing calls Anthropic or OpenAI."""
 import datetime
 import json
 import os
@@ -12,8 +13,8 @@ from dashboard.serve import App, Refused, apply_control
 from queue_runner import control, snapshot
 from queue_runner.config import Config, Repo
 from queue_runner.sol import Limits as SolLimits, LimitWindow as SolWindow
-from queue_runner.usage import Usage, UsageError, Window
-from tests.fakes import FakeUsage
+from queue_runner.usage import CachedUsage
+from tests.fakes import StubEndpoint
 
 UTC = datetime.timezone.utc
 NOW = datetime.datetime(2026, 11, 16, 5, 0, tzinfo=UTC)
@@ -76,6 +77,9 @@ class ControlTest(unittest.TestCase):
 
 
 class RunnerTest(unittest.TestCase):
+    """Claude is read through the gate's own reader (`usage.CachedUsage`) on a stub endpoint, so
+    Refresh shares its 5-minute budget (issue 66); ChatGPT is read on every Refresh taken."""
+
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
@@ -84,11 +88,13 @@ class RunnerTest(unittest.TestCase):
         self.config = Config(repos=[QR], state_dir=self.state, log_dir=os.path.join(tmp.name, 'logs'))
         self.clock = Clock()
         self.calls = snapshot.Calls(self.clock)
-        self.usage = FakeUsage(Usage(Window(38, None), Window(46, None), resets=2))
+        self.endpoint = StubEndpoint(self.clock)
+        self.claude = CachedUsage(self.endpoint.oauth(tmp.name), self.clock,
+                                  on_call=lambda ok, note: self.calls.record('claude_usage', ok, note))
         self.sol_reads = 0
         self.snaps = snapshot.Snapshots(
             self.config, calls=self.calls, clock=self.clock, info=snapshot.RunnerInfo(1, NOW, None),
-            claude=snapshot.Watch(self.usage.read, self.calls, 'claude_usage', self.clock),
+            claude=self.claude,
             sol=snapshot.Watch(self.sol, self.calls, 'sol_usage', self.clock, timed=True))
 
     def sol(self):
@@ -99,50 +105,69 @@ class RunnerTest(unittest.TestCase):
         App(self.state, clock=lambda: iso(at or self.clock())).write_control({'usage': 'refresh'})
 
     def reads(self):
-        return self.usage.count, self.sol_reads
+        return len(self.endpoint.calls), self.sol_reads
 
-    def test_a_refresh_reads_both_plans_on_the_next_tick_and_says_which_request_it_took(self):
+    def test_a_refresh_inside_claudes_budget_is_taken_and_gives_back_its_reading(self):
+        first = self.clock()
         self.snaps.build(fresh=True)                # the first read, as due
-        self.clock.tick(minutes=2)                  # READ_EVERY is far off
+        self.clock.tick(minutes=2)
         asked = self.clock()
         self.ask()
         self.snaps.build(fresh=False)               # after a pass: nothing read
         self.assertEqual(self.reads(), (1, 1))
         self.clock.tick(seconds=20)
         snap = self.snaps.build(fresh=True)
-        self.assertEqual(self.reads(), (2, 2))
+        self.assertEqual(self.reads(), (1, 2))      # ChatGPT read, Claude's endpoint not asked
         self.assertEqual(snap['usage_refresh'], {'asked_at': iso(asked), 'done_at': iso(self.clock())})
-        self.assertEqual([p['read_at'] for p in snap['usage']], [iso(self.clock())] * 2)
-        self.assertEqual([p['resets'] for p in snap['usage']], [{'available': 2}, {'available': 3}])
+        claude, sol = snap['usage']
+        self.assertEqual((claude['read_at'], claude['error'], claude['next_read_at']),
+                         (iso(first), None, iso(first + datetime.timedelta(minutes=5))))
+        self.assertEqual((sol['read_at'], sol['next_read_at']), (iso(self.clock()), None))
+        self.assertEqual([p['resets'] for p in snap['usage']], [None, {'available': 3}])
         self.clock.tick(seconds=30)
-        self.snaps.build(fresh=True)                # the same request isn't read again
+        self.snaps.build(fresh=True)                # the same request isn't taken again
+        self.assertEqual(self.reads(), (1, 2))
+
+    def test_a_refresh_outside_claudes_budget_reads_it_as_now(self):
+        self.endpoint.limit = 0
+        self.claude.every = datetime.timedelta(minutes=1)   # a budget shorter than READ_EVERY
+        self.snaps.build(fresh=True)
+        self.clock.tick(minutes=2)
+        self.ask()
+        snap = self.snaps.build(fresh=True)
         self.assertEqual(self.reads(), (2, 2))
+        self.assertEqual(snap['usage'][0]['read_at'], iso(self.clock()))
 
-    def test_no_more_than_one_forced_read_a_minute(self):
+    def test_each_refresh_is_taken_and_none_asks_claude_inside_its_budget(self):
         self.snaps.build(fresh=True)
-        self.clock.tick(minutes=2)
-        self.ask()
-        self.snaps.build(fresh=True)
-        self.clock.tick(seconds=10)
-        again = self.clock()
-        self.ask()
-        snap = self.snaps.build(fresh=True)
-        self.assertEqual(self.reads(), (2, 2))      # it waits
-        self.assertNotEqual(snap['usage_refresh']['asked_at'], iso(again))
-        self.clock.tick(seconds=50)
-        snap = self.snaps.build(fresh=True)
-        self.assertEqual(self.reads(), (3, 3))
-        self.assertEqual(snap['usage_refresh']['asked_at'], iso(again))
+        for _ in range(3):
+            self.clock.tick(seconds=40)
+            again = self.clock()
+            self.ask()
+            snap = self.snaps.build(fresh=True)
+            self.assertEqual(snap['usage_refresh']['asked_at'], iso(again))
+        self.assertEqual(self.reads(), (1, 4))
+        self.assertEqual([s for _, s in self.endpoint.calls], [200])
 
-    def test_a_failed_read_is_said_in_the_plan_and_the_request_counts_as_taken(self):
-        self.usage.reads = [self.usage.reads[0], UsageError('the usage endpoint answered HTTP 401')]
+    def test_a_failed_login_is_said_in_the_plan_and_the_request_counts_as_taken(self):
         first = self.snaps.build(fresh=True)['usage'][0]['read_at']
-        self.clock.tick(minutes=2)
+        self.clock.tick(minutes=5)
+        self.endpoint.fail = 401
         self.ask()
         snap = self.snaps.build(fresh=True)
         claude = snap['usage'][0]
         self.assertEqual((claude['read_at'], claude['error']), (first, 'The usage endpoint answered HTTP 401.'))
-        self.assertEqual(snap['usage_refresh']['asked_at'], iso(NOW + datetime.timedelta(minutes=2)))
+        self.assertEqual(snap['usage_refresh']['asked_at'], iso(NOW + datetime.timedelta(minutes=5)))
+
+    def test_a_429_beside_a_recent_reading_is_no_error(self):
+        first = self.snaps.build(fresh=True)['usage'][0]['read_at']
+        self.clock.tick(minutes=5)
+        self.endpoint.fail = 429
+        self.ask()
+        snap = self.snaps.build(fresh=True)
+        claude = snap['usage'][0]
+        self.assertEqual((claude['read_at'], claude['error']), (first, None))
+        self.assertEqual(claude['next_read_at'], iso(self.clock() + datetime.timedelta(minutes=5)))
 
     def test_a_request_left_from_before_the_runner_started_is_taken_by_its_first_read(self):
         self.ask(NOW - datetime.timedelta(hours=1))
@@ -168,15 +193,28 @@ class RunnerTest(unittest.TestCase):
 class SampleTest(unittest.TestCase):
     T = datetime.datetime(2026, 11, 16, 13, 0, tzinfo=datetime.timezone(datetime.timedelta(hours=8)))
 
-    def test_the_pretend_runner_reads_both_plans_a_few_seconds_after_refresh_is_asked(self):
+    def test_the_pretend_runner_takes_a_refresh_a_few_seconds_after_it_is_asked(self):
         asked = {'written_at': self.T.isoformat(), 'usage': {'refresh_at': self.T.isoformat()}}
         early = sample.build('busy', base=self.T, now=self.T + datetime.timedelta(seconds=1), control=asked)
         self.assertIsNone(early['usage_refresh'])
         later = sample.build('busy', base=self.T, now=self.T + datetime.timedelta(seconds=sample.ACK_SECONDS),
                              control=asked)
         self.assertEqual(later['usage_refresh']['asked_at'], self.T.isoformat())
-        for p in later['usage']:
-            self.assertGreaterEqual(datetime.datetime.fromisoformat(p['read_at']), self.T)
+        claude, sol = later['usage']
+        self.assertGreaterEqual(datetime.datetime.fromisoformat(sol['read_at']), self.T)
+        # Claude was read a minute before: inside its 5-minute budget it keeps that reading.
+        self.assertLess(datetime.datetime.fromisoformat(claude['read_at']), self.T)
+        self.assertGreater(datetime.datetime.fromisoformat(claude['next_read_at']), self.T)
+
+    def test_outside_claudes_budget_the_pretend_runner_reads_it_too(self):
+        at = self.T + datetime.timedelta(minutes=6)
+        asked = {'written_at': at.isoformat(), 'usage': {'refresh_at': at.isoformat()}}
+        snap = sample.build('busy', base=self.T, now=at + datetime.timedelta(seconds=sample.ACK_SECONDS),
+                            control=asked)
+        claude = snap['usage'][0]
+        self.assertGreaterEqual(datetime.datetime.fromisoformat(claude['read_at']), at)
+        self.assertEqual(datetime.datetime.fromisoformat(claude['next_read_at']),
+                         datetime.datetime.fromisoformat(claude['read_at']) + datetime.timedelta(minutes=5))
 
     def test_one_plan_has_reset_credits_and_one_has_none(self):
         resets = [p['resets'] for p in sample.build('busy')['usage']]

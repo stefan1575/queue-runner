@@ -1,11 +1,14 @@
-"""The run loop: two lanes side by side, one Claude job and one Sol job at a time.
+"""The run loop: two lanes side by side, one Claude job per working repo and one Sol job at a
+time.
 
-The Claude lane settles what earlier passes left open, then starts at most one job: a decision on a
-case the flow doesn't cover (`decisions.py`), then a repo's live steps after merges (`live.py`),
-then a fix round on a PR the runner found blocking (`fix.py`), before any new build, so open PRs
-finish first. It
-blocks on `t3 thread start --wait` while the job runs. The Sol lane (`review.py`) reviews at most one
-PR a pass, under `<state_dir>/sol.lock`. A second runner process is kept out by a lock on
+The Claude lane settles what earlier passes left open, then chooses each working repo's job (#50:
+the repos run side by side, each in a worker thread of its own that blocks on `t3 thread start
+--wait` while its job runs): a decision on a case the flow doesn't cover (`decisions.py`), then
+the repo's live steps after merges (`live.py`), then a fix round on a PR the runner found blocking
+(`fix.py`), before any new build, so open PRs finish first. The usage gate lets each in only
+when it fits beside the jobs still running, the repo whose work has waited longest first. The
+lane plans again whenever a job ends. The Sol lane (`review.py`) reviews at most one PR a pass,
+under `<state_dir>/sol.lock`. A second runner process is kept out by a lock on
 `<state_dir>/runner.lock`.
 """
 import datetime
@@ -13,29 +16,33 @@ import os
 import threading
 import time
 import traceback
+from dataclasses import dataclass, field, replace
 
 from . import control
 from .brief import build_brief
-from .config import Config, Repo, set_build_order, set_stopped, stopped, toml_order, working
+from .config import Config, Repo, set_stopped, stopped, working
 from .decisions import Decider
 from .fix import Fixer, fix_branch, fix_title
 from .stops import CONFLICT
-from .gate import CLAUDE_KINDS
+from .fallback import OPUS_KINDS
+from .gate import CLAUDE_KINDS, FALLBACK_REVIEW
 from . import limits as lim
 from .live import LiveSteps
 from .lock import RunnerBusy, runner_lock  # noqa: F401 (the CLI takes them from here)
 from .merge import Merger
 from .picker import BuildJob, pick
 from .review import Reviewer
+from .snapshot import Wait
 from .state import NOT_SENT, NOT_STARTED, RESTART_FAILED, USAGE_LIMIT, Job, JobLog, when
 from .stops import Stopper
-from .t3 import T3Error, Thread, settle_quietly
+from .t3 import T3Error, Thread, find_job_thread, settle_quietly
 from .toast import NoToaster
 from .wake import NoWaker
 
-# What a pass did: started (a job ran to its end), busy (a Claude job is still running from an
-# earlier runner, so none was started), idle (nothing to start), gated (the usage gate held the
-# chosen Claude job back: `Runner.gate_until` says when to look again).
+# What a pass did: started (it started jobs), busy (a Claude job is still running from an earlier
+# runner, so none was started where it runs, and nothing elsewhere), idle (nothing to start),
+# gated (the usage gate held the chosen Claude jobs back: `Runner.gate_until` says when to look
+# again).
 STARTED, BUSY, IDLE, GATED = 'started', 'busy', 'idle', 'gated'
 STOPPED = 'stopped'   # Stefan stopped the lane (`control.py`), or control.json is unreadable
 RESTART = 'restart'   # run_forever's end when the runner's own code moved (`restart.py`)
@@ -74,6 +81,30 @@ def _quote(text: str) -> str:
     return '\n'.join('> ' + line if line else '>' for line in _clip(text, 1500).splitlines())
 
 
+@dataclass(frozen=True)
+class Start:
+    """A repo's Claude job, chosen and not yet started: `kind` the gate's (None for a decision
+    Stefan's own words answer, which starts no thread), `then` the kind of job a decision may
+    continue in the same pass, `run` what runs it, `label` what the log calls it, and `usage`
+    the gate's read when it let the job in (what its cost is measured against)."""
+    repo: str
+    kind: str | None
+    then: str | None
+    run: object
+    label: str
+    usage: object = None
+
+
+@dataclass(eq=False)
+class Worker:
+    """A repo's Claude job running in its own thread (#50): `did` what its run returned, and
+    `shared` the other Claude jobs that ran beside it (so its usage teaches nothing)."""
+    start: Start
+    thread: threading.Thread | None = None
+    did: str | None = None
+    shared: set = field(default_factory=set)
+
+
 class Runner:
     def __init__(self, config: Config, *, github, t3, git, out, log_line, sol=None,
                  toaster=None, gate=None, limits=None, now=None, waker=None, self_update=None,
@@ -97,7 +128,31 @@ class Runner:
         self.now = now or (lambda: datetime.datetime.now(datetime.timezone.utc))
         self.gate = gate   # gate.Gate; None starts every Claude job (tests, the live checks)
         self.gate_until: datetime.datetime | None = None
-        self._last_gate: str | None = None
+        # What the gate last said, per repo (None: the account's usage limit), so it's said once.
+        self._last_gate: dict[str | None, str] = {}
+        # The Claude jobs running in this runner's workers, one per repo (#50), and an event set
+        # whenever one ends, so the lane plans again; the jobs a dead runner left running
+        # (`settle`); and in the run loop, when each repo whose job started no thread may be
+        # tried again.
+        self._workers: dict[str, Worker] = {}
+        self._workers_lock = threading.Lock()
+        self._ended = threading.Event()
+        self._busy: dict[str, tuple[str, str]] = {}
+        # The jobs the gate let in this pass and not yet in a worker, and the Sol lane's Opus
+        # review while it runs (label: the Claude jobs it ran beside), so each lane's gate counts
+        # the other's Claude jobs (PR #74's review 1, F1). `_gate_lock` keeps one lane's check
+        # and its admission together, so neither lets a job in unseen by the other.
+        self._admitted: list[tuple[str, str, str | None]] = []
+        self._reviews: dict[str, set] = {}
+        self._gate_lock = threading.Lock()
+        self._rests = False
+        self._rest: dict[str, datetime.datetime] = {}
+        # Each repo's wait as the last pass left it (a snapshot.Wait), for the Repositories card.
+        self.repo_waits: dict[str, Wait] = {}
+        self._seen_running: set[str] = set()   # waiting jobs a pass saw running again (settle)
+        # A dead runner's Opus fallback review still running in T3: the Claude lane starts
+        # nothing beside it until it ends (PR 67's review 2, F2; `_fallback_runs`).
+        self._orphan_review = False
         self.out, self.log_line = out, log_line
         self.jobs = JobLog(os.path.join(config.state_dir, 'jobs.jsonl'))
         self.repos = {r.name: r for r in config.repos}
@@ -111,7 +166,8 @@ class Runner:
         self.reviewer = Reviewer(config, github=github, git=git, sol=sol, jobs=self.jobs,
                                  say=self.say, toaster=self.toaster, deps=deps,
                                  fallback=OpusFallback(config, t3=t3, gate=gate,
-                                                       effort=self.effort, say=self.say),
+                                                       effort=self.effort, say=self.say,
+                                                       beside=self),
                                  t3=t3) if sol is not None else None
         self.fixer = Fixer(config, github=github, git=git, jobs=self.jobs)
         stopper = Stopper(config, github=github, jobs=self.jobs, say=self.say,
@@ -121,6 +177,10 @@ class Runner:
         from .ask_threads import AskThreads   # an ask decided in a T3 thread (ticket 35)
         self.asking = AskThreads(config, github=github, t3=t3, jobs=self.jobs, say=self.say,
                                  decider=self.decider)
+        from .prefixes import Prefixes   # "Decide: " and "Answer: " on threads that need him (71)
+        self.prefixes = Prefixes(config, t3=t3, jobs=self.jobs, say=self.say)
+        from .waiting import GitHubAnswers   # a waiting thread's question answered on GitHub
+        self.answers = GitHubAnswers(config, github=github, jobs=self.jobs, say=self.say)
         self.live = LiveSteps(config, github=github, git=git, t3=t3, jobs=self.jobs,
                               say=self.say, stopper=stopper,
                               merger=Merger(config, github=github, git=git, jobs=self.jobs,
@@ -142,12 +202,12 @@ class Runner:
         # The work (ticket 32): the queues, issues, features and PRs, read with the Inbox.
         from .work import Reader as WorkReader
         self.work = WorkReader(config, github, git, self.jobs, clock=self.now)
-        # What each lane last said about its switch (`control.py`), so it's said once.
+        # What each lane last said about its switch (`control.py`), so it's said once; a lock, as
+        # the Claude lane's workers ask it too.
         self._said_switch: dict[str, str | None] = {}
-        # The build order (ticket 33): what was last said about it, and a lock, as both lanes
-        # take it up.
+        self._switch_lock = threading.Lock()
+        # The repos Stefan stopped (ticket 37): a lock, as both lanes take them up.
         self._order_lock = threading.Lock()
-        self._said_order: str | None = None
         self._said_unknown: str | None = None   # control.json stops a repo not served (37)
 
     def say(self, line: str) -> None:
@@ -158,100 +218,322 @@ class Runner:
     # --- one pass -------------------------------------------------------------------------
 
     def run_pass(self) -> str:
-        job = self.plan()
-        if not callable(job):
-            from .snapshot import Wait
-            waits = job == GATED
-            self.claude_wait = Wait(self.gate_until, self._last_gate or '') if waits else None
-            return job
-        self.claude_wait = None
-        return job()
+        """One pass of the Claude lane, waiting for the jobs it started (`--once`, the tests):
+        STARTED if any of them ran a thread, IDLE if none did, or what `plan` said when it
+        started none."""
+        did, workers = self.dispatch()
+        for w in workers:
+            w.thread.join()
+        if workers:
+            return STARTED if any(w.did == STARTED for w in workers) else IDLE
+        return did
+
+    def dispatch(self):
+        """Plans, then starts each job `plan` let in, each in a worker of its own (#50): (what
+        the pass did, the workers it started). It returns once they've started."""
+        starts = self.plan()
+        if not isinstance(starts, list):
+            return starts, []
+        return STARTED, [self._launch(s) for s in starts]
 
     def plan(self):
-        """Settles, then chooses this pass's Claude job: a callable that runs it, or BUSY, IDLE
-        or GATED. A decision comes first, then a fix round, then a build."""
+        """Settles, then chooses each working repo's Claude job (a repo with one running gets
+        none: one Claude job per repo, #50) and asks the gate whether each fits beside the jobs
+        still running: the Starts it lets in, in the order they're let in, or BUSY, IDLE, GATED
+        or STOPPED when none. Starts nothing itself."""
         self.gate_until = None   # a wait from an earlier pass is that pass's
-        if self.settle() == BUSY:
+        busy = self.settle()
+        # Not a job: titles are kept right while a dead runner's job runs on, and while the
+        # lane is stopped (issue #71).
+        self.prefixes.sync()
+        self.take_stops()
+        if self._orphan_review:   # a dead runner's Opus review runs on: nothing starts beside it
+            self.repo_waits, self.claude_wait = {}, None
             return BUSY
-        self.take_order()
         if self.held('claude'):
+            self.repo_waits, self.claude_wait = {}, None
             return STOPPED
         self.asking.read_answers()   # an ask thread's answer, before anything is chosen (35)
-        chosen = self.choose()
-        return self._gated(*chosen) if isinstance(chosen, tuple) else chosen
+        self.answers.read()   # a waiting thread's question answered on GitHub (71)
+        self.prefixes.sync()   # an answer just read takes its thread's prefix off (71)
+        taken = set(busy) | set(self._alive())
+        chosen = self.choose(skip=taken)
+        if not isinstance(chosen, list):
+            self.repo_waits = {}
+            self.claude_wait = (Wait(self.gate_until, self._last_gate.get(None) or '')
+                                if chosen == GATED else None)
+            return BUSY if chosen == IDLE and busy else chosen
+        starts = self._admit(chosen, busy)
+        if starts:
+            return starts
+        return GATED if self.repo_waits else BUSY if busy else IDLE
 
-    def choose(self):
-        """(kind, then, a callable that runs it), or IDLE, for the gate (a decision, a repo's
-        live steps, a fix round, a build, in that order): `kind` None for a
-        decision Stefan's own words answer, which starts no thread; `then` the kind of job a
-        decision may continue in the same pass (a retry or an answer). A job cut off by a usage
-        limit comes before all of them, and until it may resume nothing else starts: the limit
-        is the whole account's."""
+    def choose(self, skip=frozenset()):
+        """Each working repo's Claude job, but those in `skip` (one is running there): a list
+        of Starts, the repo whose work has waited longest first (`_waited`), or IDLE when none
+        has one, or GATED while a job a usage limit cut off may not resume yet (the limit is the
+        whole account's: nothing starts in any repo). In each repo: a job a limit cut off, an
+        ask thread Stefan asked for, a decision (none needs a thread when Stefan's own words
+        answer it: `kind` None), the repo's live steps, a fix round, a build, in that order."""
         off = stopped(self.config)   # a stopped repo's limited job waits for its Resume (37)
-        if limited := [j for j in self.jobs.limited_jobs() if j.repo not in off]:
-            old = limited[0]
-            at = _when(old.resume_at) if old.resume_at else self.now()
-            if self.now() < at:
-                self.gate_until = at
-                text = (f'{self._name(old)} was cut off by a usage limit; it resumes after '
-                        f'{at.astimezone():%Y-%m-%d %H:%M}')
-                if text != self._last_gate:
-                    self.say(f'Claude lane waits: {text}')
-                self._last_gate = text
-                return GATED
-            return old.kind, None, lambda: self.recover(old)
-        if ask := self.asking.next(control.read(self.config.state_dir)):   # Stefan's click (35)
-            return 'decision', None, lambda: self.asking.open(*ask)
-        if case := self.decider.next_case():
-            if self.decider.direct_answer(case):
-                return None, None, lambda: self.decider.run(case, self.continue_job)
-            then = case.about.kind if {'retry', 'answer'} & set(case.allowed) else None
-            return 'decision', then, lambda: self.decider.run(case, self.continue_job)
-        if live := self.live.next():
-            return 'live', None, lambda: self.live.run(*live)
-        if fix := self.next_fix():
-            return 'fix', None, lambda: self.run_fix(*fix)
-        for repo in working(self.config):
-            if not repo.github or repo.local_issues:
-                # No GitHub issues to pick from: a local-ticket repo (`tickets.py`) is only
-                # named by --dry-run.
-                continue
-            job = pick(repo, self.github, held=self.jobs.held_issues(repo.name))
-            if job is not None:
-                return 'build', None, lambda: self.run_build(job)
-        self.say('Nothing to start: no PR needs a fix round, and no repo has an unblocked '
-                 'ready-for-agent issue that isn\'t already being built or held.')
-        self.gate_until = self.live.wait_until   # a live run's limit: the wake task for it
-        return IDLE
-
-    def _gated(self, kind, then, run):
-        """The usage gate before a Claude job (`gate.py`): GATED, saying why and until when
-        (once, until that changes), or a callable that runs the job and records usage before
-        and after it."""
-        if kind is None or self.gate is None:
-            return run
-        verdict = self.gate.check(kind, then)
-        if not verdict.go:
-            self.gate_until = verdict.until
-            if verdict.text != self._last_gate:
-                self.say(f'Claude lane waits: {verdict.text}')
-            self._last_gate = verdict.text
+        limited = [j for j in self.jobs.limited_jobs() if j.repo not in off]
+        ahead = [j for j in limited if j.resume_at and self.now() < _when(j.resume_at)]
+        if ahead:
+            old = max(ahead, key=lambda j: _when(j.resume_at))
+            at = _when(old.resume_at)
+            self.gate_until = at
+            text = (f'{self._name(old)} was cut off by a usage limit; it resumes after '
+                    f'{at.astimezone():%Y-%m-%d %H:%M}')
+            if text != self._last_gate.get(None):
+                self.say(f'Claude lane waits: {text}')
+            self._last_gate = {None: text}
             return GATED
-        self._last_gate = None
-        self.say(f'Usage gate: {verdict.text}')
+        self._last_gate.pop(None, None)
+        switch = control.read(self.config.state_dir)
+        found, live_waits = [], []
+        for repo in working(self.config):
+            if repo.name in skip or self._resting(repo.name):
+                continue
+            start = self._choose_in(repo, limited, switch)
+            live_waits.append(self.live.wait_until)
+            if start is not None:
+                found.append(start)
+        if not found:
+            if not skip:
+                self.say('Nothing to start: no PR needs a fix round, and no repo has an '
+                         'unblocked ready-for-agent issue that isn\'t already being built or '
+                         'held.')
+            # a live run's limit: the wake task for it
+            self.gate_until = min(filter(None, live_waits), default=None)
+            return IDLE
+        order = [r.name for r in self.config.repos]
+        return sorted(found, key=lambda s: (self._waited(s.repo), order.index(s.repo)))
 
-        def measured():
-            since = len(self.jobs.jobs())
-            did = run()
-            new = [j for j in self.jobs.jobs()[since:] if j.kind in CLAUDE_KINDS]
-            if did == STARTED and new:   # a thread ran: what it cost teaches the next estimate
-                # (an ask's thread runs on with Stefan, so it teaches nothing: ticket 35)
-                # A decision that continued a build or fix counts as that job's cost, so a
-                # plain decision's estimate stays a decision's.
-                learned = next((j.kind for j in new if j.kind != 'decision'), kind)
-                self.gate.measured(learned, [j.id for j in new], verdict.usage)
-            return did
-        return measured
+    def _choose_in(self, repo: Repo, limited, switch):
+        """This repo's Claude job now, as a Start, or None."""
+        name, only = repo.name, (repo.name,)
+        self.live.wait_until = None
+        if mine := [j for j in limited if j.repo == name]:
+            old = mine[0]
+            return Start(name, old.kind, None, lambda: self.recover(old), self._name(old))
+        if ask := self.asking.next(switch, only=only):   # Stefan's click (35)
+            return Start(name, 'decision', None, lambda: self.asking.open(*ask),
+                         f'ask {name}#{ask[2].number}')
+        if answered := self.answers.next(repos=only):   # Stefan's reply on GitHub (71)
+            old, text, marks = answered
+            return Start(name, old.kind, None,
+                         lambda: self.continue_job(old, text, marks=marks), self._name(old))
+        if case := self.decider.next_case(repos=only):
+            label = f'decision {name}#{case.number}'
+            if self.decider.direct_answer(case):
+                return Start(name, None, None, lambda: self.decider.run(case, self.continue_job),
+                             label)
+            then = case.about.kind if {'retry', 'answer'} & set(case.allowed) else None
+            return Start(name, 'decision', then,
+                         lambda: self.decider.run(case, self.continue_job), label)
+        if live := self.live.next(repos=only):
+            return Start(name, 'live', None, lambda: self.live.run(*live), f'live {name}')
+        if fix := self.next_fix(repos=only):
+            return Start(name, 'fix', None, lambda: self.run_fix(*fix),
+                         f'fix {name}#{fix[1].number}')
+        if not repo.github or repo.local_issues:
+            # No GitHub issues to pick from: a local-ticket repo (`tickets.py`) is only named by
+            # --dry-run.
+            return None
+        job = pick(repo, self.github, held=self.jobs.held_issues(name))
+        if job is not None:
+            return Start(name, 'build', None, lambda: self.run_build(job),
+                         f'build {name}#{job.issue.number}')
+        return None
+
+    def _waited(self, repo: str) -> float:
+        """Since when the repo's work has waited for a Claude job: when its last one ended
+        (one that never reached a thread aside), as a timestamp, or 0 (the longest) if it has
+        had none. When
+        the gate has room for one more job, the repo that has waited longest gets it, so
+        neither starves (#50); config.toml's order breaks a tie."""
+        ended = [j.ended_at for j in self.jobs.jobs() if j.repo == repo
+                 and j.kind in CLAUDE_KINDS and j.ended_at
+                 and j.outcome not in (NOT_STARTED, NOT_SENT)]
+        return max((_when(t).timestamp() for t in ended), default=0.0)
+
+    def _admit(self, chosen, busy) -> list:
+        """The usage gate before each chosen job, in order (`gate.py`): a job starts only when
+        its expected cost fits after the cost of every Claude job still running and every one
+        let in before it this pass (#50). One that waits is said once per repo (until that
+        changes) and doesn't hold back a later repo's job that fits. The Sol lane's Opus review
+        counts among the jobs running, and holds off while this lane admits (`_gate_lock`)."""
+        with self._gate_lock:
+            with self._workers_lock:
+                self._admitted = []   # an earlier pass's are in their workers by now
+            return self._admit_locked(chosen, busy)
+
+    def _admit_locked(self, chosen, busy) -> list:
+        running = self._running(busy)
+        starts, waits = [], {}
+        for start in chosen:
+            if start.kind is None or self.gate is None:
+                starts.append(start)
+                continue
+            verdict = self.gate.check(start.kind, start.then, running=running)
+            if not verdict.go:
+                waits[start.repo] = Wait(verdict.until, verdict.text)
+                if verdict.until and (self.gate_until is None or verdict.until < self.gate_until):
+                    self.gate_until = verdict.until
+                if verdict.text != self._last_gate.get(start.repo):
+                    self.say(f'Claude lane waits on {start.repo}: {verdict.text}')
+                self._last_gate[start.repo] = verdict.text
+                continue
+            self._last_gate.pop(start.repo, None)
+            self.say(f'Usage gate, {start.repo}: {verdict.text}')
+            running = running + [(start.label, start.kind, start.then)]
+            with self._workers_lock:
+                self._admitted.append((start.label, start.kind, start.then))
+            starts.append(replace(start, usage=verdict.usage))
+        self.repo_waits = waits
+        first = next(iter(waits.values()), None)
+        self.claude_wait = first if not starts else None
+        return starts
+
+    def _running(self, busy) -> list:
+        """The Claude jobs still running, as the gate counts them: (label, kind, then) each,
+        this runner's workers (and those let in and not yet started), the jobs a dead runner
+        left running (`settle`), and the Sol lane's Opus review: the one it let in, or one open
+        in the job log (a dead runner's, before the Sol lane settles it)."""
+        jobs = self._claude_jobs(busy)
+        with self._workers_lock:
+            reviews = list(self._reviews)
+        reviews += [label for label in self._open_reviews() if label not in reviews]
+        return jobs + [(label, FALLBACK_REVIEW, None) for label in reviews]
+
+    def _claude_jobs(self, busy) -> list:
+        """The Claude lane's own jobs running, as (label, kind, then) each: its workers, those
+        let in and not yet in one, and a dead runner's (`busy`)."""
+        with self._workers_lock:
+            mine = [(w.start.label, w.start.kind, w.start.then)
+                    for w in self._workers.values() if w.start.kind]
+            mine += [a for a in self._admitted if a[0] not in {m[0] for m in mine}]
+        return mine + [(label, kind, None) for label, kind in busy.values()
+                       if kind in CLAUDE_KINDS]
+
+    def _open_reviews(self) -> list[str]:
+        """The Opus reviews open in the job log, by label (`review <repo>#<PR>`)."""
+        from .fallback import OPUS_KINDS, gate_label
+        return [gate_label(j.repo, j.issue) for j in self.jobs.open_jobs()
+                if j.kind == 'review' and j.reviewer in OPUS_KINDS]
+
+    # --- the Sol lane's Opus review, beside this lane's jobs (`fallback.OpusFallback`) ------
+
+    @property
+    def gate_lock(self) -> threading.Lock:
+        return self._gate_lock
+
+    def claude_jobs(self) -> list:
+        """What an Opus review's gate counts: the Claude lane's jobs running now."""
+        return self._claude_jobs(self._busy)
+
+    def review_began(self, label: str) -> None:
+        """The Sol lane let an Opus review in: from now each lane's jobs count the other's
+        spending (`shared_with`)."""
+        with self._workers_lock:
+            shared = {w.start.label for w in self._workers.values()}
+            shared.update(label for label, _ in self._busy.values())
+            for w in self._workers.values():
+                w.shared.add(label)
+            self._reviews[label] = shared
+
+    def review_shared(self, label: str) -> list[str]:
+        """The Claude jobs that ran beside the Opus review `label` so far, sorted."""
+        with self._workers_lock:
+            return sorted(self._reviews.get(label, ()))
+
+    def review_ended(self, label: str) -> None:
+        with self._workers_lock:
+            self._reviews.pop(label, None)
+
+    # --- workers: one Claude job per repo at once (#50) -------------------------------------
+
+    def _alive(self) -> list[str]:
+        """The repos whose Claude job is running in one of this runner's workers."""
+        with self._workers_lock:
+            return list(self._workers)
+
+    def _resting(self, repo: str) -> bool:
+        """In the run loop, a repo whose last job started no thread rests `poll_seconds` before
+        it's tried again (as the one lane paused after such a pass), while the others go on."""
+        until = self._rest.get(repo)
+        return until is not None and self.now() < until
+
+    def _launch(self, start: 'Start') -> 'Worker':
+        w = Worker(start)
+        w.shared.update(self._open_reviews())   # an Opus review open in the job log
+        with self._workers_lock:
+            for other in self._workers.values():   # each counts the other's spending
+                other.shared.add(start.label)
+                w.shared.add(other.start.label)
+            w.shared.update(label for label, _ in self._busy.values())
+            for label, shared in self._reviews.items():   # and the Sol lane's Opus review's
+                shared.add(start.label)
+                w.shared.add(label)
+            self._admitted = [a for a in self._admitted if a[0] != start.label]
+            self._workers[start.repo] = w
+        w.thread = threading.Thread(target=self._work, args=(w,), daemon=True,
+                                    name=f'claude-{start.repo}')
+        w.thread.start()
+        return w
+
+    def _work(self, w: 'Worker') -> None:
+        """A worker's thread: runs its job, records what it cost (a pass that ran beside another
+        Claude job teaches nothing: `shared_with`), and says it ended."""
+        start = w.start
+        since = len(self.jobs.jobs())
+        try:
+            w.did = start.run()
+        except Exception:
+            self.log_line(f'{start.label}: the job failed:\n' + traceback.format_exc())
+            w.did = IDLE
+        try:
+            new = [j for j in self.jobs.jobs()[since:]
+                   if j.kind in CLAUDE_KINDS and j.repo == start.repo]
+            if self.gate is not None and start.usage is not None and w.did == STARTED and new:
+                # A thread ran: what it cost teaches the next estimate (an ask's thread runs on
+                # with Stefan, so it teaches nothing: ticket 35). A decision that continued a
+                # build or fix counts as that job's cost, so a plain decision's stays a
+                # decision's.
+                learned = next((j.kind for j in new if j.kind != 'decision'), start.kind)
+                if (wait := self.gate.after_wait()) > 0:   # one call every 5 minutes (issue 66)
+                    at = self.now() + datetime.timedelta(seconds=wait)
+                    self.say(f"Reading Claude's usage after the job at {at.astimezone():%H:%M:%S}"
+                             f' ({start.label}): the usage endpoint is asked at most once every '
+                             '5 minutes')
+                with self._workers_lock:
+                    shared = sorted(w.shared)
+                self.gate.measured(learned, [j.id for j in new], start.usage,
+                                   shared_with=shared or None)
+            elif (self.gate is not None and start.usage is not None
+                  and any(j.thread_id and j.outcome != NOT_SENT for j in new)):
+                # A thread ran though the pass started nothing (a decision whose retry never
+                # reached its job): what it spent isn't learned, but no reading before it serves.
+                self.gate.job_ended()
+        except Exception:
+            self.log_line(f'{start.label}: recording its usage failed:\n'
+                          + traceback.format_exc())
+        finally:
+            with self._workers_lock:
+                if self._workers.get(start.repo) is w:
+                    del self._workers[start.repo]
+            if self._rests and w.did != STARTED:
+                self._rest[start.repo] = self.now() + datetime.timedelta(
+                    seconds=self.config.poll_seconds)
+            self._ended.set()
+
+    # --- the switch ----------------------------------------------------------------------
+
+    def _thread_ended(self) -> None:
+        """A Claude job's thread was seen to end outside a measured pass (`settle`): the next
+        check waits for a usage reading taken after now (PR 67's review 1, F1)."""
+        if self.gate is not None:
+            self.gate.job_ended()
 
     def held(self, lane: str) -> bool:
         """Whether Stefan stopped `lane` (control.json, read now), or control.json is unreadable:
@@ -263,38 +545,28 @@ class Runner:
             text = control.stopped_text(lane)
         else:
             text = None
-        said = self._said_switch.get(lane)
-        if text is not None and text != said:
-            self.say(text)
-        elif text is None and said is not None:
-            self.say(f'The {control.NAMES[lane]} lane runs again: Stefan resumed it')
-        self._said_switch[lane] = text
+        with self._switch_lock:
+            said = self._said_switch.get(lane)
+            if text is not None and text != said:
+                self.say(text)
+            elif text is None and said is not None:
+                self.say(f'The {control.NAMES[lane]} lane runs again: Stefan resumed it')
+            self._said_switch[lane] = text
         return text is not None
 
-    def take_order(self) -> None:
-        """Goes through the repos in Stefan's build order from now (control.json's
-        `repo_order`, read now), or config.toml's when his doesn't name each served repo once.
-        Each lane calls it at the start of its pass, so a job already running goes on; what's
-        said is said once, and again when it changes."""
+    def take_stops(self) -> None:
+        """The repos Stefan stopped (ticket 37), read now from control.json: from then on every
+        part that chooses work goes through `working`, which leaves them out. Each lane calls it
+        at the start of its pass, so a job already running goes on. Each change is said once,
+        and a name that isn't served once. (control.json's old `repo_order` isn't read: #50.)"""
         switch = control.read(self.config.state_dir)
         if switch.error is not None:   # nothing starts until it's fixed: `held` says so
             return
-        with self._order_lock:
-            repos, why = control.ordered(toml_order(self.config), switch.order)
-            changed = [r.name for r in repos] != [r.name for r in self.config.repos]
-            if changed:
-                set_build_order(self.config, repos)
-            text = control.order_text(repos, why) if why or changed else None
-            if text is not None and text != self._said_order:
-                self.say(text)
-            self._said_order = text if why else None   # an ignored order: said once
+        with self._order_lock:   # both lanes take them up
             self._take_repo_stops(switch)
 
     def _take_repo_stops(self, switch) -> None:
-        """The repos Stefan stopped (ticket 37), taken up with the order: from now on every part
-        that chooses work goes through `working`, which leaves them out. Each change is said
-        once, and a name that isn't served once."""
-        names, unknown = control.stopped_repos(toml_order(self.config), switch)
+        names, unknown = control.stopped_repos(self.config.repos, switch)
         was = stopped(self.config)
         for name in names:
             if name not in was:
@@ -308,19 +580,20 @@ class Runner:
         self._said_unknown = text
 
     def idle_seconds(self) -> float:
-        """The pause after a pass that started nothing: `poll_seconds`, or less when the gate
-        opens sooner (pause, resume and the reserve are read again each pass)."""
+        """The pause after a pass that started nothing, or while jobs run: `poll_seconds`, or
+        less when the gate opens sooner (pause, resume and the reserve are read again each
+        pass)."""
         poll = self.config.poll_seconds
         if self.gate_until is None:
             return poll
         left = (self.gate_until - self.now()).total_seconds()
         return min(poll, left) if left >= 1 else poll
 
-    def next_fix(self):
-        """(repo, PR, its blocking review job) for the first PR that needs a fix round now;
-        the review is None for a conflict round."""
+    def next_fix(self, repos=None):
+        """(repo, PR, its blocking review job) for the first PR that needs a fix round now (in
+        `repos`' names, if given: #50); the review is None for a conflict round."""
         for repo in working(self.config):
-            if not repo.github:
+            if not repo.github or repos is not None and repo.name not in repos:
                 continue
             try:
                 found = list(self.fixer.candidates(repo))
@@ -337,11 +610,22 @@ class Runner:
                     return repo, pr, review
         return None
 
-    def settle(self) -> str | None:
+    def settle(self) -> dict:
         """Records how jobs left open by a dead runner, or left waiting for an answer, ended.
-        BUSY if one of their threads is still running."""
-        busy = None
+        The repos where one of their threads is still running: {repo: (label, kind)}, each of
+        which gets no other Claude job (one per repo, #50) and whose cost the gate counts. A
+        repo with a job running in one of this runner's own workers is left alone: that job is
+        its worker's to record."""
+        busy: dict[str, tuple[str, str]] = {}
+        self._orphan_review = False
+        mine = set(self._alive())
         for job in self.jobs.open_jobs():
+            if job.kind == 'review' and job.reviewer in OPUS_KINDS:   # the Sol lane's, not a repo's
+                if self._fallback_runs(job):
+                    self._orphan_review = True
+                continue
+            if job.repo in mine:
+                continue
             if job.kind == 'decision':   # cut off with its runner: decided again
                 self.jobs.ended(job.id, exit_code=None, outcome=NOT_STARTED,
                                 error='The runner stopped mid-decision.')
@@ -349,7 +633,9 @@ class Runner:
                 continue
             if job.kind == 'live':
                 if self.live.settle(job):
-                    busy = BUSY
+                    busy[job.repo] = (self._name(job), job.kind)
+                elif next(j for j in self.jobs.jobs() if j.id == job.id).thread_id:
+                    self._thread_ended()   # its thread ran and has ended
                 continue
             if job.kind not in ('build', 'fix'):
                 continue   # an open review or merge is the Sol lane's to settle
@@ -361,44 +647,67 @@ class Runner:
                 self._uncontinue(job)
             elif thread.active and not thread.pending_requests:
                 self.say(f'{self._name(job)} is still running in {thread.link}: '
-                         'no other Claude job starts')
-                busy = BUSY
+                         f'no other Claude job starts in {job.repo}')
+                busy[job.repo] = (self._name(job), job.kind)
             else:
                 self.finish(job, thread.thread_id, _exit_code(thread), thread.status, None,
                             thread.latest_run_id)
+                self._thread_ended()
         for job in self.jobs.waiting_jobs():
+            if job.repo in mine:
+                continue
             try:
                 thread, _ = self.t3.show(job.thread_id)
             except T3Error as e:
                 # Stefan may have answered it and set it running: start nothing until T3 says.
                 self.say(f'{self._name(job)}: cannot read {job.thread_id} ({e}); '
-                         'no other Claude job starts')
-                busy = BUSY
+                         f'no other Claude job starts in {job.repo}')
+                busy[job.repo] = (self._name(job), job.kind)
                 continue
             if thread.active and not thread.pending_requests:
-                busy = BUSY   # answered, and running again
+                busy[job.repo] = (self._name(job), job.kind)   # answered, and running again
+                self._seen_running.add(job.id)
+            elif job.id in self._seen_running and _exit_code(thread) == 2:
+                self._seen_running.discard(job.id)
+                self._thread_ended()   # it ran on Stefan's answer and asks again
             elif _exit_code(thread) != 2:
                 self.finish(job, thread.thread_id, _exit_code(thread), thread.status, None,
                             thread.latest_run_id)
+                self._thread_ended()   # Stefan's answer set it running again, and it ended
+        self._busy = busy
         return busy
+
+    def _fallback_runs(self, job: Job) -> bool:
+        """A dead runner's Opus fallback review, left open while its thread runs on (PR 67's
+        review 2, F2): True while that thread runs (or T3 can't say), so no Claude job starts
+        beside it; once it has ended the gate is told, once per job, and the Sol lane counts the
+        review failed. The Sol lane's own review now isn't a dead runner's: it runs beside the
+        Claude lane (AGENTS.md, The Opus fallback)."""
+        if self.reviewer is not None and job.id == self.reviewer.live:
+            return False
+        try:
+            thread = self._find_thread(job)
+        except T3Error as e:
+            self.say(f"review {job.repo}#{job.issue} (Opus fallback): cannot read its thread "
+                     f'({e}); no other Claude job starts')
+            return True
+        if thread is None:
+            return False   # it never started a thread: the Sol lane counts it failed
+        if thread.active and not thread.pending_requests:
+            self.say(f"review {job.repo}#{job.issue} (Opus fallback, a stopped runner's) is "
+                     f'still running in {thread.link}: no other Claude job starts')
+            return True
+        if self.gate is not None:
+            self.gate.job_ended(job.id)
+        return False
 
     def find_thread(self, job: Job) -> Thread | None:
         """The T3 thread of a job, by its id or else its title (the snapshot's link)."""
         return self._find_thread(job)
 
     def _find_thread(self, job: Job) -> Thread | None:
-        if job.thread_id:
-            return self.t3.show(job.thread_id)[0]
-        since = _when(job.started_at) - datetime.timedelta(seconds=5)
         repo = self.repos.get(job.repo)
-        if repo is None:
-            return None
-        found = [t for t in self.t3.list(repo.path)
-                 if t.title == job.title and _when(t.created_at) >= since]
-        if not found:
-            return None
-        newest = max(found, key=lambda t: _when(t.created_at))
-        return self.t3.show(newest.thread_id)[0]
+        return find_job_thread(self.t3, job, repo.path if repo else None)
 
     # --- a build job ----------------------------------------------------------------------
 
@@ -445,26 +754,29 @@ class Runner:
 
     # --- a decision's retry or answer ------------------------------------------------------
 
-    def continue_job(self, old: Job, message: str, *, limit: bool = False) -> str:
+    def continue_job(self, old: Job, message: str, *, limit: bool = False,
+                     marks: dict | None = None) -> str:
         """Picks up an earlier build or fix job (a decision's retry, the answer to its question,
         or with `limit` a job cut off by a usage limit) as a new job of its kind: in place, by
         sending `message` to its thread, or in a fresh thread, as `limits.resume_choice` decides
         from how long ago its last request started and its context. In place, the new job
         carries the thread in its start record so a dead runner's settle finds it. The earlier
-        job, if it was waiting, ends `continued`. A Stop asked of the Claude lane since the pass
-        began (during a decision's thread, ticket 30) starts nothing: IDLE, and the earlier job
-        stays as it is, so the case is taken up again after Resume."""
+        job, if it was waiting, ends `continued` (with `marks`, the end record's fields that say
+        who answered it, when not a decision: `waiting.py`). A Stop asked of the Claude lane
+        since the pass began (during a decision's thread, ticket 30) starts nothing: IDLE, and
+        the earlier job stays as it is, so the case is taken up again after Resume."""
         if self.held('claude'):
             return IDLE
         choice = self._resume_choice(old)
         if not choice.in_place:
-            return self._restart(old, choice, None if limit else message)
+            return self._restart(old, choice, None if limit else message, marks)
         job = self.jobs.started(kind=old.kind, repo=old.repo, issue=old.issue, branch=old.branch,
                                 title=old.title, sha=old.sha, round=old.round,
                                 thread_id=old.thread_id, about=old.id, cause=old.cause,
                                 resume=choice.record())
         if old.outcome == 'waiting':
-            self.jobs.ended(old.id, exit_code=old.exit_code, outcome='continued')
+            self.jobs.ended(old.id, exit_code=old.exit_code, outcome='continued',
+                            **(marks or {}))
         self.say(f'Continuing {self._name(job)} in place: {choice.why}; '
                  f'{old.link or old.thread_id}')
         try:
@@ -656,7 +968,8 @@ class Runner:
         or in a fresh thread, as `limits.resume_choice` decides (`continue_job`)."""
         return self.continue_job(old, lim.RESUME_MESSAGE, limit=True)
 
-    def _restart(self, old: Job, choice: lim.ResumeChoice, direction: str | None) -> str:
+    def _restart(self, old: Job, choice: lim.ResumeChoice, direction: str | None,
+                 marks: dict | None = None) -> str:
         """The earlier job in a fresh thread: its own brief built afresh from its sources, after
         `direction` (a decision's text, and for an answer the question it answers) and before
         the old thread's link, where it starts, what it left uncommitted and its last 3
@@ -705,7 +1018,8 @@ class Runner:
         brief = brief.rstrip('\n') + '\n\n' + lim.restart_section(
             old, work, tip, wip, messages, stopped=stopped, why=choice.why)
         if old.outcome == 'waiting':
-            self.jobs.ended(old.id, exit_code=old.exit_code, outcome='continued')
+            self.jobs.ended(old.id, exit_code=old.exit_code, outcome='continued',
+                            **(marks or {}))
         self.say(f'Restarting {self._name(job)} fresh {after} ({choice.why}), on {work} at '
                  f'{tip[:7]}; the old thread was {old.link or old.thread_id}')
         did = self._start(job, repo, brief, tip, work)
@@ -753,7 +1067,7 @@ class Runner:
         try:
             if self.reviewer is None:
                 return IDLE
-            self.take_order()
+            self.take_stops()
             if self.held('sol'):   # stopped: no stop filed, no merge, no review
                 return STOPPED
             return self.reviewer.review_pass()
@@ -828,14 +1142,15 @@ class Runner:
                     stop.wait(min(WALL_STEP, left))
 
     def run_once(self) -> None:
-        """One pass of each lane, side by side. The Claude lane chooses its job before the Sol
-        lane starts, so what this pass's review decides waits for the next pass."""
-        job = self.plan()
+        """One pass of each lane, side by side: at most one Claude job per working repo (#50)
+        and one Sol review. The Claude lane chooses its jobs before the Sol lane starts, so what
+        this pass's review decides waits for the next pass."""
+        _, workers = self.dispatch()
         sol = threading.Thread(target=self._sol_pass, name='sol-lane')
         sol.start()
         try:
-            if callable(job):
-                job()
+            for w in workers:
+                w.thread.join()
         finally:
             sol.join()
 
@@ -851,27 +1166,46 @@ class Runner:
             self.log_line('self-update check failed:\n' + traceback.format_exc())
             return False
 
+    def _wait_for_a_job(self) -> None:
+        """While Claude jobs run in their workers: until one ends, or `idle_seconds` pass (the
+        other repos' work is looked at again then), by the wall clock."""
+        end = time.time() + self.idle_seconds()
+        while self._alive() and not self._ended.is_set() and (left := end - time.time()) > 0:
+            self._ended.wait(min(WALL_STEP, left))
+
     def run_forever(self, sleep) -> str:
-        """The Claude lane here; the Sol lane in a thread that stops when this loop does. After
-        each pass of either lane the wake tasks are set to the times they wait for. Between
-        Claude jobs, when the runner's own checkout is behind its base (`restart.py`), it lets
-        the Sol lane finish its pass, updates the checkout and returns RESTART, with the new
-        commit in `restart_sha`; if git won't update it, both lanes carry on."""
+        """The Claude lane here, starting each repo's job in a worker of its own (#50) and
+        planning again whenever one ends; the Sol lane in a thread that stops when this loop
+        does. After each pass of either lane the wake tasks are set to the times they wait for.
+        When the runner's own checkout is behind its base (`restart.py`), the Claude lane starts
+        nothing more; once the jobs running end, it lets the Sol lane finish its pass, updates
+        the checkout and returns RESTART, with the new commit in `restart_sha`; if git won't
+        update it, both lanes carry on."""
         stop = threading.Event()
+        self._rests = True
+        draining = False   # new code is due: no Claude job starts until the restart
         if self.publisher is not None:
             self.publisher.start()
         sol = self._start_sol_lane(stop)
         try:
             while True:
-                try:
-                    did = self.run_pass()
-                except Exception:
-                    self.log_line('pass failed:\n' + traceback.format_exc())
-                    did = IDLE
-                self._claude_waits = self.gate_until
+                self._ended.clear()
+                did = IDLE
+                if not draining:
+                    try:
+                        did, _ = self.dispatch()
+                    except Exception:
+                        self.log_line('pass failed:\n' + traceback.format_exc())
+                    self._claude_waits = self.gate_until
                 self._wake()
                 self._publish()
-                if self._update_due():
+                if not draining and self._update_due():
+                    draining = True
+                    if running := self._alive():
+                        self.say("The runner's own code moved: it starts no Claude job, and "
+                                 'restarts on the new code once the jobs running end ('
+                                 + ', '.join(running) + ')')
+                if draining and not self._alive():
                     self.say("The runner's own code moved: restarting on the new code once the "
                              'Sol lane ends its pass')
                     stop.set()
@@ -879,9 +1213,13 @@ class Runner:
                     if sha := self.self_update.update():
                         self.restart_sha = sha
                         return RESTART
+                    draining = False
                     stop = threading.Event()
                     sol = self._start_sol_lane(stop)
-                if did != STARTED:
+                if self._alive():
+                    self._wait_for_a_job()
+                elif did != STARTED and not self._ended.is_set():
+                    # (a job that ended since this pass planned: plan again at once)
                     sleep(self.idle_seconds())
         finally:
             stop.set()

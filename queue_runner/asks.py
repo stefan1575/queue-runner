@@ -216,7 +216,11 @@ class Story:
             'failed': f'The build of #{n} failed' + (f': {clip(j.error, 160)}' if j.error else '')
                       + ('' if (j.error or '').endswith('.') else '.'),
             'waiting': f'The build of #{n} stopped to ask a question.',
-            'continued': f'The build of #{n} had asked a question, and a decision answered it.',
+            'continued': f'The build of #{n} had asked a question, and '
+                         + ('you answered it on GitHub.' if j.reason == 'github' else
+                            'a decision answered it.'),
+            'closed': f'The build of #{n} had asked you a question, and #{n} was closed, so '
+                      'it ended.',
             'usage-limit': f"The build of #{n} was cut off by Claude's usage limit.",
             'branch-exists': f"The build of #{n} couldn't start: a branch from an earlier one "
                              'was left over.',
@@ -257,7 +261,11 @@ class Story:
                        'nothing.',
             'failed': f'{what} on {h7} failed.',
             'waiting': f'{what} on {h7} stopped to ask a question.',
-            'continued': f'{what} on {h7} had asked a question, and a decision answered it.',
+            'continued': f'{what} on {h7} had asked a question, and '
+                         + ('you answered it on GitHub.' if j.reason == 'github' else
+                            'a decision answered it.'),
+            'closed': f'{what} on {h7} had asked you a question, and the PR was '
+                      + ('merged' if 'merged' in (j.reason or '') else 'closed') + ', so it ended.',
             'usage-limit': f"{what} on {h7} was cut off by Claude's usage limit.",
             'head-unknown': f"{what} on {h7} ended, but GitHub couldn't say where the PR's head "
                             'went.',

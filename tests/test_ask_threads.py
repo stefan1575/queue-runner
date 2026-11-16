@@ -148,7 +148,8 @@ class OpenTest(ThreadCase):
         self.assertEqual(self.r.run_pass(), 'started')
         [launch] = self.t3.launches
         self.assertEqual((launch['title'], launch['project'], launch['model']),
-                         ('Queue runner ask: first#20', self.dir, self.config.claude_model))
+                         ('Decide: Queue runner ask: first#20', self.dir,
+                          self.config.claude_model))   # it waits on his decision (issue #71)
         brief = launch['message']
         self.assertIn('Review 3 is still blocking', brief)            # the ask's situation
         self.assertIn('Rework the approach, fix on with the same approach, or hold it?', brief)
@@ -216,7 +217,7 @@ class OpenTest(ThreadCase):
         class Shut:
             kinds = []
 
-            def check(self, kind, then=None):
+            def check(self, kind, then=None, running=()):
                 self.kinds.append((kind, then))
                 return Verdict(False, 'five-hour', 'the session is full')
         self.noted()
@@ -284,10 +285,10 @@ class AnswerTest(ThreadCase):
         self.assertIn('## Direction first', start['message'])
         self.assertIn('fix F7 only', start['message'])
         self.assertIsNone(self.r.decider.next_case())   # decided once
-        # The fix round's thread is settled at its end; the ask thread is left (ticket 70).
+        # Decided, the ask thread is settled before the fix round starts (issue #71), and the
+        # fix round's thread at its end (ticket 70).
         self.assertTrue(ask.thread_id)
-        self.assertNotIn(ask.thread_id, self.t3.settles)
-        self.assertEqual(self.t3.settles[-1], self.jobs('fix')[-1].thread_id)
+        self.assertEqual(self.t3.settles[-2:], [ask.thread_id, self.jobs('fix')[-1].thread_id])
 
     def test_hold_answered_in_the_thread(self):
         ask = self.opened()

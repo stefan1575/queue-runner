@@ -205,9 +205,13 @@ class Decider:
         from .effort import Effort   # ticket 39: how its thread starts, its effort read back
         self.effort = effort or Effort(config)
 
-    def next_case(self) -> Case | None:
+    def next_case(self, repos=None) -> Case | None:
+        """The first case to decide, in the working repos (or in `repos` of them: the Claude
+        lane chooses each repo's job apart, #50)."""
         from .config import working   # a repo Stefan stopped gets no decision (ticket 37)
         for repo in working(self.config):
+            if repos is not None and repo.name not in repos:
+                continue
             if not repo.github:
                 continue
             try:
@@ -515,8 +519,10 @@ class Decider:
                    f'Approach note was written ({why})')
             self.stopper.file(repo, case.pr, 'approach-note', why, link)
         elif case.question == 'waiting':
-            self.stopper.file_on_issue(repo, n, why, link, open_url=j.link,
-                                       after=f'Answer it in the waiting thread: {j.link}.')
+            self.stopper.file_on_issue(
+                repo, n, why, link, open_url=j.link,
+                after=f'Answer it in the waiting thread ({j.link}), or reply here: the runner '
+                      'sends your reply to it.')
         elif case.pr is not None:
             self.stopper.file(repo, case.pr, 'decision', why, link)
         else:

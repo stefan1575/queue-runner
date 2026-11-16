@@ -292,7 +292,7 @@ class FixTest(unittest.TestCase):
                     worktree_path='C:/t3/wt/fix')
         self.gh.now[20] = {'head_sha': H3}
         self.git.heads[20] = H3
-        self.assertEqual(r.settle(), None)
+        self.assertEqual(r.settle(), {})
         [fix] = [j for j in self.fixes(r) if j.id == job.id]
         self.assertEqual((fix.outcome, fix.head, fix.worktree), ('pushed', H3, 'C:/t3/wt/fix'))
 

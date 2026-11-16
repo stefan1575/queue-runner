@@ -17,11 +17,11 @@ before). Commit after every completed step, with a message that says what change
 
 ```
 python3 -m queue_runner                       # run: both lanes, pass after pass (unattended: see Running unattended)
-python3 -m queue_runner --once                # one pass of each lane: at most one Claude job (a decision, a fix round or a build), merges, at most one Sol review
-python3 -m queue_runner --once --dry-run      # print the next Claude job's brief (a job cut off by a usage limit first, then an ask thread Stefan asked for, then a decision, then a fix round), list the stops it would file, what Sol would review and what would merge
+python3 -m queue_runner --once                # one pass of each lane: at most one Claude job per working repo (a decision, a fix round or a build), merges, at most one Sol review
+python3 -m queue_runner --once --dry-run      # print each working repo's next Claude job and its brief (a job cut off by a usage limit first, then an ask thread Stefan asked for, then a decision, then a fix round), list the stops it would file, what Sol would review and what would merge
 python3 -m queue_runner --release NAME#N      # let the picker take a held issue again (a PR: retry its failed reviews, merges and fix round; let a stopped PR go)
 python3 -m queue_runner --review NAME#N       # Sol reviews that PR's head now, if adoption says it needs one
-python3 -m queue_runner --gate                # Claude's usage now, and whether a build, fix or decision would start
+python3 -m queue_runner --gate                # Claude's usage now, the Claude jobs running, and whether a build, fix or decision would start and how many could at once
 python3 -m queue_runner --pause | --resume [LANE]   # stop a lane after its job, or let it carry on (claude by default; sol, all): the dashboard's Stop and Resume
 python3 -m queue_runner --pause | --resume NAME     # stop one served repo in both lanes, or let it carry on: the Repositories card's Stop and Resume
 python3 -m queue_runner --reserve PERCENT     # the share of the week kept for Stefan (default 5)
@@ -47,8 +47,8 @@ second runner out: it logs `a second runner started (pid N) and exited at once` 
 `config.toml` names the repos it serves (GitHub repo, local clone, base branch, and
 `review_table` for a repo whose PR bodies keep a `## Review` table, `issues = "local"` for one
 whose tickets are local markdown: Local tickets, below, `merge = "stefan"` for one whose PRs Stefan
-merges himself: Stefan merges, below), in priority order (Stefan's build order on the dashboard
-wins: The build order, below); the runner's `state_dir` and `log_dir` (`~/.queue-runner/`, outside every served repo);
+merges himself: Stefan merges, below), in an order that breaks ties between repos' work (Two
+lanes, below); the runner's `state_dir` and `log_dir` (`~/.queue-runner/`, outside every served repo);
 `runs_dir`, `checkouts_dir` and `deps_dir` for reviews; `poll_seconds`, the pause after a pass that started
 nothing; `adopt_reviews_before`, the cutover date before which a blocking review the runner
 didn't run counts as its own for fix rounds (A Claude pass, step 4); `[claude]`, the T3
@@ -117,9 +117,12 @@ under the dashboard): GitHub issues, builds, Sol reviews, and it merges its own 
 "checks passed on H" means the tests passed on H.
 
 - **Restarting on new code** (`restart.py`): in continuous mode, when a served repo's `path` is
-  the folder the runner's code runs from, the Claude lane fetches its base after every pass
-  (between jobs). When `origin/main` is ahead and fast-forwards (the runner's own merge, or any
-  push), it says `The runner's own code moved: restarting...`, lets the Sol lane finish its pass,
+  the folder the runner's code runs from, the Claude lane fetches its base after every pass.
+  When `origin/main` is ahead and fast-forwards (the runner's own merge, or any push), the Claude
+  lane starts no more jobs (`The runner's own code moved: it starts no Claude job, and restarts
+  ... once the jobs running end (...)`, while any run: two repos taking turns would otherwise
+  hold it off for good); once none runs it says `The runner's own code moved: restarting...`,
+  lets the Sol lane finish its pass,
   runs `git merge --ff-only` in the checkout and ends the loop; the CLI lets go of `runner.lock`
   and `runner.pid`, starts the same command again (`sys.executable` and `sys.orig_argv`,
   detached), and waits until the new runner's pid is in `runner.pid` and it stays up 20 seconds:
@@ -138,7 +141,8 @@ under the dashboard): GitHub issues, builds, Sol reviews, and it merges its own 
 
 `gate.py` and `usage.py` (ticket 08; `orchestration.md`, Limits). Before each Claude job (a build,
 a fix round, a decision thread; a continued job runs inside its decision's pass), after settling
-and choosing it, the Claude lane reads Claude's windows and the job kind's expected cost. **Sol
+and choosing it, the Claude lane reads Claude's windows and the job kind's expected cost, and the
+expected cost of every Claude job still running (#50: Two lanes, below). **Sol
 isn't gated**, and neither is an Approach-note answer read from Stefan's words (no thread). The
 Opus review (while Sol is out of usage, or every review when config.toml says Claude reviews: The
 Opus fallback, below) is: the Sol lane checks it as kind `review` (default cost 15% of 5 hours, 4%
@@ -155,15 +159,56 @@ never counts it, and `--gate` prints it as its own line, held by the reviewing l
   started. `tests/fixtures/usage/oauth-usage.json` is a real response. The call adds
   `?cedar_ember=1&skip_spend=1`, as T3's does, so the same answer has the reset credits (ticket
   42; `oauth-usage-resets.json`): `Usage.resets` (The dashboard, Usage).
+- **One reading, one budget** (issue 66; T3's `CAPABILITIES_PROBE_TTL` and
+  `resolveUsageLimitsAfterProbe`, read 2026-11-16): the endpoint answers 429 when it's asked
+  about once a minute (per login, shared with T3 and Claude Code), so `usage.CachedUsage`, the
+  one reader `cli._gate` makes and the snapshot shares, asks it at most once every 5 minutes
+  (`CALL_EVERY`), failed calls counted, whoever asks: the gate, the after-job read, the
+  snapshot's 5-minute read and Refresh. Inside that it gives back the cached reading with the
+  time it was taken. A failed call keeps the last good reading, its error beside it; no
+  Retry-After, no back-off. A login that can't be read asks nothing, so it spends no call.
+  `OAuthUsage.call_every` is the budget; the tests' `FakeUsage` says 0.
+- **Which reading a check decides on:** one taken after the last Claude job ended and no older
+  than 30 minutes (`STALE_AFTER`), even if the latest call failed. A 429 beside such a reading
+  never holds the lane. "Ended" is any Claude thread the runner sees end (`Gate.job_ended`): a
+  measured job's, and outside a measured pass a dead runner's build, fix or live job settled, a
+  waiting job that ran on Stefan's answer (ended, or asking again), a decision thread whose
+  retry or answer never reached its job (PR 67's review 1, F1), and a dead runner's Opus review
+  (the fallback, or config.toml's) whose thread has ended (review 2, F2: The Opus fallback, The
+  job record). With the
+  job's id it's told once, so the two lanes both seeing one thread end don't throw away a
+  reading taken in between; and a job's after-read is judged against its own end, not one the
+  other lane said meanwhile. A job settled with no thread holds nothing. An ask thread runs on with Stefan unwatched, like his own sessions, so it
+  doesn't count.
 - **Fits:** the 5-hour window's used percent plus the job's expected cost must be at most 100,
   or the lane waits for its reset (plus 2 minutes); a window with nothing used takes any job. The
   week must leave `reserve` percent (5 by default) for Stefan until 24 hours before its reset,
   or the lane waits for that release; inside the last 24 hours the reserve may be spent. No room
-  even then: it waits for the weekly reset. Unreadable usage (no login, HTTP 401, the endpoint
-  down) starts nothing and is read again next pass.
-- **Waiting:** a held pass is `gated`; the log says once why and until when (`Claude lane waits:
-  ...`, and again only when that changes), and the loop sleeps `poll_seconds` or until the gate
-  opens, if sooner. The Sol lane goes on.
+  even then: it waits for the weekly reset. No reading to decide on (none yet, one from before the
+  last job, or one past 30 minutes: Claude usage `unreadable`) starts nothing until the endpoint
+  may be asked again, or the next pass when it may be now (a login that couldn't be read).
+- **Beside running jobs** (#50; `gate.Running`, `Gate.check(..., running=)`): a job starts only
+  when its cost fits after the expected cost of every Claude job still running (this runner's
+  workers, a dead runner's job still running in T3, and the Sol lane's Opus review: the one it
+  let in, or one open in the job log, as `review <repo>#<PR>` at the `review` cost) and every one
+  let in before it in the same pass, each counted whole whatever it has spent so far, so it errs high. One that fits alone but
+  not beside them waits for one of them to end (`running`, no time: the lane plans again when a
+  job ends): `Claude lane waits on <repo>: build would fit alone, but the Claude job running
+  (build first#4) is expected to take ...`. Beside a running job a window with nothing used no
+  longer takes any job. With the cautious defaults two builds never fit together (60 + 60); the
+  learned costs (4% for a build on 2026-11-16) let them.
+- **Waiting:** a held job's repo waits; the log says once per repo why and until when (`Claude
+  lane waits on <repo>: ...`, and again only when that changes), and the loop sleeps
+  `poll_seconds` or until the gate opens, if sooner, or until a running job ends; `gate_until`
+  sets a wake task, the wait for the next read too. A pass that started nothing because of it
+  is `gated`. The Sol lane goes on.
+- **The after-job read** (`Gate.measured`) makes the call that serves the next check. After a
+  job under 5 minutes the budget doesn't allow one yet, so it waits for it on the wall clock
+  in the job's own worker (#50; `run.wall_sleep`; the log says `Reading Claude's usage after
+  the job at ... (<job>)`), then reads:
+  the next check would wait for that reading anyway, and a short job's cost is still learned. A
+  reading the snapshot took after the job ended serves too. A failed one is recorded with
+  `after` null and its error, and the next check waits for the next read.
 - **The knob** is `<state_dir>/gate.json` (`reserve` only, since ticket 30), written whole by
   `--reserve N` without the runner lock, and read before every Claude job, so it works while the
   runner runs (within one `poll_seconds`). Stopping a lane isn't the gate's: it's `control.json`
@@ -176,6 +221,10 @@ never counts it, and `--gate` prints it as its own line, held by the reviewing l
   in whole percents, and Stefan's own sessions in the same window count too, so it errs high. A
   decision that may continue a build or fix (its question allows `retry` or `answer`) must fit
   with that job's cost added; a pass in which it did is recorded under the continued job's kind.
+  A pass that ran beside another Claude job (an Opus review included, either way) measured
+  both: its record has `shared_with` (the others' labels) and teaches nothing. So while both
+  repos (and reviews) stay busy, nearly every pass is shared and a kind's expected cost stays at
+  its last five solo passes until one runs alone again.
   `usage.jsonl` is written like the job log (`state.append_record`: synced, a torn last line cut
   off); a bad line elsewhere, like an unreadable `gate.json`, starts nothing until it's fixed.
 - `Runner` without a `gate` (the tests, `live_sandbox.py`) starts every job; the CLI always passes
@@ -194,8 +243,11 @@ same limit) is started on it.
 - **When:** 10 minutes after the reset T3 stored for the stop; 5h05m from the stop if it stored
   none. The end record has `resume_at`, `context` (the thread's tokens, or null) and
   `last_request` (when its last real request started, or null). Until then
-  the Claude lane starts nothing (`gated`, said once: the limit is the whole account's); the Sol
-  lane goes on. Then the usage gate checks the job as usual.
+  the Claude lane starts nothing in any repo (`gated`, said once: the limit is the whole
+  account's; with several jobs cut off, until the latest `resume_at`); the Sol lane goes on. A
+  limit cuts off each job running beside the one that met it the same way, and each is recovered
+  in its own repo, first there, before any other job in it. Then the usage gate checks the job
+  as usual.
 - **In place or fresh** (ticket 38; `limits.resume_choice`, the one rule every caller uses: a
   limit's recovery and a decision's `retry` or `answer`). It reads only what it can measure, at
   the moment the job resumes: when the thread's last real request started and its context.
@@ -253,15 +305,43 @@ the runner should confirm the log line `<thread> stopped on a usage limit; T3 sa
 
 ## Two lanes
 
-One Claude job and one Sol job at a time (`run.py`): the Claude lane runs in the main thread
-and blocks on `t3 thread start --wait` while a build or fix round runs; the Sol lane
-(`review.py`) runs alongside in a thread: merges, then one review a pass. Both write the one job
-log (a lock per file inside the process). `--once` chooses the Claude job before the Sol lane
-starts, so what that pass's review decides waits for the next pass.
+**One Claude job per working repo, and one Sol job, at a time** (`run.py`; #50, Stefan
+2026-11-15: "they both run in parallel... since they are both different repos"; twice the burn on
+the 5-hour window accepted, 2026-11-16, with no cap beyond the usage gate). Both lanes write the
+one job log (a lock per file inside the process).
+
+- **The Claude lane** plans in the main thread (`Runner.plan`): it settles, then chooses each
+  working repo's own job, in the order A Claude pass (below) gives within a repo, skipping a repo
+  whose job still runs (`choose`, `_choose_in`; `Start`). The gate lets each in, in turn, only
+  when it fits beside the jobs running and the ones let in before it (`_admit`; The usage gate,
+  Beside running jobs). Each starts in a worker thread of its own (`Worker`, `_launch`) that
+  blocks on `t3 thread start --wait`. A job that doesn't fit doesn't hold back a later repo's
+  that does.
+- **Who goes first** when the gate has room for one more: the repo whose work has waited
+  longest, read as since its last Claude job ended (`Runner._waited`, from the job log, so a
+  restart keeps it; a job that never reached a thread doesn't count), config.toml's order
+  breaking a tie. Neither repo starves: the one just served goes behind.
+- **The loop** (`run_forever`) plans again whenever a job ends (`Runner._ended`), and every
+  `poll_seconds` (by the wall clock) while jobs run, for the other repos. A repo whose job started
+  no thread (`not-started`, `branch-exists`...) rests `poll_seconds` before it's tried again,
+  as the one lane paused after such a pass. `run_pass`, `run_once` and `--once` wait for the jobs
+  they start.
+- **The Sol lane** (`review.py`) runs alongside in a thread: merges, then one review a pass,
+  taking the repos in config.toml's order. `--once` chooses the Claude jobs before the Sol lane
+  starts, so what that pass's review decides waits for the next pass.
+- **No build order:** ticket 33's `control.json` `repo_order` (the Build order card until #61) is
+  no longer read or written. A file that still has it is read as before for its stops, the order
+  is ignored without a word, and the next write drops it.
+- `--once --dry-run` lists each working repo's job under `dry run: <repo>'s Claude job:`
+  (`Nothing to start in <repo>: ...` for one with none; `none: <job> is still running there` for
+  one whose Claude job is open in the job log, which the lane skips), after a limit that holds
+  every repo.
+  `--gate` lists the Claude jobs running (open in the job log) and the working repos with none,
+  then each kind's verdict beside them and how many of it could start at once.
 
 **One writer per PR** (`JobLog.writer`): while a build or fix job is open on a PR's branch, or
 waiting for an answer (until it ends or is released), Sol doesn't review it, it doesn't merge,
-and it gets no other fix round.
+and it gets no other fix round. A repo has one Claude job at a time, so two never write one PR.
 
 ## Stopping a lane
 
@@ -289,8 +369,8 @@ on; `"now"` is read as `"after-job"` until ticket 34.
   earlier job stays as it was, so the case is decided again after Resume.
 - **Unreadable** (not JSON, not an object, `lanes` or `repos` there but not an object, a lane's
   or repo's entry that isn't an object or has no `stop` the page could have written: a missing
-  `stop` is never a Resume): neither lane starts anything until it's fixed, said once. An odd
-  `repo_order` or ask entry is ignored instead (The build order, Read and snoozed). Any Stop or
+  `stop` is never a Resume): neither lane starts anything until it's fixed, said once. An old
+  `repo_order` (Two lanes) or an odd ask entry is ignored instead (Read and snoozed). Any Stop or
   Resume on the page, any other request it sends, or `--pause`/`--resume`, writes it afresh
   from what they can read (`control.repaired`, and the page's `serve.usable`, the same file
   from either end) and **lets go only of what it names**: an entry it can't use is written
@@ -310,33 +390,6 @@ on; `"now"` is read as `"after-job"` until ticket 34.
   Stefan` while it is); `--once --dry-run` says a stopped lane's line before what it would do
   once resumed.
 
-## The build order
-
-`control.ordered` and `Runner.take_order` (ticket 33). **`control.json`'s `repo_order`**, which
-the dashboard's Build order card wrote until #61 (2026-11-16: the page can't reorder now, and
-`POST /control` refuses it; a value already in the file is kept, and #50 stops the runner reading
-it), is the order both lanes go through the served repos: the first repo with work gets the next job, and the Sol lane files stops, merges
-and reviews in that order.
-
-- **Used only when it names every served repo exactly once.** Missing or `[]` is config.toml's
-  order, said nothing. Anything else (a repo left out, one not served, one twice, not a list of
-  names) is ignored, config.toml's order stands, and the log says once why: `control.json's
-  repo_order is ignored (it leaves out queue-runner): repos are taken in config.toml's order,
-  ...`. It never makes control.json unreadable: the stops stand. A new order is said once:
-  `Repos are taken in Stefan's build order now: ...`.
-- **Taken up at the start of each lane's pass** (`plan`, after settling, and `_sol_pass`), next
-  to the stop, so a job already running goes on; the next pass chooses in the new order.
-  `config.set_build_order` replaces `config.repos` (the one change made to a loaded Config),
-  never changing the list in place, so a lane already going through the repos finishes in the
-  order it began; every part that reads `config.repos` follows. `config.toml_order` keeps
-  config.toml's.
-- **The snapshot** reads control.json once for the stops and the order: its `repos` are in the
-  order the lanes take up next, so the one that first shows a new order is the one whose
-  `control_read_at` is that file's `written_at`. The features and each lane's queue go through
-  `Facts.repos` in that order (ticket 32: The work lists, below).
-- `--once --dry-run` says the order first (`dry run: repos are taken in Stefan's build order:
-  ...`, config.toml's, or why his is ignored) and chooses in it.
-
 ## Stopping one repo
 
 `config.working` and `Runner._take_repo_stops` (ticket 37; Stefan, 2026-11-15: so game-backdrop
@@ -349,14 +402,14 @@ any other name is refused with exit 2).
 - **A stopped repo gets nothing from either lane:** no decision, live run, fix or conflict round,
   limit recovery or build in the Claude lane; no stop filed, merge, ready mark, noticing of
   Stefan's merge or review in the Sol lane. Each of those goes through `config.working(config)`,
-  the build order less the stopped repos (`decisions.next_case`, `live.served`, `Runner.next_fix`,
+  the served repos less the stopped ones (`decisions.next_case`, `live.served`, `Runner.next_fix`,
   `Runner.choose`'s builds and limited jobs, `stops.stop_pass`, `merge.merge_pass`,
   `Reviewer.review_pass`); `config.repos` keeps every repo for what is only looked up or shown (a
-  job's own repo when it's settled, the Inbox, the snapshot). The next repo's work is taken.
+  job's own repo when it's settled, the Inbox, the snapshot). The other repos' jobs go on.
 - **A job already running on it finishes** and is settled as usual. A review that ends after its
   repo was stopped (`Reviewer.stopped_now` reads control.json then) merges nothing and files no
   stop: both wait for Resume, when the next pass does them.
-- **Taken up with the build order** at the start of each lane's pass (`take_order`), said once
+- **Taken up** at the start of each lane's pass (`Runner.take_stops`), said once
   each: `leads-dashboard is stopped by Stefan: neither lane takes up its work, ...` and
   `leads-dashboard runs again: Stefan resumed it`. A name that isn't served is ignored and said
   once (`control.json stops old-repo, which is not served: ignored`). An entry the page couldn't
@@ -365,10 +418,10 @@ any other name is refused with exit 2).
   nothing. **Its waits set no wake task:** a stopped repo's limited job and live run are skipped,
   so they set no `gate_until`. The usage limit is the account's, so another repo's job may then
   start and meet the gate or the limit itself.
-- `--gate` lists the stopped repos after the lanes; `--once --dry-run` says them after the order
-  and chooses as the lanes would.
-- The snapshot's repo carries `stopped` (`{"at"}` or null); `control_read_at` moves as for any
-  write.
+- `--gate` lists the stopped repos after the lanes; `--once --dry-run` says them first and lists
+  no job for them.
+- The snapshot's repo carries `stopped` (`{"at"}` or null), and `doing` while its last job
+  finishes; `control_read_at` moves as for any write.
 - `--review NAME#N` is Stefan's own and still reviews a stopped repo's PR, but merges nothing after.
 
 ## A Claude pass
@@ -376,7 +429,7 @@ any other name is refused with exit 2).
 1. **Settle.** A build or fix job the log shows open was left by a runner that died mid-job: its
    thread is found by title (`Queue runner build: <repo>#<n>` or `Queue runner fix: <repo>#<PR>`,
    created after the job's start record). Still
-   running: the pass starts nothing (one Claude job at a time). Ended: its outcome is recorded.
+   running: its repo gets no other job (one Claude job per repo), and the gate counts it. Ended: its outcome is recorded.
    No thread: `not-started`. A `waiting` job whose thread has since completed or failed is
    recorded again. One that's running again, or that T3 can't read, also makes the pass start
    nothing: if its thread is gone for good, `--release` the issue. A decision left open was cut
@@ -422,7 +475,7 @@ any other name is refused with exit 2).
 
    **A conflict round** (ticket 15; Conflict rounds, below) is a fix round too, for a PR with
    no blocking review whose head conflicts with its base.
-5. **Pick and build** (`run.py`): the first repo with a pickable issue gets one build. The runner
+5. **Pick and build** (`run.py`): a repo with a pickable issue gets one build. The runner
    fetches `origin/<base>`, writes a start record, then blocks on
    `t3 thread start --wait --json --worktree origin/<base> --branch claude/<slug>-<n>` with the
    brief on stdin. Afterwards it records the outcome.
@@ -434,8 +487,9 @@ status, the branch's commits, the PR found by branch, the worktree path, `effort
 the run used, read back: The effort, below; on every Claude job's end, decisions and live runs
 too) and any error.
 Outcomes: `done` (exit 0, a PR found), `done-no-pr`, `failed` (exit 1), `waiting` (exit 2),
-`continued` (it was waiting, and a decision's answer went to its thread as a later job),
-`usage-limit` (exit 1 on a Claude usage limit: Usage limits, above),
+`continued` (it was waiting, and a decision's answer, or Stefan's reply on GitHub, went to
+its thread as a later job), `closed` (it waited for Stefan, and its issue or PR was closed or
+merged on GitHub: Threads that need Stefan, below), `usage-limit` (exit 1 on a Claude usage limit: Usage limits, above),
 `branch-exists` (a local `claude/*` branch left over, so T3 couldn't make it again) and
 `not-started` (T3 failed before any thread existed). Every build that got that far holds its
 issue: the picker skips it until `--release`. Only `not-started` holds nothing, so the next pass
@@ -543,7 +597,8 @@ stands, so it isn't decided again until `--release`. `close` comments and closes
 the issue as not planned; `fix`, `carry-on` and `hold` are read from the decision's record. A
 stop goes where Stefan answers it: on a PR, the `needs-info` issue (kind `decision`, or
 `approach-note`); on a build, a comment on its issue, which the build holds until `--release`; on
-a waiting thread, a comment that links the thread, and a toast that opens it. **Once each:** a
+a waiting thread, a comment that links the thread and says a reply there is sent to it
+(Threads that need Stefan, A waiting job answered on GitHub), and a toast that opens it. **Once each:** a
 case is decided once (`JobLog.decided`, a release included), and after 3 decisions on one issue's
 or PR's failed, waiting or PR-less jobs the next goes straight to Stefan with no thread.
 
@@ -565,7 +620,8 @@ click, never by itself.
 - **Opening** (`AskThreads.next`, `open`): the Claude lane, after a limited job and before any
   decision, takes the oldest request whose stop is still `filed` and not released
   (`JobLog.released_ids`: a release leaves a stop's outcome `filed`), in a repo it works, with
-  the PR open, and starts `Queue runner ask: <repo>#<n>` in the repo's T3 project with no worktree,
+  the PR open, and starts `Decide: Queue runner ask: <repo>#<n>` (the job's own `title` has no
+  prefix: Threads that need Stefan, below) in the repo's T3 project with no worktree,
   **without waiting** (`T3Cli.launch`: `t3 thread start --json` prints `{threadId, projectId,
   runId}`, read in `server.asar` 2026-11-15), then reads its link with `thread show`. Gated as a
   decision; it teaches the learned costs nothing (`measured` records only passes that made a
@@ -715,7 +771,7 @@ The review loop's rules are `~/Code/docs/pr-review.md`; leads-dashboard's
 `docs/agents/review-loop.md` and `REVIEW.md` define the words.
 
 1. **Settle.** Under `sol.lock`, a review the log shows open was cut off with its runner: it
-   counts as `failed`. An open merge is settled from GitHub: `merged` or `failed`.
+   counts as `failed` (an Opus review's, the fallback or config.toml's, once its thread has ended: The Opus fallback). An open merge is settled from GitHub: `merged` or `failed`.
 2. **Stops** (`stops.Stopper`, before merging, so a PR stopped now neither merges nor is
    reviewed; see Stops for Stefan, below).
 3. **Merge** (`merge.Merger`, also right after a clean review is posted). A PR merges once the
@@ -864,7 +920,7 @@ then, if it's still needed, a grill on what the Overview is for (ticket 25); the
 again (ticket 20), also as variants. Its frame is the one Stefan asked
 for in the prototype rounds: a sidebar for getting around (the repository switcher and the
 pages), one centred column, and the machine's readings floating on the right, in his order:
-usage, the build order, then the runner's status. **It is its own process and depends on nothing:** no build step, no
+usage, the repositories, then the runner's status. **It is its own process and depends on nothing:** no build step, no
 package, no network, no runner code, no T3, no GitHub. One HTML file, served by Python's standard
 library.
 
@@ -897,26 +953,28 @@ python3 -m dashboard    # http://queue.localhost/ is the runner's; http://localh
   `~/.queue-runner/state`). `snapshot.json`: the runner writes it whole, the page reads it.
   `control.json`: the page writes it whole, the runner reads it. **The runner writes
   `snapshot.json`** (ticket 28, below) and obeys `control.json`'s stops (ticket 30: Stopping a
-  lane, above) and its `repo_order` (ticket 33: The build order, above).
+  lane, above; ticket 37: Stopping one repo, above).
 - **The runner's snapshot** (`queue_runner/snapshot.py`, ticket 28; spec
   `.scratch/queue-runner/dashboard-live.md`). In continuous mode only (`--once` writes none):
   `Publisher` writes it whole (a temp file, then `os.replace`) after every pass of either lane,
   and every `write_every` (30) seconds from its own thread, so it goes on while a lane is
   blocked in a job. A write that fails is logged once (`The dashboard snapshot was not
   written ...`, then `... is written again`) and never stops a lane. `build(Facts)` is pure, one
-  small function per part; `Snapshots` gathers the facts: the job log (each lane's open job),
+  small function per part; `Snapshots` gathers the facts: the job log (each lane's open jobs),
   each lane's switch (`control.read`: a stopped lane is `stopped`, `stopped.at` when Stefan
   asked, or gate.json's mtime for the older pause; `stopping` while its job still runs; an
   unreadable control.json makes an idle lane `waiting` with the reason; `control_read_at` is
   the `written_at` of the control.json the snapshot read, since each lane reads it again before
   it starts anything; `knob.paused` is whether the Claude lane is stopped), gate.json's reserve, the learned costs (`CostBook.learned`), the Claude lane's wait as its last
-  pass left it (`Runner.claude_wait`: the gate's verdict text or a limit's resume), Sol's resume
+  pass left it (`Runner.claude_wait`: the gate's verdict text or a limit's resume) and each
+  repo's (`Runner.repo_waits`: the gate's word on that repo's job, #50), Sol's resume
   (`JobLog.sol_resume_at`), and the titles the passes read (`Runner.titles`). **Sources** are the
-  last real call of each kind: the CLI wraps GitHub and T3 in `Calls.watch` and the gate's usage
-  reader in a `Watch`, so every call the passes make is recorded (a failing one keeps its last
-  good time). **GitHub is never read for the snapshot.** Only the publisher's own 30-second writes
-  read afresh: Claude's usage and ChatGPT's (`codex_usage.CodexUsage`, ticket 42: Usage, below)
-  at most every 5 minutes (`READ_EVERY`) or on a Refresh, and an open Claude job's
+  last real call of each kind: the CLI wraps GitHub and T3 in `Calls.watch`, and the gate's
+  usage reader tells `Calls` each attempt (`on_call`), so every call the passes make is recorded
+  (a failing one keeps its last good time). **GitHub is never read for the snapshot.** Only the
+  publisher's own 30-second writes read afresh: Claude's usage, through the gate's own reader
+  (The usage gate, One reading, one budget), and ChatGPT's (`codex_usage.CodexUsage`, ticket
+  42: Usage, below) every 5 minutes (`READ_EVERY`) or on a Refresh, and an open Claude job's
   thread in T3 until found. `asks` and `answered` are ticket 31's (The Inbox's asks, below);
   `features`, `issues`, `prs`, `activity` and each lane's `queue` ticket 32's (The work lists,
   below). `stop_now` is unavailable until ticket 34. `--snapshot` prints one built the same way
@@ -926,14 +984,18 @@ python3 -m dashboard    # http://queue.localhost/ is the runner's; http://localh
   `write_every` (a snapshot older than three times that, or 90 seconds, means the runner has
   gone quiet: the page says so, greys the health readings and takes the controls away),
   `control_read_at`, `sources` (health; `short` is the name beside its dot, `group` sorts them
-  on the page: `provider`, `local` or `external`), `repos` in build
-  order (each with `stopped`, `{"at"}` or null: ticket 37), `asks` (below; each with `read` and
+  on the page: `provider`, `local` or `external`), `repos` in config.toml's
+  order (each with `stopped`, `{"at"}` or null: ticket 37; `doing`, the Claude job running in it,
+  shaped as a lane's `job`, or null; and `wait`, `{until, reason}` while none starts in it
+  because the gate held its job or something holds every repo, or null: #50), `asks` (below; each with `read` and
   `snoozed_until`: Read and snoozed, below), `answered` (asks Stefan has answered that the runner hasn't acted on
-  yet: an ask plus `answered`: `at`, `said`, `next`; not counted as waiting on him), `lanes` (each with its `queue`, what it takes up next, in order, across
-  repositories, a job a limit cut off first, and for the reviewing lane the PRs waiting for their review; `queue_empty` says why there's none), `usage` (a plan
-  each: `id`, `provider`, `name`, `plan`, `read_at`, `error`, `windows`, and `resets`,
-  `{"available": N}` or null: Usage, below), `usage_refresh` (`{"asked_at", "done_at"}`, the
-  Refresh the runner last read for, or null), `features` (in build order: the repos'
+  yet: an ask plus `answered`: `at`, `said`, `next`; not counted as waiting on him), `lanes` (each with `job`, the newest job it runs, and `jobs`, every one,
+  oldest first: the Claude lane's one per repo, #50; and its `queue`, what it takes up next, in
+  order, across repositories, a job a limit cut off first, and for the reviewing lane the PRs waiting for their review; `queue_empty` says why there's none), `usage` (a plan
+  each: `id`, `provider`, `name`, `plan`, `read_at`, `error`, `windows`, `resets`,
+  `{"available": N}` or null, and `next_read_at`, when Claude's endpoint may be asked again while
+  that's ahead, null for ChatGPT: Usage, below), `usage_refresh` (`{"asked_at", "done_at"}`, the
+  Refresh the runner last read for, or null), `features` (the repos'
   order, then the feature whose first open ticket has the lowest number, a finished one last; each with `tickets`, its
   tickets' `repo#n` keys in the order they're built: what has started first, furthest along first, then a blocker
   before what it blocks, lowest number first, one not marked ready last), `issues` (with `pick`, the order ready work is
@@ -950,17 +1012,25 @@ python3 -m dashboard    # http://queue.localhost/ is the runner's; http://localh
   "snooze_until"}` (an ISO time with its offset, kept in this PC's, or null), or `{"ask": <id>,
   "open": true}` (`asks.<id>.open`: Deciding an ask in T3, above), or `{"usage": "refresh"}`
   (`usage.refresh_at`: Usage, below), and anything else is refused, `{"repo_order"}` too
-  since #61;
+  since #61 (and a `repo_order` already in the file is dropped, #50);
   each write keeps what the others wrote. The page shows a request as asked until
   `control_read_at` reaches its time.
 - **Usage** (ticket 42): the Usage card's head has Refresh (an icon, "Refresh" on hover) where
   Details was; the Usage page stays in the sidebar. It posts `{"usage": "refresh"}`; the
-  publisher's next fresh tick (30 seconds at most) reads both plans whatever `READ_EVERY` says,
-  no more than once a minute (`FORCE_EVERY`; a later request waits for a later tick), and the
-  snapshot's `usage_refresh.asked_at` names the request it took. The button spins until then
-  (the page reads every 2 seconds meanwhile), then the card says which plan it couldn't read; it's
-  off while the runner is silent or its snapshot has no `usage_refresh` (older code). A request
-  left from before the runner started is taken by its first read. **Reset credits** come from
+  publisher's next fresh tick (30 seconds at most) takes it whatever `READ_EVERY` says, and the
+  snapshot's `usage_refresh.asked_at` names the request it took. **It doesn't force Claude's
+  call** (issue 66): ChatGPT is read; Claude's reader asks its endpoint only if its 5-minute
+  budget allows, so inside it the card says when the reading was taken and when the next read
+  can be ("Claude: read 2 min ago. Next read from 14:06."), and outside it Claude is read as
+  now. The button spins until the request is taken (the page reads every 2 seconds meanwhile),
+  then the card says which plan it couldn't read; it's off while the runner is silent or its
+  snapshot has no `usage_refresh` (older code). A request left from before the runner started
+  is taken by its first read. **A failure shows only when it matters:** Claude's plan has an
+  `error`, and its source's dot turns red, only once its reading is past 30 minutes (the error
+  then says no Claude job starts until a read answers) or its login is the trouble (no token,
+  HTTP 401); until then it shows its numbers and "read N min ago". Whether a plan failed is the
+  snapshot's `error` alone, never a time the page compares. The sample's `usage-stale` state
+  shows a reading 40 minutes old. **Reset credits** come from
   the same read as the windows, counted as T3 counts them: Claude's from the usage answer's
   `cedar_ember` grants (usable, not paused or ended; none when the grant to use next isn't one:
   `usage.resets`, T3's `claudeResetCreditsToContract`), ChatGPT's from `codex app-server`'s
@@ -974,9 +1044,14 @@ python3 -m dashboard    # http://queue.localhost/ is the runner's; http://localh
   says "2 resets left" on its line, and nothing when it has none. **Redeeming one isn't on the
   page:** it spends the credit, so it stays Stefan's, in T3.
 - **The Repositories card** (#61, Stefan 2026-11-16: "just stop and resume") was the Build order
-  card: no numbers or arrows, the repos in the order the runner takes them up (config.toml's,
-  or a `repo_order` still in control.json: the snapshot's `repos`), its note "Taken up in this
-  order." naming neither (PR #62's F2), on every page; Settings has no copy of it.
+  card: no numbers or arrows, the repos in config.toml's order (the snapshot's `repos`), on every
+  page; Settings has no copy of it. Each row says what that repo is doing now (#50, `repoRows`):
+  "Building #212, 35 min in.", "Waiting: <why>.", or "Idle.", then who merges; a stopped one
+  "Stopped since ..." and the job it still finishes. Its note: each runs its own Claude job at
+  once, as the usage gate allows. `tests/test_repo_rows.py` runs `repoRows()` in node on the
+  sample's states. A lane running several jobs says "2 at once" and lists each with its thread
+  (`laneSays`); `laneOn` finds an ask's job among a lane's `jobs`. The sample's `side-by-side`
+  state runs a build in each repo.
 - **What's left** (#60, Stefan 2026-11-16: "71% left as opposed to the current usage"): each
   usage window says `100 - used` as "N% left", on the Usage card and page; the bar holds what's
   left, amber at 15% left or less and red at none, and the share kept for you is blue at its left
@@ -1122,7 +1197,7 @@ python3 -m dashboard    # http://queue.localhost/ is the runner's; http://localh
   `dashboard/index.html`, sample data only, none agreed). `?page=queue&variant=a|b|c`; the pill
   over the sidebar's foot and the left and right arrow keys turn between them (the pill shows
   on the sample addresses only), and the last one looked at is remembered in the browser. **A, features
-  first** (`queueA`): a card per feature in build order, with its bar, what's left in a sentence
+  first** (`queueA`): a card per feature in the repos' order, with its bar, what's left in a sentence
   ("4 to go: 2 wait on you, 1 merged but not live, 1 blocked.") and its tickets as rows in the
   order they're built; a chip or a feature's name narrows the page to it (`?feature=<id>`,
   `none` for the work that belongs to no feature); "What blocks what" draws the same scope as
@@ -1249,12 +1324,25 @@ doesn't wait: a PR that needs a review gets one from a T3 thread on the Claude m
 - **The job record:** kind `review` with `reviewer` `opus-fallback` in its start record, and the
   thread's `thread_id`, `run_id` and `effort` in its end. `sol_resume_at` reads only Sol's own
   reviews, so fallback reviews never end the wait; **once Sol's reset has passed, the next review
-  goes to Sol**, and if Sol is still out, its `out-of-usage` starts the fallback again. A runner
-  that dies mid-review counts the review `failed` as for Sol's (its T3 thread runs on; its reply
-  is never read).
-- **Alongside the Claude lane:** the fallback runs in the Sol lane, beside whatever Claude job
-  runs. Each is gated on its own, so a build and a fallback review that each fit may together
-  take more of the 5-hour window than either check saw.
+  goes to Sol**, and if Sol is still out, its `out-of-usage` starts the fallback again.
+- **A runner that dies mid-review** (PR 67's review 2, F2): its T3 thread runs on, and its reply
+  is never read. The next runner finds the thread by its title (`t3.find_job_thread`, as for a
+  build). While it runs (or T3 can't say), the job stays open, said once in the Sol lane: that
+  PR isn't reviewed (`why_not`), and the Claude lane starts nothing in any repo
+  (`Runner._fallback_runs`: Stefan's rule on PR 67's review 2, kept beside #50's one job per
+  repo; the Sol lane's own review now, `Reviewer.live`, still runs beside it). Once it has ended, the Sol lane counts the review `failed`, with its `thread_id`
+  and `run_id`, and whichever lane saw the end first tells the gate (The usage gate, Which
+  reading). No thread found: `failed`, holding nothing. A Reviewer with no fallback (`--review`)
+  leaves such a review open for the runner's. Until then the dashboard shows it as the
+  reviewing lane's job.
+- **Alongside the Claude lane:** the fallback runs in the Sol lane, beside the Claude lane's
+  jobs, and each side's gate counts the other (PR #74's review 1, F1): the review's check counts
+  the Claude jobs running (`OpusFallback.check(label, ...)`, with the Runner as its `beside`),
+  and once let in it's one of the Claude jobs running for the Claude lane until it ends
+  (`Runner.review_began`, `review_ended`), so a build that fits alone but not beside it waits.
+  One lock (`Runner.gate_lock`) keeps each lane's check and its admission together. Each side's
+  record has the other's label in `shared_with`. `--gate` counts an open Opus review among the
+  jobs running and checks the review beside the Claude lane's.
 - **On the dashboard:** the Sol lane's wait says Opus reviews meanwhile, a lane on a fallback
   review names Claude's model, and the work lists and the Inbox's timelines say a review was
   Opus's.
@@ -1284,9 +1372,10 @@ provider = "claude"   # "chatgpt" (Sol) is the default
 - **Back to Sol:** set `provider = "chatgpt"` (or remove `[review]`) on main; the runner restarts
   on the merge (Restarting on new code, above). Any other value stops the runner at load, naming
   the key.
-- **Not yet covered** (issue #77, after #70 and #74): #74's gate doesn't count a running review
-  among the Claude jobs running, and #70 doesn't settle review threads, so they stay in the
-  sidebar until settled by hand.
+- **Issue #77:** the gate counts a running review among the Claude jobs running since #74
+  (Alongside the Claude lane, above), and #70 settles a review thread once its reply is read
+  (Settling threads, below). Still not settled: a review thread cut off with its runner (its id
+  is never recorded).
 
 ## Sol runs tests
 
@@ -1347,10 +1436,11 @@ didn't start: only ids from its own job records.
   (`Merger.after_merge`: the runner's, Stefan's, or one cut off with its runner), every thread
   the runner started for the PR (`JobLog.pr_threads`: its builds and fixes, the decisions on it
   or on one of those jobs, its Opus fallback reviews), the latest point one can still be open:
-  so one that waited, asked back or whose settle failed goes then (review 1's F1). **Not
-  settled:** ask threads, even at a merge (a decision acted on from one carries its id), and jobs
-  waiting on Stefan until their PR merges (a later ticket of #68); live threads. A fallback
-  review cut off with its runner records no thread id, so its thread stays.
+  so one that waited, asked back or whose settle failed goes then (review 1's F1). **An ask
+  thread, and a job whose question waits on Stefan,** are settled once they no longer need him
+  (Threads that need Stefan, below); an ask thread never at a merge (a decision acted on from
+  one carries its id). **Not settled:** live threads. A fallback review cut off with its runner
+  records no thread id, so its thread stays.
 - **A settled thread stays readable:** `thread show` and `thread list` still give it and its
   messages (checked live 2026-11-16), so decisions and restarts read its last reply as before.
   **A message to a settled thread unsettles it** (T3's `thread.unsettled` on a new turn,
@@ -1359,9 +1449,46 @@ didn't start: only ids from its own job records.
 - **A failed settle** is said (`<job>: settling its thread <id> in T3 failed (...); left as it
   is`: one Stefan archived is refused too, and isn't in the sidebar) and never raised: no lane
   stops on one, and nothing retries it but the merge.
-- **The interface:** `T3Cli` gains `settle` and `rename` (#71's), which go to its `mcp`, a
+- **The interface:** `T3Cli` gains `settle` and `rename` (#71's, below), which go to its `mcp`, a
   `t3_mcp.T3Mcp` (`cli.main` passes one; with none they raise `T3Error`). Everything else stays
   on the CLI. `--review` and `--dry-run` get no MCP client and settle nothing.
+
+### Threads that need Stefan
+
+`prefixes.py` (issue #71; spec #68). While a runner thread needs Stefan, its title says so, so
+the sidebar tells him at a glance what's his to do. Only two prefixes (everything else is
+settled), and only on threads the runner started (ids from its job records):
+
+- **"Decide: "** on an ask thread (Deciding an ask in T3, above) while its stop is `filed`, not
+  released and not decided (`waiting_on_stefan`). `AskThreads.open` launches it with the prefix;
+  the job's own `title` stays plain.
+- **"Answer: "** on a build or fix thread whose question a decision left to him (the `waiting`
+  question's `stop`: the Inbox's "Threads waiting for your answer"), while the job is still
+  `waiting` and not released. Answered in the thread and asking again, it keeps the prefix.
+- **Off, and settled,** once it no longer needs him: decided in the ask thread or on GitHub (a
+  reply, a closed issue), answered in the thread or on GitHub, or `--release`d. A thread a later
+  job carries on (his answer sent to it) waits for that job: its end settles it, or its own
+  question to him prefixes it again.
+- **A waiting job answered on GitHub** (`waiting.py`, review 1's F1): its stop comment (on the
+  build's issue or the fix round's PR) says to answer in the thread or there. Each Claude pass,
+  after the lane's switch and in the repos the lanes work, the runner reads each such job's issue
+  or PR. **His reply** after the question was put to him (bots and the runner's own posts aside)
+  is sent to the thread, quoted, as a continued job (in place or fresh, gated as the job's kind,
+  after a limited job and an ask thread and before decisions); the job ends `continued` with
+  `reason` `github` and `answer` the newest reply's time, so a reply goes once and the next
+  question waits for words after it. **The issue closed, or the PR merged or closed,** ends the
+  job `closed` (`reason` says which). GitHub failing is said once per job and read again next
+  pass.
+- **`Prefixes.sync`** runs in each Claude pass right after settling, before the build order and
+  the lane's switch (so titles are kept right while a dead runner's job runs on, and while the
+  Claude lane is stopped, as renaming isn't a job), and again after the ask threads' and
+  GitHub's answers are read. It works from the job log and the title T3 gives now (`thread list`, once per repo,
+  only for a repo with a thread to change): `titled` strips any prefix before adding one, so a
+  prefix is never doubled, and a restarted runner puts right what an earlier one left (an ask
+  thread opened before #71 gets its prefix). A thread still running keeps its prefix until its
+  run ends. A rename or settle that fails is said once (`<job>: renaming its thread <id> in T3
+  failed (...); tried again next pass`) and tried again next pass; nothing stops on one. What's
+  in order is remembered for the process, so a quiet pass calls T3 for nothing.
 
 **The token.** T3's MCP endpoint (`<origin>/mcp`, the origin read from
 `~/.t3/userdata/server-runtime.json` on every call) takes only an MCP client session: subject
@@ -1569,7 +1696,16 @@ reply (`decision_reply`), each thread's last messages and the runs `send` starts
 The usage gate: `tests/test_usage.py` (the real response, the login, never the token),
 `tests/test_gate.py` (`decide()` with a fixed clock, the knob, learned costs) and
 `tests/test_gating.py` (the run loop and the knob through `main`, `FakeUsage` in `fakes.py`; every
-test that runs `main` passes one, so none reads the real endpoint).
+test that runs `main` passes one, so none reads the real endpoint; a short job's after-read
+waiting for the budget). One reading, one budget (issue 66): `CachedUsageTest` in
+`tests/test_usage.py`, and `tests/test_usage_budget.py`: the CLI's wiring on `StubEndpoint`
+(`fakes.py`: a real `OAuthUsage` whose fetch answers 429 within a minute of its last call),
+Stefan's 2026-11-16 Refresh replayed, an hour of all four callers with every call 5 minutes
+apart, a 429 beside a recent reading, a stale one, and the after-job read; `EndedElsewhereTest`
+(a thread that ends outside a measured pass), `DeadFallbackReviewTest` (a dead runner's
+fallback review, either lane seeing it end first) and `MeasuredRaceTest` (the other lane saying a
+job ended mid-read), and `tests/test_review2_fallback_settle.py` (PR 67's review 2, as Sol wrote
+it).
 The Opus fallback: `tests/test_fallback.py` (through the Sol seam, `FakeT3` and
 `FakeGitHubForReviews`: the thread and its brief, the comment, status, Review row and
 `decision.json` naming it, the effort read back in the label, failed and waiting threads, the
@@ -1617,7 +1753,14 @@ server) and, through the real `Runner` with `FakeT3.settle` (settled threads sta
 `send` unsettles), each job kind's settle and a failing one in `tests/test_fix.py`,
 `tests/test_conflicts.py`, `tests/test_decisions.py` (a build, its decision, a retry, a waiting
 build, a decision that asked back, a dead runner's build), `tests/test_merge.py` and
-`tests/test_ask_threads.py` (an ask thread is left) and `tests/test_fallback.py`.
+`tests/test_ask_threads.py` (a decided ask thread) and `tests/test_fallback.py`.
+Threads that need Stefan: `tests/test_prefixes.py` (`titled` and `plain`; through the real
+`Runner` with `FakeT3.rename` changing the title: an ask thread opened "Decide:", one from before
+prefixed once by a restarted runner, its prefix off and settled when decided in the thread, on
+GitHub or released, kept while running, a failed rename said once; a build and a fix round
+stopped on a question "Answer:", off and settled once answered in the thread or on GitHub (a
+reply sent to the thread once, a closed issue, a merged PR) or released, kept when it asks again,
+and a quiet pass that calls T3 for nothing).
 Read and snoozed: `tests/test_read_snoozed.py` (control.json's `asks` read and kept by
 `control.py`, and the snapshot's `read` and `snoozed_until` from `snapshot.build` on the Inbox's
 fixtures); the requests, dropping gone asks and the sample's pretend runner in `test_dashboard.py`.
@@ -1632,8 +1775,9 @@ lists `SOURCES` and nothing else) and
 run, paused, none with `--once`, `--snapshot` with the lock held; `main`'s `sol_usage` and
 `snapshot_every` keep it off the real Codex and fast). `sol.latest_limits` (Codex's rollouts, no
 longer the snapshot's read) is in `tests/test_sol.py`.
-Usage refresh and resets (ticket 42): `tests/test_usage_refresh.py` (the control request, the
-publisher's forced read and its once a minute, the sample's pretend runner),
+Usage refresh and resets (ticket 42): `tests/test_usage_refresh.py` (the control request, a
+Refresh inside and outside Claude's budget on `StubEndpoint`, a 429 and a 401, the sample's
+pretend runner),
 `tests/test_codex_usage.py` (real `account/rateLimits/read` answers in `fixtures/codex/`, with
 and without reset credits, through `fixtures/codex/fake_app_server.py`, so no test starts Codex)
 and `ResetsTest` in `tests/test_usage.py`.
@@ -1655,11 +1799,21 @@ stop through `main` and `Runner.run_once`, the older pause against an entry, `--
 `--resume`, the same file from the CLI's writer and `serve.App.write_control`, `--gate` and the
 dry run's words, an unreadable control.json in every shape, read and repaired from both
 ends, the wake tasks a stopped lane doesn't set, and a Stop asked mid-review or mid-merge).
-The build order: `tests/test_build_order.py` (two served repos through `main` and the real
-`Runner`: each lane in `repo_order`, the orders that are ignored and said once, a new order
-written mid-job, the dry run, and the snapshot's `repos` and `control_read_at`).
+Repos side by side (#50): `tests/test_side_by_side.py` (two served repos through `main` and the
+real `Runner`: a build in each at once, held at a barrier so they must overlap; no second job in
+a repo while its first runs; a stopped repo and a dead runner's running job each holding only
+their own repo; the gate with room for one (config.toml's order on a tie, else the repo that
+waited longest), a held job not holding back a later one that fits, shared passes teaching
+nothing; both jobs cut off by a limit and each recovered in its repo; new code waiting for the
+running jobs; the dry run and `--gate`; the snapshot while both run; an old `repo_order` ignored
+silently and dropped on write). The gate beside running jobs: `RunningJobsTest` in
+`tests/test_gate.py`. `FakeT3` takes a lock, as two workers call it at once. The Opus review
+beside the Claude lane: `tests/test_review_beside_lane.py` (an open review holding a build, one
+the Sol lane let in, the review held by a running build, `shared_with` both ways whichever
+started first, a review alone still teaching, `--gate`).
 Stopping one repo: `tests/test_repo_stop.py` (leads-dashboard with live steps due and
-game-backdrop first through the run loop: game-backdrop's build comes first; each kind of Claude
+game-backdrop first through the run loop: game-backdrop's build, with leads-dashboard's live steps
+beside it unless stopped; each kind of Claude
 work and the Sol lane's stops, merges and reviews with a control run unstopped; a review that ends
 after its repo was stopped; `apply_control` and `--pause NAME` writing the same file; the log said
 once, an unserved name, an unreadable entry, wake tasks, the Inbox, the snapshot, `--gate`, the
@@ -1682,12 +1836,16 @@ temp folder.
 - `queue_runner/github.py`: the GitHub seam and its `gh api` adapter.
 - `queue_runner/t3.py`: the T3 seam and its CLI adapter; `settle_quietly`.
 - `queue_runner/t3_mcp.py`: T3's MCP endpoint called directly, for settle and rename (ticket 70).
+- `queue_runner/prefixes.py`: "Decide: " and "Answer: " on the threads that need Stefan, off
+  and settled once they don't (issue #71).
+- `queue_runner/waiting.py`: a waiting thread's question answered on GitHub: his reply sent to
+  it, or the job ended once its issue or PR is closed (issue #71).
 - `queue_runner/git.py`: local git around a job (fetch, leftover branch, the branch's commits),
   a review's checkout (the PR's head, a detached worktree, diffs), a fix brief's commits and
   files, and removing a job's worktree after its PR merged.
 - `queue_runner/state.py`: the job log.
-- `queue_runner/run.py`: the two lanes, a build job, a fix round's thread, a continued job and
-  the loop.
+- `queue_runner/run.py`: the two lanes (the Claude lane's plan, gate and one worker per repo),
+  a build job, a fix round's thread, a continued job and the loop.
 - `queue_runner/ask_threads.py` and `templates/ask.md`: an ask decided in a T3 thread Stefan
   opens from the Inbox: opening it, reading its answer, and the ask's `decide` in the snapshot.
 - `queue_runner/decisions.py` and `templates/decision.md`: decision threads: the cases, the
@@ -1715,18 +1873,18 @@ temp folder.
   seam over a T3 thread, gated, and its label (issue #69).
 - `queue_runner/deps.py`: a review checkout's dependencies, cached per lockfile and linked in.
 - `queue_runner/usage.py`: Claude's usage windows and reset credits from `api/oauth/usage`, with
-  the Claude login.
+  the Claude login; `CachedUsage`, the one reader that asks it at most once every 5 minutes
+  (issue 66), and `Reading`.
 - `queue_runner/codex_usage.py`: ChatGPT's usage windows and reset credits through `codex
   app-server` (ticket 42).
-- `queue_runner/gate.py`: the usage gate: `decide()`, Stefan's knob (`gate.json`), learned costs
-  (`usage.jsonl`).
+- `queue_runner/gate.py`: the usage gate: `decide()` beside the jobs running (`Running`),
+  Stefan's knob (`gate.json`), learned costs (`usage.jsonl`).
 - `queue_runner/control.py`: each lane's switch: reading `control.json` (and gate.json's older
-  pause), writing it for `--pause` and `--resume`, and what the runner says (ticket 30); the
-  build order, `ordered` (ticket 33); each repo's stop, `stopped_repos` (ticket 37); each ask's
+  pause), writing it for `--pause` and `--resume`, and what the runner says (ticket 30); each
+  repo's stop, `stopped_repos` (ticket 37); each ask's
   entry, `Switch.asks`, read only (ticket 36).
-- `queue_runner/config.py`: the served repos and the runner's folders; the build order
-  (`set_build_order`) and the stopped repos (`set_stopped`), and `working`, the repos the lanes
-  take work from.
+- `queue_runner/config.py`: the served repos and the runner's folders; the stopped repos
+  (`set_stopped`), and `working`, the repos the lanes take work from.
 - `queue_runner/limits.py` and `templates/restart.md`: usage-limit stops: T3's record of the
   reset, the transcript's last call (its context and its request's start), when a job resumes,
   in place or fresh for any job picking up an earlier thread (`resume_choice`), the auto-resume

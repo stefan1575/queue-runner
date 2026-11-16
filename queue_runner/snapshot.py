@@ -7,7 +7,9 @@
   stay empty until ticket 32 fills them from facts it adds to `Facts`.
 - `Snapshots` gathers the facts: the job log, `gate.json`, the learned costs, what the runner's
   passes last saw (`Calls`, `Watch`) and the runner's own state. GitHub is read by the passes, never
-  for the snapshot; Claude's and ChatGPT's usage are read for it at most every `READ_EVERY`.
+  for the snapshot; Claude's and ChatGPT's usage are read for it at most every `READ_EVERY`, and
+  Claude's through the gate's own reader (`usage.CachedUsage`), which asks the endpoint at most
+  once every 5 minutes whoever asks (issue 66).
 - `Publisher` writes it (a temp file, then `os.replace`) after every pass of either lane and every
   `WRITE_EVERY` seconds from its own thread, so it goes on while a lane is blocked in a job.
 """
@@ -21,14 +23,13 @@ import time
 from dataclasses import dataclass, field
 
 from . import control
-from .config import toml_order
 from .gate import RECENT, RESERVE_RELEASE, SAMPLES, Knob
 from .state import when
+from .usage import STALE_AFTER, Reading
 
 VERSION = 1
 WRITE_EVERY = 30    # seconds: the longest the runner goes between writes
 READ_EVERY = 300    # seconds: the snapshot reads usage itself no more often than this
-FORCE_EVERY = 60    # seconds: Refresh on the page reads usage again no more often than this
 
 
 CLAUDE_KINDS = ('build', 'fix', 'decision', 'live')   # the Claude lane's jobs (gate.CLAUDE_KINDS)
@@ -79,15 +80,6 @@ class Call:
 
 
 @dataclass(frozen=True)
-class Reading:
-    """A usage reading: the last good value (usage.Usage, or sol.Limits) and when it was read,
-    and the newest read's error if that one failed."""
-    value: object | None
-    at: datetime.datetime | None
-    error: str | None = None
-
-
-@dataclass(frozen=True)
 class RunnerInfo:
     pid: int | None
     started_at: datetime.datetime | None
@@ -98,8 +90,8 @@ class RunnerInfo:
 class Facts:
     """Everything `build` needs, as plain data. Later tickets add theirs with a default."""
     now: datetime.datetime
-    # config.Repo in the build order: control.json's repo_order, else config.toml's (ticket 33).
-    # The features and each lane's queue go through the repos in this order too.
+    # config.Repo in config.toml's order (#50: no build order). The features and each lane's
+    # queue go through the repos in this order too.
     repos: list = field(default_factory=list)
     jobs: list = field(default_factory=list)     # state.Job, the job log folded
     knob: Knob | None = Knob()                   # gate.json; None: unreadable
@@ -107,8 +99,10 @@ class Facts:
     switch: control.Switch = control.Switch()
     claude_model: str = 'claude-opus-5-5'
     review_provider: str = 'chatgpt'   # config.toml's `[review] provider` (issue #76)
-    # The gate's verdict or a limit's resume, as the Claude lane's last pass left it.
+    # The gate's verdict or a limit's resume, as the Claude lane's last pass left it; and each
+    # repo's own wait, when the gate held its job (#50: each repo runs its own Claude job).
     claude_wait: Wait | None = None
+    repo_waits: dict = field(default_factory=dict)   # repo name: Wait
     sol_wait: Wait | None = None      # ChatGPT out of usage: when reviews start again
     # (repo, n): the issue's or PR's title, as the pass that started a job on it read it.
     titles: dict = field(default_factory=dict)
@@ -170,9 +164,30 @@ def build(facts: Facts) -> dict:
 
 
 def _repos(facts: Facts) -> list[dict]:
-    """In the build order, each with `stopped` (ticket 37): when Stefan stopped it, or None."""
+    """In config.toml's order, each with `stopped` (ticket 37): when Stefan stopped it, or None;
+    and what it's doing now (#50): `doing`, the Claude job running in it (as a lane's `job`), or
+    None, and `wait`, why the Claude lane starts none in it now, or None."""
+    jobs = {j.repo: j for j in _open_jobs(facts, CLAUDE_KINDS)}
     return [{'name': r.name, 'github': f'https://github.com/{r.github}' if r.github else None,
-             'merge': r.merge, 'stopped': _repo_stopped(facts, r.name)} for r in facts.repos]
+             'merge': r.merge, 'stopped': _repo_stopped(facts, r.name),
+             'doing': _job(facts, jobs[r.name]) if r.name in jobs else None,
+             'wait': None if r.name in jobs else _repo_wait(facts, r.name)}
+            for r in facts.repos]
+
+
+def _repo_wait(facts: Facts, name: str) -> dict | None:
+    """Why no Claude job starts in this repo now: the gate's word on its job, or a wait that
+    holds every repo (a usage limit, an unreadable control.json, or the lane stopped)."""
+    if _repo_stopped(facts, name) is not None:
+        return None   # `stopped` says it
+    wait = facts.repo_waits.get(name)
+    if wait is None and not facts.repo_waits:
+        wait = facts.claude_wait
+    if facts.switch.error is not None:
+        wait = Wait(None, control.unreadable_text(facts.switch))
+    elif facts.switch.stop('claude').stopped:
+        wait = Wait(None, 'the Claude lane is stopped by Stefan')
+    return {'until': _iso(wait.until), 'reason': _sentence(wait.reason)} if wait else None
 
 
 def _repo_stopped(facts: Facts, name: str) -> dict | None:
@@ -198,9 +213,13 @@ def _work(facts: Facts) -> dict:
 def _decide(facts: Facts, asks: list, answered: list) -> None:
     """Each ask's `decide` and `also` (ticket 35: decided in a T3 thread)."""
     from .ask_threads import mark, waits_text
-    job, wait = _open_job(facts, CLAUDE_KINDS), facts.claude_wait
+    jobs = {j.repo: j for j in _open_jobs(facts, CLAUDE_KINDS)}   # one per repo (#50)
+
+    def wait(repo):
+        w = facts.repo_waits.get(repo) or (facts.claude_wait if not facts.repo_waits else None)
+        return w.reason if w else None
     mark(asks, answered, facts.jobs, facts.switch.opened,
-         lambda repo: waits_text(facts.switch, repo, job, wait.reason if wait else None),
+         lambda repo: waits_text(facts.switch, repo, jobs.get(repo), wait(repo)),
          released=facts.released)
 
 
@@ -223,8 +242,8 @@ def _view(facts: Facts):
     off = frozenset(r.name for r in facts.repos if _repo_stopped(facts, r.name) is not None)
     return View(reads=facts.work, jobs=facts.jobs, repos=facts.repos, off=off,
                 limited=facts.limited, titles=facts.titles, released=facts.released,
-                lane_jobs={'claude': _open_job(facts, CLAUDE_KINDS),
-                           'sol': _open_job(facts, SOL_KINDS)})
+                lane_jobs={'claude': _open_jobs(facts, CLAUDE_KINDS),
+                           'sol': _open_jobs(facts, SOL_KINDS)})
 
 
 def _queue(facts: Facts, lane: str) -> tuple[list[dict], str]:
@@ -244,9 +263,15 @@ def _sentence(text: str) -> str:
     return text[:1].upper() + text[1:] + ('' if text.endswith(('.', '!', '?')) else '.')
 
 
+def _open_jobs(facts: Facts, kinds) -> list:
+    """The open jobs of these kinds, oldest first: the Claude lane has one per repo (#50)."""
+    return sorted((j for j in facts.jobs if j.open and j.kind in kinds),
+                  key=lambda j: j.started_at)
+
+
 def _open_job(facts: Facts, kinds) -> object | None:
-    found = [j for j in facts.jobs if j.open and j.kind in kinds]
-    return max(found, key=lambda j: j.started_at, default=None)
+    found = _open_jobs(facts, kinds)
+    return found[-1] if found else None
 
 
 def _job(facts: Facts, job) -> dict:
@@ -263,7 +288,7 @@ def _job(facts: Facts, job) -> dict:
     }
 
 
-def _lane(facts: Facts, id: str, job, wait: Wait | None) -> dict:
+def _lane(facts: Facts, id: str, job, wait: Wait | None, jobs=None) -> dict:
     stop = facts.switch.stop(id)
     if facts.switch.error is not None:   # nothing starts until it's fixed: say so
         wait = Wait(None, control.unreadable_text(facts.switch))
@@ -287,6 +312,9 @@ def _lane(facts: Facts, id: str, job, wait: Wait | None) -> dict:
         else SOL_MODEL,
         'state': state,
         'job': _job(facts, job) if job is not None else None,
+        # Every job the lane runs now, oldest first: the Claude lane's one per repo (#50); `job`
+        # is the newest of them.
+        'jobs': [_job(facts, j) for j in (jobs if jobs is not None else [job] if job else [])],
         'next': None,   # read by the page's earlier takes only
         'wait': {'until': _iso(wait.until), 'reason': _sentence(wait.reason)}
         if wait and state == 'waiting' else None,
@@ -300,7 +328,8 @@ def _lane(facts: Facts, id: str, job, wait: Wait | None) -> dict:
 
 
 def _lanes(facts: Facts) -> list[dict]:
-    return [_lane(facts, 'claude', _open_job(facts, CLAUDE_KINDS), facts.claude_wait),
+    return [_lane(facts, 'claude', _open_job(facts, CLAUDE_KINDS), facts.claude_wait,
+                  _open_jobs(facts, CLAUDE_KINDS)),
             _lane(facts, 'sol', _open_job(facts, SOL_KINDS), facts.sol_wait)]
 
 
@@ -324,6 +353,9 @@ def _sources(facts: Facts) -> list[dict]:
             note, ok, at = 'Not called yet', True, None
         elif call.ok:
             note, ok, at = answered, True, call.at
+        elif id == 'claude_usage' and _claude_stands(facts):
+            # A failed call beside a recent Claude reading isn't shown (issue 66): it stands.
+            note, ok, at = answered, True, call.good_at
         else:   # the page shows a failing source's time as its last good one
             note, ok, at = call.note or 'Failed', False, call.good_at
         out.append({'id': id, 'group': group, 'name': name, 'short': short, 'ok': ok,
@@ -331,17 +363,28 @@ def _sources(facts: Facts) -> list[dict]:
     return out
 
 
+def _claude_stands(facts: Facts) -> bool:
+    """Whether Claude's reading stands though its latest call failed: it's good, under
+    `STALE_AFTER` old, and the login isn't the trouble (`usage.Reading.failing`)."""
+    r = facts.claude_usage
+    return r is not None and r.value is not None and not r.failing(facts.now)
+
+
 def _plan(id: str, provider: str, name: str, reading: Reading | None, windows,
-          plan=None) -> dict:
+          plan=None, error: str | None = None, next_read_at=None) -> dict:
     """`resets` (ticket 42): the reset credits the plan has left, from the same read as its
-    windows, or None when it has none to give (or isn't read yet)."""
+    windows, or None when it has none to give (or isn't read yet). `error`: what to say instead
+    of the reading's own ('' for nothing). `next_read_at` (issue 66): when the endpoint may be
+    asked again, while that's ahead; None for a plan that's read whenever it's asked."""
     good = reading is not None and reading.value is not None
-    error = reading.error if reading and reading.error else None if good else 'Not read yet'
+    if error is None:
+        error = reading.error if reading and reading.error else None if good else 'Not read yet'
     resets = getattr(reading.value, 'resets', None) if good else None
     return {'id': id, 'provider': provider, 'name': name, 'plan': plan,
             'read_at': _iso(reading.at) if good else None,
             'error': _sentence(error) if error else None, 'windows': windows,
-            'resets': {'available': resets} if resets is not None else None}
+            'resets': {'available': resets} if resets is not None else None,
+            'next_read_at': _iso(next_read_at)}
 
 
 def _claude_usage(facts: Facts) -> dict:
@@ -357,7 +400,22 @@ def _claude_usage(facts: Facts) -> dict:
              'reserve_opens_at': _iso(week.resets_at - RESERVE_RELEASE)
              if week.resets_at else None},
         ]
-    return _plan('claude', 'claude', 'Claude', reading, windows)
+    return _plan('claude', 'claude', 'Claude', reading, windows, error=_claude_error(facts),
+                 next_read_at=getattr(reading, 'next_at', None))
+
+
+def _claude_error(facts: Facts) -> str:
+    """What Claude's plan says went wrong (issue 66): nothing while a failed call stands beside
+    a recent reading; a stale reading says no Claude job starts on it."""
+    r = facts.claude_usage
+    if r is None or r.value is None and r.error is None:
+        return 'Not read yet'
+    if not r.failing(facts.now):
+        return ''
+    if r.value is not None and not r.login:
+        return (f'{r.error}; the reading is over {STALE_AFTER.total_seconds() / 60:g} minutes '
+                'old, so no Claude job starts until a read answers')
+    return r.error
 
 
 def _sol_usage(facts: Facts) -> dict:
@@ -445,9 +503,10 @@ class Watched:
 
 
 class Watch:
-    """A usage reader whose reads are kept: `read()` (the gate's reader for Claude), `reading()`
-    for the snapshot, and `due(seconds)` once the last read (good or not) is that old. With
-    `timed`, `read_fn` returns (when it was read, the value), as Codex's rollouts say."""
+    """A usage reader whose reads are kept (ChatGPT's): `read()`, `reading()` for the snapshot,
+    and `due(seconds)` once the last read (good or not) is that old. With `timed`, `read_fn`
+    returns (when it was read, the value). Claude's is `usage.CachedUsage`, which has the same
+    three and a 5-minute budget (issue 66)."""
 
     def __init__(self, read_fn, calls: Calls, id: str, clock, timed: bool = False):
         self.read_fn, self.calls, self.id, self.clock, self.timed = read_fn, calls, id, clock, timed
@@ -577,23 +636,24 @@ class Snapshots:
 
     def facts(self, fresh: bool = False) -> Facts:
         """With `fresh`, usage is read when `READ_EVERY` has passed since the last read, or when
-        Stefan asked for a Refresh since the last one acted on and none was forced in the last
-        `FORCE_EVERY` (ticket 42), and an open Claude job's thread is looked up in T3 until
-        it's found."""
+        Stefan asked for a Refresh since the last one acted on (ticket 42), and an open Claude
+        job's thread is looked up in T3 until it's found. Claude's reader asks its endpoint only
+        when its 5-minute budget allows (issue 66), so a Refresh inside it is taken and gives
+        back the cached reading; ChatGPT's is read."""
         from .gate import CLAUDE_KINDS as KINDS, CostBook, read_knob
         from .state import JobLog
         state = self.config.state_dir
         log = JobLog(os.path.join(state, 'jobs.jsonl'))
         jobs = log.jobs()
         now = self.clock()
-        switch = control.read(state)   # once: the stops, the build order (ticket 33), a Refresh
+        switch = control.read(state)   # once: the stops and a Refresh
         if fresh:
-            forced = self._refresh(switch, now)
+            asked = self._refresh(switch)
             for watch in (self.claude, self.sol):
-                if watch is not None and (forced or watch.due(READ_EVERY)):
+                if watch is not None and (asked or watch.due(READ_EVERY)):
                     with contextlib.suppress(Exception):   # kept in the reading as its error
                         watch.read()
-            if forced:
+            if asked:
                 self._refreshed = (switch.refresh_at, self.clock())
             self._find_threads(jobs)
         try:
@@ -608,13 +668,14 @@ class Snapshots:
         with self._lock:
             threads = dict(self._threads)
         runner = self.runner
-        repos, _ = control.ordered(toml_order(self.config), switch.order)
+        repos = list(self.config.repos)
         return Facts(
             now=now, repos=repos, jobs=jobs, knob=knob,
             switch=switch,
             claude_model=self.config.claude_model,
             review_provider=self.config.review_provider,
             claude_wait=runner.claude_wait if runner is not None else self._limit_wait(log, now),
+            repo_waits=dict(runner.repo_waits) if runner is not None else {},
             # Sol's out-of-usage wait holds no review back while Claude reviews (issue #76).
             sol_wait=None if self.config.review_provider == 'claude' else self._sol_wait(log, now),
             titles=dict(runner.titles) if runner is not None else {},
@@ -624,13 +685,11 @@ class Snapshots:
             usage_refresh=self._refreshed,
             **self._inbox(log))
 
-    def _refresh(self, switch, now) -> bool:
-        """Whether a Refresh asked on the page is due to be read now: newer than the last one
-        acted on, and none forced in the last `FORCE_EVERY` (it waits for a later tick)."""
+    def _refresh(self, switch) -> bool:
+        """Whether a Refresh asked on the page is to be taken now: newer than the last one acted
+        on."""
         asked = switch.refresh_at if switch.error is None else None
-        if asked is None or self._refreshed is not None and asked <= self._refreshed[0]:
-            return False
-        return self._refreshed is None or             (now - self._refreshed[1]).total_seconds() >= FORCE_EVERY
+        return asked is not None and (self._refreshed is None or asked > self._refreshed[0])
 
     def _inbox(self, log) -> dict:
         """The Sol lane's last Inbox read (ticket 31) and work read (ticket 32), the releases
