@@ -29,7 +29,7 @@ from string import Template
 
 from .decisions import ACTIONS, QUESTIONS, VERSION, Answer, Case, parse
 from .state import NOT_STARTED
-from .t3 import RunResult, T3Error
+from .t3 import RunResult, T3Error, settle_quietly
 
 KIND = 'ask'          # its job's kind
 OPENED = 'opened'     # the thread started; its outcome
@@ -85,18 +85,26 @@ def _ask_text(a: dict) -> str:
     return '\n'.join(lines)
 
 
-def _settled(stop, all_jobs, gone, log) -> str | None:
-    """Why this stop's ask opens no thread now, or None: it was answered (GitHub's issue closed
-    or a reply, or its thread), released, already has a thread, or was decided."""
+def _answered(stop, all_jobs, gone, log) -> str | None:
+    """Why this stop no longer waits on Stefan, or None: answered (GitHub's issue closed or a
+    reply, or its thread), released, or decided. A thread's answer is never acted on then."""
+    if stop.outcome == 'answered':
+        return 'answered in its T3 thread' if stop.answer == ANSWER else 'answered on GitHub'
     if stop.outcome != 'filed':
-        return ('answered in its T3 thread' if stop.answer == ANSWER else 'answered on GitHub'
-                if stop.outcome == 'answered' else f'marked {stop.outcome}')
+        return f'marked {stop.outcome}'
     if stop.id in gone:
         return 'released'
-    if opened(all_jobs, stop.id):
-        return 'given a thread already'
     if log.decided(stop.id):
         return 'decided already'
+    return None
+
+
+def _settled(stop, all_jobs, gone, log) -> str | None:
+    """Why this stop's ask opens no thread now, or None: `_answered`, or it has a thread."""
+    if why := _answered(stop, all_jobs, gone, log):
+        return why
+    if opened(all_jobs, stop.id):
+        return 'given a thread already'
     return None
 
 
@@ -174,33 +182,45 @@ class AskThreads:
         story = Story(all_jobs, self.jobs.releases(), reviews(all_jobs, {(repo.name, pr.number)}))
         return _ask_text(ask(story, w, {repo.name: repo}))
 
+    def _now(self, stop_id: str, why) -> str | None:
+        """`why(stop, ...)` for the stop as the job log has it now, or 'gone'. The Sol lane runs
+        alongside and may answer a stop (or Stefan release it) at any moment, so a check that
+        guards an action is made with this, after every slow read the action needs (issue #84,
+        review 1's F1)."""
+        all_jobs = self.jobs.jobs()
+        now = next((j for j in all_jobs if j.id == stop_id), None)
+        return why(now, all_jobs, self.jobs.released_ids(), self.jobs) if now else 'gone'
+
     def open(self, repo, stop, pr) -> str:
         """Starts the ask's thread and returns at once: 'started', or 'idle' if T3 started none
         (the request stands, and the next pass tries again) or if the stop no longer waits on
         Stefan when read again here (the request is dropped, as next() would have)."""
         n = pr.number
-        # The Sol lane runs alongside and may have answered the stop (or Stefan released it)
-        # since next() chose it: read the log again, so no thread opens that nothing would act
-        # on (issue #84).
-        all_jobs = self.jobs.jobs()
-        now = next((j for j in all_jobs if j.id == stop.id), None)
-        why = _settled(now, all_jobs, self.jobs.released_ids(), self.jobs) if now else 'gone'
-        if why:
+        # Everything slow the start needs (the brief reads GitHub) comes before the stop is read
+        # again, so nothing but the job log's own write lies between that check and the launch.
+        failed = None
+        try:
+            # Started as every Claude job is (ticket 39): on the project's default model when
+            # that is the config's model at its effort, else with --model.
+            brief, flags = self.brief(repo, stop, pr), self.decider.effort.flags(repo)
+        except Exception as e:   # the brief couldn't be built
+            failed = e
+        if why := self._now(stop.id, _settled):
             self._once(f'{PREFIX}{stop.id}', f'ask {repo.name}#{n}: its stop was {why} before '
                                              'its thread started, so none is started')
             return 'idle'
         job = self.jobs.started(kind=KIND, repo=repo.name, issue=n, branch=None,
                                 title=title(repo, n), sha=stop.sha, about=stop.id,
                                 question=QUESTION)
-        try:
-            # Started as every Claude job is (ticket 39): on the project's default model when
-            # that is the config's model at its effort, else with --model.
-            launched = self.t3.launch(repo.path, self.brief(repo, stop, pr), title=job.title,
-                                      **self.decider.effort.flags(repo))
-        except Exception as e:   # T3 down, or the brief couldn't be built
+        if failed is None:
+            try:
+                launched = self.t3.launch(repo.path, brief, title=job.title, **flags)
+            except Exception as e:   # T3 down
+                failed = e
+        if failed is not None:
             self.jobs.ended(job.id, exit_code=None, outcome=NOT_STARTED,
-                            error=f'{type(e).__name__}: {e}')
-            self.say(f'ask {repo.name}#{n} not started: {e}')
+                            error=f'{type(failed).__name__}: {failed}')
+            self.say(f'ask {repo.name}#{n} not started: {failed}')
             return 'idle'
         link = None
         try:
@@ -209,6 +229,13 @@ class AskThreads:
             pass
         self.jobs.ended(job.id, exit_code=None, outcome=OPENED, thread_id=launched.thread_id,
                         run_id=launched.run_id, link=link)
+        # Answered while T3 started it: the thread stays on record, its answer is never acted
+        # on (read_answers), and it leaves Stefan's sidebar.
+        if why := self._now(stop.id, _answered):
+            settle_quietly(self.t3, launched.thread_id, f'ask {repo.name}#{n}', self.say)
+            self.say(f'ask {repo.name}#{n}: its stop was {why} while its thread started, so the '
+                     "thread is settled and its answer won't be acted on")
+            return 'started'
         self.say(f'ask {repo.name}#{n}: a thread to decide it in is open for Stefan'
                  + (f' {link}' if link else ''))
         return 'started'
@@ -223,8 +250,8 @@ class AskThreads:
         by_id = {j.id: j for j in all_jobs}
         for j in all_jobs:
             stop = by_id.get(j.about) if j.kind == KIND and j.outcome == OPENED else None
-            if (stop is None or stop.repo not in repos or stop.outcome != 'filed'
-                    or stop.id in gone or self.jobs.decided(stop.id)
+            if (stop is None or stop.repo not in repos
+                    or _answered(stop, all_jobs, gone, self.jobs)
                     or opened(all_jobs, stop.id) is not j):
                 continue   # answered on GitHub, released or decided: that answer counts
             try:
@@ -248,8 +275,8 @@ class AskThreads:
                                  'another')
             return
         pr = next((p for p in self.github.open_pulls(repo) if p.number == stop.issue), None)
-        if pr is None:
-            return
+        if pr is None or self._now(stop.id, _answered):
+            return   # answered on GitHub (or released) while the thread and PR were read
         self.act(repo, stop, pr, j, thread, answer)
 
     def act(self, repo, stop, pr, j, thread, answer: Answer) -> None:

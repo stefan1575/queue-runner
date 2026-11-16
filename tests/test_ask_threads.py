@@ -398,6 +398,55 @@ class RaceTest(ThreadCase):
         self.assertTrue(any('released' in line for line in self.said))
         self.assertIsNone(self.r.asking.next(control.read(self.config.state_dir)))
 
+    # Review 1's F1: the check must come after the slow reads it guards, not before them.
+
+    def during(self, obj, name, step):
+        """`step` (the other lane's) lands while `obj.name` runs, before it returns."""
+        inner = getattr(obj, name)
+
+        def step_inside(*a, **k):
+            step()
+            return inner(*a, **k)
+        setattr(obj, name, step_inside)
+
+    def sol_reads(self, body):
+        self.gh.comments.setdefault(20, []).append(Comment('stefan1575', td.LATER, body))
+        return self.r.reviewer.review_pass
+
+    def test_a_stop_answered_on_github_while_the_brief_is_built_opens_no_thread(self):
+        self.noted()
+        self.ask_to_open()
+        self.during(self.r.asking, 'brief', self.sol_reads('fix on'))   # its GitHub reads
+        self.r.run_pass()
+        self.assertEqual(self.jobs('stop')[0].answer, 'replied')
+        self.assertEqual((self.jobs('ask'), self.t3.launches), ([], []))
+        self.assertFalse(any('is open for Stefan' in line for line in self.said))
+        self.assertTrue(any('answered on GitHub' in line for line in self.said))
+
+    def test_a_stop_answered_on_github_while_t3_starts_the_thread_settles_the_thread(self):
+        self.noted()
+        self.ask_to_open()
+        self.during(self.t3, 'launch', self.sol_reads('fix on'))
+        self.r.run_pass()
+        [ask] = self.jobs('ask')
+        self.assertEqual(ask.outcome, 'opened')         # the thread exists: its id is kept
+        self.assertIn(ask.thread_id, self.t3.settles)   # ...and it leaves Stefan's sidebar
+        self.assertFalse(any('is open for Stefan' in line for line in self.said))
+        self.assertTrue(any('answered on GitHub' in line and 'settled' in line
+                            for line in self.said))
+
+    def test_a_stop_answered_on_github_while_the_thread_is_read_acts_on_github_s_answer(self):
+        ask = self.opened()
+        self.says(ask, Message('assistant', decision_reply('hold')))
+        self.during(self.t3, 'show', self.sol_reads('fix on'))   # the Sol lane, meanwhile
+        self.t3.outcomes = [(0, 'completed')]   # the fix round his reply orders
+        self.r.run_pass()
+        [stop] = self.jobs('stop')
+        self.assertEqual(stop.answer, 'replied')   # not overwritten by the thread's answer
+        self.assertEqual([d.outcome for d in self.jobs('decision') if d.question == 'reply'],
+                         ['fix'])
+        self.assertIsNone(held(self.r.jobs, self.repo, 20))   # no hold from the thread
+
 
 class SnapshotTest(ThreadCase):
     def snap(self):
