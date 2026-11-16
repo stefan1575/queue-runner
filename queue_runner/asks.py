@@ -224,7 +224,8 @@ class Story:
         }.get(out, None if out in SKIPPED else f'The build of #{n} ended {out}.')
 
     def _review(self, j) -> str:
-        where = f'Review {j.round} on {(j.sha or "")[:7]}'
+        where = f'Review {j.round} on {(j.sha or "")[:7]}' + (
+            ', by Opus while Sol was out of usage,' if j.reviewer else '')   # issue #69
         if j.outcome == 'clean':
             return f'{where} came back clean.'
         found = self.problems(j)

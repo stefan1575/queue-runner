@@ -136,6 +136,7 @@ class Job:
     cause: str | None = None       # a fix: `conflict` for a conflict round (ticket 15), else None
     resume: dict | None = None     # a job picking up an earlier one: in place or fresh, and why
     effort: str | None = None      # a Claude job: the effort its run used, read back (ticket 39)
+    reviewer: str | None = None    # a review: `opus-fallback` when Opus reviewed in Sol's place
 
     @property
     def open(self) -> bool:
@@ -162,20 +163,21 @@ class JobLog:
                 title: str, sha: str | None = None, round: int | None = None,
                 stop: str | None = None, thread_id: str | None = None, about: str | None = None,
                 question: str | None = None, head: str | None = None,
-                cause: str | None = None, resume: dict | None = None) -> Job:
+                cause: str | None = None, resume: dict | None = None,
+                reviewer: str | None = None) -> Job:
         at = _now()
         stamp = at[:19].replace('-', '').replace(':', '').replace('T', '-')
         job = Job(id=f'{stamp}-{kind}-{repo}-{issue}-{uuid.uuid4().hex[:6]}', kind=kind,
                   repo=repo, issue=issue, branch=branch, title=title, started_at=at, sha=sha,
                   round=round, stop=stop, thread_id=thread_id, about=about, question=question,
-                  head=head, cause=cause, resume=resume)
+                  head=head, cause=cause, resume=resume, reviewer=reviewer)
         record = {'event': 'start', 'job': job.id, 'kind': kind, 'repo': repo, 'issue': issue,
                   'branch': branch, 'title': title, 'at': at}
         if sha:
             record.update(sha=sha, round=round)
         for k, v in (('stop', stop), ('thread_id', thread_id), ('about', about),
                      ('question', question), ('head', head), ('cause', cause),
-                     ('resume', resume)):
+                     ('resume', resume), ('reviewer', reviewer)):
             if v:
                 record[k] = v
         self._append(record)
@@ -203,7 +205,8 @@ class JobLog:
                           sha=e.get('sha'), round=e.get('round'), stop=e.get('stop'),
                           thread_id=e.get('thread_id'), about=e.get('about'),
                           question=e.get('question'), head=e.get('head'),
-                          cause=e.get('cause'), resume=e.get('resume'))
+                          cause=e.get('cause'), resume=e.get('resume'),
+                          reviewer=e.get('reviewer'))
                 jobs[job.id] = job
                 if job.kind == 'build':
                     held[(job.repo, job.issue)] = True
@@ -322,9 +325,12 @@ class JobLog:
         return found[-1] if found else None
 
     def sol_resume_at(self) -> str | None:
-        """When the Sol lane may run again, if the newest ended review found Sol out of usage."""
-        ended = [j for j in self.jobs() if j.kind == 'review' and not j.open]
-        last = max(ended, key=lambda j: j.ended_at, default=None)
+        """When Sol may review again, if Sol's newest ended review found it out of usage. The
+        Opus fallback's reviews meanwhile (`reviewer`) aren't Sol's, so they don't end the wait
+        (issue #69)."""
+        ended = [j for j in self.jobs() if j.kind == 'review' and not j.open and not j.reviewer]
+        # Stamps are to the second: a tie goes to the one written later.
+        last = max(reversed(ended), key=lambda j: j.ended_at, default=None)
         return last.resume_at if last and last.outcome == OUT_OF_USAGE else None
 
     def held_issues(self, repo: str) -> set[int]:

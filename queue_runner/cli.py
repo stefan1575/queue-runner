@@ -84,11 +84,11 @@ def _print_gate(gate, out, config) -> None:
     kind's verdict beside them with how many of that kind could start at once, one per working
     repo with none running (#50). Reads usage once."""
     from . import control
-    from .gate import CLAUDE_KINDS, CostBook, decide
+    from .gate import CLAUDE_KINDS, FALLBACK_REVIEW, GATED_KINDS, CostBook, decide
     from .usage import UsageError
     for line in _switch_lines(config):
         print(line, file=out)
-    held = control.read(config.state_dir).holds('claude')
+    switch = control.read(config.state_dir)
     try:
         knob = gate.knob()
     except (OSError, ValueError) as e:
@@ -111,14 +111,23 @@ def _print_gate(gate, out, config) -> None:
     print(f'  running: {", ".join(running.jobs) if running else "no Claude job"}; '
           f'{len(free)} working repo{"" if len(free) == 1 else "s"} with none running'
           + (f' ({", ".join(free)})' if free else ''), file=out)
-    for kind in CLAUDE_KINDS:
+    for kind in GATED_KINDS:
         cost = gate.book.expected(kind)
         learned = ' (the cautious default)' if cost == CostBook.default(kind) else ''
-        if held:
-            print(f'  {kind}: waits: the Claude lane is stopped by Stefan', file=out)
+        # The Opus review while Sol is out of usage (issue #69) runs in the reviewing lane.
+        lane = 'sol' if kind == FALLBACK_REVIEW else 'claude'
+        name = 'review (Opus, while Sol is out)' if kind == FALLBACK_REVIEW else kind
+        if switch.holds(lane):
+            print(f'  {name}: waits: the {control.NAMES[lane]} lane is stopped by Stefan',
+                  file=out)
+            continue
+        if kind == FALLBACK_REVIEW:
+            # The Sol lane's one review at a time, checked alone (fallback.py), as it starts.
+            v = decide(usage, kind, cost, knob, gate.clock())
+            print(f'  {name}: {"starts" if v.go else "waits"}: {v.text}{learned}', file=out)
             continue
         v = decide(usage, kind, cost, knob, gate.clock(), running)
-        print(f'  {kind}: {"starts" if v.go else "waits"}: {v.text}{learned}; '
+        print(f'  {name}: {"starts" if v.go else "waits"}: {v.text}{learned}; '
               f'{_could_start(usage, kind, cost, knob, gate.clock(), running, len(free))} '
               'could start at once', file=out)
 
