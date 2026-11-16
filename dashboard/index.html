@@ -2053,17 +2053,23 @@ document.addEventListener("click", (e) => {
   address();
   draw();
 });
-// In the Inbox the arrow keys walk the list, as in a mail client; `u` marks the open ask unread
-// (or read) and `s` opens its Snooze menu, as its row's icons do.
-const focusRow = () => { const row = document.querySelector('.mrow[aria-current="true"]'); if (row) row.focus(); };
+// In the Inbox the arrow keys walk the list, as in a mail client; `u` marks the row that has
+// focus unread (or read) and `s` opens its Snooze menu, as its icons do: the focused row, not the
+// open ask (PR #59's review 1, F1), which they fall back to when focus is on no row.
+const rowOf = (id) => [...document.querySelectorAll(".mrow")].find((r) => r.dataset.id === id);
+const focusRow = (id = ui.ask) => { const row = rowOf(id); if (row) row.focus(); };
+const focusedAsk = (el) => {
+  const li = el && el.closest ? el.closest("li") : null, row = li && li.querySelector(".mrow");
+  return row ? row.dataset.id : ui.ask;
+};
 document.addEventListener("keydown", (e) => {
   if (ui.page !== "inbox" || !snap || ui.pop || ui.pr || e.ctrlKey || e.metaKey || e.altKey) return;
   if (e.target.closest("input, textarea, select")) return;
   if (e.key === "u" || e.key === "s") {
-    const a = inboxOrder().find((x) => x.id === ui.ask);
+    const id = focusedAsk(e.target), a = inboxOrder().find((x) => x.id === id);
     if (!a || a.answered || snoozedUntil(a)) return;
     e.preventDefault();
-    if (e.key === "u") { toggleRead(a); draw(); focusRow(); return; }
+    if (e.key === "u") { toggleRead(a); draw(); focusRow(a.id); return; }
     ui.pop = `snooze:${a.id}`; draw();
     const first = document.querySelector(".row-pop .mi");
     if (first) first.focus();
@@ -2091,10 +2097,10 @@ document.addEventListener("keydown", (e) => {
 });
 document.addEventListener("keydown", (e) => {
   if (e.key !== "Escape" || !(ui.pop || ui.rail || ui.nav)) return;
-  const row = String(ui.pop).startsWith("snooze:");
+  const pop = String(ui.pop), from = pop.startsWith("snooze:") ? pop.slice("snooze:".length) : null;
   ui.pop = null; ui.rail = false; ui.nav = false;
   draw();
-  if (row) focusRow();   // back where the menu opened from
+  if (from) focusRow(from);   // back to the row the menu opened from, not the open ask
 });
 // The row's Snooze menu follows its row as the list or the window scrolls.
 document.addEventListener("scroll", () => { if (String(ui.pop).startsWith("snooze:")) placeRowMenu(); }, true);
