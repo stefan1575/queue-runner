@@ -1308,16 +1308,21 @@ didn't start: only ids from its own job records.
   `finish_fix`, so a dead runner's settle too), whatever the outcome except `waiting`; a decision
   thread once its answer is read (`Decider.run`), and an Opus fallback review's thread once its
   reply is read (`fallback.OpusThread`), unless either asked back (exit 2); and at a merge
-  (`Merger.after_merge`, the runner's or Stefan's), every build and fix thread of the PR, the
-  latest point one can still be open. **Not settled:** ask threads and jobs waiting on Stefan (a
-  later ticket of #68), live threads.
+  (`Merger.after_merge`: the runner's, Stefan's, or one cut off with its runner), every thread
+  the runner started for the PR (`JobLog.pr_threads`: its builds and fixes, the decisions on it
+  or on one of those jobs, its Opus fallback reviews), the latest point one can still be open:
+  so one that waited, asked back or whose settle failed goes then (review 1's F1). **Not
+  settled:** ask threads, even at a merge (a decision acted on from one carries its id), and jobs
+  waiting on Stefan until their PR merges (a later ticket of #68); live threads. A fallback
+  review cut off with its runner records no thread id, so its thread stays.
 - **A settled thread stays readable:** `thread show` and `thread list` still give it and its
   messages (checked live 2026-11-16), so decisions and restarts read its last reply as before.
   **A message to a settled thread unsettles it** (T3's `thread.unsettled` on a new turn,
   `server.asar`): a retry or a limit's resume in place shows it again, and its own end settles
   it again.
-- **A failed settle** is said (`<job>: settling its thread <id> in T3 failed (...); it stays in
-  the sidebar`) and never raised: no lane stops on one, and nothing retries it but the merge.
+- **A failed settle** is said (`<job>: settling its thread <id> in T3 failed (...); left as it
+  is`: one Stefan archived is refused too, and isn't in the sidebar) and never raised: no lane
+  stops on one, and nothing retries it but the merge.
 - **The interface:** `T3Cli` gains `settle` and `rename` (#71's), which go to its `mcp`, a
   `t3_mcp.T3Mcp` (`cli.main` passes one; with none they raise `T3Error`). Everything else stays
   on the CLI. `--review` and `--dry-run` get no MCP client and settle nothing.

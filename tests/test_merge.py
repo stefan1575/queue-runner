@@ -266,7 +266,7 @@ class MergeTest(unittest.TestCase):
                  jobs=self.jobs, say=self.said.append, now=lambda: NOW, t3=t3).review_pass()
         self.assertEqual(self.outcomes(), ['merged'])
         self.assertIn('merge first#20: settling its thread mcp:build in T3 failed (T3Error: '
-                      'down); it stays in the sidebar', self.said)
+                      'down); left as it is', self.said)
 
     def test_a_merge_cut_off_with_its_runner_is_settled_from_github(self):
         self.reviewed_clean()
@@ -276,6 +276,20 @@ class MergeTest(unittest.TestCase):
         self.reviewer().review_pass()
         self.assertEqual(self.outcomes(), ['merged'])
         self.assertEqual(self.merges(), [])
+
+    def test_a_merge_cut_off_with_its_runner_settles_the_prs_threads(self):
+        """Review 1's N3: Merger.settle's merge goes through after_merge too."""
+        t3 = FakeT3()
+        build = self.jobs.started(kind='build', repo='first', issue=5, branch='claude/red-5',
+                                  title='Queue runner build: first#5')
+        self.jobs.ended(build.id, exit_code=2, outcome='waiting', thread_id='mcp:build')
+        self.jobs.started(kind='merge', repo='first', issue=20, branch='claude/red-5',
+                          title='Queue runner merge: first#20', sha=H2)
+        self.gh.now[20] = {'state': 'merged'}
+        Merger(self.config, github=self.gh, git=self.git, jobs=self.jobs,
+               say=self.said.append, t3=t3).settle()
+        self.assertEqual(self.outcomes(), ['merged'])
+        self.assertEqual(t3.settles, ['mcp:build'])
 
 
 class StefanMergesTest(unittest.TestCase):
@@ -364,6 +378,23 @@ class StefanMergesTest(unittest.TestCase):
         self.assertEqual(self.labels()[-1], ('unlabel', 20, READY))
         self.assertEqual(self.git.removed_worktrees, [('C:/t3/wt/build', 'claude/red-5')])
         self.assertIn('merge first#20: Stefan merged it; its live steps follow', self.said)
+
+    def test_stefans_merge_settles_the_prs_threads(self):
+        """Review 1's N3: his merge, noticed (`_gone`), settles the PR's threads once."""
+        t3 = FakeT3()
+        build = self.jobs.started(kind='build', repo='first', issue=5, branch='claude/red-5',
+                                  title='Queue runner build: first#5')
+        self.jobs.ended(build.id, exit_code=0, outcome='done', thread_id='mcp:build')
+        decision = self.jobs.started(kind='decision', repo='first', issue=20, branch=None,
+                                     title='Queue runner decision: first#20', question='reply')
+        self.jobs.ended(decision.id, exit_code=2, outcome='stop', thread_id='mcp:dec')
+        self.reviewer().review_pass()
+        self.gh.now[20] = {'state': 'merged', 'labels': (READY,)}
+        m = Merger(self.config, github=self.gh, git=self.git, jobs=self.jobs,
+                   say=self.said.append, toaster=self.toaster, t3=t3)
+        m.merge_pass()
+        m.merge_pass()
+        self.assertEqual(t3.settles, ['mcp:build', 'mcp:dec'])
 
     def test_a_ready_pr_closed_unmerged_loses_its_mark_and_label(self):
         self.reviewer().review_pass()

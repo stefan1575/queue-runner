@@ -175,6 +175,6 @@ def settle_quietly(t3, thread_id: str | None, name: str, say) -> bool:
         t3.settle(thread_id)
     except Exception as e:   # noqa: BLE001 - T3 down, refused, or no MCP client
         say(f'{name}: settling its thread {thread_id} in T3 failed '
-            f'({type(e).__name__}: {e}); it stays in the sidebar')
+            f'({type(e).__name__}: {e}); left as it is')
         return False
     return True

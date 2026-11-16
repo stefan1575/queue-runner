@@ -191,7 +191,7 @@ class FixTest(unittest.TestCase):
         self.assertEqual(r.run_pass(), 'started')
         self.assertEqual([f.outcome for f in self.fixes(r)], ['pushed'])
         self.assertIn("fix first#20: settling its thread mcp:t1 in T3 failed (T3Error: T3's "
-                      "server can't be reached); it stays in the sidebar", self.out.getvalue())
+                      "server can't be reached); left as it is", self.out.getvalue())
 
     def test_a_round_that_ended_without_pushing_is_recorded_and_h_not_reviewed_again(self):
         r = self.blocking()

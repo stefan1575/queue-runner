@@ -525,7 +525,7 @@ class DecisionTest(unittest.TestCase):
         self.assertEqual(self.r.run_pass(), 'started')
         self.assertEqual(self.jobs('decision')[0].outcome, 'stop')
         self.assertIn('decision first#4 (failed): settling its thread mcp:t2 in T3 failed '
-                      '(T3Error: T3 refused it); it stays in the sidebar', self.said)
+                      '(T3Error: T3 refused it); left as it is', self.said)
 
     def test_a_dead_runners_build_is_settled_once_its_end_is_recorded(self):
         self.gh.prs = []
