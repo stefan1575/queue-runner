@@ -1341,10 +1341,11 @@ didn't start: only ids from its own job records.
   (`Merger.after_merge`: the runner's, Stefan's, or one cut off with its runner), every thread
   the runner started for the PR (`JobLog.pr_threads`: its builds and fixes, the decisions on it
   or on one of those jobs, its Opus fallback reviews), the latest point one can still be open:
-  so one that waited, asked back or whose settle failed goes then (review 1's F1). **Not
-  settled:** ask threads, even at a merge (a decision acted on from one carries its id), and jobs
-  waiting on Stefan until their PR merges (a later ticket of #68); live threads. A fallback
-  review cut off with its runner records no thread id, so its thread stays.
+  so one that waited, asked back or whose settle failed goes then (review 1's F1). **An ask
+  thread, and a job whose question waits on Stefan,** are settled once they no longer need him
+  (Threads that need Stefan, below); an ask thread never at a merge (a decision acted on from
+  one carries its id). **Not settled:** live threads. A fallback review cut off with its runner
+  records no thread id, so its thread stays.
 - **A settled thread stays readable:** `thread show` and `thread list` still give it and its
   messages (checked live 2026-11-16), so decisions and restarts read its last reply as before.
   **A message to a settled thread unsettles it** (T3's `thread.unsettled` on a new turn,
@@ -1353,9 +1354,35 @@ didn't start: only ids from its own job records.
 - **A failed settle** is said (`<job>: settling its thread <id> in T3 failed (...); left as it
   is`: one Stefan archived is refused too, and isn't in the sidebar) and never raised: no lane
   stops on one, and nothing retries it but the merge.
-- **The interface:** `T3Cli` gains `settle` and `rename` (#71's), which go to its `mcp`, a
+- **The interface:** `T3Cli` gains `settle` and `rename` (#71's, below), which go to its `mcp`, a
   `t3_mcp.T3Mcp` (`cli.main` passes one; with none they raise `T3Error`). Everything else stays
   on the CLI. `--review` and `--dry-run` get no MCP client and settle nothing.
+
+### Threads that need Stefan
+
+`prefixes.py` (issue #71; spec #68). While a runner thread needs Stefan, its title says so, so
+the sidebar tells him at a glance what's his to do. Only two prefixes (everything else is
+settled), and only on threads the runner started (ids from its job records):
+
+- **"Decide: "** on an ask thread (Deciding an ask in T3, above) while its stop is `filed`, not
+  released and not decided (`waiting_on_stefan`). `AskThreads.open` launches it with the prefix;
+  the job's own `title` stays plain.
+- **"Answer: "** on a build or fix thread whose question a decision left to him (the `waiting`
+  question's `stop`: the Inbox's "Threads waiting for your answer"), while the job is still
+  `waiting` and not released. Answered in the thread and asking again, it keeps the prefix.
+- **Off, and settled,** once it no longer needs him: decided in the ask thread or on GitHub (a
+  reply, a closed issue), answered in the thread (its job ends), or `--release`d. A GitHub
+  answer to a waiting job's stop comment isn't read by the runner (the comment says to answer in
+  the thread), so only the thread or a release ends one.
+- **`Prefixes.sync`** runs in each Claude pass after the build order (so a stopped Claude lane's
+  titles are kept right too, as renaming isn't a job) and again after the ask threads' answers
+  are read. It works from the job log and the title T3 gives now (`thread list`, once per repo,
+  only for a repo with a thread to change): `titled` strips any prefix before adding one, so a
+  prefix is never doubled, and a restarted runner puts right what an earlier one left (an ask
+  thread opened before #71 gets its prefix). A thread still running keeps its prefix until its
+  run ends. A rename or settle that fails is said once (`<job>: renaming its thread <id> in T3
+  failed (...); tried again next pass`) and tried again next pass; nothing stops on one. What's
+  in order is remembered for the process, so a quiet pass calls T3 for nothing.
 
 **The token.** T3's MCP endpoint (`<origin>/mcp`, the origin read from
 `~/.t3/userdata/server-runtime.json` on every call) takes only an MCP client session: subject
@@ -1611,7 +1638,13 @@ server) and, through the real `Runner` with `FakeT3.settle` (settled threads sta
 `send` unsettles), each job kind's settle and a failing one in `tests/test_fix.py`,
 `tests/test_conflicts.py`, `tests/test_decisions.py` (a build, its decision, a retry, a waiting
 build, a decision that asked back, a dead runner's build), `tests/test_merge.py` and
-`tests/test_ask_threads.py` (an ask thread is left) and `tests/test_fallback.py`.
+`tests/test_ask_threads.py` (a decided ask thread) and `tests/test_fallback.py`.
+Threads that need Stefan: `tests/test_prefixes.py` (`titled` and `plain`; through the real
+`Runner` with `FakeT3.rename` changing the title: an ask thread opened "Decide:", one from before
+prefixed once by a restarted runner, its prefix off and settled when decided in the thread, on
+GitHub or released, kept while running, a failed rename said once; a build and a fix round
+stopped on a question "Answer:", off and settled once answered or released, kept when it asks
+again).
 Read and snoozed: `tests/test_read_snoozed.py` (control.json's `asks` read and kept by
 `control.py`, and the snapshot's `read` and `snoozed_until` from `snapshot.build` on the Inbox's
 fixtures); the requests, dropping gone asks and the sample's pretend runner in `test_dashboard.py`.
@@ -1676,6 +1709,8 @@ temp folder.
 - `queue_runner/github.py`: the GitHub seam and its `gh api` adapter.
 - `queue_runner/t3.py`: the T3 seam and its CLI adapter; `settle_quietly`.
 - `queue_runner/t3_mcp.py`: T3's MCP endpoint called directly, for settle and rename (ticket 70).
+- `queue_runner/prefixes.py`: "Decide: " and "Answer: " on the threads that need Stefan, off
+  and settled once they don't (issue #71).
 - `queue_runner/git.py`: local git around a job (fetch, leftover branch, the branch's commits),
   a review's checkout (the PR's head, a detached worktree, diffs), a fix brief's commits and
   files, and removing a job's worktree after its PR merged.

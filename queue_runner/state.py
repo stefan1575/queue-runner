@@ -275,8 +275,8 @@ class JobLog:
         """The T3 threads the runner started for a PR, oldest first, each once (ticket 70's
         settle at its merge): its build and fix threads, the decisions on it or on one of
         those jobs (a failed build's, before the PR existed), and its Opus fallback reviews.
-        Never an ask thread, which stays Stefan's (a decision acted on from one carries its
-        id), nor a live run's, which isn't the PR's."""
+        Never an ask thread, which `prefixes.py` settles once decided (a decision acted on
+        from one carries its id), nor a live run's, which isn't the PR's."""
         jobs = self.jobs()
         writers = self.pr_jobs(repo, number, branch)
         ids = {j.id for j in writers}
