@@ -124,10 +124,12 @@ def _is_time(stamp) -> bool:
 
 def apply_control(control: object, body: object, now: str, asks: set | None = None) -> dict:
     """The control file after one request: `{"lane", "stop"}`, `{"repo", "stop"}` (ticket 37),
-    `{"repo_order"}`, or an ask's `{"ask", "read"}` and `{"ask", "snooze_until"}` (ticket 36) and
+    or an ask's `{"ask", "read"}` and `{"ask", "snooze_until"}` (ticket 36) and
     `{"ask", "open": true}` (ticket 35: decide that ask in a T3 thread), kept under `asks.<id>`
     beside that object's other keys, or `{"usage": "refresh"}` (ticket 42: read both plans'
-    usage now), kept as `usage.refresh_at`. `control` is the file as parsed, repaired first
+    usage now), kept as `usage.refresh_at`. `{"repo_order"}` is refused: the page can't reorder
+    the repos (#61); a `repo_order` already in the file is kept for the runner, which reads it
+    until #50. `control` is the file as parsed, repaired first
     (`usable`) if the runner couldn't read it. With `asks`, the ids the snapshot
     lists now, entries for any other ask are dropped."""
     if not isinstance(body, dict):
@@ -151,12 +153,6 @@ def apply_control(control: object, body: object, now: str, asks: set | None = No
         if stop not in REPO_STOPS:
             raise Refused('a repo\'s stop must be "after-job" or null')
         repos[repo] = {"stop": stop, "at": now}
-    elif keys == {"repo_order"}:
-        order = body["repo_order"]
-        if (not isinstance(order, list) or not 1 <= len(order) <= 50
-                or not all(isinstance(r, str) and NAME.match(r) for r in order)
-                or len(set(order)) != len(order)):
-            raise Refused("repo_order must list each repo's name once")
     elif keys in ({"ask", "read"}, {"ask", "snooze_until"}):
         ask = body["ask"]
         if not isinstance(ask, str) or not ASK.match(ask):
@@ -181,7 +177,7 @@ def apply_control(control: object, body: object, now: str, asks: set | None = No
             raise Refused('usage must be "refresh"')
         refresh = now
     else:
-        raise Refused('send {"lane", "stop"}, {"repo", "stop"}, {"repo_order"}, {"ask", "read"}, '
+        raise Refused('send {"lane", "stop"}, {"repo", "stop"}, {"ask", "read"}, '
                       '{"ask", "snooze_until"}, {"ask", "open": true} or {"usage": "refresh"}')
     if asks is not None:   # an ask that's gone takes its entry with it
         marks = {k: v for k, v in marks.items() if k in asks}

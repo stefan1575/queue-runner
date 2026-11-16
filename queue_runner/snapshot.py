@@ -25,6 +25,7 @@ from dataclasses import dataclass, field
 from . import control
 from .config import toml_order
 from .gate import RECENT, RESERVE_RELEASE, SAMPLES, Knob
+from .state import when
 from .usage import STALE_AFTER, Reading
 
 VERSION = 1
@@ -570,7 +571,7 @@ class Publisher:
 # --- gathering the facts ----------------------------------------------------------------------
 
 def _when(stamp: str) -> datetime.datetime:
-    return datetime.datetime.fromisoformat(stamp.replace('Z', '+00:00'))
+    return when(stamp)
 
 
 class Snapshots:

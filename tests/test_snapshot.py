@@ -629,6 +629,15 @@ class SnapshotsTest(unittest.TestCase):
         self.clock.tick(hours=1)
         self.assertIsNone(self.snapshots().facts().sol_wait)
 
+    def test_a_chatgpt_resume_with_no_offset_is_local_time_and_still_builds(self):
+        # The Sol lane wrote one like this on 2026-11-16, and the snapshot stopped being written.
+        job = self.jobs.started(kind='review', repo='leads-dashboard', issue=210, branch=None, title='t')
+        resume = (NOW + datetime.timedelta(minutes=30)).astimezone()
+        self.jobs.ended(job.id, exit_code=None, outcome='out-of-usage',
+                        resume_at=resume.replace(tzinfo=None).isoformat(timespec='seconds'))
+        self.assertEqual(self.snapshots().facts().sol_wait.until, resume.replace(microsecond=0))
+        self.snapshots().build()
+
     def test_an_unreadable_gate_json_is_no_knob(self):
         os.makedirs(self.state)
         with open(os.path.join(self.state, 'gate.json'), 'w') as f:
