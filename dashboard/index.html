@@ -1784,9 +1784,11 @@ function pyramid(m) {
 function meter(w, full) {
   const known = typeof w.used === "number", left = known ? Math.max(0, Math.min(100, 100 - w.used)) : null;
   const cls = known && left <= 0 ? " full" : known && left <= 15 ? " near" : "";
+  // The kept share is the last of what's left, so it's never wider than what's left (PR #62 F1).
+  const kept = known && w.reserve > 0 ? Math.min(w.reserve, left) : 0;
   return `<div class="meter${cls}" title="${esc(w.note || "")}"><span class="label">${esc(w.label)}</span>
     <span class="bar" role="img" aria-label="${esc(w.label)}: ${known ? left + "% left" : "unknown"}">
-      ${known ? `<i class="fill" style="width:${left}%"></i>` : ""}${w.reserve ? `<i class="kept" style="width:${w.reserve}%" title="${w.reserve}% kept for you"></i>` : ""}</span>
+      ${known ? `<i class="fill" style="width:${left}%"></i>` : ""}${kept > 0 ? `<i class="kept" style="width:${kept}%" title="${kept}% of what's left is kept for you"></i>` : ""}</span>
     <span class="pct">${known ? left + "% left" : "?"}</span>
     <span class="when">${w.resets_at ? `resets ${esc(stamp(w.resets_at))}` : "not started"}${full && !w.gates ? `. ${esc(w.note || "Not used by the runner.")}` : ""}</span></div>`;
 }
