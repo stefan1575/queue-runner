@@ -402,5 +402,132 @@ class EndedElsewhereTest(Harness):
         self.assertEqual(self.r.run_pass(), STARTED)   # the next build goes on the same reading
 
 
+
+class DeadFallbackReviewTest(EndedElsewhereTest):
+    """A dead runner's Opus fallback review whose thread runs on in T3 (PR 67's review 2, F2):
+    the Sol lane leaves its job open while the thread runs and counts it failed once it ends;
+    the Claude lane starts nothing beside it; and whichever lane first sees the thread end tells
+    the gate, once, so the next Claude job waits for a reading after it."""
+    test_a_dead_runners_job_that_ends_holds_the_next_job_for_a_reading_after_it = None
+    test_a_dead_runners_job_found_ended_on_the_first_pass_counts_too = None
+
+    def setUp(self):
+        super().setUp()
+        import io
+        from queue_runner.review import Reviewer
+        self.said = []
+        self.r = Runner(self.config, github=self.gh, t3=self.t3, git=FakeGit(), sol=object(),
+                        out=io.StringIO(), log_line=self.said.append, gate=self.gate,
+                        now=self.clock)
+        self.assertIsInstance(self.r.reviewer, Reviewer)
+
+    def a_review(self, status=None):
+        from queue_runner.fallback import KIND
+        job = self.log.started(kind='review', repo='queue-runner', issue=7, branch='claude/x-7',
+                               title='Queue runner review: queue-runner#7', sha='c' * 40,
+                               round=1, reviewer=KIND)
+        if status:
+            self.t3.add('mcp:opus', job.title, status)
+        return job
+
+    def the(self, job):
+        return next(j for j in self.log.jobs() if j.id == job.id)
+
+    def test_the_sol_lane_keeps_it_open_while_its_thread_runs_then_counts_it_failed(self):
+        from queue_runner.github import PullRequest
+        job = self.a_review('running')
+        self.endpoint.five = 10
+        self.tick()                                    # 14:01:49: 10% while it runs
+        self.r.reviewer.settle()
+        self.r.reviewer.settle()
+        self.assertTrue(self.the(job).open)
+        self.assertEqual(sum('runs on in https://app.t3.codes/threads/env/mcp:opus' in line
+                             for line in self.said), 1)   # said once
+        self.assertIn('runs on in T3', self.r.reviewer.why_not(
+            QR, PullRequest(7, 'claude/x-7', '', head_sha='d' * 40)))
+        self.assertEqual(self.r.run_pass(), BUSY)      # no Claude job beside it
+        self.assertEqual(self.t3.starts, [])
+        self.clock.at(14, 2, 49)
+        self.endpoint.five = 90                        # what the review spent
+        self.t3.set_status('mcp:opus', 'completed')
+        self.r.reviewer.settle()                       # the Sol lane sees it end first
+        ended = self.the(job)
+        self.assertEqual((ended.outcome, ended.thread_id, ended.run_id),
+                         ('failed', 'mcp:opus', 'run:mcp:opus:1'))
+        self.assertEqual(self.gate.ended, t(14, 2, 49))
+        self.assert_held_until_the_next_read()
+
+    def test_the_claude_lane_seeing_it_end_first_tells_the_gate_once(self):
+        job = self.a_review('running')
+        self.endpoint.five = 10
+        self.tick()
+        self.assertEqual(self.r.run_pass(), BUSY)
+        self.clock.at(14, 2, 49)
+        self.endpoint.five = 90
+        self.t3.set_status('mcp:opus', 'completed')
+        # Each of these passes sees the job still open (the Sol lane is busy elsewhere) and its
+        # thread ended: only the first tells the gate, so the 14:06:49 reading serves.
+        self.assert_held_until_the_next_read()
+        self.assertEqual(self.gate.ended, t(14, 2, 49))
+        self.clock.at(14, 7)
+        self.r.reviewer.settle()                       # the Sol lane, at last
+        self.assertEqual(self.the(job).outcome, 'failed')
+        self.assertEqual(self.gate.ended, t(14, 2, 49))   # told already: the reading stands
+        self.assertEqual(self.gate.check('fix').why, FIVE_HOUR)   # decided on 14:06:49's 90%
+
+    def test_the_sol_lanes_own_review_now_runs_beside_the_claude_lane(self):
+        job = self.a_review('running')
+        self.r.reviewer.live = job.id                  # this runner's review, running now
+        self.tick()
+        self.clock.at(14, 2, 49)
+        self.assertEqual(self.r.run_pass(), STARTED)
+
+    def test_a_review_that_never_started_a_thread_is_counted_failed_and_holds_nothing(self):
+        job = self.a_review()
+        self.tick()
+        self.r.reviewer.settle()
+        ended = self.the(job)
+        self.assertEqual((ended.outcome, ended.thread_id), ('failed', None))
+        self.assertIsNone(self.gate.ended)             # no thread ran: the reading stands
+        self.clock.at(14, 2, 49)
+        self.assertEqual(self.r.run_pass(), STARTED)
+
+    def test_t3_unreadable_keeps_both_lanes_off_it(self):
+        from queue_runner.t3 import T3Error
+        job = self.a_review('running')
+        self.tick()
+
+        def down(project):
+            raise T3Error('the server is down')
+        self.t3.list = down
+        self.r.reviewer.settle()
+        self.assertTrue(self.the(job).open)
+        self.assertEqual(self.r.run_pass(), BUSY)
+        self.assertEqual(self.t3.starts, [])
+
+
+class MeasuredRaceTest(Harness):
+    """PR 67's review 2, a nit: the other lane telling the gate a job ended while this job's
+    after-read is under way doesn't cost this job its sample."""
+
+    def test_a_job_ended_in_the_other_lane_mid_read_keeps_this_jobs_reading(self):
+        import json
+        self.tick()                                    # 14:01:49
+        verdict = self.gate.check('fix')
+        self.clock.tick(minutes=10)                    # a 10-minute job: no budget wait
+        read = self.gate.reader.read
+
+        def read_then_the_other_lane(*a, **kw):
+            got = read(*a, **kw)
+            self.clock.tick(seconds=1)
+            self.gate.job_ended('the-sol-lanes-fallback-review')
+            return got
+        self.gate.reader.read = read_then_the_other_lane
+        self.gate.measured('fix', ['j1'], verdict.usage)
+        with open(os.path.join(self.state, 'usage.jsonl'), encoding='utf-8') as f:
+            last = json.loads(f.read().splitlines()[-1])
+        self.assertIsNotNone(last['after'], last)
+
+
 if __name__ == '__main__':
     unittest.main()

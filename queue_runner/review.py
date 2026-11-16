@@ -30,6 +30,7 @@ from .post import GitHubPoster, PostFailed
 from .sol import SolOutOfUsage
 from .state import FAILED_REVIEW, OUT_OF_USAGE, REVIEWED, JobLog, when
 from .stops import Stopper, held
+from .t3 import T3Error, find_job_thread
 
 STARTED, BUSY, IDLE = 'started', 'busy', 'idle'   # as run.py's lane results
 MAX_FAILED = 2   # failed reviews on one head before the lane leaves it until a release or a push
@@ -124,6 +125,10 @@ class Reviewer:
         # for Sol's reset (the CLI's --review, the live checks, most tests).
         self.fallback = fallback
         self._said_gate: str | None = None
+        # The review this Reviewer runs now (its job id), so the Claude lane can tell it from a
+        # dead runner's fallback review whose thread runs on (PR 67's review 2, F2).
+        self.live: str | None = None
+        self._said_running: set[str] = set()
         # deps.Deps: the checkout's node_modules from a cache, so Sol can run the tests (ticket
         # 16); None installs nothing (the tests, live_merge.py).
         self.deps = deps
@@ -186,13 +191,41 @@ class Reviewer:
 
     def settle(self) -> None:
         """A review left open was cut off with its runner (the caller holds sol.lock, so no
-        live one is open): it counts as failed."""
+        live one is open): it counts as failed. An Opus fallback review's thread may run on in
+        T3 (PR 67's review 2, F2): it's found by its title, and while it runs the job stays open
+        (the Claude lane is busy meanwhile: `Runner.settle`); once it has ended the review
+        counts as failed, with its thread, and the gate is told a Claude job ended. A Reviewer
+        that can't read T3 (no fallback: `--review`) leaves such a review to the runner's."""
         for job in self.jobs.open_jobs():
-            if job.kind == 'review':
-                self.jobs.ended(job.id, exit_code=None, outcome=FAILED_REVIEW,
-                                error='The runner stopped mid-review.')
-                self.say(f'review {job.repo}#{job.issue}: cut off with its runner; '
-                         'counted as failed')
+            if job.kind != 'review':
+                continue
+            name = f'review {job.repo}#{job.issue}'
+            thread = None
+            if job.reviewer == FALLBACK:
+                if self.fallback is None:
+                    continue
+                repo = next((r for r in self.config.repos if r.name == job.repo), None)
+                try:
+                    thread = find_job_thread(self.fallback.t3, job, repo.path if repo else None)
+                except T3Error as e:
+                    if job.id not in self._said_running:
+                        self.say(f"{name}: cut off with its runner; T3 can't say whether its "
+                                 f'Opus thread runs on ({e}): left open until it can')
+                        self._said_running.add(job.id)
+                    continue
+                if thread is not None and thread.active and not thread.pending_requests:
+                    if job.id not in self._said_running:
+                        self.say(f'{name}: cut off with its runner, but its Opus thread runs on '
+                                 f'in {thread.link}: counted as failed once it ends')
+                        self._said_running.add(job.id)
+                    continue
+            ran_on = {'thread_id': thread.thread_id, 'run_id': thread.latest_run_id}                 if thread else {}
+            self.jobs.ended(job.id, exit_code=None, outcome=FAILED_REVIEW,
+                            error='The runner stopped mid-review.', **ran_on)
+            self._said_running.discard(job.id)
+            if thread is not None:   # a Claude thread ran and has ended
+                self.fallback.thread_ended(job.id)
+            self.say(f'{name}: cut off with its runner; counted as failed')
         if self.merger:
             self.merger.settle()
 
@@ -261,6 +294,10 @@ class Reviewer:
                     f'a {job.kind} job is still writing to its branch')
         if why := held(self.jobs, repo, pr.number):
             return why
+        if any(j.open and j.reviewer == FALLBACK and j.id != self.live
+               for j in self.jobs.on('review', repo.name, pr.number)):
+            return ("a stopped runner's Opus fallback review of it runs on in T3: counted as "
+                    'failed once it ends')
         done = self.jobs.reviews_of(repo.name, pr.number, h)
         if ran := [j for j in done if j.outcome in REVIEWED]:
             return (f'the runner reviewed {h7} already (review {ran[-1].round}, '
@@ -307,6 +344,14 @@ class Reviewer:
         job = self.jobs.started(kind='review', repo=repo.name, issue=n, branch=pr.branch,
                                 title=review_title(repo, n), sha=h, round=rnd,
                                 reviewer=FALLBACK if opus else None)
+        self.live = job.id
+        try:
+            return self._review(repo, pr, by, job, earlier, rnd, opus)
+        finally:
+            self.live = None
+
+    def _review(self, repo, pr, by, job, earlier, rnd, opus) -> str:
+        n, h = pr.number, pr.head_sha
         sol = self.fallback.thread(repo, review_title(repo, n)) if opus else self.sol
         who = 'Opus (the fallback while Sol is out of usage)' if opus else 'Sol'
         run_dir = os.path.join(self.config.runs_dir,

@@ -20,6 +20,7 @@ Limits). Sol isn't gated.
 import datetime
 import json
 import os
+import threading
 from dataclasses import dataclass
 
 from .state import append_record, read_records
@@ -211,6 +212,8 @@ class Gate:
         self.sleep = sleep
         self.book = CostBook(os.path.join(state_dir, 'usage.jsonl'))
         self.ended: datetime.datetime | None = None   # when the last measured Claude job ended
+        self._told: dict[str, datetime.datetime] = {}   # job_ended(job_id): each told once
+        self._ended_lock = threading.Lock()   # both lanes say a job ended (the Opus fallback)
 
     def knob(self) -> Knob:
         return read_knob(self.state_dir)
@@ -260,11 +263,22 @@ class Gate:
             return r.value, None
         return None, Verdict(False, UNREADABLE, text, next_at)
 
-    def job_ended(self) -> None:
+    def job_ended(self, job_id: str | None = None) -> datetime.datetime:
         """A Claude job's thread has ended (now): the next check decides only on a reading taken
         after it. `measured` says so itself; the runner says so for a thread that ended outside
-        a measured pass (a dead runner's job settled, a decision whose retry never ran)."""
-        self.ended = self.clock()
+        a measured pass (a dead runner's job settled, a decision whose retry never ran). With
+        `job_id`, a job already told is told nothing again: both lanes may see a dead runner's
+        Opus fallback review end (PR 67's review 2, F2), and a second telling would discard a
+        reading taken since the first. Returns when this job's end counts from."""
+        with self._ended_lock:
+            if job_id is not None:
+                if job_id in self._told:
+                    return self._told[job_id]
+                self._told[job_id] = self.clock()
+                self.ended = self._told[job_id]
+                return self.ended
+            self.ended = self.clock()
+            return self.ended
 
     def after_wait(self) -> float:
         """How long the after-job read will wait for the endpoint's budget, in seconds."""
@@ -275,7 +289,9 @@ class Gate:
         after it waits for the endpoint's budget (a job under 5 minutes), since the next check
         waits for that reading anyway; a reading another caller took after the job ended serves
         too. A failed read is recorded with its error and no `after`."""
-        self.job_ended()
+        # Its own end, not `self.ended`: the other lane may say a job ended while this one
+        # reads, and this job's reading is still its own (PR 67's review 2, a nit).
+        ended = self.job_ended()
         wait = self.reader.wait_seconds()
         if wait > 0:
             if self.sleep is None:
@@ -287,7 +303,7 @@ class Gate:
         except UsageError:
             pass
         r = self.reader.reading()
-        if r is not None and r.value is not None and r.at >= self.ended:
+        if r is not None and r.value is not None and r.at >= ended:
             after, error = r.value, None
         else:
             after, error = None, (r.error if r and r.error else 'no reading after the job')

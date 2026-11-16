@@ -6,6 +6,7 @@ completed, 2 when the agent waits for an answer (status `waiting`), and 1 when t
 other way (failed, interrupted, cancelled...). It also exits 1, printing nothing on stdout, when
 T3 itself fails before or while waiting (server not running, unknown project): that's `T3Error`.
 """
+import datetime
 import json
 import os
 import re
@@ -59,6 +60,24 @@ class Thread:
     @property
     def active(self) -> bool:
         return self.status in ACTIVE
+
+
+def find_job_thread(t3, job, project: str | None) -> Thread | None:
+    """A job's T3 thread (`thread show`): by its `thread_id`, else by its title among the
+    threads of `project` created after the job's start record (5 seconds' slack), the newest.
+    None when there's none, or no project to look in. T3Error propagates."""
+    if job.thread_id:
+        return t3.show(job.thread_id)[0]
+    if project is None:
+        return None
+    from .state import when
+    since = when(job.started_at) - datetime.timedelta(seconds=5)
+    found = [t for t in t3.list(project)
+             if t.title == job.title and when(t.created_at) >= since]
+    if not found:
+        return None
+    newest = max(found, key=lambda t: when(t.created_at))
+    return t3.show(newest.thread_id)[0]
 
 
 @dataclass(frozen=True)

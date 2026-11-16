@@ -20,6 +20,7 @@ from .config import Config, Repo, set_build_order, set_stopped, stopped, toml_or
 from .decisions import Decider
 from .fix import Fixer, fix_branch, fix_title
 from .stops import CONFLICT
+from .fallback import KIND as FALLBACK
 from .gate import CLAUDE_KINDS
 from . import limits as lim
 from .live import LiveSteps
@@ -29,7 +30,7 @@ from .picker import BuildJob, pick
 from .review import Reviewer
 from .state import NOT_SENT, NOT_STARTED, RESTART_FAILED, USAGE_LIMIT, Job, JobLog, when
 from .stops import Stopper
-from .t3 import T3Error, Thread
+from .t3 import T3Error, Thread, find_job_thread
 from .toast import NoToaster
 from .wake import NoWaker
 
@@ -368,6 +369,10 @@ class Runner:
                 elif next(j for j in self.jobs.jobs() if j.id == job.id).thread_id:
                     self._thread_ended()   # its thread ran and has ended
                 continue
+            if job.kind == 'review' and job.reviewer == FALLBACK:
+                if self._fallback_runs(job):
+                    busy = BUSY
+                continue
             if job.kind not in ('build', 'fix'):
                 continue   # an open review or merge is the Sol lane's to settle
             thread = self._find_thread(job)
@@ -405,23 +410,37 @@ class Runner:
                 self._thread_ended()   # Stefan's answer set it running again, and it ended
         return busy
 
+    def _fallback_runs(self, job: Job) -> bool:
+        """A dead runner's Opus fallback review, left open while its thread runs on (PR 67's
+        review 2, F2): True while that thread runs (or T3 can't say), so no Claude job starts
+        beside it; once it has ended the gate is told, once per job, and the Sol lane counts the
+        review failed. The Sol lane's own review now isn't a dead runner's: it runs beside the
+        Claude lane (AGENTS.md, The Opus fallback)."""
+        if self.reviewer is not None and job.id == self.reviewer.live:
+            return False
+        try:
+            thread = self._find_thread(job)
+        except T3Error as e:
+            self.say(f"review {job.repo}#{job.issue} (Opus fallback): cannot read its thread "
+                     f'({e}); no other Claude job starts')
+            return True
+        if thread is None:
+            return False   # it never started a thread: the Sol lane counts it failed
+        if thread.active and not thread.pending_requests:
+            self.say(f"review {job.repo}#{job.issue} (Opus fallback, a stopped runner's) is "
+                     f'still running in {thread.link}: no other Claude job starts')
+            return True
+        if self.gate is not None:
+            self.gate.job_ended(job.id)
+        return False
+
     def find_thread(self, job: Job) -> Thread | None:
         """The T3 thread of a job, by its id or else its title (the snapshot's link)."""
         return self._find_thread(job)
 
     def _find_thread(self, job: Job) -> Thread | None:
-        if job.thread_id:
-            return self.t3.show(job.thread_id)[0]
-        since = _when(job.started_at) - datetime.timedelta(seconds=5)
         repo = self.repos.get(job.repo)
-        if repo is None:
-            return None
-        found = [t for t in self.t3.list(repo.path)
-                 if t.title == job.title and _when(t.created_at) >= since]
-        if not found:
-            return None
-        newest = max(found, key=lambda t: _when(t.created_at))
-        return self.t3.show(newest.thread_id)[0]
+        return find_job_thread(self.t3, job, repo.path if repo else None)
 
     # --- a build job ----------------------------------------------------------------------
 

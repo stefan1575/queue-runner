@@ -124,6 +124,13 @@ class OpusFallback:
     def thread(self, repo, title: str) -> OpusThread:
         return OpusThread(self, repo, title)
 
+    def thread_ended(self, job_id: str) -> None:
+        """A dead runner's fallback review thread was seen to end (`Reviewer.settle`): the
+        Claude lane's next check waits for a reading after it, once per job (PR 67's review 2,
+        F2)."""
+        if self.gate is not None:
+            self.gate.job_ended(job_id)
+
     def measured(self, jobs: list, verdict) -> None:
         """What a fallback review that ran a thread cost, learned as kind `review`."""
         if self.gate is not None and verdict is not None and verdict.usage is not None:
