@@ -103,3 +103,52 @@ class GitCliTest(unittest.TestCase):
     def test_a_worktree_already_gone_counts_as_removed(self):
         self.cli.remove_worktree(self.repo, self.wt, None)
         self.assertTrue(self.cli.remove_worktree(self.repo, self.wt, 'claude/x-1'))
+
+    def test_a_checkout_git_cant_delete_is_moved_aside_and_the_next_one_is_made(self):
+        """Ticket 45: Sol's sandbox user left owner-only folders in the checkout, so `git
+        worktree remove` unregistered it but left its folder, and the next review's `worktree
+        add` refused the path. A deny-delete ACL plays the sandbox user's folder."""
+        checkout = os.path.join(os.path.dirname(self.repo), 'checkouts', 'repo-pr6')
+        self.cli.checkout(self.repo, self.head, checkout)
+        locked = os.path.join(checkout, '.review-tmp', 'tmp1')
+        deny_delete(self, locked)
+        moved = self.cli.remove_checkout(self.repo, checkout)
+        self.addCleanup(subprocess.run, ['icacls', os.path.join(moved, '.review-tmp', 'tmp1'),
+                                         '/remove:d', '*S-1-1-0'], capture_output=True)
+        self.assertFalse(os.path.exists(checkout))
+        self.assertTrue(os.path.basename(moved).startswith('repo-pr6.stale-'), moved)
+        self.assertTrue(os.path.isdir(os.path.join(moved, '.review-tmp', 'tmp1')))
+        self.cli.checkout(self.repo, self.head, checkout)   # the next review
+        self.assertTrue(os.path.isfile(os.path.join(checkout, 'b.txt')))
+        self.assertNotIn('repo-pr6.stale', git('worktree', 'list', cwd=self.repo))
+
+    def test_a_checkout_removed_whole_moves_nothing_aside(self):
+        checkout = os.path.join(os.path.dirname(self.repo), 'checkouts', 'repo-pr6')
+        self.cli.checkout(self.repo, self.head, checkout)
+        self.assertIsNone(self.cli.remove_checkout(self.repo, checkout))
+        self.assertEqual(os.listdir(os.path.dirname(checkout)), [])
+
+    def test_folders_moved_aside_are_swept_once_they_can_be_deleted(self):
+        checkouts = os.path.join(os.path.dirname(self.repo), 'checkouts')
+        free = os.path.join(checkouts, 'repo-pr4.stale-20261116-010203')
+        held = os.path.join(checkouts, 'repo-pr6.stale-20261116-010203')
+        live = os.path.join(checkouts, 'repo-pr7')
+        for d in (free, held, live):
+            os.makedirs(os.path.join(d, 'x'))
+        deny_delete(self, os.path.join(held, 'x'))
+        self.assertEqual(self.cli.sweep_stale(checkouts), [held])
+        self.assertEqual(sorted(os.listdir(checkouts)), ['repo-pr6.stale-20261116-010203',
+                                                         'repo-pr7'])
+        self.assertEqual(self.cli.sweep_stale(os.path.join(checkouts, 'none')), [])
+
+
+def deny_delete(test, folder):
+    """Makes `folder` (and a file in it) undeletable by anyone, as the folders Sol's sandbox
+    user leaves are for Stefan; undone at the test's end so the temp folder can go."""
+    os.makedirs(folder, exist_ok=True)
+    with open(os.path.join(folder, 'f.txt'), 'w') as f:
+        f.write('x')
+    subprocess.run(['icacls', folder, '/deny', '*S-1-1-0:(OI)(CI)(DE,DC)'], check=True,
+                   capture_output=True)
+    test.addCleanup(lambda: subprocess.run(['icacls', folder, '/remove:d', '*S-1-1-0'],
+                                           capture_output=True))
