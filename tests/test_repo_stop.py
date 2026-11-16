@@ -28,7 +28,8 @@ class Done(Exception):
 
 
 def control(order=(), lanes=None, **repos):
-    """control.json as the page writes it; each repo's stop by its name (`**{LD: ...}`)."""
+    """control.json as the page writes it; each repo's stop by its name (`**{LD: ...}`). `order`
+    is ticket 33's old `repo_order`, which the runner no longer reads (#50): left in the file."""
     return {'version': 1, 'written_at': WRITTEN,
             'lanes': {k: {'stop': v, 'at': WRITTEN} for k, v in (lanes or {}).items()},
             'repo_order': list(order),
@@ -58,7 +59,8 @@ class PerRepoGitHub(FakeGitHubForReviews):
 
 
 class Harness(unittest.TestCase):
-    """leads-dashboard (live steps, first in config.toml) and game-backdrop (a ready issue)."""
+    """game-backdrop (a ready issue, first in config.toml, as it is since 2026-11-15) and
+    leads-dashboard (live steps)."""
 
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
@@ -66,9 +68,9 @@ class Harness(unittest.TestCase):
         self.dir = tmp.name
         self.state = os.path.join(self.dir, 'state')
         os.makedirs(self.state)
-        self.repos = [Repo(name=LD, github=f'owner/{LD}', path=os.path.join(self.dir, LD),
-                           live_doc='docs/agents/lovable-cloud.md', merge='stefan'),
-                      Repo(name=GB, github=f'owner/{GB}', path=os.path.join(self.dir, GB))]
+        self.repos = [Repo(name=GB, github=f'owner/{GB}', path=os.path.join(self.dir, GB)),
+                      Repo(name=LD, github=f'owner/{LD}', path=os.path.join(self.dir, LD),
+                           live_doc='docs/agents/lovable-cloud.md', merge='stefan')]
         self.config = Config(repos=list(self.repos), state_dir=self.state,
                              log_dir=os.path.join(self.dir, 'logs'))
         self.jobs = JobLog(os.path.join(self.state, 'jobs.jsonl'))
@@ -123,7 +125,7 @@ class FirstRunTest(Harness):
         self.merged_since_live()
         self.put(control([GB, LD], lanes={'claude': None}))
         runner = self.runner()
-        runner.take_order()
+        runner.take_stops()
         kind, _, _ = runner.choose()
         self.assertEqual(kind, 'live')
 
@@ -173,7 +175,7 @@ class ClaudeLaneTest(Harness):
                 make()
                 self.put(control([GB, LD]))
                 runner = self.runner()
-                runner.take_order()
+                runner.take_stops()
                 self.assertEqual(runner.choose()[0], kind)   # the control: GB's work is due
                 self.put(control([GB, LD], **{GB: 'after-job'}))
                 runner = self.runner()
@@ -253,9 +255,10 @@ class PageControlTest(unittest.TestCase):
     def test_a_repo_is_stopped_and_resumed_and_the_rest_is_kept(self):
         from dashboard.serve import apply_control
         c = apply_control({'repo_order': [GB, LD]}, {'lane': 'claude', 'stop': 'after-job'}, WRITTEN)
+        self.assertNotIn('repo_order', c)   # #50: an old order is dropped
         c = apply_control(c, {'repo': LD, 'stop': 'after-job'}, '2026-11-15T20:00:00+08:00')
         self.assertEqual(c['repos'], {LD: {'stop': 'after-job', 'at': '2026-11-15T20:00:00+08:00'}})
-        self.assertEqual((c['lanes']['claude']['stop'], c['repo_order']), ('after-job', [GB, LD]))
+        self.assertEqual(c['lanes']['claude']['stop'], 'after-job')
         self.assertEqual(c['written_at'], '2026-11-15T20:00:00+08:00')
         c = apply_control(c, {'repo': LD, 'stop': None}, WRITTEN)
         self.assertEqual(c['repos'][LD], {'stop': None, 'at': WRITTEN})
@@ -524,7 +527,7 @@ class SampleTest(unittest.TestCase):
         from dashboard import sample
         now = datetime.datetime(2026, 11, 15, 20, 0, 10, tzinfo=UTC)
         c = {'version': 1, 'written_at': '2026-11-15T20:00:00+00:00', 'lanes': {},
-             'repo_order': [], 'repos': {sample.LD: {'stop': 'after-job',
+             'repos': {sample.LD: {'stop': 'after-job',
                                                      'at': '2026-11-15T20:00:00+00:00'}}}
         snap = sample.build('busy', control=c, now=now)
         self.assertEqual({r['name']: r['stopped'] for r in snap['repos']},

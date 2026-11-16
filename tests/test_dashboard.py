@@ -33,10 +33,10 @@ class ApplyControlTest(unittest.TestCase):
         resumed = apply_control(stopped, {"lane": "claude", "stop": None}, NOW)
         self.assertIsNone(resumed["lanes"]["claude"]["stop"])
 
-    def test_a_build_order_already_in_the_file_is_kept_for_the_runner(self):
-        # The page can't reorder (#61), but the runner reads repo_order until #50.
+    def test_a_build_order_already_in_the_file_is_dropped(self):
+        # The page can't reorder (#61), and the runner reads no order (#50).
         c = apply_control({"repo_order": ["queue-runner", "leads-dashboard"]}, {"lane": "claude", "stop": "now"}, NOW)
-        self.assertEqual(c["repo_order"], ["queue-runner", "leads-dashboard"])
+        self.assertNotIn("repo_order", c)
         self.assertEqual(c["lanes"]["claude"]["stop"], "now")
 
     def test_an_ask_is_marked_read_or_unread_under_asks_and_the_rest_is_kept(self):
@@ -160,7 +160,7 @@ class AppTest(unittest.TestCase):
     def test_a_control_request_is_written_whole_to_the_state_folder(self):
         self.app.write_control({"lane": "claude", "stop": "after-job"})
         on_disk = json.loads((self.dir / "control.json").read_text(encoding="utf-8"))
-        self.assertEqual(on_disk, {"version": 1, "written_at": NOW, "lanes": {"claude": {"stop": "after-job", "at": NOW}}, "repo_order": [], "repos": {}, "asks": {}})
+        self.assertEqual(on_disk, {"version": 1, "written_at": NOW, "lanes": {"claude": {"stop": "after-job", "at": NOW}}, "repos": {}, "asks": {}})
         self.assertEqual(self.app.control(), on_disk)
         self.assertEqual([p.name for p in self.dir.iterdir()], ["control.json"])   # no temp file left
 
@@ -195,7 +195,7 @@ class AppTest(unittest.TestCase):
         # the page says the same, and a write lets go only of what it names.
         (self.dir / "control.json").write_text("not json", encoding="utf-8")
         stopped = {"stop": "after-job", "at": NOW}
-        self.assertEqual(self.app.control(), {"version": 1, "written_at": None, "repo_order": [],
+        self.assertEqual(self.app.control(), {"version": 1, "written_at": None,
                                               "lanes": {"claude": stopped, "sol": stopped},
                                               "repos": {}, "asks": {}})
         self.app.write_control({"lane": "sol", "stop": None})
@@ -285,7 +285,7 @@ class SampleTest(unittest.TestCase):
         self.assertLessEqual({"done", "merged", "review", "building", "you", "ready", "blocked"}, states)
         swapped = {"written_at": self.T.isoformat(), "repo_order": ["queue-runner", "leads-dashboard"]}
         later = sample.build("busy", base=self.T, now=self.T + timedelta(seconds=sample.ACK_SECONDS), control=swapped)
-        self.assertEqual(later["features"][0]["title"], "Dashboard")
+        self.assertEqual(later["features"][0]["title"], "Ring-to numbers")   # an old order is read no more (#50)
 
     def test_a_features_tickets_come_in_the_order_they_are_built(self):
         for name in sample.STATES:
@@ -351,9 +351,7 @@ class SampleTest(unittest.TestCase):
         self.assertEqual(sol["state"], "stopped")
         self.assertIsNone(sol["job"])
         self.assertEqual(sol["stopped"]["during"], "PR #210 Callers list: filter by tag")
-        self.assertEqual([r["name"] for r in later["repos"]], ["queue-runner", "leads-dashboard"])
-        first = next(i for i in later["issues"] if i["pick"] == 1)
-        self.assertEqual((first["repo"], first["n"]), ("queue-runner", 5))
+        self.assertEqual([r["name"] for r in later["repos"]], ["leads-dashboard", "queue-runner"])   # no order is read (#50)
 
 
 class HttpTest(unittest.TestCase):

@@ -16,7 +16,7 @@ import traceback
 
 from . import control
 from .brief import build_brief
-from .config import Config, Repo, set_build_order, set_stopped, stopped, toml_order, working
+from .config import Config, Repo, set_stopped, stopped, working
 from .decisions import Decider
 from .fix import Fixer, fix_branch, fix_title
 from .stops import CONFLICT
@@ -139,10 +139,8 @@ class Runner:
         self.work = WorkReader(config, github, git, self.jobs, clock=self.now)
         # What each lane last said about its switch (`control.py`), so it's said once.
         self._said_switch: dict[str, str | None] = {}
-        # The build order (ticket 33): what was last said about it, and a lock, as both lanes
-        # take it up.
+        # The repos Stefan stopped (ticket 37): a lock, as both lanes take them up.
         self._order_lock = threading.Lock()
-        self._said_order: str | None = None
         self._said_unknown: str | None = None   # control.json stops a repo not served (37)
 
     def say(self, line: str) -> None:
@@ -168,7 +166,7 @@ class Runner:
         self.gate_until = None   # a wait from an earlier pass is that pass's
         if self.settle() == BUSY:
             return BUSY
-        self.take_order()
+        self.take_stops()
         if self.held('claude'):
             return STOPPED
         self.asking.read_answers()   # an ask thread's answer, before anything is chosen (35)
@@ -266,30 +264,19 @@ class Runner:
         self._said_switch[lane] = text
         return text is not None
 
-    def take_order(self) -> None:
-        """Goes through the repos in Stefan's build order from now (control.json's
-        `repo_order`, read now), or config.toml's when his doesn't name each served repo once.
-        Each lane calls it at the start of its pass, so a job already running goes on; what's
-        said is said once, and again when it changes."""
+    def take_stops(self) -> None:
+        """The repos Stefan stopped (ticket 37), read now from control.json: from then on every
+        part that chooses work goes through `working`, which leaves them out. Each lane calls it
+        at the start of its pass, so a job already running goes on. Each change is said once,
+        and a name that isn't served once. (control.json's old `repo_order` isn't read: #50.)"""
         switch = control.read(self.config.state_dir)
         if switch.error is not None:   # nothing starts until it's fixed: `held` says so
             return
-        with self._order_lock:
-            repos, why = control.ordered(toml_order(self.config), switch.order)
-            changed = [r.name for r in repos] != [r.name for r in self.config.repos]
-            if changed:
-                set_build_order(self.config, repos)
-            text = control.order_text(repos, why) if why or changed else None
-            if text is not None and text != self._said_order:
-                self.say(text)
-            self._said_order = text if why else None   # an ignored order: said once
+        with self._order_lock:   # both lanes take them up
             self._take_repo_stops(switch)
 
     def _take_repo_stops(self, switch) -> None:
-        """The repos Stefan stopped (ticket 37), taken up with the order: from now on every part
-        that chooses work goes through `working`, which leaves them out. Each change is said
-        once, and a name that isn't served once."""
-        names, unknown = control.stopped_repos(toml_order(self.config), switch)
+        names, unknown = control.stopped_repos(self.config.repos, switch)
         was = stopped(self.config)
         for name in names:
             if name not in was:
@@ -737,7 +724,7 @@ class Runner:
         try:
             if self.reviewer is None:
                 return IDLE
-            self.take_order()
+            self.take_stops()
             if self.held('sol'):   # stopped: no stop filed, no merge, no review
                 return STOPPED
             return self.reviewer.review_pass()

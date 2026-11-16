@@ -199,13 +199,7 @@ def _dry_run(config, github, git, out, log_line, t3=None, gate=None) -> int:
     for id in control.LANES:
         if switch.error is None and switch.stop(id).stopped:
             print(f'dry run: {control.stopped_text(id)}. Once resumed, it would:', file=out)
-    repos, why = control.ordered(config.repos, switch.order)   # the build order (ticket 33)
-    if why is not None:
-        print(f'dry run: {control.order_text(repos, why)}', file=out)
-    else:
-        whose = "Stefan's build order" if switch.order else "config.toml's order"
-        print(f'dry run: repos are taken in {whose}: {", ".join(r.name for r in repos)}',
-              file=out)
+    repos = list(config.repos)
     config = dataclasses.replace(config, repos=repos)
     if switch.error is None:   # ticket 37: what a stopped repo holds back, as the lanes do
         from .config import set_stopped

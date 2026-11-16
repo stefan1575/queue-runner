@@ -5,16 +5,16 @@ Stop and Resume write it (`dashboard/serve.py`, `apply_control`) and so do `--pa
 `--resume` (`ask`), in the same format:
 
     {"version": 1, "written_at": "<ISO>", "lanes": {"claude": {"stop": "after-job", "at": "<ISO>"}},
-     "repo_order": [...]}
+     "repos": {...}, "asks": {...}}
 
 `lanes.<id>.stop` is "after-job" (the lane's job finishes, and it starts nothing after), "now"
 (read as "after-job" until ticket 34) or null (it carries on). The runner reads it (`read`) before
 each lane starts a job; an unreadable file (an entry without a `stop` included) starts nothing
 in either lane until it's fixed, and a write over it lets go only of what it names (`repaired`).
 
-`repo_order` (ticket 33) is the order both lanes go through the served repos, read at the start
-of each pass (`ordered`): used when it names every served repo exactly once, and otherwise
-ignored (config.toml's order stands) without making the file unreadable.
+`repo_order` (ticket 33's build order) is no longer read or written (#50: each repo runs its own
+Claude job side by side): a file that still has it is read as before for everything else, and a
+write drops it.
 
 `asks.<id>` (ticket 36) is what Stefan did with one ask in the Inbox: `read` (true or false) and
 `snooze_until` (an ISO time or null), beside other keys other tickets keep there (35's `open`).
@@ -69,7 +69,6 @@ class Switch:
     lanes: dict = field(default_factory=dict)   # lane id: Stop
     written_at: str | None = None
     error: str | None = None
-    order: object = None   # `repo_order` as written (None: not there); `ordered` judges it
     repos: dict = field(default_factory=dict)   # repo name: Stop, as written (ticket 37)
     opened: dict = field(default_factory=dict)  # ask id: when Stefan asked to open it (ticket 35)
     asks: dict = field(default_factory=dict)    # ask id: its entry, a dict (ticket 36)
@@ -163,8 +162,8 @@ def repaired(raw, now: str) -> dict:
     read is kept, and nothing the unreadable file held is let go by a write that doesn't name it:
     a lane's or repo's entry that can't be used is written stopped ("after-job", at `now`), and
     with no lanes to read (not JSON, not an object, `lanes` not one) each lane is. A `repos` that
-    isn't an object names no repo, and an order or ask that can't be used is dropped (neither
-    held anything)."""
+    isn't an object names no repo, an ask that can't be used is dropped (it held nothing), and
+    an old `repo_order` is dropped (#50)."""
     if raw is MISSING:
         raw = {}
     broken = not isinstance(raw, dict)
@@ -183,11 +182,8 @@ def repaired(raw, now: str) -> dict:
     repos, entries = {}, raw.get('repos', {})
     for name, entry in (entries.items() if isinstance(entries, dict) else ()):
         repos[name] = entry if _usable(entry, REPO_STOPS) else dict(stopped)
-    order = raw.get('repo_order')
     marks = raw.get('asks')
-    kept = {'version': 1, 'written_at': raw.get('written_at'), 'lanes': lanes,
-            'repo_order': [r for r in order if isinstance(r, str)] if isinstance(order, list)
-            else [], 'repos': repos,
+    kept = {'version': 1, 'written_at': raw.get('written_at'), 'lanes': lanes, 'repos': repos,
             'asks': {k: v for k, v in marks.items() if isinstance(v, dict)}
             if isinstance(marks, dict) else {}}
     if usage := _usage(raw):   # a Refresh asked from the page stands (ticket 42; PR #57's F1)
@@ -219,7 +215,7 @@ def read(state_dir: str) -> Switch:
              for name, e in (raw.get('repos') or {}).items()}
     marks = raw.get('asks') if isinstance(raw.get('asks'), dict) else {}
     return Switch(lanes, written if isinstance(written, str) else None,
-                  order=raw.get('repo_order'), repos=repos,
+                  repos=repos,
                   asks={k: v for k, v in marks.items() if isinstance(v, dict)},
                   opened=_opened(raw), refresh_at=_when(_usage(raw).get('refresh_at')))
 
@@ -240,27 +236,6 @@ def _opened(raw: dict) -> dict:
         if at is not None:
             found[id] = at
     return found
-
-
-def ordered(repos: list, order) -> tuple[list, str | None]:
-    """`repos` (config.toml's order) in `order`, control.json's `repo_order`, when it names each
-    of them exactly once; else `repos` as they are, and why the order was ignored (None when
-    none was set: missing or empty)."""
-    if order is None or order == []:
-        return list(repos), None
-    names = [r.name for r in repos]
-    if not isinstance(order, list) or not all(isinstance(n, str) for n in order):
-        why = 'it is not a list of repo names'
-    elif dupes := sorted({n for n in order if order.count(n) > 1}):
-        why = f'it names {", ".join(dupes)} more than once'
-    elif unknown := [n for n in order if n not in names]:
-        verb = 'is' if len(unknown) == 1 else 'are'
-        why = f'it names {", ".join(unknown)}, which {verb} not served'
-    elif missing := [n for n in names if n not in order]:
-        why = f'it leaves out {", ".join(missing)}'
-    else:
-        return sorted(repos, key=lambda r: order.index(r.name)), None
-    return list(repos), why
 
 
 def stopped_repos(repos: list, switch: Switch) -> tuple[list[str], list[str]]:
@@ -310,7 +285,7 @@ def ask(state_dir: str, lanes, stop: str | None, now: str, repos=()) -> dict:
     except (OSError, ValueError):
         raw = BROKEN
     base = repaired(raw, now)
-    entries, order, stops, marks = base['lanes'], base['repo_order'], base['repos'], base['asks']
+    entries, stops, marks = base['lanes'], base['repos'], base['asks']
     old = _old_pause(state_dir)
     if old is not None and 'claude' not in entries:
         entries['claude'] = {'stop': 'after-job', 'at': _iso(old)}
@@ -318,8 +293,7 @@ def ask(state_dir: str, lanes, stop: str | None, now: str, repos=()) -> dict:
         entries[lane] = {'stop': stop, 'at': now}
     for name in repos:
         stops[name] = {'stop': stop, 'at': now}
-    data = {'version': 1, 'written_at': now, 'lanes': entries, 'repo_order': order,
-            'repos': stops, 'asks': marks}
+    data = {'version': 1, 'written_at': now, 'lanes': entries, 'repos': stops, 'asks': marks}
     if 'usage' in base:   # a Refresh asked from the page stands (ticket 42), kept by `repaired`
         data['usage'] = base['usage']
     _write(state_dir, data)
@@ -348,16 +322,6 @@ def resume_hint(lane: str) -> str:
 def stopped_text(lane: str) -> str:
     what = 'starts no job' if lane == 'claude' else 'starts no review and merges nothing'
     return f'The {NAMES[lane]} lane is stopped by Stefan: it {what} ({resume_hint(lane)})'
-
-
-def order_text(repos: list, why: str | None) -> str:
-    """What a lane says when it takes up an order: Stefan's (`why` None), or config.toml's
-    because his can't be used."""
-    names = ', '.join(r.name for r in repos)
-    if why is None:
-        return f"Repos are taken in Stefan's build order now: {names}"
-    return (f"control.json's repo_order is ignored ({why}): repos are taken in config.toml's "
-            f'order, {names}. Reorder them on the dashboard to set it afresh')
 
 
 def repo_stopped_text(name: str) -> str:

@@ -3,7 +3,7 @@
 `build(name)` returns a whole `snapshot.json` (version 1) with its times set around now, so the
 page can be judged without a runner. The shape here is the contract the runner's side is built
 to. It also plays the runner reading `control.json` (a few seconds after it's written), so the
-stop buttons and the build order can be tried; that part is the sample's only pretence.
+stop buttons can be tried; that part is the sample's only pretence.
 
 Every time is an ISO string with its UTC offset; the page does the formatting.
 """
@@ -621,10 +621,6 @@ def _obey(snap: dict, control: dict, now: datetime) -> None:
         snap["usage_refresh"] = {"asked_at": usage["refresh_at"], "done_at": read}
         for plan in snap["usage"]:
             plan["read_at"] = read
-    order = control.get("repo_order") or []
-    names = [r["name"] for r in snap["repos"]]
-    if sorted(order) == sorted(names):
-        snap["repos"].sort(key=lambda r: order.index(r["name"]))
 
 
 def _order(snap: dict) -> None:

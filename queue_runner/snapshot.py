@@ -21,7 +21,6 @@ import time
 from dataclasses import dataclass, field
 
 from . import control
-from .config import toml_order
 from .gate import RECENT, RESERVE_RELEASE, SAMPLES, Knob
 from .state import when
 
@@ -98,8 +97,8 @@ class RunnerInfo:
 class Facts:
     """Everything `build` needs, as plain data. Later tickets add theirs with a default."""
     now: datetime.datetime
-    # config.Repo in the build order: control.json's repo_order, else config.toml's (ticket 33).
-    # The features and each lane's queue go through the repos in this order too.
+    # config.Repo in config.toml's order (#50: no build order). The features and each lane's
+    # queue go through the repos in this order too.
     repos: list = field(default_factory=list)
     jobs: list = field(default_factory=list)     # state.Job, the job log folded
     knob: Knob | None = Knob()                   # gate.json; None: unreadable
@@ -169,7 +168,7 @@ def build(facts: Facts) -> dict:
 
 
 def _repos(facts: Facts) -> list[dict]:
-    """In the build order, each with `stopped` (ticket 37): when Stefan stopped it, or None."""
+    """In config.toml's order, each with `stopped` (ticket 37): when Stefan stopped it, or None."""
     return [{'name': r.name, 'github': f'https://github.com/{r.github}' if r.github else None,
              'merge': r.merge, 'stopped': _repo_stopped(facts, r.name)} for r in facts.repos]
 
@@ -581,7 +580,7 @@ class Snapshots:
         log = JobLog(os.path.join(state, 'jobs.jsonl'))
         jobs = log.jobs()
         now = self.clock()
-        switch = control.read(state)   # once: the stops, the build order (ticket 33), a Refresh
+        switch = control.read(state)   # once: the stops and a Refresh
         if fresh:
             forced = self._refresh(switch, now)
             for watch in (self.claude, self.sol):
@@ -603,7 +602,7 @@ class Snapshots:
         with self._lock:
             threads = dict(self._threads)
         runner = self.runner
-        repos, _ = control.ordered(toml_order(self.config), switch.order)
+        repos = list(self.config.repos)
         return Facts(
             now=now, repos=repos, jobs=jobs, knob=knob,
             switch=switch,
