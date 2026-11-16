@@ -101,11 +101,24 @@ def usable(raw: object, now: str) -> dict:
     repos, entries = {}, raw.get("repos", {})
     for name, entry in (entries.items() if isinstance(entries, dict) else ()):
         repos[name] = entry if _usable_entry(entry, REPO_STOPS) else dict(stopped)
-    order, marks = raw.get("repo_order"), raw.get("asks")
-    return {"version": 1, "written_at": raw.get("written_at"), "lanes": lanes,
+    order, marks, usage = raw.get("repo_order"), raw.get("asks"), raw.get("usage")
+    kept = {"version": 1, "written_at": raw.get("written_at"), "lanes": lanes,
             "repo_order": [r for r in order if isinstance(r, str)] if isinstance(order, list) else [],
             "repos": repos,
             "asks": {k: v for k, v in marks.items() if isinstance(v, dict)} if isinstance(marks, dict) else {}}
+    # A Refresh asked (ticket 42) is kept through every read, or the page reading it back after
+    # its POST loses it (PR #57's review 1, F1); one the page couldn't have written is dropped.
+    if isinstance(usage, dict) and _is_time(usage.get("refresh_at")):
+        kept["usage"] = {"refresh_at": usage["refresh_at"]}
+    return kept
+
+
+def _is_time(stamp) -> bool:
+    """An ISO time, as the runner's `control._when` reads one (so both ends keep the same)."""
+    try:
+        return isinstance(stamp, str) and bool(datetime.fromisoformat(stamp.replace("Z", "+00:00")))
+    except ValueError:
+        return False
 
 
 def apply_control(control: object, body: object, now: str, asks: set | None = None) -> dict:
@@ -118,9 +131,8 @@ def apply_control(control: object, body: object, now: str, asks: set | None = No
     lists now, entries for any other ask are dropped."""
     if not isinstance(body, dict):
         raise Refused("a JSON object is expected")
-    kept = control.get("usage") if isinstance(control, dict) else None
-    refresh = kept.get("refresh_at") if isinstance(kept, dict) and isinstance(kept.get("refresh_at"), str) else None
     control = usable(control, now)   # an unreadable file is written afresh from what can be read
+    refresh = control["usage"]["refresh_at"] if "usage" in control else None
     lanes, order, repos = dict(control["lanes"]), list(control["repo_order"]), dict(control["repos"])
     marks = {k: dict(v) for k, v in control["asks"].items()}
     keys = set(body)

@@ -111,6 +111,25 @@ class AppTest(unittest.TestCase):
         self.dir = Path(_dir.name)
         self.app = App(self.dir, clock=lambda: NOW)
 
+    def test_a_refresh_asked_is_read_back_from_control_for_the_page_to_spin_on(self):
+        """PR #57's review 1, F1: the page reads control.json back after its POST, through the
+        same repair as every read (`usable`), so a repair that drops `usage` ends the spin."""
+        self.app.write_control({"usage": "refresh"})
+        self.assertEqual(self.app.control()["usage"], {"refresh_at": NOW})
+        for odd in ({"usage": None}, {"usage": {"refresh_at": 5}}, {"usage": "refresh"}):
+            with self.subTest(odd=odd):
+                (self.dir / "control.json").write_text(json.dumps(odd), encoding="utf-8")
+                self.assertNotIn("usage", self.app.control())
+
+    def test_the_sample_acknowledges_a_refresh_once_its_pretend_runner_read_it(self):
+        from datetime import datetime, timedelta
+        asked = (datetime.now().astimezone() - timedelta(minutes=1)).isoformat(timespec="seconds")
+        sample = App(self.dir, sample=True, clock=lambda: asked)
+        sample.write_control({"usage": "refresh"})
+        status, body = sample.snapshot()
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body)["usage_refresh"]["asked_at"], asked)
+
     def test_no_snapshot_yet_says_where_it_looked_and_how_to_start_the_runner(self):
         status, body = self.app.snapshot()
         self.assertEqual(status, 404)

@@ -185,11 +185,14 @@ def repaired(raw, now: str) -> dict:
         repos[name] = entry if _usable(entry, REPO_STOPS) else dict(stopped)
     order = raw.get('repo_order')
     marks = raw.get('asks')
-    return {'version': 1, 'written_at': raw.get('written_at'), 'lanes': lanes,
+    kept = {'version': 1, 'written_at': raw.get('written_at'), 'lanes': lanes,
             'repo_order': [r for r in order if isinstance(r, str)] if isinstance(order, list)
             else [], 'repos': repos,
             'asks': {k: v for k, v in marks.items() if isinstance(v, dict)}
             if isinstance(marks, dict) else {}}
+    if usage := _usage(raw):   # a Refresh asked from the page stands (ticket 42; PR #57's F1)
+        kept['usage'] = {'refresh_at': usage['refresh_at']}
+    return kept
 
 
 BROKEN = object()    # control.json is there but isn't JSON (`repaired`)
@@ -317,8 +320,8 @@ def ask(state_dir: str, lanes, stop: str | None, now: str, repos=()) -> dict:
         stops[name] = {'stop': stop, 'at': now}
     data = {'version': 1, 'written_at': now, 'lanes': entries, 'repo_order': order,
             'repos': stops, 'asks': marks}
-    if usage := (_usage(raw) if isinstance(raw, dict) else {}):   # a Refresh asked from the page stands (ticket 42)
-        data['usage'] = {'refresh_at': usage['refresh_at']}
+    if 'usage' in base:   # a Refresh asked from the page stands (ticket 42), kept by `repaired`
+        data['usage'] = base['usage']
     _write(state_dir, data)
     if old is not None:
         from .gate import Knob, read_knob, write_knob

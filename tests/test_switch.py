@@ -660,6 +660,20 @@ class ControlRepairTest(unittest.TestCase):
                     held |= {'first'} if switch.repo_stop('first').stopped else set()
                     self.assertEqual(held, set(still.get(name, ())) - {named})
 
+    def test_a_refresh_asked_is_kept_the_same_by_either_end(self):
+        """PR #57's review 1, F1: a write from the page or the CLI keeps a Refresh asked, and
+        drops one the page couldn't have written, the same from either end."""
+        for usage, kept in ((self.AT, True), ('2026-11-16T00:00:00Z', True), ('soon', False),
+                            (5, False), (None, False)):
+            for request in ({'lane': 'claude', 'stop': None}, {'repo': 'first', 'stop': None}):
+                with self.subTest(usage=usage, request=request),                         tempfile.TemporaryDirectory() as page, tempfile.TemporaryDirectory() as cli:
+                    for state in (page, cli):
+                        _put(state, {'lanes': {'sol': {}}, 'usage': {'refresh_at': usage}})
+                    self.write('page', page, request)
+                    self.write('cli', cli, request)
+                    self.assertEqual(self.written(cli), self.written(page))
+                    self.assertEqual('usage' in self.written(page), kept)
+
     def test_the_pages_order_and_ask_requests_repair_it_too(self):
         from dashboard import serve
         from queue_runner import control as ctl
