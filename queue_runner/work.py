@@ -755,6 +755,8 @@ def _event(story, j) -> list[tuple]:
         text, actor = story._decision(j) or f'A decision ended {j.outcome}.', 'claude'
         tone = 'you' if j.outcome == 'stop' else None
     elif j.kind == 'rerun':
+        if _other(j) is None:   # open, or never reached GitHub: nothing to say yet
+            return []
         text, actor = _other(j), 'runner'
         tone = 'ok' if j.outcome == 'passed' else 'bad' if j.outcome == 'failed' else None
     elif j.kind == 'stop':

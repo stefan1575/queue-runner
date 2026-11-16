@@ -193,6 +193,90 @@ class StopsTest(unittest.TestCase):
         [stop] = self.stops()
         self.assertIn('re-running it failed', stop.reason)
 
+    # --- PR #105's review 1 -------------------------------------------------------------------
+
+    RUN2 = 'https://github.com/owner/first/actions/runs/440'
+
+    def test_f1_a_later_run_that_fails_gets_its_own_re_run_then_its_stop(self):
+        # Run 437 fails while run 440 is still going: 437 is re-run and passes.
+        self.fail_actions()
+        self.reviewer().review_pass()
+        self.gh.workflow_runs[437] = WorkflowRun(437, 2, 'completed', 'success', self.RUN)
+        # Then 440 fails on its first attempt: it gets its own re-run, not a stall.
+        self.gh.check_states[H2] = Checks('failed', failed=('lint',), runs=(440,))
+        self.gh.workflow_runs[440] = WorkflowRun(440, 1, 'completed', 'failure', self.RUN2)
+        self.reviewer().review_pass()
+        self.assertEqual(self.calls('rerun'), [(437,), (440,)])
+        self.assertEqual(self.stops(), [])
+        # 440 fails again: now it's a stop.
+        self.gh.workflow_runs[440] = WorkflowRun(440, 2, 'completed', 'failure', self.RUN2)
+        self.reviewer().review_pass()
+        [stop] = self.stops()
+        self.assertIn(f'again after one re-run (attempt 2 of [run 440]({self.RUN2}/attempts/2))',
+                      stop.reason)
+        self.assertEqual(len(self.calls('rerun')), 2)
+
+    def test_f2_a_re_run_cut_off_before_github_was_asked_is_asked_next_pass(self):
+        # A runner died after writing the re-run's start record, before the POST.
+        self.fail_actions()
+        self.jobs.started(kind='rerun', repo='first', issue=20, branch='claude/red-5',
+                          title='Queue runner rerun: first#20', sha=H2, reason='tests',
+                          runs=[{'id': 437, 'attempt': 1, 'url': self.RUN}])
+        self.reviewer().review_pass()
+        self.assertEqual(self.calls('rerun'), [(437,)])
+        self.assertEqual(self.stops(), [])
+        self.assertEqual([j.outcome for j in self.jobs.on('rerun', 'first', 20, H2)],
+                         ['not-started', 'rerun'])
+        # And it fails again: a stop, as for any re-run.
+        self.gh.workflow_runs[437] = WorkflowRun(437, 2, 'completed', 'failure', self.RUN)
+        self.reviewer().review_pass()
+        [stop] = self.stops()
+        self.assertIn('again after one re-run', stop.reason)
+
+    def test_f2_a_re_run_cut_off_after_github_was_asked_counts_as_the_runners(self):
+        self.fail_actions(attempt=2, status='in_progress')
+        self.jobs.started(kind='rerun', repo='first', issue=20, branch='claude/red-5',
+                          title='Queue runner rerun: first#20', sha=H2, reason='tests',
+                          runs=[{'id': 437, 'attempt': 1, 'url': self.RUN}])
+        self.reviewer().review_pass()
+        self.assertEqual((self.calls('rerun'), self.stops()), ([], []))
+        self.assertEqual([j.outcome for j in self.jobs.on('rerun', 'first', 20, H2)], ['rerun'])
+
+    def test_f3_a_pass_on_the_re_run_is_said_once_posting_works_again(self):
+        self.fail_actions()
+        self.reviewer().review_pass()
+        self.gh.check_states[H2] = Checks('passed')
+        self.gh.workflow_runs[437] = WorkflowRun(437, 2, 'completed', 'success', self.RUN)
+        self.gh.fail.add('comment')
+        self.reviewer().review_pass()
+        self.assertEqual([j.outcome for j in self.jobs.on('rerun', 'first', 20, H2)], ['rerun'])
+        self.gh.fail.discard('comment')
+        self.reviewer().review_pass()
+        self.reviewer().review_pass()
+        said = [b for n, b in self.calls('comment') if 'passed on a re-run' in b]
+        self.assertEqual(len(said), 1, self.calls('comment'))
+        self.assertEqual([j.outcome for j in self.jobs.on('rerun', 'first', 20, H2)], ['passed'])
+
+    def test_f3_a_pass_said_before_its_record_was_written_is_not_said_twice(self):
+        self.fail_actions()
+        self.reviewer().review_pass()
+        [job] = self.jobs.on('rerun', 'first', 20, H2)
+        self.gh.post_comment(self.repo, 20, f'said\n\n{RUNNER_MARK}rerun passed sha={H2} '
+                                            f'run=437 -->\n')
+        self.gh.check_states[H2] = Checks('passed')
+        self.gh.workflow_runs[437] = WorkflowRun(437, 2, 'completed', 'success', self.RUN)
+        self.reviewer().review_pass()
+        self.assertEqual(len([1 for n, b in self.calls('comment') if 'rerun passed' in b]), 1)
+        self.assertEqual([j.outcome for j in self.jobs.on('rerun', 'first', 20, H2)], ['passed'])
+
+    def test_f4_a_re_run_that_passed_is_no_stop_while_checks_still_list_the_old_failure(self):
+        self.fail_actions()
+        self.reviewer().review_pass()
+        self.gh.workflow_runs[437] = WorkflowRun(437, 2, 'completed', 'success', self.RUN)
+        self.reviewer().review_pass()   # check-runs still say failed
+        self.assertEqual(self.stops(), [])
+        self.assertEqual(len(self.calls('rerun')), 1)
+
     def test_a_conflict_is_no_stop_until_a_conflict_round_tried(self):
         self.gh.conflicts.add(20)
         self.reviewer().review_pass()

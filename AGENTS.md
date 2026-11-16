@@ -905,17 +905,22 @@ not found`, and attempt 2 of the same run passed untouched). Each Sol pass, befo
 stops, a failed check on H whose failures are all GitHub Actions check runs
 (`Checks.runs`: the run id from the check run's `details_url`, app `github-actions`) gets its
 failed jobs re-run (`POST actions/runs/<id>/rerun-failed-jobs`, as `gh run rerun <id>
---failed`), **once per head**: a `rerun` job on H (`runs` each run's id, failed attempt and
-URL; `reason` the checks), outcome `rerun`. Meanwhile it's no stop and Sol waits for the checks
-as for pending ones. It's a `failed-check` stop when the re-run's attempt has ended (the run's
-own `status` and `run_attempt`, read from `actions/runs/<id>`, since check-runs can list the
-old failure for a moment) and a check still fails; at once when a failure is a commit status or
+--failed`), **once per run and head** (PR #105's F1: a run that fails after another's re-run
+passed gets its own): a `rerun` job per run on H (`runs` the run's id, failed attempt and URL;
+`reason` the checks), its start record written before GitHub is asked, so one a dead runner left
+open is settled from the run (F2: moved past that attempt, `rerun`; else `not-started` and asked
+again). Meanwhile it's no stop and Sol waits for the checks as for pending ones. It's a
+`failed-check` stop when a re-run's attempt has ended and its conclusion isn't a pass (the run's
+own `status`, `run_attempt` and `conclusion`, read from `actions/runs/<id>`, since check-runs can
+list the old failure for a while after the re-run passed: F4); at once when a failure is a commit status or
 another app's check (they can't be re-run), when the run is already past attempt 1 without the
 runner's re-run (re-run by hand), or when GitHub refused the re-run (`rerun` job `failed`, so it
 never loops). Any step counts, not only checkout: a real failure fails again a few minutes
 later. **A pass on the re-run is said on the PR** once, in one line linking the run's failed
 attempt (`.../actions/runs/<id>/attempts/<n>`), under the runner's mark, so a flaky check stays
-visible; the job ends `passed`. A new head gets its own re-run. The PR's timeline and the
+visible; the job ends `passed` only once the comment is on the PR (F3: a post that fails is
+tried again next pass, and one already there, by its hidden `rerun passed sha=H run=N` line,
+isn't posted twice). A new head gets its own re-run. The PR's timeline and the
 activity list say each.
 
 **Toasts** (`toast.py`): a native Windows toast under the runner's own name and icon. The runner
@@ -1771,7 +1776,7 @@ network: GitHub is the `GhCli` adapter in `queue_runner/github.py`, faked in tes
 (`tests/test_run.py`). The Sol lane is tested against `FakeGitHubForReviews` (every write goes to its `posts`, in
 order; a call named in `fail` raises), `FakeReviewGit` and `FakeSol` (`tests/test_review.py`); `decide()` and the marker formats in
 `tests/test_ledger.py`; the codex-sol.sh adapter in `tests/test_sol.py`; dependencies in `tests/test_deps.py` (a
-fake install) and the junction kept on removal and a checkout git can't delete (a deny-delete ACL) in `tests/test_git.py`. Stops and toasts are in `tests/test_stops.py` (a fake toaster), with a failed Actions check's one re-run per head (`FakeGitHubForReviews.workflow_runs` and `rerun_failed`). Merging
+fake install) and the junction kept on removal and a checkout git can't delete (a deny-delete ACL) in `tests/test_git.py`. Stops and toasts are in `tests/test_stops.py` (a fake toaster), with a failed Actions check's one re-run per run and head (`FakeGitHubForReviews.workflow_runs` and `rerun_failed`). Merging
 (`tests/test_merge.py`) plays GitHub moving on through `FakeGitHubForReviews.now` (a PR's fields
 now), `threads` and `push_before_merge`; fix rounds (`tests/test_fix.py`) run the real `Runner`
 with a T3 fake whose thread pushes; `AdoptedReviewTest` runs them all again with a cutover
