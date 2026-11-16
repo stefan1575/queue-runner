@@ -18,14 +18,19 @@ Limits). Sol isn't gated.
   its expected cost fits after the expected cost of every Claude job still running (`Running`),
   counted whole, whatever they have spent so far, so it errs high. One that would fit alone but
   not beside them waits for one of them to end (`RUNNING`), not for a reset.
+- **The reading** (issue 66) is `usage.CachedUsage`'s, shared with the snapshot: the endpoint is
+  asked at most once every 5 minutes. A check decides only on a reading taken after the last
+  Claude job ended and no older than `STALE_AFTER`, even if the latest call failed; with none,
+  the lane waits until the endpoint may be asked again. The after-job read waits for that too.
 """
 import datetime
 import json
 import os
+import threading
 from dataclasses import dataclass
 
 from .state import append_record, read_records
-from .usage import Usage, UsageError, Window
+from .usage import STALE_AFTER, CachedUsage, Usage, UsageError, Window
 
 DEFAULT_RESERVE = 5.0
 RESERVE_RELEASE = datetime.timedelta(hours=24)   # before the weekly reset, the reserve is free
@@ -44,7 +49,9 @@ RELEASED = 'reserve-released'   # fits only because the last 24 hours release th
 FIVE_HOUR = 'five-hour'         # waits for the 5-hour reset
 RESERVE = 'weekly-reserve'      # waits for the reserve's release, 24 hours before the weekly reset
 WEEKLY = 'weekly-full'          # waits for the weekly reset
-UNREADABLE = 'unreadable'       # usage couldn't be read: nothing starts; read again next pass
+# No reading to decide on (none, from before the last job, or stale), or gate.json or usage.jsonl
+# unreadable: nothing starts until the endpoint may be asked again, or the next pass.
+UNREADABLE = 'unreadable'
 RUNNING = 'running'             # fits alone, not beside the Claude jobs still running (#50)
 
 
@@ -241,12 +248,20 @@ class CostBook:
 
 
 class Gate:
-    """`check(kind)` before a Claude job; `measured(...)` after it."""
+    """`check(kind)` before a Claude job; `measured(...)` after it. `reader` is the shared
+    `usage.CachedUsage` (an endpoint's reader is wrapped in one); `sleep` waits on the wall clock
+    for the after-job read (`run.wall_sleep` unless given)."""
 
-    def __init__(self, state_dir: str, reader, clock=None):
-        self.state_dir, self.reader = state_dir, reader
+    def __init__(self, state_dir: str, reader, clock=None, sleep=None):
+        self.state_dir = state_dir
         self.clock = clock or (lambda: datetime.datetime.now(datetime.timezone.utc))
+        self.reader = reader if isinstance(reader, CachedUsage) else \
+            CachedUsage(reader, self.clock)
+        self.sleep = sleep
         self.book = CostBook(os.path.join(state_dir, 'usage.jsonl'))
+        self.ended: datetime.datetime | None = None   # when the last measured Claude job ended
+        self._told: dict[str, datetime.datetime] = {}   # job_ended(job_id): each told once
+        self._ended_lock = threading.Lock()   # both lanes say a job ended (the Opus fallback)
 
     def knob(self) -> Knob:
         return read_knob(self.state_dir)
@@ -275,11 +290,9 @@ class Gate:
         except (OSError, ValueError) as e:
             return Verdict(False, UNREADABLE, f'gate.json is unreadable ({e}): no Claude job '
                            'starts until it is fixed or removed')
-        try:
-            usage = self.reader.read()
-        except UsageError as e:
-            return Verdict(False, UNREADABLE, f'Claude usage is unreadable ({e}): no Claude job '
-                           'starts; trying again next pass')
+        usage, wait = self.usage()
+        if usage is None:
+            return wait
         try:
             cost, others = self.cost(kind, then), self.running(running)
         except (OSError, ValueError) as e:
@@ -287,12 +300,74 @@ class Gate:
                            'starts until it is fixed or removed')
         return decide(usage, label, cost, knob, self.clock(), others)
 
+    def usage(self) -> tuple[Usage | None, Verdict | None]:
+        """The reading a check decides on (the endpoint asked if the budget allows), or None and
+        the wait: until the endpoint may be asked again, or the next pass when it may be now."""
+        try:
+            self.reader.read()
+        except UsageError:
+            pass   # kept in the reading
+        r, now, next_at = self.reader.reading(), self.clock(), self.reader.next_call_at()
+        then = f'until the next read at {_local(next_at)}' if next_at else 'trying again next pass'
+        failed = f' (the latest read failed: {r.error})' if r is not None and r.error else ''
+        if r is None or r.value is None:
+            text = (f'Claude usage is unreadable ({r.error if r else "not read yet"}): no Claude '
+                    f'job starts, {then}')
+        elif self.ended is not None and r.at < self.ended:
+            text = (f'Claude usage was last read at {_local(r.at)}, before the last Claude job '
+                    f'ended{failed}: no Claude job starts, {then}')
+        elif now - r.at > STALE_AFTER:
+            text = (f'Claude usage was last read at {_local(r.at)}, over '
+                    f'{STALE_AFTER.total_seconds() / 60:g} minutes ago{failed}: no Claude job '
+                    f'starts, {then}')
+        else:
+            return r.value, None
+        return None, Verdict(False, UNREADABLE, text, next_at)
+
+    def job_ended(self, job_id: str | None = None) -> datetime.datetime:
+        """A Claude job's thread has ended (now): the next check decides only on a reading taken
+        after it. `measured` says so itself; the runner says so for a thread that ended outside
+        a measured pass (a dead runner's job settled, a decision whose retry never ran). With
+        `job_id`, a job already told is told nothing again: both lanes may see a dead runner's
+        Opus fallback review end (PR 67's review 2, F2), and a second telling would discard a
+        reading taken since the first. Returns when this job's end counts from."""
+        with self._ended_lock:
+            if job_id is not None:
+                if job_id in self._told:
+                    return self._told[job_id]
+                self._told[job_id] = self.clock()
+                self.ended = self._told[job_id]
+                return self.ended
+            self.ended = self.clock()
+            return self.ended
+
+    def after_wait(self) -> float:
+        """How long the after-job read will wait for the endpoint's budget, in seconds."""
+        return self.reader.wait_seconds()
+
     def measured(self, kind: str, jobs: list, before: Usage,
                  shared_with: list | None = None) -> None:
         """Records usage after a Claude job pass, against `before` (read by its check).
-        `shared_with`: the other Claude jobs that ran meanwhile (#50), so it teaches nothing."""
+        `shared_with`: the other Claude jobs that ran meanwhile (#50), so it teaches nothing. The read
+        after it waits for the endpoint's budget (a job under 5 minutes), since the next check
+        waits for that reading anyway; a reading another caller took after the job ended serves
+        too. A failed read is recorded with its error and no `after`."""
+        # Its own end, not `self.ended`: the other lane may say a job ended while this one
+        # reads, and this job's reading is still its own (PR 67's review 2, a nit).
+        ended = self.job_ended()
+        wait = self.reader.wait_seconds()
+        if wait > 0:
+            if self.sleep is None:
+                from .run import wall_sleep
+                self.sleep = wall_sleep
+            self.sleep(wait)
         try:
-            after, error = self.reader.read(), None
-        except UsageError as e:
-            after, error = None, str(e)
+            self.reader.read()
+        except UsageError:
+            pass
+        r = self.reader.reading()
+        if r is not None and r.value is not None and r.at >= ended:
+            after, error = r.value, None
+        else:
+            after, error = None, (r.error if r and r.error else 'no reading after the job')
         self.book.record(kind, jobs, before, after, error, shared_with)

@@ -1809,7 +1809,7 @@ function meter(w, full) {
 // A plan's reset credits (ticket 42): said only while it has some. Redeeming one is T3's.
 const resetsLeft = (p) => (p.resets && p.resets.available > 0 ? plural(p.resets.available, "reset", "resets") + " left, " : "");
 const plan = (p, full) => `<div class="plan">
-    <p class="plan-name">${who(p.provider, p.name)}<span class="dim small">${p.plan ? esc(p.plan) + ", " : ""}${resetsLeft(p)}${p.read_at ? `read ${esc(clock(p.read_at))}` : "not read yet"}</span></p>
+    <p class="plan-name">${who(p.provider, p.name)}<span class="dim small">${p.plan ? esc(p.plan) + ", " : ""}${resetsLeft(p)}${p.read_at ? `<span title="${esc(stamp(p.read_at))}">read ${esc(ago(p.read_at))} ago</span>` : "not read yet"}</span></p>
     ${p.error ? `<p class="plan-note bad">${esc(p.error)}</p>` : ""}
     ${(p.windows || []).map((w) => meter(w, full)).join("")}
     ${(p.windows || []).filter((w) => w.reserve).map((w) => `<p class="plan-note">${w.reserve}% of the week is kept for you.</p>`).join("")}
@@ -1853,15 +1853,20 @@ function repoRows() {
 
 // Refresh (ticket 42): asks the runner to read both plans now (control.json's usage.refresh_at).
 // It spins until the snapshot says the runner acted on that request (usage_refresh), which is
-// its next write, 30 seconds at most, a minute after the refresh before; then a plan it couldn't
-// read is said. Off while the runner is silent.
+// its next write, 30 seconds at most. Claude's endpoint is asked at most once every 5 minutes
+// (issue 66), so inside that the runner gives back its last reading, and the note says when it
+// was read and when the next read can be. A plan's error is the snapshot's to say (Claude's only
+// once its reading is past 30 minutes, or its login is the trouble); no time here decides one.
+// Off while the runner is silent.
 const refreshAsked = () => (ctl.usage && ctl.usage.refresh_at) || null;
 const canRefresh = () => !frozen() && "usage_refresh" in snap;   // a runner older than ticket 42 can't
 const refreshPending = () => !!refreshAsked() && canRefresh() && !(snap.usage_refresh && ms(snap.usage_refresh.asked_at) >= ms(refreshAsked()));
-function refreshFailed() {
+function refreshNotes() {
   const at = refreshAsked();
   if (!at || refreshPending() || !snap.usage_refresh) return [];
-  return (snap.usage || []).filter((p) => p.error && (!p.read_at || ms(p.read_at) < ms(at)));
+  return (snap.usage || []).flatMap((p) => p.error ? [{ bad: true, text: `The refresh couldn't read ${p.name}: ${p.error}` }]
+    : p.read_at && p.next_read_at && ms(p.read_at) < ms(at) ? [{ bad: false, text: `${p.name}: read ${ago(p.read_at)} ago. Next read from ${hm(p.next_read_at)}.` }]
+    : []);
 }
 function refreshButton() {
   const busy = refreshPending(), off = !canRefresh();
@@ -1872,9 +1877,9 @@ let refreshPoll = 0;   // while a refresh is on its way, the snapshot is read ev
 function rail() {
   clearTimeout(refreshPoll);
   if (refreshPending()) refreshPoll = setTimeout(load, 2000);
-  const failed = refreshFailed();
+  const notes = refreshNotes().map((n) => `<p class="plan-note${n.bad ? " bad" : ""}" style="margin:0 0 14px">${esc(n.text)}</p>`).join("");
   const usage = `<section class="card"><header class="card-head"><h2>Usage</h2>${refreshButton()}</header>
-    <div class="card-pad">${failed.length ? `<p class="plan-note bad" style="margin:0 0 14px">The refresh couldn't read ${failed.map((p) => esc(p.name)).join(" or ")}: ${failed.map((p) => esc(p.error)).join(" ")}</p>` : ""}${(snap.usage || []).map((p) => plan(p, false)).join("")}</div></section>`;
+    <div class="card-pad">${notes}${(snap.usage || []).map((p) => plan(p, false)).join("")}</div></section>`;
   const repos = `<section class="card"><header class="card-head"><h2>Repositories</h2></header><div class="card-pad" style="padding-top:8px">${repoRows()}</div></section>`;
   return (ui.page === "usage" ? "" : usage) + repos + status();
 }
