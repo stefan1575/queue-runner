@@ -696,7 +696,7 @@ class Runner:
         review 2, F2): True while that thread runs (or T3 can't say), so no Claude job starts
         beside it; once it has ended the gate is told, once per job, and the Sol lane counts the
         review failed. The Sol lane's own review now isn't a dead runner's: it runs beside the
-        Claude lane (AGENTS.md, The Opus fallback)."""
+        Claude lane (docs/reviews.md, The Opus fallback)."""
         if self.reviewer is not None and job.id == self.reviewer.live:
             return False
         try:

@@ -59,7 +59,7 @@ The review loop's rules are `~/Code/docs/pr-review.md`; leads-dashboard's
    tables, notes, a visible `sol-findings` ledger of the PR's whole state, and the old script's
    hidden marker) and `decision.json` (verdict, outcome, signals, the `sol-review` status,
    follow-up issues).
-8. **Post** (`post.GitHubPoster`; automated posts need no go-ahead, `~/Code/global/CLAUDE.md`). In
+8. **Post** (`post.GitHubPoster`; automated posts need no go-ahead, `~/Code/AGENTS.md`). In
    order: each new Pre-existing finding as a `needs-triage` issue, with a hidden
    `<!-- sol-finding owner/name#N ID -->` line (an open issue with that line, the old script's
    footer for the PR and ID, or the same title is linked instead of filed again); the comment,

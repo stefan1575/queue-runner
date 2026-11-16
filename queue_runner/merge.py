@@ -19,7 +19,7 @@ longer open, the next pass reads it: merged by Stefan, it gets a `merge` job `me
 worktrees go, as after the runner's own merge; closed unmerged, the mark and the label come off. The live steps
 read his merge from git as usual (`live.py`).
 
-Merges are automated posts that need no go-ahead (`~/Code/global/CLAUDE.md`, Merge when the review is
+Merges are automated posts that need no go-ahead (`~/Code/AGENTS.md`, Merge when the review is
 clean).
 """
 from .fix import fix_branch

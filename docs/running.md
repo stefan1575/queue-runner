@@ -4,6 +4,27 @@ How the runner is started, kept running, restarted on its own code, stopped per 
 
 ## The command line
 
+Every command, with what it does in full (`AGENTS.md` keeps a short copy):
+
+```
+python3 -m queue_runner                       # run: both lanes, pass after pass (unattended: see Running unattended)
+python3 -m queue_runner --once                # one pass of each lane: at most one Claude job per working repo (a decision, a fix round or a build), merges, at most one Sol review
+python3 -m queue_runner --once --dry-run      # print each working repo's next Claude job and its brief (a job cut off by a usage limit first, then an ask thread Stefan asked for, then a decision, then a fix round), list the stops it would file, what Sol would review and what would merge
+python3 -m queue_runner --release NAME#N      # let the picker take a held issue again (a PR: retry its failed reviews, merges and fix round; let a stopped PR go)
+python3 -m queue_runner --review NAME#N       # Sol reviews that PR's head now, if adoption says it needs one
+python3 -m queue_runner --gate                # Claude's usage now, the Claude jobs running, and whether a build, fix or decision would start and how many could at once
+python3 -m queue_runner --pause | --resume [LANE]   # stop a lane after its job, or let it carry on (claude by default; sol, all): the dashboard's Stop and Resume
+python3 -m queue_runner --pause | --resume NAME     # stop one served repo in both lanes, or let it carry on: the Repositories card's Stop and Resume
+python3 -m queue_runner --reserve PERCENT     # the share of the week kept for Stefan (default 5)
+python3 -m queue_runner --stop                # stop the running runner
+python3 -m queue_runner --inbox               # everything waiting on Stefan: PRs ready to merge, needs-info stops, threads waiting for his answer
+python3 -m queue_runner --snapshot            # print the dashboard's snapshot from the state now (reads usage and GitHub once; no lock, writes nothing)
+```
+
+The repo was local-only until 2026-11-10, when it went to GitHub as the private
+`stefan1575/queue-runner` (Stefan). Its tickets were moved from personal-ops into
+`.scratch/queue-runner/` the same day, and were local markdown there until 2026-11-16.
+
 In production it runs under `pythonw`, so it never needs a console: every subprocess runs with
 no window, and `print` goes nowhere (the log has it all). A lock on `<state_dir>/runner.lock` keeps a
 second runner out: it logs `a second runner started (pid N) and exited at once` and exits 3;
