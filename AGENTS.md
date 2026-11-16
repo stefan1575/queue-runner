@@ -50,8 +50,10 @@ whose tickets are local markdown: Local tickets, below, `merge = "stefan"` for o
 merges himself: Stefan merges, below), in priority order (Stefan's build order on the dashboard
 wins: The build order, below); the runner's `state_dir` and `log_dir` (`~/.queue-runner/`, outside every served repo);
 `runs_dir`, `checkouts_dir` and `deps_dir` for reviews; `poll_seconds`, the pause after a pass that started
-nothing; `[claude]`, the T3 provider instance, model and `effort` (default `high`) for Claude
-jobs (The effort, below); and `[sol]`,
+nothing; `adopt_reviews_before`, the cutover date before which a blocking review the runner
+didn't run counts as its own for fix rounds (A Claude pass, step 4); `[claude]`, the T3
+provider instance, model and `effort` (default `high`) for Claude jobs (The effort, below);
+and `[sol]`,
 `codex-sol.sh` and the Git bash that runs it. `--config <path>` reads another one.
 
 ## Running unattended
@@ -383,8 +385,20 @@ any other name is refused with exit 2).
    approach note goes to Stefan) and that review is still the PR's newest review comment, or
    when that review stopped and a decision has since ordered a round (`Fixer.order`: Stefan's
    rework or fix on, or a decision thread's `fix`; one more round on H, its text first in the
-   brief under `## Direction first`). PRs
-   whose newest review was hand-run are left to the session that ran it. **One round per head:**
+   brief under `## Direction first`). **A review
+   from before the cutover** (issue 3; `Fixer.adopted`): with no runner review of H, the PR's
+   newest review comment, in any readable format (the old script's marker, or Sol's visible
+   `sol-findings` block from a T3 child), blocking on H and posted before `config.toml`'s
+   `adopt_reviews_before` (GitHub's UTC time; 2026-11-10, `''` adopts none), counts as the
+   runner's review of H: its findings, classes and declines feed the brief, and a restarted
+   round finds it by its round. Checked on 2026-11-10: leads-dashboard #152, #162, #163 and #168
+   each get a round from their old review 1. A PR whose newest review was hand-run after the
+   cutover is left to the session that ran it, and so is one that decide() would have sent to
+   Stefan (`ledger.escalation`, read from the ledgers: a kept decline, a reopened finding, an
+   earlier class repeated, or review 3 or later still blocking), since stops and Approach notes
+   read only the runner's own reviews. Such a PR gets no conflict round either
+   (`Fixer.old_escalation`, PR #4's review 2): nothing automatic runs on it until a decision
+   orders a round on H. **One round per head:**
    once a round on H ended (except `not-started`), H gets no other until `--release NAME#PR`. The
    runner fetches the PR's head (moved since listing: nothing starts, Sol reviews it first),
    writes a start record (`sha` H, `round` the review's, `branch` the PR's), then blocks on
@@ -1350,7 +1364,8 @@ order; a call named in `fail` raises), `FakeReviewGit` and `FakeSol` (`tests/tes
 fake install) and the junction kept on removal and a checkout git can't delete (a deny-delete ACL) in `tests/test_git.py`. Stops and toasts are in `tests/test_stops.py` (a fake toaster). Merging
 (`tests/test_merge.py`) plays GitHub moving on through `FakeGitHubForReviews.now` (a PR's fields
 now), `threads` and `push_before_merge`; fix rounds (`tests/test_fix.py`) run the real `Runner`
-with a T3 fake whose thread pushes. Conflict rounds (`tests/test_conflicts.py`): a pair of
+with a T3 fake whose thread pushes; `AdoptedReviewTest` runs them all again with a cutover
+set, and adopts a review from before it (not one after). Conflict rounds (`tests/test_conflicts.py`): a pair of
 conflicted PRs through the real `Runner`, one after the other, with a T3 fake whose thread
 resolves (or doesn't), and the stops. Decisions (`tests/test_decisions.py`): the answer block
 parsed, and each case and action through the real `Runner`, `FakeT3` giving a decision thread's
