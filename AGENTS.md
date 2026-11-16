@@ -1563,7 +1563,8 @@ temp folder.
 ## Layout
 
 - `queue_runner/picker.py`: which ticket is next: open, `ready-for-agent`, every blocker closed
-  (GitHub's native dependencies, or `#N`, `owner/name#N` or issue URLs on a `Blocked by:` line or
+  (GitHub's native dependencies, read from the REST `issue_dependencies_summary.blocked_by`,
+  which counts only open blockers: checked 2026-11-16, #73; or `#N`, `owner/name#N` or issue URLs on a `Blocked by:` line or
   under a `## Blocked by` heading), not already in flight (a `claude/*-<issue>` branch, an open
   PR on one, or an open PR that closes it or that GitHub links to it by hand), not a spec with
   open sub-issues (its children are the work); lowest number first. The job branches `claude/<slug>-<issue>` from
