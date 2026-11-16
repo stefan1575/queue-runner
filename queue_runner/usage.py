@@ -13,6 +13,11 @@ Reset credits (ticket 42) come in the same response when it's asked with `cedar_
 asks it (`readClaudeResetCredits`): the `cedar_ember` block's grants, counted as T3 counts them
 (`claudeResetCreditsToContract`). Redeeming one is T3's (it spends the credit); the runner only
 counts them.
+
+The endpoint answers HTTP 429 when it's asked too often, and T3 and Claude Code ask it with the
+same login. After a 429 the reader isn't asked again for a while: the response's `Retry-After`
+when it gives one, else `COOL` doubled for each 429 in a row up to `COOL_MOST`. A read meanwhile
+raises at once, without a call. The first good read ends it.
 """
 import datetime
 import json
@@ -26,6 +31,9 @@ URL = 'https://api.anthropic.com/api/oauth/usage?cedar_ember=1&skip_spend=1'
 # T3's headers for this call; the user agent names a Claude Code version as T3's does.
 HEADERS = {'anthropic-beta': 'oauth-2025-04-20',
            'user-agent': 'claude-cli/2.1.319 (external, cli)'}
+COOL = datetime.timedelta(minutes=2)        # after a 429 with no Retry-After, doubled in a row
+COOL_MOST = datetime.timedelta(minutes=16)
+RETRY_MOST = datetime.timedelta(minutes=30)  # a Retry-After longer than this counts as this
 
 
 class UsageError(Exception):
@@ -125,6 +133,8 @@ class OAuthUsage:
             os.path.join(os.path.expanduser('~'), '.claude')
         self.fetch = fetch
         self.clock = clock or (lambda: datetime.datetime.now(datetime.timezone.utc))
+        self._cool_until: datetime.datetime | None = None   # after a 429: not asked before this
+        self._limited = 0                                   # 429s in a row
 
     @property
     def credentials(self) -> str:
@@ -151,13 +161,46 @@ class OAuthUsage:
         return token, note
 
     def read(self) -> Usage:
+        now = self.clock()
+        if self._cool_until and now < self._cool_until:
+            raise UsageError(self._cooling_text())
         token, note = self._login()
         request = urllib.request.Request(URL, headers={**HEADERS,
                                                        'authorization': f'Bearer {token}'})
         try:
             body = self.fetch(request)
         except urllib.error.HTTPError as e:
+            if e.code == 429:
+                self._cool(now, e.headers)
+                raise UsageError(self._cooling_text()) from None
             raise UsageError(f'the usage endpoint answered HTTP {e.code}{note}') from None
         except Exception as e:   # the message is ours: an exception's own could echo the request
             raise UsageError(f'reading usage failed ({type(e).__name__}){note}') from None
-        return parse(body, self.clock())
+        self._cool_until, self._limited = None, 0
+        return parse(body, now)
+
+    def _cool(self, now: datetime.datetime, headers) -> None:
+        self._limited += 1
+        wait = min(COOL * 2 ** (self._limited - 1), COOL_MOST)
+        given = retry_after(headers.get('retry-after') if headers else None, now)
+        self._cool_until = now + (min(given, RETRY_MOST) if given else wait)
+
+    def _cooling_text(self) -> str:
+        at = self._cool_until.astimezone().strftime('%H:%M')
+        return f'the usage endpoint answered HTTP 429 (asked too often); not asked again before {at}'
+
+
+def retry_after(value, now: datetime.datetime) -> datetime.timedelta | None:
+    """A `Retry-After` header as a wait: seconds, or an HTTP date. None if absent or unreadable."""
+    if not value:
+        return None
+    value = str(value).strip()
+    if value.isdigit():
+        return datetime.timedelta(seconds=int(value)) or None
+    try:
+        import email.utils
+        at = email.utils.parsedate_to_datetime(value)
+    except (TypeError, ValueError):
+        return None
+    wait = at - now if at.tzinfo else None
+    return wait if wait and wait > datetime.timedelta(0) else None

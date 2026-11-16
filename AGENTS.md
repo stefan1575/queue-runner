@@ -150,6 +150,13 @@ isn't gated**, and neither is an Approach-note answer read from Stefan's words (
   started. `tests/fixtures/usage/oauth-usage.json` is a real response. The call adds
   `?cedar_ember=1&skip_spend=1`, as T3's does, so the same answer has the reset credits (ticket
   42; `oauth-usage-resets.json`): `Usage.resets` (The dashboard, Usage).
+- **Asking it less (HTTP 429):** the endpoint answers 429 when it's asked too often, and T3 (two
+  calls per check) and Claude Code ask it with the same login. The gate's check takes the gate's
+  own read from the last 90 seconds (`gate.REUSE`), so the read that records a job pass serves
+  the next check; the after-read of a pass is always fresh. After a 429, `OAuthUsage` asks
+  nothing until `Retry-After` (at most 30 minutes) or else 2 minutes, doubled per 429 in a row up
+  to 16; a read meanwhile raises at once with when it asks again, and the first good read ends it.
+  The snapshot's every-5-minutes read and Refresh go through the same reader, so they wait too.
 - **Fits:** the 5-hour window's used percent plus the job's expected cost must be at most 100,
   or the lane waits for its reset (plus 2 minutes); a window with nothing used takes any job. The
   week must leave `reserve` percent (5 by default) for Stefan until 24 hours before its reset,

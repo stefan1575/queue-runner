@@ -5,8 +5,9 @@ import tempfile
 import unittest
 
 from queue_runner.gate import (FITS, FIVE_HOUR, RELEASED, RESERVE, WEEKLY, Cost,
-                               CostBook, Knob, decide, read_knob, write_knob)
+                               CostBook, Gate, Knob, decide, read_knob, write_knob)
 from queue_runner.usage import Usage, Window
+from tests.fakes import FakeUsage
 
 UTC = datetime.timezone.utc
 NOW = datetime.datetime(2026, 11, 10, 12, 0, tzinfo=UTC)
@@ -105,6 +106,38 @@ class CostBookTest(unittest.TestCase):
             self.book.record('decision', [], snap(0, 10, five_reset=None), snap(4, 10))
         self.assertEqual(self.book.expected('decision').five_hour, 4)
 
+
+
+class GateReadTest(unittest.TestCase):
+    """The check after a job pass takes the read that recorded it (2026-11-16: the two reads
+    15 seconds apart met HTTP 429 and the lane waited a pass)."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.now = NOW
+        self.reader = FakeUsage(usage(10, 20), usage(15, 21), usage(30, 25))
+        self.gate = Gate(tmp.name, self.reader, clock=lambda: self.now)
+
+    def test_a_check_right_after_a_pass_reuses_its_read(self):
+        before = self.gate.check('build').usage
+        self.now += datetime.timedelta(minutes=10)
+        self.gate.measured('build', ['j1'], before)
+        self.now += datetime.timedelta(seconds=15)
+        v = self.gate.check('fix')
+        self.assertEqual((self.reader.count, v.usage.five_hour.used), (2, 15))
+
+    def test_a_check_after_the_reuse_window_reads_again(self):
+        self.gate.check('build')
+        self.now += datetime.timedelta(seconds=91)
+        self.assertEqual(self.gate.check('build').usage.five_hour.used, 15)
+        self.assertEqual(self.reader.count, 2)
+
+    def test_the_after_read_of_a_pass_is_always_fresh(self):
+        before = self.gate.check('build').usage
+        self.now += datetime.timedelta(seconds=5)
+        self.gate.measured('build', ['j1'], before)
+        self.assertEqual(self.reader.count, 2)
 
 if __name__ == '__main__':
     unittest.main()

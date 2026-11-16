@@ -1,11 +1,14 @@
 """Claude's usage windows, parsed from a real `api/oauth/usage` response (saved 2026-11-10)."""
 import datetime
+import email.message
+import io
 import json
 import os
 import tempfile
 import unittest
+import urllib.error
 
-from queue_runner.usage import OAuthUsage, UsageError, parse
+from queue_runner.usage import URL, OAuthUsage, UsageError, parse
 
 FIXTURE = os.path.join(os.path.dirname(__file__), 'fixtures', 'usage', 'oauth-usage.json')
 UTC = datetime.timezone.utc
@@ -95,6 +98,91 @@ class ResetsTest(unittest.TestCase):
             usage = OAuthUsage(config_dir=d, fetch=fetch, clock=lambda: ON_THE_16TH).read()
         self.assertEqual(seen, ['https://api.anthropic.com/api/oauth/usage?cedar_ember=1&skip_spend=1'])
         self.assertEqual(usage.resets, 2)
+
+
+class RateLimitTest(unittest.TestCase):
+    """After a 429 the endpoint isn't asked again until the cool-down ends (2026-11-16: the
+    runner's two reads a few seconds apart around each job, beside T3's own, met 429s)."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        with open(os.path.join(tmp.name, '.credentials.json'), 'w') as f:
+            json.dump({'claudeAiOauth': {'accessToken': 'sk-fake'}}, f)
+        self.now = ON_THE_16TH
+        self.answers, self.calls = [], 0
+
+        def fetch(request):
+            self.calls += 1
+            got = self.answers.pop(0)
+            if isinstance(got, Exception):
+                raise got
+            with open(RESETS, 'rb') as f:
+                return f.read()
+        self.usage = OAuthUsage(config_dir=tmp.name, fetch=fetch, clock=lambda: self.now)
+
+    def limited(self, retry_after=None):
+        headers = email.message.Message()
+        if retry_after is not None:
+            headers['Retry-After'] = retry_after
+        return urllib.error.HTTPError(URL, 429, 'Too Many Requests', headers, io.BytesIO())
+
+    def later(self, **kw):
+        self.now += datetime.timedelta(**kw)
+
+    def test_after_a_429_reads_wait_without_a_call_then_ask_again(self):
+        self.answers = [self.limited(), 'ok']
+        with self.assertRaises(UsageError) as e:
+            self.usage.read()
+        self.assertIn('HTTP 429', str(e.exception))
+        self.later(seconds=90)
+        with self.assertRaises(UsageError):
+            self.usage.read()
+        self.assertEqual(self.calls, 1)   # the second read asked nothing
+        self.later(seconds=31)
+        self.assertEqual(self.usage.read().resets, 2)
+        self.assertEqual(self.calls, 2)
+
+    def test_429s_in_a_row_wait_longer_each_time_up_to_a_ceiling(self):
+        waits = []
+        for _ in range(6):
+            self.answers = [self.limited()]
+            start = self.now
+            with self.assertRaises(UsageError):
+                self.usage.read()
+            waits.append(self.usage._cool_until - start)
+            self.now = self.usage._cool_until
+        self.assertEqual([w.total_seconds() / 60 for w in waits], [2, 4, 8, 16, 16, 16])
+
+    def test_a_good_read_ends_the_backoff(self):
+        self.answers = [self.limited(), 'ok', self.limited()]
+        with self.assertRaises(UsageError):
+            self.usage.read()
+        self.later(minutes=2)
+        self.usage.read()
+        with self.assertRaises(UsageError):
+            self.usage.read()
+        self.assertEqual(self.usage._cool_until - self.now, datetime.timedelta(minutes=2))
+
+    def test_retry_after_is_honoured_and_capped(self):
+        self.answers = [self.limited('300')]
+        with self.assertRaises(UsageError):
+            self.usage.read()
+        self.assertEqual(self.usage._cool_until - self.now, datetime.timedelta(minutes=5))
+        self.now = self.usage._cool_until
+        self.answers = [self.limited('86400')]
+        with self.assertRaises(UsageError):
+            self.usage.read()
+        self.assertEqual(self.usage._cool_until - self.now, datetime.timedelta(minutes=30))
+
+    def test_another_http_error_sets_no_cool_down(self):
+        self.answers = [urllib.error.HTTPError(URL, 500, 'boom', email.message.Message(),
+                                               io.BytesIO()), 'ok']
+        with self.assertRaises(UsageError) as e:
+            self.usage.read()
+        self.assertIn('HTTP 500', str(e.exception))
+        self.usage.read()
+        self.assertEqual(self.calls, 2)
 
 
 class LoginTest(unittest.TestCase):

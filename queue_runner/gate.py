@@ -12,6 +12,8 @@ Limits). Sol isn't gated.
 - **Expected cost** per job kind (build, fix, decision), in percent of each window, is learned from
   `<state_dir>/usage.jsonl`: one record per Claude job pass, usage before and after. With fewer
   than `SAMPLES` usable records it's the cautious `DEFAULTS`; then the largest of the last `RECENT`.
+- **Reading usage:** a check takes the gate's own read from the last `REUSE` (the read that
+  recorded the job pass before it) instead of asking the endpoint again seconds later.
 """
 import datetime
 import json
@@ -35,6 +37,7 @@ FIVE_HOUR = 'five-hour'         # waits for the 5-hour reset
 RESERVE = 'weekly-reserve'      # waits for the reserve's release, 24 hours before the weekly reset
 WEEKLY = 'weekly-full'          # waits for the weekly reset
 UNREADABLE = 'unreadable'       # usage couldn't be read: nothing starts; read again next pass
+REUSE = datetime.timedelta(seconds=90)   # a check takes the gate's own read this fresh
 
 
 @dataclass(frozen=True)
@@ -193,6 +196,18 @@ class Gate:
         self.state_dir, self.reader = state_dir, reader
         self.clock = clock or (lambda: datetime.datetime.now(datetime.timezone.utc))
         self.book = CostBook(os.path.join(state_dir, 'usage.jsonl'))
+        self._last: tuple[datetime.datetime, Usage] | None = None   # its newest good read
+
+    def _read(self, reuse: bool) -> Usage:
+        """Usage now. With `reuse`, a read of the gate's own from the last `REUSE` stands: the
+        check after a job pass takes the read that recorded the pass, rather than asking the
+        endpoint twice in a few seconds (which it answers with HTTP 429)."""
+        now = self.clock()
+        if reuse and self._last and now - self._last[0] < REUSE:
+            return self._last[1]
+        got = self.reader.read()
+        self._last = (now, got)
+        return got
 
     def knob(self) -> Knob:
         return read_knob(self.state_dir)
@@ -207,7 +222,7 @@ class Gate:
             return Verdict(False, UNREADABLE, f'gate.json is unreadable ({e}): no Claude job '
                            'starts until it is fixed or removed')
         try:
-            usage = self.reader.read()
+            usage = self._read(reuse=True)
         except UsageError as e:
             return Verdict(False, UNREADABLE, f'Claude usage is unreadable ({e}): no Claude job '
                            'starts; trying again next pass')
@@ -223,7 +238,7 @@ class Gate:
     def measured(self, kind: str, jobs: list, before: Usage) -> None:
         """Records usage after a Claude job pass, against `before` (read by its check)."""
         try:
-            after, error = self.reader.read(), None
+            after, error = self._read(reuse=False), None
         except UsageError as e:
             after, error = None, str(e)
         self.book.record(kind, jobs, before, after, error)
