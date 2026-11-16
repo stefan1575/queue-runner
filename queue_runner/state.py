@@ -329,7 +329,8 @@ class JobLog:
         Opus fallback's reviews meanwhile (`reviewer`) aren't Sol's, so they don't end the wait
         (issue #69)."""
         ended = [j for j in self.jobs() if j.kind == 'review' and not j.open and not j.reviewer]
-        last = max(ended, key=lambda j: j.ended_at, default=None)
+        # Stamps are to the second: a tie goes to the one written later.
+        last = max(reversed(ended), key=lambda j: j.ended_at, default=None)
         return last.resume_at if last and last.outcome == OUT_OF_USAGE else None
 
     def held_issues(self, repo: str) -> set[int]:
