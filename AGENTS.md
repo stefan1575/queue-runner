@@ -3,9 +3,12 @@
 A script with no AI in it that runs Stefan's fixed build-and-review flow and starts fresh T3 Code
 threads only for work that needs Claude or Sol. The design and its rules live outside this repo:
 `~/Code/docs/orchestration.md`, `~/Code/docs/pr-review.md` and `~/Code/docs/sol.md`. The
-spec and the tickets that build it are in this repo's `.scratch/queue-runner/` (`spec.md`,
-`issues/NN-*.md`; moved from personal-ops on 2026-11-10). The tracker's conventions are
-`docs/agents/issue-tracker.md` and `docs/agents/triage-labels.md`.
+spec and the tickets that build it are GitHub issues: the spec is #8, the dashboard's runner
+side #9 (under ticket 18, #27), each ticket a sub-issue with native blocked-by links. They were
+local markdown in `.scratch/queue-runner/` until 2026-11-16 (moved from personal-ops on
+2026-11-10). **A ticket number in this file or a commit is the local one: ticket NN is issue
+#(NN+9)**, and #8 has the table. The tracker's conventions are `docs/agents/issue-tracker.md`
+and `docs/agents/triage-labels.md`.
 
 **On GitHub as the private `stefan1575/queue-runner`** (Stefan, 2026-11-10; it was local-only
 before). Commit after every completed step, with a message that says what changed and why.
@@ -47,8 +50,10 @@ whose tickets are local markdown: Local tickets, below, `merge = "stefan"` for o
 merges himself: Stefan merges, below), in priority order (Stefan's build order on the dashboard
 wins: The build order, below); the runner's `state_dir` and `log_dir` (`~/.queue-runner/`, outside every served repo);
 `runs_dir`, `checkouts_dir` and `deps_dir` for reviews; `poll_seconds`, the pause after a pass that started
-nothing; `[claude]`, the T3 provider instance, model and `effort` (default `high`) for Claude
-jobs (The effort, below); and `[sol]`,
+nothing; `adopt_reviews_before`, the cutover date before which a blocking review the runner
+didn't run counts as its own for fix rounds (A Claude pass, step 4); `[claude]`, the T3
+provider instance, model and `effort` (default `high`) for Claude jobs (The effort, below);
+and `[sol]`,
 `codex-sol.sh` and the Git bash that runs it. `--config <path>` reads another one.
 
 ## Running unattended
@@ -382,8 +387,20 @@ any other name is refused with exit 2).
    approach note goes to Stefan) and that review is still the PR's newest review comment, or
    when that review stopped and a decision has since ordered a round (`Fixer.order`: Stefan's
    rework or fix on, or a decision thread's `fix`; one more round on H, its text first in the
-   brief under `## Direction first`). PRs
-   whose newest review was hand-run are left to the session that ran it. **One round per head:**
+   brief under `## Direction first`). **A review
+   from before the cutover** (issue 3; `Fixer.adopted`): with no runner review of H, the PR's
+   newest review comment, in any readable format (the old script's marker, or Sol's visible
+   `sol-findings` block from a T3 child), blocking on H and posted before `config.toml`'s
+   `adopt_reviews_before` (GitHub's UTC time; 2026-11-10, `''` adopts none), counts as the
+   runner's review of H: its findings, classes and declines feed the brief, and a restarted
+   round finds it by its round. Checked on 2026-11-10: leads-dashboard #152, #162, #163 and #168
+   each get a round from their old review 1. A PR whose newest review was hand-run after the
+   cutover is left to the session that ran it, and so is one that decide() would have sent to
+   Stefan (`ledger.escalation`, read from the ledgers: a kept decline, a reopened finding, an
+   earlier class repeated, or review 3 or later still blocking), since stops and Approach notes
+   read only the runner's own reviews. Such a PR gets no conflict round either
+   (`Fixer.old_escalation`, PR #4's review 2): nothing automatic runs on it until a decision
+   orders a round on H. **One round per head:**
    once a round on H ended (except `not-started`), H gets no other until `--release NAME#PR`. The
    runner fetches the PR's head (moved since listing: nothing starts, Sol reviews it first),
    writes a start record (`sha` H, `round` the review's, `branch` the PR's), then blocks on
@@ -1187,6 +1204,20 @@ bug with a failing test; CI still gates the merge.
 - **The sandbox user reads the cache through `~/.queue-runner`'s inherited ACL**
   (`CodexSandboxUsers` RX). An install folder made with `tempfile.mkdtemp` gets an owner-only ACL
   on Windows and can't be read (vitest "not recognized", EPERM on stat), so it's `os.makedirs`.
+- **Temp folders Sol's tests leave can't be deleted by Stefan** (ticket 45, 2026-11-16). Codex's
+  sandbox has no writable `%TEMP%`, so Sol sets `TEMP` to `<checkout>/.review-tmp` itself; a
+  folder made there with `mkdtemp` is owner-only, owned by the sandbox user, and Stefan's account
+  can neither delete it nor take it over without admin. `git worktree remove --force` then
+  unregisters the checkout but leaves its folder, and the next review's `worktree add` refused
+  the path (PR #4's and PR #6's failed reviews). So: **this repo's tests clean up every temp
+  folder they make** (`TemporaryDirectory` with `addCleanup`; `tests/test_no_temp_leftovers.py`
+  fails on a bare `mkdtemp(`), and a checkout git can't delete is moved aside to
+  `<checkout>.stale-<time>` (`GitCli.remove_checkout`, also at the next `checkout`), so the
+  review goes on. Before each checkout `GitCli.sweep_stale` deletes the folders moved aside
+  where it can; the log says once of each it can't. Pointing Sol's `TEMP` elsewhere wouldn't
+  help: a folder the sandbox user makes is owner-only wherever it is. Clearing one by hand needs
+  an elevated shell: `takeown /f <folder> /r /d y`, `icacls <folder> /grant Anon:(OI)(CI)F /t`,
+  then delete it.
 - **The brief** (step 4, `review._tests`) tells Sol what it can run: `npm test`, a failing test it
   adds, each command named with its summary line quoted; a failure the change doesn't explain
   (Windows only) is no finding. leads-dashboard's `src/test/callsling-relay.test.ts` has one
@@ -1356,10 +1387,11 @@ network: GitHub is the `GhCli` adapter in `queue_runner/github.py`, faked in tes
 (`tests/test_run.py`). The Sol lane is tested against `FakeGitHubForReviews` (every write goes to its `posts`, in
 order; a call named in `fail` raises), `FakeReviewGit` and `FakeSol` (`tests/test_review.py`); `decide()` and the marker formats in
 `tests/test_ledger.py`; the codex-sol.sh adapter in `tests/test_sol.py`; dependencies in `tests/test_deps.py` (a
-fake install) and the junction kept on removal in `tests/test_git.py`. Stops and toasts are in `tests/test_stops.py` (a fake toaster). Merging
+fake install) and the junction kept on removal and a checkout git can't delete (a deny-delete ACL) in `tests/test_git.py`. Stops and toasts are in `tests/test_stops.py` (a fake toaster). Merging
 (`tests/test_merge.py`) plays GitHub moving on through `FakeGitHubForReviews.now` (a PR's fields
 now), `threads` and `push_before_merge`; fix rounds (`tests/test_fix.py`) run the real `Runner`
-with a T3 fake whose thread pushes. Conflict rounds (`tests/test_conflicts.py`): a pair of
+with a T3 fake whose thread pushes; `AdoptedReviewTest` runs them all again with a cutover
+set, and adopts a review from before it (not one after). Conflict rounds (`tests/test_conflicts.py`): a pair of
 conflicted PRs through the real `Runner`, one after the other, with a T3 fake whose thread
 resolves (or doesn't), and the stops. Decisions (`tests/test_decisions.py`): the answer block
 parsed, and each case and action through the real `Runner`, `FakeT3` giving a decision thread's

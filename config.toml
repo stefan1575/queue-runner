@@ -6,6 +6,10 @@ runs_dir = "~/.queue-runner/runs"            # each Sol review's brief, inputs, 
 checkouts_dir = "~/.queue-runner/checkouts"  # Sol's detached checkout of a PR's head
 deps_dir = "~/.queue-runner/deps"            # node_modules per lockfile, linked into that checkout
 poll_seconds = 300   # continuous mode: the pause after a pass that started nothing
+# The runner's cutover (issue 3): a blocking review posted before this date by the old loop (or by
+# Sol from a T3 child) counts as the runner's own for fix rounds. One posted after it is left to
+# the session that ran it.
+adopt_reviews_before = 2026-11-10
 
 # Claude jobs run as T3 threads on this provider instance and model, at this effort (ticket 39;
 # Stefan, 2026-11-15: "keep it at high by default", until his Claude Max plan ends). T3's CLI has
