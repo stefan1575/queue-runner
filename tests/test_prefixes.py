@@ -98,6 +98,28 @@ class AskTitleTest(ta.ThreadCase):
         self.assertEqual(self.title(ask.thread_id), ASK)
         self.assertIn(ask.thread_id, self.t3.settles)
 
+    def test_a_quiet_pass_calls_t3_for_nothing(self):
+        self.opened()
+        self.t3.outcomes = [(0, 'completed')]   # the build of #4
+        self.r.run_pass()
+        self.r.run_pass()
+        self.t3.lists.clear()
+        self.r.plan()
+        self.r.plan()
+        self.assertEqual(self.t3.lists, [])
+
+    def test_titles_are_kept_right_while_a_dead_runners_job_runs_on(self):
+        ask = self.opened()
+        self.says(ask, Message('assistant', 'The case: ...'), status='completed')
+        self.r.jobs.released('first', 20)
+        # A dead runner's build of #4 runs on in T3: the pass starts nothing (review 1's F4).
+        self.r.jobs.started(kind='build', repo='first', issue=4, branch='claude/blue-4',
+                            title=BUILD)
+        self.t3.add('mcp:dead', BUILD, 'running')
+        self.assertEqual(self.r.plan(), 'busy')
+        self.assertEqual(self.title(ask.thread_id), ASK)
+        self.assertIn(ask.thread_id, self.t3.settles)
+
     def test_a_rename_that_fails_is_said_once_and_tried_again(self):
         ask = self.opened()
         self.says(ask, Message('assistant', 'The case: ...'), status='completed')
@@ -169,6 +191,109 @@ class AnswerTitleTest(unittest.TestCase):
         self.r.plan()
         self.assertEqual(self.title(build.thread_id), BUILD)
         self.assertTrue(self.t3.threads[build.thread_id].settled)
+
+    def reply(self, n, text, at='2099-01-01T00:00:00Z'):
+        self.gh.comments.setdefault(n, []).append(Comment('stefan1575', at, text))
+
+    def test_answered_on_github_his_reply_goes_to_the_thread_and_it_is_settled(self):
+        build = self.stopped_build()
+        self.r.run_pass()
+        self.reply(4, 'Blue, the darker one.')
+        self.t3.outcomes = [(0, 'completed')]   # the thread carries on with his answer
+        self.assertEqual(self.r.run_pass(), 'started')
+        [sent] = self.t3.sends
+        self.assertEqual(sent['thread_id'], build.thread_id)
+        self.assertIn('Stefan answered your question on GitHub', sent['message'])
+        self.assertIn('> Blue, the darker one.', sent['message'])
+        old, new = self.jobs('build')
+        self.assertEqual((old.outcome, old.reason), ('continued', 'github'))
+        self.assertEqual(new.about, old.id)
+        self.r.run_pass()
+        self.assertEqual(self.title(build.thread_id), BUILD)
+        self.assertTrue(self.t3.threads[build.thread_id].settled)
+        self.assertEqual(len(self.t3.sends), 1)   # sent once
+
+    def test_it_asks_again_after_his_github_answer_and_keeps_its_prefix(self):
+        build = self.stopped_build()
+        self.r.run_pass()
+        self.reply(4, 'Blue.')
+        self.t3.outcomes = [(2, 'waiting'),   # it asks another question
+                            (0, 'completed', decision_reply('stop', question='Which blue?'))]
+        self.r.run_pass()
+        self.r.run_pass()   # the new question's decision leaves it to Stefan too
+        self.r.run_pass()
+        self.assertEqual([j.outcome for j in self.jobs('build')], ['continued', 'waiting'])
+        self.assertEqual(self.title(build.thread_id), 'Answer: ' + BUILD)
+        self.assertFalse(self.t3.threads[build.thread_id].settled)
+        self.assertEqual(len(self.t3.sends), 1)   # the old reply isn't sent again
+
+    def test_words_from_before_the_question_are_no_answer(self):
+        build = self.stopped_build()
+        self.reply(4, 'Make it pop.', at='2026-01-01T00:00:00Z')
+        self.r.run_pass()
+        self.r.run_pass()
+        self.assertEqual(self.t3.sends, [])
+        self.assertEqual(self.title(build.thread_id), 'Answer: ' + BUILD)
+
+    def test_its_issue_closed_on_github_ends_it_and_the_prefix_comes_off(self):
+        build = self.stopped_build()
+        self.r.run_pass()
+        self.gh.states[4] = 'closed'
+        self.r.run_pass()
+        [j] = self.jobs('build')
+        self.assertEqual((j.outcome, j.reason), (
+            'closed', 'its issue #4 was closed on GitHub while it waited for Stefan'))
+        self.assertEqual(self.t3.sends, [])
+        self.assertEqual(self.title(build.thread_id), BUILD)
+        self.assertTrue(self.t3.threads[build.thread_id].settled)
+
+    def test_github_failing_is_said_once_and_read_again(self):
+        build = self.stopped_build()
+        self.r.run_pass()
+        self.gh.states = {}   # issue_state raises below
+        self.gh.issue_state = lambda github, n: (_ for _ in ()).throw(RuntimeError('HTTP 502'))
+        self.r.plan()
+        self.r.plan()
+        line = ('build first#4: reading GitHub for an answer to its question failed (HTTP 502); '
+                'next pass')
+        self.assertEqual(self.said.count(line), 1)
+        self.assertEqual(self.title(build.thread_id), 'Answer: ' + BUILD)
+
+    def stopped_fix(self):
+        """A fix round on PR #20 that asked a question, which a decision left to Stefan."""
+        self.gh.issues = []   # no build of #4 in between
+        r = self.runner((2, 'waiting'), (0, 'completed', decision_reply('stop', question='?')))
+        j = r.jobs.started(kind='review', repo='first', issue=20, branch='claude/red-5',
+                           title='t', sha=H2, round=1)
+        r.jobs.ended(j.id, exit_code=None, outcome='blocking')
+        self.gh.comments[20] = [Comment('stefan1575', '2026-11-09T10:00:00Z',
+                                        old_marker(1, 'blocking', H2, [important('F7')]))]
+        r.run_pass()   # the fix round asks a question
+        r.run_pass()   # a decision leaves it to Stefan
+        r.run_pass()
+        [fix] = self.jobs('fix')
+        self.assertEqual(self.title(fix.thread_id), 'Answer: ' + FIX)
+        return fix
+
+    def test_its_pr_merged_on_github_ends_the_fix_round_and_the_prefix_comes_off(self):
+        fix = self.stopped_fix()
+        self.gh.now[20] = {'state': 'merged'}
+        self.r.run_pass()
+        [j] = self.jobs('fix')
+        self.assertEqual((j.outcome, j.reason), (
+            'closed', 'its PR #20 was merged on GitHub while it waited for Stefan'))
+        self.assertEqual(self.title(fix.thread_id), FIX)
+        self.assertTrue(self.t3.threads[fix.thread_id].settled)
+
+    def test_a_reply_on_the_pr_goes_to_the_waiting_fix_round(self):
+        fix = self.stopped_fix()
+        self.reply(20, 'Keep F7 as it is.')
+        self.t3.outcomes = [(0, 'completed')]
+        self.r.run_pass()
+        [sent] = self.t3.sends
+        self.assertEqual(sent['thread_id'], fix.thread_id)
+        self.assertIn('> Keep F7 as it is.', sent['message'])
+        self.assertIn('https://github.com/owner/first/issues/20', sent['message'])
 
     def test_a_fix_round_stopped_on_a_question_to_stefan_is_titled_answer(self):
         self.gh.issues = []   # no build of #4 in between

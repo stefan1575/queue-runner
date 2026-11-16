@@ -2,11 +2,11 @@
 
 On a stopped PR's ask in the dashboard's Inbox, Stefan clicks "Decide in T3": the page writes
 `asks.<ask id>.open` in control.json (`dashboard/serve.py`'s `apply_control`). The Claude lane's
-next pass starts one thread for it, `Queue runner ask: <repo>#<n>`, in the repo's T3 project with
-no worktree, and doesn't wait on it (`t3 thread start` without `--wait`): Stefan talks it through
-there. Its brief (`templates/ask.md`) is the ask as the Inbox writes it, the PR's open findings
-and the earlier threads, and it tells the thread to end with a `queue-runner-decision` block once
-Stefan has decided.
+next pass starts one thread for it, `Decide: Queue runner ask: <repo>#<n>` (issue #71), in the
+repo's T3 project with no worktree, and doesn't wait on it (`t3 thread start` without
+`--wait`): Stefan talks it through there. Its brief (`templates/ask.md`) is the ask as the Inbox
+writes it, the PR's open findings and the earlier threads, and it tells the thread to end with a
+`queue-runner-decision` block once Stefan has decided.
 
 - **Only on his click**, once per ask (an `ask` job, `about` the stop, ended `opened` with the
   thread). It's a Claude job, gated as a decision; a stopped Claude lane or repo keeps the request

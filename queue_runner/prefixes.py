@@ -7,14 +7,16 @@ its own job records):
 - **"Answer: "** on a build or fix thread that waits for an answer a decision left to him (the
   `waiting` question's `stop`), while it still waits and isn't released.
 
-Once it no longer needs him (he decided in the thread or on GitHub, answered in the thread, or
-released it) the prefix comes off and the thread is settled. Everything else is settled without
-a prefix (ticket 70), so there's no "Done" or "Blocked".
+Once it no longer needs him (he decided in the thread or on GitHub, answered in the thread or on
+GitHub (`waiting.py`), or released it) the prefix comes off and the thread is settled.
+Everything else is settled without a prefix (ticket 70), so there's no "Done" or "Blocked".
 
-`Prefixes.sync` runs in each Claude pass. It works from the job log and the thread's title as T3
-gives it (`thread list`, once per repo, and only for a repo with a thread to change), so a
-title is never prefixed twice, a runner that restarted puts right what an earlier one left, and
-a rename or settle that failed is tried again next pass (said once). A thread still running
+`Prefixes.sync` runs in each Claude pass, right after settling (so also while a dead runner's
+job runs on, or the lane is stopped), and again after answers are read. It works from the job
+log and the thread's title as T3 gives it (`thread list`, once per repo, and only for a repo
+with a thread to change), so a title is never prefixed twice, a runner that restarted puts right
+what an earlier one left, and a rename or settle that failed is tried again next pass (said
+once). A thread still running
 keeps its prefix until its run ends. What's in order is remembered for the process, so a quiet
 pass calls T3 for nothing.
 """
@@ -51,6 +53,10 @@ def waiting_on_stefan(all_jobs, released) -> tuple[dict, dict]:
             decided[j.about] = j
         if j.kind == KIND and j.outcome == OPENED:
             newest_ask[j.about] = j
+    # A thread a later job carries on (his answer sent to it, a decision's retry) isn't done
+    # with while that job runs or waits: its own end settles it, or its own decision prefixes it.
+    going = {j.thread_id for j in all_jobs if j.kind in ('build', 'fix') and j.thread_id
+             and (j.open or j.outcome == 'waiting') and j.id not in released}
     now, ever = {}, {}
     for j in all_jobs:
         if not j.thread_id:
@@ -65,9 +71,11 @@ def waiting_on_stefan(all_jobs, released) -> tuple[dict, dict]:
             d = decided.get(j.id)
             if d is None or d.question != 'waiting' or d.open or d.outcome != 'stop':
                 continue
-            ever[j.thread_id] = j.repo
             if j.outcome == 'waiting' and j.id not in released:
                 now[j.thread_id] = (j.repo, ANSWER)
+                ever[j.thread_id] = j.repo
+            elif j.thread_id not in going:
+                ever[j.thread_id] = j.repo
     return now, ever
 
 
