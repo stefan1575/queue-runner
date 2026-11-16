@@ -222,12 +222,40 @@ class UsageTest(unittest.TestCase):
         self.assertIsNone(window(p, 'five_hour')['resets_at'])
         self.assertIsNone(window(p, 'week')['reserve_opens_at'])
 
-    def test_a_failed_read_keeps_the_last_good_windows_and_says_why(self):
+    def test_a_failed_login_keeps_the_last_good_windows_and_says_why(self):
         read = snapshot.Reading(Usage(Window(38, FIVE_RESET), Window(46, WEEK_RESET)),
-                                NOW - datetime.timedelta(minutes=20), 'the usage endpoint answered HTTP 401')
+                                NOW - datetime.timedelta(minutes=20), 'the usage endpoint answered HTTP 401',
+                                login=True)
         p = plan(snapshot.build(facts(claude_usage=read)), 'claude')
         self.assertEqual(p['error'], 'The usage endpoint answered HTTP 401.')
         self.assertEqual(window(p, 'five_hour')['used'], 38)
+
+    def test_a_failed_call_beside_a_recent_reading_shows_the_numbers_and_no_error(self):
+        # Issue 66: a 429 with a reading under 30 minutes old isn't an error on the page.
+        read = snapshot.Reading(Usage(Window(38, FIVE_RESET), Window(46, WEEK_RESET)),
+                                NOW - datetime.timedelta(minutes=20), 'the usage endpoint answered HTTP 429',
+                                next_at=NOW + datetime.timedelta(minutes=3))
+        calls = {'claude_usage': snapshot.Call(NOW, False, 'the usage endpoint answered HTTP 429',
+                                               NOW - datetime.timedelta(minutes=20))}
+        snap = snapshot.build(facts(claude_usage=read, calls=calls))
+        p = plan(snap, 'claude')
+        self.assertEqual((p['error'], window(p, 'five_hour')['used']), (None, 38))
+        self.assertEqual(when(p['next_read_at']), NOW + datetime.timedelta(minutes=3))
+        source = next(s for s in snap['sources'] if s['id'] == 'claude_usage')
+        self.assertEqual((source['ok'], when(source['checked_at'])),
+                         (True, NOW - datetime.timedelta(minutes=20)))
+
+    def test_a_reading_past_thirty_minutes_with_failing_calls_says_so(self):
+        read = snapshot.Reading(Usage(Window(38, FIVE_RESET), Window(46, WEEK_RESET)),
+                                NOW - datetime.timedelta(minutes=31), 'the usage endpoint answered HTTP 429')
+        calls = {'claude_usage': snapshot.Call(NOW, False, 'the usage endpoint answered HTTP 429',
+                                               NOW - datetime.timedelta(minutes=31))}
+        snap = snapshot.build(facts(claude_usage=read, calls=calls))
+        self.assertEqual(plan(snap, 'claude')['error'],
+                         'The usage endpoint answered HTTP 429; the reading is over 30 minutes old, '
+                         'so no Claude job starts until a read answers.')
+        source = next(s for s in snap['sources'] if s['id'] == 'claude_usage')
+        self.assertFalse(source['ok'])
 
     def test_usage_never_read_has_no_windows(self):
         p = plan(snapshot.build(facts()), 'claude')

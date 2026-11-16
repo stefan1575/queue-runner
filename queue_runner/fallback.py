@@ -31,6 +31,7 @@ SET = 'opus-config'
 WHY = {KIND: 'fallback while Sol is out', SET: 'set in config.toml'}
 # Who reviews, as the log, the work lists and the Inbox's story say it.
 WHO = {KIND: 'Opus (the fallback while Sol is out of usage)', SET: 'Opus (config.toml says so)'}
+OPUS_KINDS = tuple(WHO)   # a review job's `reviewer` when an Opus thread reviewed
 
 
 def chosen(config) -> bool:
@@ -149,6 +150,13 @@ class OpusFallback:
 
     def thread(self, repo, title: str) -> OpusThread:
         return OpusThread(self, repo, title, self.kind)
+
+    def thread_ended(self, job_id: str) -> None:
+        """A dead runner's fallback review thread was seen to end (`Reviewer.settle`): the
+        Claude lane's next check waits for a reading after it, once per job (PR 67's review 2,
+        F2)."""
+        if self.gate is not None:
+            self.gate.job_ended(job_id)
 
     def measured(self, jobs: list, verdict) -> None:
         """What a fallback review that ran a thread cost, learned as kind `review`."""

@@ -20,6 +20,7 @@ from .config import Config, Repo, set_build_order, set_stopped, stopped, toml_or
 from .decisions import Decider
 from .fix import Fixer, fix_branch, fix_title
 from .stops import CONFLICT
+from .fallback import OPUS_KINDS
 from .gate import CLAUDE_KINDS
 from . import limits as lim
 from .live import LiveSteps
@@ -29,7 +30,7 @@ from .picker import BuildJob, pick
 from .review import Reviewer
 from .state import NOT_SENT, NOT_STARTED, RESTART_FAILED, USAGE_LIMIT, Job, JobLog, when
 from .stops import Stopper
-from .t3 import T3Error, Thread, settle_quietly
+from .t3 import T3Error, Thread, find_job_thread, settle_quietly
 from .toast import NoToaster
 from .wake import NoWaker
 
@@ -98,6 +99,7 @@ class Runner:
         self.gate = gate   # gate.Gate; None starts every Claude job (tests, the live checks)
         self.gate_until: datetime.datetime | None = None
         self._last_gate: str | None = None
+        self._seen_running: set[str] = set()   # waiting jobs a pass saw running again (settle)
         self.out, self.log_line = out, log_line
         self.jobs = JobLog(os.path.join(config.state_dir, 'jobs.jsonl'))
         self.repos = {r.name: r for r in config.repos}
@@ -249,9 +251,23 @@ class Runner:
                 # A decision that continued a build or fix counts as that job's cost, so a
                 # plain decision's estimate stays a decision's.
                 learned = next((j.kind for j in new if j.kind != 'decision'), kind)
+                if (wait := self.gate.after_wait()) > 0:   # one call every 5 minutes (issue 66)
+                    at = self.now() + datetime.timedelta(seconds=wait)
+                    self.say(f"Reading Claude's usage after the job at {at.astimezone():%H:%M:%S}:"
+                             ' the usage endpoint is asked at most once every 5 minutes')
                 self.gate.measured(learned, [j.id for j in new], verdict.usage)
+            elif any(j.thread_id and j.outcome != NOT_SENT for j in new):
+                # A thread ran though the pass started nothing (a decision whose retry never
+                # reached its job): what it spent isn't learned, but no reading before it serves.
+                self.gate.job_ended()
             return did
         return measured
+
+    def _thread_ended(self) -> None:
+        """A Claude job's thread was seen to end outside a measured pass (`settle`): the next
+        check waits for a usage reading taken after now (PR 67's review 1, F1)."""
+        if self.gate is not None:
+            self.gate.job_ended()
 
     def held(self, lane: str) -> bool:
         """Whether Stefan stopped `lane` (control.json, read now), or control.json is unreadable:
@@ -350,6 +366,12 @@ class Runner:
             if job.kind == 'live':
                 if self.live.settle(job):
                     busy = BUSY
+                elif next(j for j in self.jobs.jobs() if j.id == job.id).thread_id:
+                    self._thread_ended()   # its thread ran and has ended
+                continue
+            if job.kind == 'review' and job.reviewer in OPUS_KINDS:
+                if self._fallback_runs(job):
+                    busy = BUSY
                 continue
             if job.kind not in ('build', 'fix'):
                 continue   # an open review or merge is the Sol lane's to settle
@@ -366,6 +388,7 @@ class Runner:
             else:
                 self.finish(job, thread.thread_id, _exit_code(thread), thread.status, None,
                             thread.latest_run_id)
+                self._thread_ended()
         for job in self.jobs.waiting_jobs():
             try:
                 thread, _ = self.t3.show(job.thread_id)
@@ -377,28 +400,47 @@ class Runner:
                 continue
             if thread.active and not thread.pending_requests:
                 busy = BUSY   # answered, and running again
+                self._seen_running.add(job.id)
+            elif job.id in self._seen_running and _exit_code(thread) == 2:
+                self._seen_running.discard(job.id)
+                self._thread_ended()   # it ran on Stefan's answer and asks again
             elif _exit_code(thread) != 2:
                 self.finish(job, thread.thread_id, _exit_code(thread), thread.status, None,
                             thread.latest_run_id)
+                self._thread_ended()   # Stefan's answer set it running again, and it ended
         return busy
+
+    def _fallback_runs(self, job: Job) -> bool:
+        """A dead runner's Opus fallback review, left open while its thread runs on (PR 67's
+        review 2, F2): True while that thread runs (or T3 can't say), so no Claude job starts
+        beside it; once it has ended the gate is told, once per job, and the Sol lane counts the
+        review failed. The Sol lane's own review now isn't a dead runner's: it runs beside the
+        Claude lane (AGENTS.md, The Opus fallback)."""
+        if self.reviewer is not None and job.id == self.reviewer.live:
+            return False
+        try:
+            thread = self._find_thread(job)
+        except T3Error as e:
+            self.say(f"review {job.repo}#{job.issue} (Opus fallback): cannot read its thread "
+                     f'({e}); no other Claude job starts')
+            return True
+        if thread is None:
+            return False   # it never started a thread: the Sol lane counts it failed
+        if thread.active and not thread.pending_requests:
+            self.say(f"review {job.repo}#{job.issue} (Opus fallback, a stopped runner's) is "
+                     f'still running in {thread.link}: no other Claude job starts')
+            return True
+        if self.gate is not None:
+            self.gate.job_ended(job.id)
+        return False
 
     def find_thread(self, job: Job) -> Thread | None:
         """The T3 thread of a job, by its id or else its title (the snapshot's link)."""
         return self._find_thread(job)
 
     def _find_thread(self, job: Job) -> Thread | None:
-        if job.thread_id:
-            return self.t3.show(job.thread_id)[0]
-        since = _when(job.started_at) - datetime.timedelta(seconds=5)
         repo = self.repos.get(job.repo)
-        if repo is None:
-            return None
-        found = [t for t in self.t3.list(repo.path)
-                 if t.title == job.title and _when(t.created_at) >= since]
-        if not found:
-            return None
-        newest = max(found, key=lambda t: _when(t.created_at))
-        return self.t3.show(newest.thread_id)[0]
+        return find_job_thread(self.t3, job, repo.path if repo else None)
 
     # --- a build job ----------------------------------------------------------------------
 

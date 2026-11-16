@@ -83,6 +83,25 @@ path = "{self.dir}"
         self.assertEqual(rec['before']['five_hour']['used'], 10)
         self.assertEqual(rec['spent'], {'five_hour': 25, 'seven_day': 4})
 
+    def test_a_short_job_still_teaches_its_cost_the_after_read_waits_for_the_budget(self):
+        # Issue 66: the endpoint is asked once every 5 minutes, so a job under that waits for
+        # the budget on the wall clock before its after-read.
+        from tests.fakes import StubEndpoint
+        endpoint = StubEndpoint(lambda: self.now, five=10, week=20, resets=(FIVE_RESET, WEEK_RESET))
+        slept = []
+
+        def sleep(seconds):
+            slept.append(seconds)
+            endpoint.five, endpoint.week = 35, 24
+            self.now += datetime.timedelta(seconds=seconds)
+        self.run_main(['--once'], endpoint.oauth(self.dir), sleep=sleep)
+        self.assertEqual(len(self.t3.starts), 1)
+        self.assertEqual(slept, [300])
+        self.assertEqual(endpoint.calls, [(NOW, 200), (NOW + datetime.timedelta(minutes=5), 200)])
+        [rec] = self.usage_records()
+        self.assertEqual(rec['spent'], {'five_hour': 25, 'seven_day': 4})
+        self.assertIn("Reading Claude's usage after the job at", self.runner_log())
+
     def test_unreadable_usage_starts_nothing_and_says_why(self):
         self.run_main(['--once'], FakeUsage(UsageError('the usage endpoint answered HTTP 401')))
         self.assertEqual(self.t3.starts, [])

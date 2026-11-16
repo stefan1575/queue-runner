@@ -52,12 +52,15 @@ def _jobs(config) -> JobLog:
     return JobLog(os.path.join(config.state_dir, 'jobs.jsonl'))
 
 
-def _gate(config, usage, clock):
+def _gate(config, usage, clock, sleep=None):
+    """The gate, with Claude's one shared reader (`usage.CachedUsage`, issue 66): the snapshot
+    and Refresh read through `gate.reader` too, so the endpoint is asked once every 5 minutes."""
     from .gate import Gate
+    from .usage import CachedUsage, OAuthUsage
     if usage is None:
-        from .usage import OAuthUsage
         usage = OAuthUsage()
-    return Gate(config.state_dir, usage, clock)
+    reader = usage if isinstance(usage, CachedUsage) else CachedUsage(usage, clock)
+    return Gate(config.state_dir, reader, clock, sleep=sleep)
 
 
 def _switch_lines(config) -> list[str]:
@@ -522,12 +525,17 @@ def _snapshot(config, gate, sol_usage, clock, out, github, git) -> int:
             pid = int(f.read().strip())
         started = datetime.datetime.fromtimestamp(os.path.getmtime(_pid_file(config)),
                                                   datetime.timezone.utc)
+    gate.reader.on_call = _heard(calls)
     snaps = Snapshots(config, calls=calls, clock=clock, info=RunnerInfo(pid, started, _commit()),
-                      readers=readers,
-                      claude=Watch(gate.reader.read, calls, 'claude_usage', clock),
+                      readers=readers, claude=gate.reader,
                       sol=Watch(sol_usage, calls, 'sol_usage', clock, timed=True))
     print(json.dumps(snaps.build(fresh=True), indent=1, ensure_ascii=False), file=out)
     return 0
+
+
+def _heard(calls):
+    """Claude's reader's every attempt, as the claude_usage source's last call."""
+    return lambda ok, note: calls.record('claude_usage', ok, note)
 
 
 def _publisher(config, runner, calls, claude, sol_usage, clock, log_line, every):
@@ -669,7 +677,7 @@ def main(argv=None, github=None, out=None, t3=None, git=None, sleep=None,
         if code == 0:
             log_line(f'Stefan: {" ".join(argv or sys.argv[1:])}')
         return code
-    gate = _gate(config, usage, clock)
+    gate = _gate(config, usage, clock, sleep)
     if args.gate:
         _print_gate(gate, out, config)
         return 0
@@ -721,10 +729,10 @@ def main(argv=None, github=None, out=None, t3=None, git=None, sleep=None,
         self_update = _self_update(config, log_line)
     calls = None
     if not args.once:   # the dashboard's sources: the last real call of each kind
-        from .snapshot import Calls, Watch
+        from .snapshot import Calls
         calls = Calls(snap_clock)
         github, t3 = calls.watch(github, 'github'), calls.watch(t3, 't3')
-        gate.reader = Watch(gate.reader.read, calls, 'claude_usage', snap_clock)
+        gate.reader.on_call = _heard(calls)   # one reader, the gate's and the snapshot's
     # The effort Claude jobs run at (ticket 39): read from T3's own files when the limits store
     # is T3's real database (a test's fake store reads none, so nothing is read back).
     from .effort import Effort, T3Files, T3_SETTINGS
