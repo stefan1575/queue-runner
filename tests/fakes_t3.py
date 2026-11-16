@@ -121,6 +121,11 @@ class FakeReviewGit(FakeGit):
         self.checkouts, self.removed = [], []
         self.removed_worktrees = []
         self.stuck = set()   # worktrees git can't remove
+        self.moved_aside = {}   # a review checkout git can't delete: where it's moved
+        self.stale = []         # what sweep_stale can't delete
+
+    def sweep_stale(self, checkouts_dir):
+        return list(self.stale)
 
     def fetch_pr(self, path, number, base):
         self.fetches.append((path, f'pr{number}', base))
@@ -138,6 +143,7 @@ class FakeReviewGit(FakeGit):
         import shutil
         shutil.rmtree(worktree, ignore_errors=True)
         self.removed.append((worktree, ref))
+        return self.moved_aside.get(worktree)
 
     def is_ancestor(self, path, older, newer):
         return (older, newer) in self.ancestors
