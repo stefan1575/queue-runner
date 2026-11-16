@@ -328,8 +328,8 @@ class WaitingToastTest(unittest.TestCase):
         self.assertIn('Red or blue?', t['text'])
         [(n, said)] = [p[1:] for p in self.gh.posts if p[0] == 'comment']
         self.assertEqual(n, 4)
-        self.assertIn('Answer it in the waiting thread: https://app.t3.codes/threads/env/mcp:t1',
-                      said)
+        self.assertIn('Answer it in the waiting thread (https://app.t3.codes/threads/env/mcp:t1)'
+                      ', or reply here', said)
 
     def test_a_build_that_completes_does_not_toast(self):
         self.assertEqual(self.passes(1, (0, 'completed')), [])

@@ -123,6 +123,10 @@ class Runner:
         from .ask_threads import AskThreads   # an ask decided in a T3 thread (ticket 35)
         self.asking = AskThreads(config, github=github, t3=t3, jobs=self.jobs, say=self.say,
                                  decider=self.decider)
+        from .prefixes import Prefixes   # "Decide: " and "Answer: " on threads that need him (71)
+        self.prefixes = Prefixes(config, t3=t3, jobs=self.jobs, say=self.say)
+        from .waiting import GitHubAnswers   # a waiting thread's question answered on GitHub
+        self.answers = GitHubAnswers(config, github=github, jobs=self.jobs, say=self.say)
         self.live = LiveSteps(config, github=github, git=git, t3=t3, jobs=self.jobs,
                               say=self.say, stopper=stopper,
                               merger=Merger(config, github=github, git=git, jobs=self.jobs,
@@ -173,12 +177,18 @@ class Runner:
         """Settles, then chooses this pass's Claude job: a callable that runs it, or BUSY, IDLE
         or GATED. A decision comes first, then a fix round, then a build."""
         self.gate_until = None   # a wait from an earlier pass is that pass's
-        if self.settle() == BUSY:
+        settled = self.settle()
+        # Not a job: titles are kept right while a dead runner's job runs on, and while the
+        # lane is stopped (issue #71).
+        self.prefixes.sync()
+        if settled == BUSY:
             return BUSY
         self.take_order()
         if self.held('claude'):
             return STOPPED
         self.asking.read_answers()   # an ask thread's answer, before anything is chosen (35)
+        self.answers.read()   # a waiting thread's question answered on GitHub (71)
+        self.prefixes.sync()   # an answer just read takes its thread's prefix off (71)
         chosen = self.choose()
         return self._gated(*chosen) if isinstance(chosen, tuple) else chosen
 
@@ -204,6 +214,9 @@ class Runner:
             return old.kind, None, lambda: self.recover(old)
         if ask := self.asking.next(control.read(self.config.state_dir)):   # Stefan's click (35)
             return 'decision', None, lambda: self.asking.open(*ask)
+        if answered := self.answers.next():   # Stefan's reply on GitHub, sent to its thread
+            old, text, marks = answered
+            return old.kind, None, lambda: self.continue_job(old, text, marks=marks)
         if case := self.decider.next_case():
             if self.decider.direct_answer(case):
                 return None, None, lambda: self.decider.run(case, self.continue_job)
@@ -487,26 +500,29 @@ class Runner:
 
     # --- a decision's retry or answer ------------------------------------------------------
 
-    def continue_job(self, old: Job, message: str, *, limit: bool = False) -> str:
+    def continue_job(self, old: Job, message: str, *, limit: bool = False,
+                     marks: dict | None = None) -> str:
         """Picks up an earlier build or fix job (a decision's retry, the answer to its question,
         or with `limit` a job cut off by a usage limit) as a new job of its kind: in place, by
         sending `message` to its thread, or in a fresh thread, as `limits.resume_choice` decides
         from how long ago its last request started and its context. In place, the new job
         carries the thread in its start record so a dead runner's settle finds it. The earlier
-        job, if it was waiting, ends `continued`. A Stop asked of the Claude lane since the pass
-        began (during a decision's thread, ticket 30) starts nothing: IDLE, and the earlier job
-        stays as it is, so the case is taken up again after Resume."""
+        job, if it was waiting, ends `continued` (with `marks`, the end record's fields that say
+        who answered it, when not a decision: `waiting.py`). A Stop asked of the Claude lane
+        since the pass began (during a decision's thread, ticket 30) starts nothing: IDLE, and
+        the earlier job stays as it is, so the case is taken up again after Resume."""
         if self.held('claude'):
             return IDLE
         choice = self._resume_choice(old)
         if not choice.in_place:
-            return self._restart(old, choice, None if limit else message)
+            return self._restart(old, choice, None if limit else message, marks)
         job = self.jobs.started(kind=old.kind, repo=old.repo, issue=old.issue, branch=old.branch,
                                 title=old.title, sha=old.sha, round=old.round,
                                 thread_id=old.thread_id, about=old.id, cause=old.cause,
                                 resume=choice.record())
         if old.outcome == 'waiting':
-            self.jobs.ended(old.id, exit_code=old.exit_code, outcome='continued')
+            self.jobs.ended(old.id, exit_code=old.exit_code, outcome='continued',
+                            **(marks or {}))
         self.say(f'Continuing {self._name(job)} in place: {choice.why}; '
                  f'{old.link or old.thread_id}')
         try:
@@ -698,7 +714,8 @@ class Runner:
         or in a fresh thread, as `limits.resume_choice` decides (`continue_job`)."""
         return self.continue_job(old, lim.RESUME_MESSAGE, limit=True)
 
-    def _restart(self, old: Job, choice: lim.ResumeChoice, direction: str | None) -> str:
+    def _restart(self, old: Job, choice: lim.ResumeChoice, direction: str | None,
+                 marks: dict | None = None) -> str:
         """The earlier job in a fresh thread: its own brief built afresh from its sources, after
         `direction` (a decision's text, and for an answer the question it answers) and before
         the old thread's link, where it starts, what it left uncommitted and its last 3
@@ -747,7 +764,8 @@ class Runner:
         brief = brief.rstrip('\n') + '\n\n' + lim.restart_section(
             old, work, tip, wip, messages, stopped=stopped, why=choice.why)
         if old.outcome == 'waiting':
-            self.jobs.ended(old.id, exit_code=old.exit_code, outcome='continued')
+            self.jobs.ended(old.id, exit_code=old.exit_code, outcome='continued',
+                            **(marks or {}))
         self.say(f'Restarting {self._name(job)} fresh {after} ({choice.why}), on {work} at '
                  f'{tip[:7]}; the old thread was {old.link or old.thread_id}')
         did = self._start(job, repo, brief, tip, work)

@@ -2,11 +2,11 @@
 
 On a stopped PR's ask in the dashboard's Inbox, Stefan clicks "Decide in T3": the page writes
 `asks.<ask id>.open` in control.json (`dashboard/serve.py`'s `apply_control`). The Claude lane's
-next pass starts one thread for it, `Queue runner ask: <repo>#<n>`, in the repo's T3 project with
-no worktree, and doesn't wait on it (`t3 thread start` without `--wait`): Stefan talks it through
-there. Its brief (`templates/ask.md`) is the ask as the Inbox writes it, the PR's open findings
-and the earlier threads, and it tells the thread to end with a `queue-runner-decision` block once
-Stefan has decided.
+next pass starts one thread for it, `Decide: Queue runner ask: <repo>#<n>` (issue #71), in the
+repo's T3 project with no worktree, and doesn't wait on it (`t3 thread start` without
+`--wait`): Stefan talks it through there. Its brief (`templates/ask.md`) is the ask as the Inbox
+writes it, the PR's open findings and the earlier threads, and it tells the thread to end with a
+`queue-runner-decision` block once Stefan has decided.
 
 - **Only on his click**, once per ask (an `ask` job, `about` the stop, ended `opened` with the
   thread). It's a Claude job, gated as a decision; a stopped Claude lane or repo keeps the request
@@ -28,6 +28,7 @@ from importlib import resources
 from string import Template
 
 from .decisions import ACTIONS, QUESTIONS, VERSION, Answer, Case, parse
+from .prefixes import DECIDE, titled
 from .state import NOT_STARTED
 from .t3 import RunResult, T3Error
 
@@ -170,7 +171,9 @@ class AskThreads:
         try:
             # Started as every Claude job is (ticket 39): on the project's default model when
             # that is the config's model at its effort, else with --model.
-            launched = self.t3.launch(repo.path, self.brief(repo, stop, pr), title=job.title,
+            # Titled "Decide: ..." from the start: it waits on Stefan's decision (issue #71).
+            launched = self.t3.launch(repo.path, self.brief(repo, stop, pr),
+                                      title=titled(DECIDE, job.title),
                                       **self.decider.effort.flags(repo))
         except Exception as e:   # T3 down, or the brief couldn't be built
             self.jobs.ended(job.id, exit_code=None, outcome=NOT_STARTED,
