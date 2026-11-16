@@ -1778,11 +1778,12 @@ function pyramid(m) {
 }
 
 // ------------------------------------------------------------------ status, usage and repositories
-// Every window says what's left of it and when it resets (ticket 51, #60: what's left, not what's
-// used). The bar drains as it's used, amber at 15% left and red at none; the blue at its left end
-// is the share kept for you, the last of what's left. The Usage page adds what the runner makes of it.
+// Every window says what's left of it and when it resets, as T3 Code says it ("70% left"; ticket
+// 51, #60: what's left, not what's used; the snapshot keeps `used`). The bar drains as it's used,
+// amber at 15% left and red at none; the blue at its left end is the share kept for you, the last
+// of what's left. The Usage page adds what the runner makes of it.
 function meter(w, full) {
-  const known = typeof w.used === "number", left = known ? Math.max(0, Math.min(100, 100 - w.used)) : null;
+  const known = typeof w.used === "number", left = known ? Math.max(0, Math.min(100, Math.round(100 - w.used))) : null;
   const cls = known && left <= 0 ? " full" : known && left <= 15 ? " near" : "";
   // The kept share is the last of what's left, so it's never wider than what's left (PR #62 F1).
   const kept = known && w.reserve > 0 ? Math.min(w.reserve, left) : 0;

@@ -1162,8 +1162,9 @@ python3 -m dashboard    # http://queue.localhost/ is the runner's; http://localh
   sample's sources are `snapshot.SOURCES` (a test holds them), and whether Stop now is available
   shows on the lane's Stop button (`stop_now.note`), not here.
   Nothing on the page moves by itself (Stefan). Colour is state only: blue is Stefan's, amber
-  is working, green is done or healthy, red is broken; a usage bar turns amber from 85% and red
-  at the limit, and its blue end is the share kept for him; Claude's clay and OpenAI's black or
+  is working, green is done or healthy, red is broken; a usage bar says what's **left**, as T3
+  Code does ("65% left"; the snapshot keeps `used`), its fill shrinking as it's used, amber with
+  15% left and red with none, and its blue start is the share kept for him; Claude's clay and OpenAI's black or
   white are on their marks and names only (the marks are Simple Icons', CC0, inline). Fonts are
   ones Windows ships (Segoe UI Variable, Sitka for an ask's question, Cascadia Mono), 16px and up.
 - **Stop all** (the top bar) is one `{"lane", "stop"}` request per lane; a lane whose Stop now is

@@ -1,9 +1,10 @@
 """The job log: what ran and what's open, read back the way a restarted runner reads it."""
+import datetime
 import os
 import tempfile
 import unittest
 
-from queue_runner.state import JobLog
+from queue_runner.state import JobLog, when
 
 
 class JobLogTest(unittest.TestCase):
@@ -110,6 +111,19 @@ class JobLogTest(unittest.TestCase):
         log.released('first', 4)
         self.end(log, self.start(log, 4), exit_code=0, outcome='done')
         self.assertEqual(JobLog(self.path).waiting_jobs(), [])
+
+
+class WhenTest(unittest.TestCase):
+    def test_a_stamp_keeps_its_offset(self):
+        self.assertEqual(when('2026-11-16T05:40:00Z'),
+                         datetime.datetime(2026, 11, 16, 5, 40, tzinfo=datetime.timezone.utc))
+
+    def test_a_stamp_with_no_offset_is_local_time_and_compares_with_any_aware_time(self):
+        # The wake sync raised on one (TypeError: offset-naive and offset-aware) on 2026-11-16.
+        t = when('2026-11-16T13:40:00')
+        self.assertEqual(t, datetime.datetime(2026, 11, 16, 13, 40).astimezone())
+        self.assertIsInstance(t > datetime.datetime.now(datetime.timezone.utc), bool)
+
 
 if __name__ == '__main__':
     unittest.main()

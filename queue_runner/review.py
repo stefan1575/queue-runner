@@ -23,7 +23,7 @@ from .merge import Merger
 from .picker import closed_issues
 from .post import GitHubPoster, PostFailed
 from .sol import SolOutOfUsage
-from .state import FAILED_REVIEW, OUT_OF_USAGE, REVIEWED, JobLog
+from .state import FAILED_REVIEW, OUT_OF_USAGE, REVIEWED, JobLog, when
 from .stops import Stopper, held
 
 STARTED, BUSY, IDLE = 'started', 'busy', 'idle'   # as run.py's lane results
@@ -190,7 +190,7 @@ class Reviewer:
 
     def _paused(self) -> bool:
         resume = self.jobs.sol_resume_at()
-        if resume and self.now() < datetime.datetime.fromisoformat(resume):
+        if resume and self.now().astimezone() < when(resume):
             if self._said_paused != resume:
                 self.say(f'Sol is out of usage: no review starts before {resume}')
                 self._said_paused = resume
@@ -296,7 +296,8 @@ class Reviewer:
         except SolOutOfUsage as e:
             resume = (e.back + RESUME_AFTER) if e.back else self.now() + RETRY_UNKNOWN
             self.jobs.ended(job.id, exit_code=None, outcome=OUT_OF_USAGE, run_dir=run_dir,
-                            error=str(e), resume_at=resume.isoformat(timespec='seconds'))
+                            error=str(e),
+                            resume_at=resume.astimezone().isoformat(timespec='seconds'))
             self.say(f'{name}: {e}; the Sol lane waits until {resume:%Y-%m-%d %H:%M}')
             return STARTED
         except Exception as e:   # SolFailed, or git or GitHub failing around it
