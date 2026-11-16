@@ -25,6 +25,7 @@ STATES = {
     "no-interrupt": "T3 refuses the interrupt, so Stop now is off for Claude",
     "dead": "The runner stopped writing 42 minutes ago",
     "repo-stopped": "leads-dashboard is stopped: its running jobs finish, then only queue-runner is worked on",
+    "side-by-side": "Claude runs a job in each repo at once",
 }
 DEFAULT = "busy"
 # Takes of the page before this one, kept while its look is being agreed: `serve.py` serves the
@@ -79,6 +80,8 @@ def build(name: str = DEFAULT, base: datetime | None = None, control: dict | Non
         # `stopped` (ticket 37): when Stefan stopped the repo (`at`), or null. A stopped repo
         # gets nothing from either lane; its asks stay in the Inbox.
         "repos": [
+            # `doing`: the Claude job running in it (as a lane's `job`), and `wait`: why none
+            # starts in it now (#50; both filled in by `_doing`, below).
             {"name": LD, "github": GH[LD], "merge": "stefan", "stopped": None},
             {"name": QR, "github": GH[QR], "merge": "runner", "stopped": None},
         ],
@@ -271,6 +274,7 @@ def build(name: str = DEFAULT, base: datetime | None = None, control: dict | Non
         snap["written_at"] = (now - timedelta(minutes=42)).isoformat(timespec="seconds")
     else:
         _obey(snap, control or {}, now)
+    _doing(snap)
     _number(snap)
     _order(snap)
     _tickets(snap)
@@ -564,6 +568,13 @@ def _vary(snap: dict, name: str, ago, ahead) -> None:
                                        affects="Asks, PRs and the work list are as they were then; some may be missing.")
     elif name == "repo-stopped":
         _repo(snap, LD)["stopped"] = {"at": ago(6)}   # after the jobs on it began
+    elif name == "side-by-side":   # #50: each repo runs its own Claude job
+        claude = _lane(snap, "claude")
+        _issue(snap, QR, 5).update(state="building", note="Claude is building it")
+        claude["jobs"] = [claude["job"], {
+            "kind": "build", "repo": QR, "ref": "#5", "title": "Publish the snapshot the dashboard reads",
+            "started_at": ago(8), "sha": None, "pr": None, "thread": T3 + "6b1d0a52-5d0e-4c7b-9f4e-2f0c0c1b8e11"}]
+        claude["job"] = claude["jobs"][-1]
     elif name == "no-interrupt":
         # Stop now isn't a source the runner depends on (ticket 43): it shows on the Stop button.
         _lane(snap, "claude")["stop_now"].update(available=False, note="T3 refuses the interrupt since its last update: stop after the job instead.")
@@ -621,6 +632,20 @@ def _obey(snap: dict, control: dict, now: datetime) -> None:
         snap["usage_refresh"] = {"asked_at": usage["refresh_at"], "done_at": read}
         for plan in snap["usage"]:
             plan["read_at"] = read
+
+
+def _doing(snap: dict) -> None:
+    """The Claude lane's `jobs` (one per repo, #50; `job` the newest), and what each repo is
+    doing: `doing`, the job running in it, else `wait`, why none starts (the lane's wait)."""
+    claude = _lane(snap, "claude")
+    running = claude["state"] in ("working", "stopping") and claude["job"]
+    claude["jobs"] = (claude.get("jobs") or [claude["job"]]) if running else []
+    for lane in snap["lanes"]:
+        lane.setdefault("jobs", [lane["job"]] if lane["job"] else [])
+    for repo in snap["repos"]:
+        repo["doing"] = next((j for j in claude["jobs"] if j["repo"] == repo["name"]), None)
+        repo["wait"] = (claude["wait"] if claude["state"] == "waiting" and not repo["doing"]
+                        and not repo["stopped"] else None)
 
 
 def _order(snap: dict) -> None:

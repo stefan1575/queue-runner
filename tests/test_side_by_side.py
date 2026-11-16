@@ -396,6 +396,50 @@ class DryRunAndGateTest(Harness):
         self.assertIn('; 1 could start at once', out.split('build: starts')[1].splitlines()[0])
 
 
+class SnapshotTest(Harness):
+    """The dashboard's snapshot while both repos' builds run: a job per repo on the Claude lane,
+    and each repo saying what it's doing."""
+
+    def test_it_shows_both_jobs_while_they_run(self):
+        import time
+        from tests.test_snapshot_runner import sol_limits
+        self.learn()
+        path, seen = os.path.join(self.state, 'snapshot.json'), {}
+
+        class Watched(FakeT3):
+            """Each run ends once the snapshot shows both jobs (or 10 seconds pass)."""
+            def start(self, project, message, **kwargs):
+                deadline = time.time() + 10
+                while time.time() < deadline and 'snap' not in seen:
+                    try:
+                        with open(path, encoding='utf-8') as f:
+                            snap = json.load(f)
+                    except (OSError, ValueError):
+                        snap = None
+                    if snap and len(next(l for l in snap['lanes'] if l['id'] == 'claude')['jobs']) == 2:
+                        seen['snap'] = snap
+                    time.sleep(0.01)
+                return super().start(project, message, **kwargs)
+
+        def sleep(_):
+            raise Done
+        try:
+            main(['--config', self.config], github=self.gh, out=io.StringIO(),
+                 t3=Watched([(0, 'completed')] * 2), git=FakeGit(), sleep=sleep, sol=FakeSol(),
+                 toaster=FakeToaster(), usage=FakeUsage(ROOM), clock=lambda: NOW,
+                 limits=FakeLimits(), t3_settings=os.path.join(self.dir, 't3.json'),
+                 waker=NoWaker(), sol_usage=sol_limits, snapshot_every=0.02)
+        except Done:
+            pass
+        snap = seen['snap']
+        claude = next(l for l in snap['lanes'] if l['id'] == 'claude')
+        self.assertEqual(claude['state'], 'working')
+        self.assertEqual(sorted((j['repo'], j['ref']) for j in claude['jobs']),
+                         [('first', '#4'), ('second', '#7')])
+        doing = {r['name']: r['doing'] and r['doing']['ref'] for r in snap['repos']}
+        self.assertEqual(doing, {'first': '#4', 'second': '#7'})
+
+
 class OldOrderTest(Harness):
     """A control.json that still has `repo_order` is read as before for its stops, and the order
     is ignored without a word."""

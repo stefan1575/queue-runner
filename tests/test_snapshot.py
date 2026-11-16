@@ -55,9 +55,9 @@ class BuildTest(unittest.TestCase):
     def test_repos_come_in_config_order_with_their_github_page_and_who_merges(self):
         self.assertEqual(snapshot.build(facts())['repos'], [
             {'name': 'leads-dashboard', 'github': 'https://github.com/RoyalBullyAgency-RBA/leads-dashboard',
-             'merge': 'stefan', 'stopped': None},
+             'merge': 'stefan', 'stopped': None, 'doing': None, 'wait': None},
             {'name': 'queue-runner', 'github': 'https://github.com/stefan1575/queue-runner',
-             'merge': 'runner', 'stopped': None},
+             'merge': 'runner', 'stopped': None, 'doing': None, 'wait': None},
         ])
 
 
@@ -110,6 +110,45 @@ class LanesTest(unittest.TestCase):
         conflict = replace(fix, cause='conflict')
         self.assertEqual(lane(snapshot.build(facts(jobs=[conflict])), 'claude')['job']['kind'],
                          'conflict')
+
+    def test_the_claude_lane_shows_a_job_per_repo_and_each_repo_what_it_is_doing(self):   # #50
+        ld = job('build', 212, 35)
+        qr = job('fix', 4, 5, repo='queue-runner', sha='a0d5f6f0123456789',
+                 title='Queue runner fix: queue-runner#4')
+        snap = snapshot.build(facts(jobs=[qr, ld], titles={('leads-dashboard', 212): 'Archive'}))
+        claude = lane(snap, 'claude')
+        self.assertEqual(claude['state'], 'working')
+        self.assertEqual([(j['repo'], j['ref']) for j in claude['jobs']],
+                         [('leads-dashboard', '#212'), ('queue-runner', 'PR #4')])   # oldest first
+        self.assertEqual(claude['job'], claude['jobs'][-1])
+        self.assertEqual({r['name']: r['doing'] for r in snap['repos']},
+                         {'leads-dashboard': claude['jobs'][0], 'queue-runner': claude['jobs'][1]})
+        self.assertEqual([r['wait'] for r in snap['repos']], [None, None])
+        self.assertEqual(lane(snap, 'sol')['jobs'], [])
+
+    def test_a_repo_the_gate_holds_says_why_beside_one_that_works(self):
+        ld = job('build', 212, 35)
+        until = NOW + datetime.timedelta(hours=2)
+        held = snapshot.Wait(until, 'build would fit alone, but the Claude job running (build '
+                             'leads-dashboard#212) is expected to take 60% of 5 hours')
+        snap = snapshot.build(facts(jobs=[ld], claude_wait=held,
+                                    repo_waits={'queue-runner': held}))
+        repos = {r['name']: r for r in snap['repos']}
+        self.assertIsNone(repos['leads-dashboard']['wait'])
+        self.assertEqual(repos['queue-runner']['doing'], None)
+        self.assertEqual(when(repos['queue-runner']['wait']['until']), until)
+        self.assertTrue(repos['queue-runner']['wait']['reason'].startswith('Build would fit alone'))
+
+    def test_a_wait_that_holds_every_repo_shows_on_each(self):
+        until = NOW + datetime.timedelta(hours=1)
+        limit = snapshot.Wait(until, 'build leads-dashboard#212 was cut off by a usage limit')
+        snap = snapshot.build(facts(claude_wait=limit))
+        self.assertEqual([r['wait']['reason'] for r in snap['repos']],
+                         ['Build leads-dashboard#212 was cut off by a usage limit.'] * 2)
+        stopped = control.Switch(lanes={'claude': control.Stop('after-job', NOW, 'control')})
+        snap = snapshot.build(facts(switch=stopped))
+        self.assertEqual([r['wait']['reason'] for r in snap['repos']],
+                         ['The Claude lane is stopped by Stefan.'] * 2)
 
     def test_an_open_review_is_the_reviewing_lanes_job(self):
         review = job('review', 210, 12, sha='4be91c2aaaa')
@@ -506,6 +545,7 @@ class FakeRunner:
 
     def __init__(self, wait=None, titles=None, thread=None):
         self.claude_wait, self.titles, self.thread, self.looked = wait, titles or {}, thread, []
+        self.repo_waits = {}
 
     def find_thread(self, job):
         self.looked.append(job.id)

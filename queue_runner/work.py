@@ -310,7 +310,7 @@ class View:
     repos: list
     off: frozenset = frozenset()
     limited: list = field(default_factory=list)
-    lane_jobs: dict = field(default_factory=dict)   # lane id: its open state.Job, or None
+    lane_jobs: dict = field(default_factory=dict)   # lane id: its open state.Jobs (one per repo)
     titles: dict = field(default_factory=dict)      # (repo, n): a title the passes read
     released: frozenset = frozenset()   # the jobs a release settled (`JobLog.released_ids`)
 
@@ -370,8 +370,8 @@ def claude_queue(v: View) -> list[dict]:
     for r in working:
         for n, title in v.reads[r.name].builds:
             out.append(_entry('build', r.name, False, n, title))
-    now = v.lane_jobs.get('claude')
-    return [e for e in out if not _same(e, now)]
+    now = v.lane_jobs.get('claude') or []
+    return [e for e in out if not any(_same(e, j) for j in now)]
 
 
 def sol_queue(v: View) -> list[dict]:
@@ -379,8 +379,8 @@ def sol_queue(v: View) -> list[dict]:
     out = [_entry('review', r.name, True, p.pr.number, p.pr.title)
            for r in v.repos if r.name not in v.off and r.name in v.reads
            for p in v.reads[r.name].prs if p.review_why is None]
-    now = v.lane_jobs.get('sol')
-    return [e for e in out if not _same(e, now)]
+    now = v.lane_jobs.get('sol') or []
+    return [e for e in out if not any(_same(e, j) for j in now)]
 
 
 def queue(v: View | None, lane: str) -> tuple[list[dict], str]:

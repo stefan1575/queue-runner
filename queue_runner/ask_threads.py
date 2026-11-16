@@ -295,7 +295,8 @@ def mark(asks: list, answered: list, jobs, opened_at: dict, waits, released=froz
 
 
 def waits_text(switch, repo: str, lane_job, wait_reason: str | None) -> str | None:
-    """Why the Claude lane wouldn't start an asked thread now: what the page says."""
+    """Why the Claude lane wouldn't start an asked thread now: what the page says. `lane_job`
+    is the Claude job running in that repo (one per repo, #50), or None."""
     if switch.error is not None:
         return 'It starts once control.json is readable again.'
     if switch.stop('claude').stopped:
