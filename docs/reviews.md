@@ -108,6 +108,17 @@ reviewed), `failed`, `out-of-usage` and `head-moved` (nothing counts).
   the Sol lane starts no Sol review until 10 minutes after the reset in Sol's rollout, else the
   time Sol names, else 30 minutes (`docs/usage.md`, Usage limits); meanwhile the Opus fallback reviews
   (below), and stops and merges go on.
+- **Usage back before that** (issue #130; Stefan, 2026-11-18: a ChatGPT reset credit used on a
+  week-long wait, and Opus went on reviewing): while Sol waits, the Sol lane reads ChatGPT's usage
+  (`Reviewer._sol_back`) through the dashboard's own reader (`snapshot.Watch`, one for both, built
+  in `cli.main`), using its last reading and reading again once that's `SOL_BACK_EVERY` (5
+  minutes) old. A reading taken after the out-of-usage review ended, with every window under 99%
+  (`sol.FULL`), ends the wait: a `sol-back` record in the job log (`JobLog.sol_back`: the reading's
+  time and windows, and the `resume_at` it ends), said once, and the next review goes to Sol.
+  `JobLog.sol_resume_at` reads the record, so the dashboard's wait, the wake times and a restarted
+  runner agree. A window at 99% or more, a reading from before the review ran out, or a failed
+  read (said once per error) leaves the wait standing. `--review` and a Reviewer made without a
+  reader wait for the reset.
 
 ## The Opus fallback
 
@@ -140,8 +151,9 @@ doesn't wait: a PR that needs a review gets one from a T3 thread on the Claude m
   `ready-for-stefan`), and a blocking one gets a fix round.
 - **The job record:** kind `review` with `reviewer` `opus-fallback` in its start record, and the
   thread's `thread_id`, `run_id` and `effort` in its end. `sol_resume_at` reads only Sol's own
-  reviews, so fallback reviews never end the wait; **once Sol's reset has passed, the next review
-  goes to Sol**, and if Sol is still out, its `out-of-usage` starts the fallback again.
+  reviews, so fallback reviews never end the wait; **once Sol's reset has passed, or ChatGPT's
+  reading shows usage again (Usage back before that, above), the next review goes to Sol**, and
+  if Sol is still out, its `out-of-usage` starts the fallback again.
 - **A runner that dies mid-review** (PR 67's review 2, F2): its T3 thread runs on, and its reply
   is never read. The next runner finds the thread by its title (`t3.find_job_thread`, as for a
   build). While it runs (or T3 can't say), the job stays open, said once in the Sol lane: that

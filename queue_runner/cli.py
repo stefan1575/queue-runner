@@ -595,11 +595,12 @@ def _heard(calls):
     return lambda ok, note: calls.record('claude_usage', ok, note)
 
 
-def _publisher(config, runner, calls, claude, sol_usage, clock, log_line, every):
-    """The running runner's snapshot (`snapshot.py`): written by both lanes and its own thread."""
-    from .snapshot import Publisher, RunnerInfo, Snapshots, Watch
+def _publisher(config, runner, calls, claude, sol_watch, clock, log_line, every):
+    """The running runner's snapshot (`snapshot.py`): written by both lanes and its own thread.
+    `sol_watch` is ChatGPT's reader, shared with the Sol lane (issue #130)."""
+    from .snapshot import Publisher, RunnerInfo, Snapshots
     snaps = Snapshots(config, calls=calls, clock=clock, runner=runner, claude=claude,
-                      sol=Watch(sol_usage, calls, 'sol_usage', clock, timed=True),
+                      sol=sol_watch,
                       info=RunnerInfo(os.getpid(), clock(), _commit()))
     return Publisher(os.path.join(config.state_dir, 'snapshot.json'), snaps.build, log_line,
                      every=every)
@@ -796,12 +797,16 @@ def main(argv=None, github=None, out=None, t3=None, git=None, sleep=None,
     effort = Effort(config, files=T3Files(settings=t3_settings or T3_SETTINGS, db=limits.path,
                                           projects=limits.projects)
                     if isinstance(limits, T3Store) else None)
+    # ChatGPT's usage, one reader for the dashboard and the Sol lane, which reads it while Sol
+    # waits for a reset (issue #130). --once keeps its calls to itself: it writes no snapshot.
+    from .snapshot import Calls, Watch
+    sol_watch = Watch(sol_usage, calls or Calls(snap_clock), 'sol_usage', snap_clock, timed=True)
     runner = Runner(config, github=github, t3=t3, git=git, out=out, log_line=log_line, sol=sol,
                     toaster=toaster, gate=gate, limits=limits, now=clock, waker=waker,
-                    self_update=self_update, deps=deps, effort=effort)
+                    self_update=self_update, deps=deps, effort=effort, sol_usage=sol_watch)
     if calls is not None:   # continuous mode only: --once writes no snapshot
         from .snapshot import WRITE_EVERY
-        runner.publisher = _publisher(config, runner, calls, gate.reader, sol_usage, snap_clock,
+        runner.publisher = _publisher(config, runner, calls, gate.reader, sol_watch, snap_clock,
                                       log_line, snapshot_every or WRITE_EVERY)
     if warning := auto_resume_warning(*([t3_settings] if t3_settings else [])):
         runner.say(f'Warning: {warning}')
