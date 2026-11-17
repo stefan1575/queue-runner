@@ -123,9 +123,9 @@ SOL_BACK_EVERY = 300
 
 
 def _after(reading, moment: datetime.datetime) -> bool:
-    """Whether `reading` (a `usage.Reading`) has a good value read after `moment`."""
+    """Whether `reading` (a `usage.Reading`) has a good value read at or after `moment`."""
     return (reading is not None and reading.value is not None and reading.at is not None
-            and reading.at.astimezone() > moment)
+            and reading.at.astimezone() >= moment)
 
 
 def _window_said(w) -> str:
@@ -300,13 +300,15 @@ class Reviewer:
         `SOL_BACK_EVERY` old (whatever it said: one still full is read again, review 1 F5), with
         every window under `sol.FULL`. The check and the read are one step (`read_if_due`), so
         the dashboard sharing the reader never reads too (F3). If so it's recorded
-        (`JobLog.sol_back`) with the reading's own time to the microsecond, so every reader of
-        the wait agrees (F2), and said. A failed read leaves the wait standing (said once per
-        error)."""
+        (`JobLog.sol_back`) against that review's job, so every reader of the wait agrees
+        without comparing stamps (F2, review 2 F6), and said. A failed read leaves the wait
+        standing (said once per error)."""
         watch = self.sol_usage
         if watch is None:
             return False
-        ran_out = when(out.ended_at)
+        # The job log stamps the end to the second, so the review ran out somewhere in that
+        # second: only a reading from the next second on is surely after it (review 2, F6).
+        ran_out = when(out.ended_at) + datetime.timedelta(seconds=1)
         watch.read_if_due(SOL_BACK_EVERY)
         reading = watch.reading()
         if reading is not None and reading.error and reading.error != self._said_back:
@@ -319,7 +321,7 @@ class Reviewer:
         if not windows or any(w.used >= FULL for w in windows):
             return False
         read_at = reading.at.astimezone()
-        self.jobs.sol_back(read_at=read_at.isoformat(), resume_at=out.resume_at,
+        self.jobs.sol_back(job=out.id, read_at=read_at.isoformat(), resume_at=out.resume_at,
                            windows=[{'minutes': w.minutes, 'used': w.used} for w in windows])
         shown = read_at.isoformat(timespec='seconds')
         self.say(f"ChatGPT has usage again ({', '.join(_window_said(w) for w in windows)}, "

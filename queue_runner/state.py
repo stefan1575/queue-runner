@@ -28,8 +28,8 @@ decision's retry or answer, a limit's recovery) also has `resume`: in place or f
 Events: `start` (a job is about to start), `end` (how it ended; a later `end` for the same job
 replaces the earlier one, e.g. when a waiting thread later completes), `release` (Stefan
 handled a held issue, so the picker may take it again) and `sol-back` (a ChatGPT reading taken
-after Sol's out-of-usage review, with every window under `sol.FULL`, ended the Sol lane's wait
-before the `resume_at` it recorded: issue #130; `read_at` and `windows` are that reading).
+after Sol's out-of-usage review `job`, with every window under `sol.FULL`, ended that review's
+wait before the `resume_at` it recorded: issue #130; `read_at` and `windows` are that reading).
 """
 import datetime
 import json
@@ -372,8 +372,10 @@ class JobLog:
         last = max(reversed(ended), key=lambda j: j.ended_at, default=None)
         if not last or last.outcome != OUT_OF_USAGE:
             return None
-        out = when(last.ended_at)
-        if any(e['event'] == 'sol-back' and when(e['read_at']) > out for e in self._events()):
+        # A sol-back record names the review whose wait it ended (PR 131's review 2, F6): no
+        # stamp is compared, so a later out-of-usage review ending in the same second as the
+        # reading starts a wait of its own.
+        if any(e['event'] == 'sol-back' and e.get('job') == last.id for e in self._events()):
             return None
         return last
 
@@ -382,10 +384,11 @@ class JobLog:
         out = self.sol_out()
         return out.resume_at if out else None
 
-    def sol_back(self, *, read_at: str, windows: list, resume_at: str | None) -> None:
-        """A ChatGPT reading at `read_at`, after Sol ran out, shows usage again: the wait that
-        would have lasted until `resume_at` ends now (issue #130)."""
-        self._append({'event': 'sol-back', 'at': _now(), 'read_at': read_at,
+    def sol_back(self, *, job: str, read_at: str, windows: list, resume_at: str | None) -> None:
+        """A ChatGPT reading at `read_at`, after Sol's out-of-usage review `job` ran out, shows
+        usage again: that review's wait, which would have lasted until `resume_at`, ends now
+        (issue #130)."""
+        self._append({'event': 'sol-back', 'at': _now(), 'job': job, 'read_at': read_at,
                       'windows': windows, 'resume_at': resume_at})
 
     def held_issues(self, repo: str) -> set[int]:

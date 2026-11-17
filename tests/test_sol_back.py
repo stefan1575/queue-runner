@@ -146,15 +146,47 @@ class SolBackTest(unittest.TestCase):
         self.assertEqual(len(self.backs()), 1)
         self.assertIsNone(self.jobs.sol_resume_at())   # the dashboard's wait and the wake time
 
-    def test_a_reading_within_the_second_the_review_ran_out_ends_the_wait_for_every_reader(self):
-        """Review 1 F2: the record keeps the reading's own time, to the microsecond, so the job
-        log's `sol_out` agrees with the lane that accepted it."""
+    def test_a_reading_within_the_second_the_review_ran_out_leaves_the_wait_for_every_reader(self):
+        """Review 1 F2 and review 2 F6: the end is stamped to the second, so a reading inside
+        that second may come before the review ran out. It doesn't end the wait, for the lane or
+        the job log; one from the next second on does, and the record names the review."""
         self.clock.at = OUT_AT + datetime.timedelta(microseconds=500000)
-        r = self.reviewer(self.watch(limits(2, 0)), sol=[reply()])
+        watch = self.watch(limits(2, 0))
+        r = self.reviewer(watch, sol=[reply()])
+        self.assertTrue(r._paused())
+        self.assertEqual(self.backs(), [])
+        self.assertIsNotNone(JobLog(self.path).sol_out())
+        self.clock.at += datetime.timedelta(seconds=SOL_BACK_EVERY)   # read again once due
         self.assertFalse(r._paused())
         self.assertIsNone(JobLog(self.path).sol_out())
         self.assertFalse(r._paused())
-        self.assertEqual(len(self.backs()), 1)   # recorded once: the log agrees after it
+        [back] = self.backs()   # recorded once: the log agrees after it
+        self.assertEqual(back['job'], 'out')
+
+    def test_a_reading_at_the_second_after_the_end_stamp_ends_the_wait(self):
+        self.clock.at = OUT_AT + datetime.timedelta(seconds=1)
+        self.assertFalse(self.reviewer(self.watch(limits(2, 0)), sol=[reply()])._paused())
+        self.assertIsNone(JobLog(self.path).sol_out())
+
+    def test_sol_out_again_in_the_second_its_usage_came_back_starts_a_new_wait(self):
+        """Review 2 F6: usage back at 00:21:00.5 ends the first wait; a review running out again
+        at 00:21:00.9 is stamped 00:21:00, before the reading, and still starts a wait of its
+        own, because the record ends only the review it names."""
+        back_at = OUT_AT + datetime.timedelta(hours=2, seconds=0.5)
+        self.clock.at = back_at
+        self.reviewer(self.watch(limits(2, 0)), sol=[reply()]).review_pass()
+        self.assertIsNone(self.jobs.sol_out())
+        again = back_at.replace(microsecond=900000)
+        resume = again + datetime.timedelta(hours=5)
+        self.sol_out(at=again, resume=resume, id='out-again')
+        self.assertEqual(JobLog(self.path).sol_resume_at(),
+                         resume.astimezone().isoformat(timespec='seconds'))
+        self.assertEqual(self.jobs.sol_out().id, 'out-again')
+
+    def test_an_old_record_without_a_job_ends_no_wait(self):
+        append_record(self.path, {'event': 'sol-back', 'at': NOW.isoformat(),
+                                  'read_at': NOW.isoformat(), 'windows': [], 'resume_at': None})
+        self.assertEqual(self.jobs.sol_out().id, 'out')
 
     def test_a_reading_still_full_is_read_again_once_due(self):
         """Review 1 F5: a post-stop reading at 100% doesn't stop the lane reading again."""

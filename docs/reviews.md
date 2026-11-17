@@ -115,10 +115,13 @@ reviewed), `failed`, `out-of-usage` and `head-moved` (nothing counts).
   reading and reading again once that's `SOL_BACK_EVERY` (5 minutes) old, whatever it said. The
   check and the read are one step under the reader's lock (`Watch.read_if_due`), so the lane and
   the dashboard never both read. A reading taken after the out-of-usage review ended, with every
-  window under 99% (`sol.FULL`), ends the wait: a `sol-back` record in the job log
-  (`JobLog.sol_back`: the reading's time to the microsecond, so it compares with the review's end
-  as the lane compared it, its windows, and the `resume_at` it ends), said once, and the next
-  review goes to Sol.
+  window under 99% (`sol.FULL`), ends the wait. "After" means from the second after the review's
+  end stamp on: the job log stamps to the second, so a reading inside that second may predate
+  the end. The wait ends with a `sol-back` record in the job log (`JobLog.sol_back`: the
+  out-of-usage review's job id, the reading's time, its windows and the `resume_at` it ends),
+  said once, and the next review goes to Sol. The record clears only the review it names, so no
+  reader compares stamps of different precision (PR 131's review 2, F6), and a later
+  out-of-usage review starts a wait of its own.
   `JobLog.sol_resume_at` reads the record, so the dashboard's wait, the wake times and a restarted
   runner agree. A window at 99% or more, a reading from before the review ran out, or a failed
   read (said once per error) leaves the wait standing. `--review NAME#N` reads it too, so
