@@ -53,7 +53,10 @@ database or settings). A decision's `retry` and `answer` in place or fresh: the 
 says otherwise).
 `[jobs]` (#120): `tests/test_jobs_config.py` (the table, its checks, the old tables' message) and
 `tests/test_jobs_run.py` (a build on codex end to end, a kind's fallback, a review on claudeAgent
-and on codex, the fallback's model on the PR). The effort: `tests/test_effort.py` (each kind on
+and on codex, the fallback's model on the PR, Sol as a Claude review's fallback) and
+`tests/test_provider_out.py` (who's out of usage, from every usage-limit end; the gate and
+usage by the providers a job's threads run on, fresh or continued; a thread named by its
+model). The effort: `tests/test_effort.py` (each kind on
 a model of its own, `PER_KIND`; `T3Files` on a temp SQLite and
 transcript folder; the provider, model and effort named, end records and log lines through a
 real build, decision, continued job, fix round and live run with `FakeFiles`). Every kind's
