@@ -503,7 +503,8 @@ class ReviewerTest(unittest.TestCase):
         self.assertEqual((b, n), ('body', 20))
         self.assertRegex(new, re.escape(
             '| Opened | 2026-11-09 11:00 | `bbbbbbb` | Waiting on Sol |\n'
-            '| [Sol review 1](https://github.com/owner/first/pull/20#issuecomment-901) | ')
+            '| [Sol review 1, GPT-6.1 Sol high]'
+            '(https://github.com/owner/first/pull/20#issuecomment-901) | ')
             + r'\d{4}-\d\d-\d\d \d\d:\d\d' + re.escape(
             ' | `bbbbbbb` | **Blocking**, back to fix; raised: F1; left open: F1 |\n'))
         self.assertIn('edited while Sol ran', new)   # read afresh, not from the listing

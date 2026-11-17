@@ -80,11 +80,16 @@ class JobsTableTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, r'jobs\.build.*modle'):
             self.load('[jobs.build]\nmodle = "x"\n')
 
-    def test_a_review_fallback_on_codex_is_refused(self):
-        # Only a review whose own provider is Codex runs through the Codex adapter.
-        with self.assertRaisesRegex(ValueError, r'jobs\.review\.fallback.*codex'):
-            self.load('[jobs.review]\nprovider = "claudeAgent"\nmodel = "claude-opus-5-5"\n'
-                      'fallback = { provider = "codex", model = "gpt-6.1-sol" }\n')
+    def test_a_review_on_claude_may_fall_back_to_codex(self):
+        # PR #137's review 1, F2: Sol reviews through the Codex adapter as the fallback too,
+        # at the fallback's model and effort.
+        from queue_runner.sol import codex_adapter
+        c = self.load('[jobs.review]\nprovider = "claudeAgent"\nmodel = "claude-opus-5-5"\n'
+                      'effort = "high"\n'
+                      'fallback = { provider = "codex", model = "gpt-7-sol", effort = "xhigh" }\n')
+        self.assertEqual(c.job('review').fallback, JobSpec('codex', 'gpt-7-sol', 'xhigh'))
+        sol = codex_adapter(c)
+        self.assertEqual((sol.model, sol.effort), ('gpt-7-sol', 'xhigh'))
 
     def test_an_old_claude_or_review_table_fails_saying_what_to_write(self):
         with self.assertRaisesRegex(ValueError, r'\[claude\].*\[jobs\.default\]'):

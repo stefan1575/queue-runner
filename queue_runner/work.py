@@ -603,8 +603,10 @@ def _pr_status(v: View, repo, p: PrRead, cq: list, sq: list) -> tuple[str, str, 
         what = 'Conflict round' if fix.cause == 'conflict' else 'Fix round'
         return f'{what} running', 'Claude is on it; Sol reviews the head it pushes.', FIXING
     if review := next((j for j in on if j.kind == 'review'), None):
-        who = ({'opus-config': 'Opus (config.toml says so)'}.get(
-            review.reviewer, 'Opus (in place of Sol, out of usage)') if review.reviewer else 'Sol')
+        from .fallback import thread_model
+        m = thread_model(review)   # the thread's model, as it runs (PR #137's review 1, F3)
+        who = ({'opus-config': f'{m} (config.toml says so)'}.get(
+            review.reviewer, f'{m} (in place of Sol, out of usage)') if review.reviewer else 'Sol')
         return 'In review', f'{who} is on review {review.round or 1} of {h7}.', REVIEW
     if any(j.kind == 'merge' for j in on):
         return 'Merging', f'The runner is merging it at {h7}.', REVIEW
@@ -693,12 +695,13 @@ def _other(j) -> str | None:
     """The sentences `asks.Story` doesn't write: what counted for nothing."""
     h7 = _h7(j.sha)
     if j.kind == 'review' and j.reviewer:   # Opus: Sol out (#69), or config.toml's choice (#76)
-        set_ = j.reviewer == 'opus-config'
-        return {'failed': f'The Opus review of {h7} failed.' if set_
-                else f"The Opus fallback's review of {h7} failed.",
-                'head-moved': f'The head moved while Opus was to review {h7}, so nothing '
-                              'counted.'}.get(j.outcome, (f'Opus started reviewing {h7}.' if set_
-                                              else f'Opus started reviewing {h7} in place of '
+        from .fallback import thread_model
+        set_, m = j.reviewer == 'opus-config', thread_model(j)   # PR #137's review 1, F3
+        return {'failed': f'The {m} review of {h7} failed.' if set_
+                else f"The {m} fallback's review of {h7} failed.",
+                'head-moved': f'The head moved while {m} was to review {h7}, so nothing '
+                              'counted.'}.get(j.outcome, (f'{m} started reviewing {h7}.' if set_
+                                              else f'{m} started reviewing {h7} in place of '
                                               'Sol.') if j.open else None)
     if j.kind == 'review':
         return {'failed': f"Sol's review of {h7} failed.",

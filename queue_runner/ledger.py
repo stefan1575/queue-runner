@@ -309,7 +309,7 @@ def issue_title(f: dict) -> str:
 
 def decide(repo: str, n: int, sha: str, rnd: int, earlier: list[dict], has_review_md: bool,
            reply: str, wt: str | None = None, rundir: str | None = None,
-           gone: bool = False, reviewer: str | None = None) -> dict:
+           gone: bool = False, reviewer: str | None = None, sol=None) -> dict:
     """Everything a review decides, from the PR's earlier reviews (read_reviews()) and Sol's reply.
     wt and rundir are the local folders Sol's paths start with; gone means the last reviewed commit
     isn't in H's history (a force-push), so Sol read the whole diff.
@@ -320,8 +320,13 @@ def decide(repo: str, n: int, sha: str, rnd: int, earlier: list[dict], has_revie
     `sol-review` on H), issues (new Pre-existing findings to file), body (the comment) and
     reviewer. `reviewer` names who reviewed when it wasn't Sol, and why (the Opus fallback, #69,
     or config.toml's choice, #76):
-    the comment's heading and byline and the status say so. An unreadable reply raises
-    SolFailed."""
+    the comment's heading and byline and the status say so. `sol` is how Sol ran when it
+    reviewed: (its model as said, its effort, why when it's a fallback, else None); None is
+    codex-sol.sh's own, GPT-6.1 Sol at high (PR #137's review 1, F3). `sol_label` in the result
+    names it for the Review row. An unreadable reply raises SolFailed."""
+    sol_model, sol_effort, sol_why = sol or ('GPT-6.1 Sol', 'high', None)
+    sol_label = f'{sol_model} {sol_effort}' + (f', {sol_why}' if sol_why else '')
+    named = reviewer or (sol_label if sol_why else None)   # the heading's and status's
     found, prose = parse_findings(reply)
     given = parse_earlier(reply)
     notes = []
@@ -452,8 +457,8 @@ def decide(repo: str, n: int, sha: str, rnd: int, earlier: list[dict], has_revie
     desc = (f'Blocking: {len(important)} Important finding{"s" * (len(important) != 1)} '
             f'({", ".join(important)})' if important else
             f'Clean: no Important finding, {nits} nit{"s" * (nits != 1)}')
-    if reviewer:
-        desc = f'{reviewer}: {desc}'
+    if named:
+        desc = f'{named}: {desc}'
     fresh = [f for f in found if not (f['id'] in before
                                       and before[f['id']]['status'] in (*OPEN, 'filed'))]
     table = (('No new findings.' if earlier else 'No findings.') if not fresh else
@@ -476,9 +481,10 @@ def decide(repo: str, n: int, sha: str, rnd: int, earlier: list[dict], has_revie
     # The heading keeps its `## Sol review N · V` start (the review loop's name, and HEADING's).
     byline = (f"Reviewed by {reviewer}: Claude reviewed in Sol's place, in a T3 thread, from "
               f'the same brief, on {sha[:7]}{scope}{guide}' if reviewer else
-              f'GPT-6.1 Sol at effort high, read-only, on {sha[:7]}{scope}{guide}')
+              f'{sol_model} at effort {sol_effort}' + (f', {sol_why}' if sol_why else '')
+              + f', read-only, on {sha[:7]}{scope}{guide}')
     body = (f'## Sol review {rnd} · {verdict.capitalize()}'
-            + (f' · {reviewer}' if reviewer else '') + '\n\n'
+            + (f' · {named}' if named else '') + '\n\n'
             f"<sub>{byline}. Posted by the queue runner from Stefan's PC.</sub>\n\n"
             f'{text}\n\n{old}### Findings\n\n{table.rstrip()}\n\n'
             + ''.join(f'{s}\n\n' for s in notes)
@@ -492,7 +498,7 @@ def decide(repo: str, n: int, sha: str, rnd: int, earlier: list[dict], has_revie
             'issues': [{'id': f['id'], 'title': issue_title(f), 'finding': f}
                        for f in [*(f for f in pre if f['id'] not in filed),
                                  *(f for f in now if f.get('unfiled') and f['id'] not in new)]],
-            'body': body, 'reviewer': reviewer}
+            'body': body, 'reviewer': reviewer, 'sol_label': None if reviewer else sol_label}
 
 
 def _trailer(rnd: int, verdict: str, sha: str, findings: list[dict]) -> str:

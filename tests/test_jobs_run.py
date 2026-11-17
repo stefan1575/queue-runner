@@ -196,6 +196,49 @@ class ReviewTest(Harness):
         [job] = self.of('review')
         self.assertEqual((job.provider, job.model, job.effort, job.outcome),
                          ('codex', 'gpt-7-sol', 'xhigh', 'clean'))
+        # The comment and the Review row say what it ran at (PR #137's review 1, F3).
+        [(_, _, body)] = self.posted('comment')
+        self.assertIn('<sub>GPT-7 Sol at effort xhigh, read-only, on ', body)
+        self.assertNotIn('GPT-6.1', body)
+        self.assertTrue(body.startswith('## Sol review 1 · Clean\n'), body[:80])
+        [(_, _, pr_body)] = self.posted('body')
+        row = next(line for line in pr_body.splitlines() if line.startswith('| ['))
+        self.assertTrue(row.startswith('| [Sol review 1, GPT-7 Sol xhigh](https://'), row)
+
+    def run_codex(self, calls):
+        def run(cmd, out, timeout):
+            calls.append(cmd)
+            with open(cmd[-2], 'w', encoding='utf-8') as f:
+                f.write(reply())
+            return 0
+        return run
+
+    def test_a_review_on_claude_falls_back_to_sol_while_claude_is_out(self):
+        # PR #137's review 1, F2: Sol as a Claude review's fallback, at the fallback's model
+        # and effort, and the PR says why Sol reviewed.
+        from queue_runner.sol import codex_adapter
+        self.configure([self.repo], review=dataclasses.replace(
+            OPUS, fallback=JobSpec('codex', 'gpt-7-sol', 'xhigh')))
+        cut = self.jobs.started(kind='fix', repo='other', issue=3, branch='b', title='t',
+                                provider='claudeAgent')
+        self.jobs.ended(cut.id, exit_code=1, outcome='usage-limit',
+                        resume_at='2099-01-01T00:00:00+00:00')
+        calls = []
+        self.reviewer(sol=codex_adapter(self.config, run=self.run_codex(calls))).review_pass()
+        self.assertEqual(self.t3.starts, [])   # no Claude thread
+        [cmd] = calls
+        i = cmd.index('--model')
+        self.assertEqual(cmd[i:i + 4], ['--model', 'gpt-7-sol', '--effort', 'xhigh'])
+        [job] = self.of('review')
+        self.assertEqual((job.provider, job.model, job.effort), ('codex', 'gpt-7-sol', 'xhigh'))
+        label = 'GPT-7 Sol xhigh, fallback while Opus 5.5 is out'
+        [(_, _, body)] = self.posted('comment')
+        self.assertTrue(body.startswith(f'## Sol review 1 · Clean · {label}\n'), body[:120])
+        self.assertIn('<sub>GPT-7 Sol at effort xhigh, fallback while Opus 5.5 is out, '
+                      'read-only, on ', body)
+        [(_, _, pr_body)] = self.posted('body')
+        row = next(line for line in pr_body.splitlines() if line.startswith('| ['))
+        self.assertTrue(row.startswith(f'| [Sol review 1, {label}](https://'), row)
 
     def test_the_fallback_reviews_while_sol_is_out_and_the_pr_names_its_model(self):
         self.configure([self.repo], review=JobSpec('codex', 'gpt-6.1-sol', 'high',

@@ -243,9 +243,11 @@ class Story:
         }.get(out, None if out in SKIPPED else f'The build of #{n} ended {out}.')
 
     def _review(self, j) -> str:
+        from .fallback import thread_model
+        m = thread_model(j)   # the thread's model, as it ran (PR #137's review 1, F3)
         where = f'Review {j.round} on {(j.sha or "")[:7]}' + (   # issues #69 and #76
-            {'opus-config': ', by Opus (config.toml says so),'}.get(
-                j.reviewer, ', by Opus while Sol was out of usage,') if j.reviewer else '')
+            {'opus-config': f', by {m} (config.toml says so),'}.get(
+                j.reviewer, f', by {m} while Sol was out of usage,') if j.reviewer else '')
         if j.outcome == 'clean':
             return f'{where} came back clean.'
         found = self.problems(j)

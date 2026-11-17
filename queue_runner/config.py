@@ -57,6 +57,14 @@ class JobSpec:
     fallback: 'JobSpec | None' = None
 
 
+def codex_spec(review: JobSpec) -> 'JobSpec | None':
+    """The spec a review on Codex runs at (the Codex adapter, `sol.codex_adapter`): the review's
+    own when it's on Codex, else its fallback's when that is, else None. Either may be: a
+    review on Claude falls back to Sol as Sol's falls back to Claude (PR #137's review 1, F2)."""
+    return next((s for s in (review, review.fallback) if s is not None and s.provider == CODEX),
+                None)
+
+
 OPUS_HIGH = JobSpec(CLAUDE, 'claude-opus-5-5', 'high')
 # A config with no `[jobs]` table: Opus at high, and Sol reviewing at high with Opus at high
 # while Sol is out of usage (the runner's jobs before #120).
@@ -186,10 +194,6 @@ def _jobs(raw: dict) -> dict:
         spec = _spec(f'jobs.{kind}', merged, default, fallback=True)
         if (back := merged.get('fallback')) is not None:
             fb = _spec(f'jobs.{kind}.fallback', back, default, fallback=False)
-            if kind == 'review' and spec.provider != CODEX and fb.provider == CODEX:
-                raise ValueError('jobs.review.fallback: a review runs on codex only as its own '
-                                 'provider, through the Codex adapter; name a T3 provider '
-                                 'such as claudeAgent')
             spec = JobSpec(spec.provider, spec.model, spec.effort, fallback=fb)
         jobs[kind] = spec
     return jobs

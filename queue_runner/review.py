@@ -390,9 +390,9 @@ class Reviewer:
             spec, kind = spec.fallback, KIND
         else:
             self._said_paused = None
-        if spec.provider == CODEX:
+        if spec.provider == CODEX:   # Sol: the review's own, or its fallback (PR #137, F2)
             self._said_gate = None
-            return SOL
+            return By('sol', None, spec, kind, primary)
         if spec.provider != CLAUDE:   # the gate reads Claude's usage only
             self._said_gate = None
             return By('thread', None, spec, kind, primary)
@@ -489,10 +489,9 @@ class Reviewer:
         sol = (self.fallback.thread(repo, review_title(repo, n), by.spec, by.kind, by.primary)
                if opus else self.sol)
         # What it runs on (issue #120): the thread's spec, or the Codex adapter's model and
-        # effort (a test's fake Sol has none).
+        # effort (`_on_codex`).
         on = ({'provider': by.spec.provider, 'model': by.spec.model, 'effort': by.spec.effort}
-              if opus else {'provider': CODEX, 'model': getattr(self.sol, 'model', None),
-                            'effort': getattr(self.sol, 'effort', None)})
+              if opus else {'provider': CODEX, **self._on_codex(by)})
         job = self.jobs.started(kind='review', repo=repo.name, issue=n, branch=pr.branch,
                                 title=review_title(repo, n), sha=h, round=rnd,
                                 reviewer=sol.kind if opus else None, **on)
@@ -501,6 +500,16 @@ class Reviewer:
             return self._review(repo, pr, by, job, earlier, rnd, opus, sol)
         finally:
             self.live = None
+
+    def _on_codex(self, by: By) -> dict:
+        """The model and effort a review through the Codex adapter runs at: the adapter's own
+        (`sol.codex_adapter`, at config.toml's Codex spec), else (a test's fake Sol has none)
+        the Codex spec `by` names, else codex-sol.sh's own."""
+        from .config import codex_spec
+        from .sol import EFFORT, MODEL
+        spec = by.spec if by.spec is not None and by.spec.provider == CODEX else             codex_spec(self.config.job('review'))
+        return {'model': getattr(self.sol, 'model', None) or (spec and spec.model) or MODEL,
+                'effort': getattr(self.sol, 'effort', None) or (spec and spec.effort) or EFFORT}
 
     def _review(self, repo, pr, by, job, earlier, rnd, opus, sol) -> str:
         n, h = pr.number, pr.head_sha
@@ -537,8 +546,13 @@ class Reviewer:
             reply = sol.review(brief_path, os.path.join(run_dir, 'reply.md'), wt,
                                     os.path.join(run_dir, 'run.out'),
                                     writable=list(prepared.writable) if prepared else [])
+            # Sol's model and effort as it ran (PR #137's review 1, F3), and why when it's
+            # the fallback of a review on another provider.
+            said = None if opus else (model_name(job.model), job.effort,
+                                      f'fallback while {by.primary} is out'
+                                      if by.kind == KIND else None)
             d = decide(repo.github, n, h, rnd, earlier, guidelines is not None, reply, wt,
-                       run_dir, gone, reviewer=sol.label if opus else None)
+                       run_dir, gone, reviewer=sol.label if opus else None, sol=said)
         except SolOutOfUsage as e:
             resume = (e.back + RESUME_AFTER) if e.back else self.now() + RETRY_UNKNOWN
             self.jobs.ended(job.id, exit_code=None, outcome=OUT_OF_USAGE, run_dir=run_dir,

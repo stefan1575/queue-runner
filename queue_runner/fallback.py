@@ -92,6 +92,12 @@ def reviewer_name(spec) -> str:
     return 'Sol' if spec.provider == CODEX else model_name(spec.model)
 
 
+def thread_model(job) -> str:
+    """The model a review thread ran on, as people say it: its start record's (issue #120),
+    else Opus, which every review thread ran on before (PR #137's review 1, F3)."""
+    return model_name(job.model) if getattr(job, 'model', None) else 'Opus'
+
+
 def label(model: str, effort: str, kind: str = KIND, primary: str = 'Sol') -> str:
     return f'{model_name(model)} {effort}, {WHY[kind].format(primary=primary)}'
 

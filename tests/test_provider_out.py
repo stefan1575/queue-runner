@@ -131,6 +131,25 @@ class InvokedProvidersTest(Harness):
         self.assertEqual(r.run_pass(), 'started')
 
 
+class ThreadModelTest(unittest.TestCase):
+    """F3's class elsewhere: the work lists name a review thread by the model it ran on."""
+
+    def review(self, model, outcome=None):
+        from queue_runner.state import Job
+        return Job(id='r', kind='review', repo='first', issue=20, branch='b', title='t',
+                   started_at='2026-11-16T16:00:00+00:00', sha=H2, reviewer='opus-config',
+                   model=model, outcome=outcome)
+
+    def test_a_fable_review_thread_is_named_fable(self):
+        from queue_runner.work import _other
+        self.assertEqual(_other(self.review('claude-fable-5-2', 'failed')),
+                         f'The Fable 5.2 review of {H2[:7]} failed.')
+
+    def test_a_record_from_before_120_is_opus(self):
+        from queue_runner.fallback import thread_model
+        self.assertEqual(thread_model(self.review(None)), 'Opus')
+
+
 UTC = datetime.timezone.utc
 
 

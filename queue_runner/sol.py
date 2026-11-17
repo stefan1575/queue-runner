@@ -167,11 +167,12 @@ def _read(path: str) -> str:
 
 
 def codex_adapter(config, **kw) -> 'SolCli':
-    """The Codex adapter config.toml asks for (issue #120): codex-sol.sh under its bash, at
-    `[jobs.review]`'s model and effort when reviews are on Codex, else at codex-sol.sh's own."""
-    review = config.job('review')
-    at = ({'model': review.model, 'effort': review.effort} if review.provider == 'codex'
-          else {})
+    """The Codex adapter config.toml asks for (issue #120): codex-sol.sh under its bash, at the
+    model and effort of `[jobs.review]` or its fallback, whichever is on Codex (`codex_spec`),
+    else at codex-sol.sh's own."""
+    from .config import codex_spec
+    spec = codex_spec(config.job('review'))
+    at = {'model': spec.model, 'effort': spec.effort} if spec is not None else {}
     return SolCli(script=config.sol_script or SOL_SCRIPT, bash=config.sol_bash or GIT_BASH,
                   **at, **kw)
 

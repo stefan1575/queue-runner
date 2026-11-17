@@ -182,8 +182,9 @@ fallback = { provider = "claudeAgent", model = "claude-opus-5-5", effort = "high
   model and effort, `sol.codex_adapter`); any other is a T3 thread on its provider, model and
   effort, which on Claude goes through the usage gate (kind `review`: `docs/usage.md`, The usage
   gate; `Opus 5.5 fallback review waits: ...` said once while it holds). Nobody, until the next
-  pass, while both are out. A fallback on `codex` is refused at load unless the review's own
-  provider is `codex`: only a review on Codex runs through the adapter. The Runner gives the
+  pass, while both are out. Either may be on `codex`: a review on Claude falls back to Sol as
+  Sol's falls back to Claude, and the adapter runs at whichever of the two is on Codex
+  (`config.codex_spec`; PR #137's review 1, F2). The Runner gives the
   Reviewer the threads (`ThreadReviews`, with T3, the gate, the effort and T3's run records);
   `--review NAME#N`, the live checks and `Reviewer`s made without one run Sol, or wait for it.
 - **The Sol seam** (`ReviewThread.review(brief, reply, workdir, out, writable)`, as
@@ -210,7 +211,12 @@ fallback = { provider = "claudeAgent", model = "claude-opus-5-5", effort = "high
   status's description (`<label>: Clean: ...`; the context stays `sol-review`), the Review row
   (`[Review N, <label>](...)`) and `decision.json`'s `reviewer`. The hidden marker is the same,
   so the review counts as any other: **a clean fallback review merges** (or marks
-  `ready-for-stefan`), and a blocking one gets a fix round.
+  `ready-for-stefan`), and a blocking one gets a fix round. **Sol's own reviews** name the model
+  and effort the adapter ran at (PR #137's review 1, F3): the byline (`GPT-6.1 Sol at effort
+  high, read-only, ...`) and the Review row (`[Sol review N, GPT-6.1 Sol high](...)`); as a
+  Claude review's fallback, its label (`GPT-6.1 Sol high, fallback while Opus 5.5 is out`) is
+  in the heading and the status too. The work lists and the Inbox's story name a thread by the
+  model in its start record (`fallback.thread_model`; Opus for a record from before #120).
 - **The job record:** kind `review` with `reviewer` `opus-fallback` and its `provider`, `model`
   and `effort` in its start record, and the thread's `thread_id`, `run_id` and `effort` in its
   end (a Sol review's start names `codex` and the adapter's model and effort). A provider's wait
