@@ -71,7 +71,8 @@ What each module and script is for.
   in place or fresh for any job picking up an earlier thread (`resume_choice`), the auto-resume
   warning.
 - `queue_runner/effort.py`: the effort Claude jobs run at: the provider, model and effort every
-  job names (`claude_job`, #119), and the effort a run used, read back (ticket 39).
+  job names (`Effort.job(kind)`: config.toml's `[jobs]`, its fallback while its provider is
+  out, #119, #120), and the effort a run used, read back (ticket 39).
 - `queue_runner/lock.py`: `runner.lock` and `sol.lock`.
 - `queue_runner/wake.py`: the wake tasks: `Waker.sync` and the `schtasks` adapter.
 - `queue_runner/restart.py`: restarting on its own new code after main moves (ticket 14).

@@ -7,10 +7,11 @@ posts nothing (the live check). One Sol job at a time: each review holds `<state
 A clean review merges (`merge.Merger`) once the PR is read again; each pass first merges any PR
 still waiting at a head the runner found clean.
 
-While Sol is out of usage, stops and merges go on, and a review runs as an Opus thread in T3
-instead, through Claude's usage gate (`fallback.py`, issue #69); once Sol's reset has passed,
-reviews go to Sol again. When config.toml's `[review] provider` is "claude" (issue #76), every
-review runs as that Opus thread, and Sol's usage plays no part.
+Who reviews is config.toml's `[jobs.review]` (issue #120): on Codex, Sol (`sol.py`, the Codex
+adapter); on any other provider, a T3 thread (`fallback.py`, issue #76), and Sol's usage plays no
+part. While the review's own provider is out of usage, stops and merges go on, and a review runs
+on its `fallback` (Stefan's: an Opus thread, through Claude's usage gate, issue #69); once the
+reset has passed, reviews go back to their own provider.
 """
 import dataclasses
 import datetime

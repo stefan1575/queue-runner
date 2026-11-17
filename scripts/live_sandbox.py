@@ -14,7 +14,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from queue_runner.config import Config, Repo  # noqa: E402
+from queue_runner.config import DEFAULT_JOBS, Config, JobSpec, Repo  # noqa: E402
 from queue_runner.effort import Effort, T3Files  # noqa: E402
 from queue_runner.git import GitCli  # noqa: E402
 from queue_runner.github import Issue  # noqa: E402
@@ -39,7 +39,9 @@ class NoGitHub:
 def main() -> int:
     repo = Repo(name='sandbox', github=None, path=os.path.join(SANDBOX, 'repo'), base='main')
     config = Config(repos=[repo], state_dir=os.path.join(SANDBOX, 'state'),
-                    log_dir=os.path.join(SANDBOX, 'logs'), claude_model='claude-haiku-5-5')
+                    log_dir=os.path.join(SANDBOX, 'logs'),
+                    jobs={**DEFAULT_JOBS, 'build': JobSpec('claudeAgent', 'claude-haiku-5-5',
+                                                           'high')})
     log_dir = config.log_dir
 
     def log_line(line):

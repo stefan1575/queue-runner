@@ -51,7 +51,10 @@ start; every test that runs `main` passes it, and a `t3_settings` path, so none 
 database or settings). A decision's `retry` and `answer` in place or fresh: the `cold` tests in
 `tests/test_decisions.py` (its `Runner` gets a `FakeLimits` whose threads are warm unless a test
 says otherwise).
-The effort: `tests/test_effort.py` (`[claude] effort`; `T3Files` on a temp SQLite and
+`[jobs]` (#120): `tests/test_jobs_config.py` (the table, its checks, the old tables' message) and
+`tests/test_jobs_run.py` (a build on codex end to end, a kind's fallback, a review on claudeAgent
+and on codex, the fallback's model on the PR). The effort: `tests/test_effort.py` (each kind on
+a model of its own, `PER_KIND`; `T3Files` on a temp SQLite and
 transcript folder; the provider, model and effort named, end records and log lines through a
 real build, decision, continued job, fix round and live run with `FakeFiles`). Every kind's
 start names them on `FakeT3` (which requires them): also the conflict round

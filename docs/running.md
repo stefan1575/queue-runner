@@ -38,10 +38,35 @@ merges himself: `docs/claude-lane.md`, Stefan merges), in an order that breaks t
 (`docs/claude-lane.md`, Two lanes); the runner's `state_dir` and `log_dir` (`~/.queue-runner/`, outside every served repo);
 `runs_dir`, `checkouts_dir` and `deps_dir` for reviews; `poll_seconds`, the pause after a pass that started
 nothing; `adopt_reviews_before`, the cutover date before which a blocking review the runner
-didn't run counts as its own for fix rounds (A Claude pass, step 4); `[claude]`, the T3
-provider instance, model and `effort` (default `high`) for Claude jobs (`docs/usage.md`, The effort);
-and `[sol]`,
-`codex-sol.sh` and the Git bash that runs it. `--config <path>` reads another one.
+didn't run counts as its own for fix rounds (A Claude pass, step 4); `[jobs]`, what each job
+kind runs on (below); and `[sol]`, `codex-sol.sh` and the Git bash that runs it (the Codex
+adapter). `--config <path>` reads another one.
+
+**`[jobs]`** (issue #120): each job kind's T3 provider instance (`claudeAgent` or `codex`), model
+and effort, and optionally a `fallback` used while its own provider is out of usage (without
+one, the job waits for the reset). The kinds are `build`, `fix`, `conflict`, `decision`,
+`live`, `review` and `ask` (an Inbox ask thread); each takes `[jobs.default]`'s keys unless it
+names its own, and `[jobs.default]`'s missing keys are Opus 5.5 at `high`. Efforts are checked
+per provider: Claude Code's `low`..`max`; the Codex CLI's `minimal`..`max`. A review on `codex`
+runs through the Codex adapter (`docs/reviews.md`); every other job, and a review on any other
+provider, starts through T3's MCP launch with its provider, model and effort named (`docs/t3.md`).
+A job not on Claude skips the usage gate, which reads Claude's usage (`docs/usage.md`). A config
+with no `[jobs]` runs Opus 5.5 high for every kind but review, which is Sol high with Opus 5.5
+high as its fallback. The old `[claude]` and `[review]` tables fail at load with a message
+saying what to write instead.
+
+```toml
+[jobs.default]            # every kind not named below
+provider = "claudeAgent"
+model = "claude-opus-5-5"
+effort = "medium"
+
+[jobs.review]
+provider = "codex"
+model = "gpt-6.1-sol"
+effort = "high"
+fallback = { provider = "claudeAgent", model = "claude-opus-5-5", effort = "high" }
+```
 
 ## Running unattended
 

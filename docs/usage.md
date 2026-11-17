@@ -170,15 +170,21 @@ the runner should confirm the log line `<thread> stopped on a usage limit; T3 sa
 
 ## The effort
 
-`effort.py` (ticket 39; Stefan, 2026-11-15: "keep it at high by default", until his Claude Max
-plan ends). Every Claude job (build, fix or conflict round, decision, live run) is meant to run
-at `[claude] effort` (`high`).
+`effort.py` (ticket 39; issue #120). Every job runs at its kind's `[jobs]` effort
+(`docs/running.md`, The command line; Stefan's config: Opus 5.5 `medium`), or its fallback's while
+its own provider is out of usage (`Effort.spec`: `JobLog.out_until`).
 
 - **Every job names its provider, model and effort** (issue #119): builds, fix and conflict
   rounds, decisions, live steps, Opus reviews and ask threads start through T3's MCP launch
-  (`T3Cli.start`/`launch`, `docs/t3.md`) with `effort.claude_job`: `[claude]`'s provider, model
-  and effort, whatever the T3 project's default model is. A continued job (`t3 thread send`)
-  keeps its thread's selection. Checked live on 2026-11-17 (`docs/t3.md`).
+  (`T3Cli.start`/`launch`, `docs/t3.md`) with `Effort.job(kind)`: its kind's provider, model and
+  effort, whatever the T3 project's default model is, recorded in its start record and launched
+  from there (`effort.asked`). A continued job (`t3 thread send`) keeps its thread's selection.
+  Checked live on 2026-11-17 (`docs/t3.md`).
+- **A fallback while a provider is out** (issue #120): a provider is out while a build or fix on
+  it was cut off by a limit and nobody picked it up yet, or its newest review found it out
+  (`JobLog.out_until`). While one is, a Claude-lane kind with a `fallback` starts on it (a repo
+  whose own job was cut off still waits for that job's reset); with no kind able to start, the
+  lane waits as before. A job not on Claude skips the usage gate.
 - **Before #119** T3's CLI was the only way in, and `t3 thread start --provider --model` sends no
   effort option, so a run got the model's default (Opus 5.5's is medium). The runner leaned on
   the T3 project's default model instead (`projectSettingsOverrides[<id>].defaultModelSelection`

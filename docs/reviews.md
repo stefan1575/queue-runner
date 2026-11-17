@@ -94,9 +94,11 @@ reviewed), `failed`, `out-of-usage` and `head-moved` (nothing counts).
 
 ## Sol, as a script sees it
 
-- **Sol runs through `scripts/codex-sol.sh`, not a T3 thread** (`queue_runner/sol.py`). Since
-  #119 a T3 thread could run it at its effort (`reasoningEffort`, `docs/t3.md`); moving it is a
-  later step of #68. Checked
+- **Sol runs through `scripts/codex-sol.sh`, not a T3 thread** (`queue_runner/sol.py`, the Codex
+  adapter): a review whose `[jobs.review]` provider is `codex` runs there, at its model and
+  effort (`--model`, `--effort`; issue #120), since it is the one way to run a review in a
+  read-only, network-off checkout. Since #119 a T3 thread could run it at its effort
+  (`reasoningEffort`, `docs/t3.md`). Checked
   2026-11-09: a thread from `t3 thread start --provider codex --model gpt-6.1-sol` ran at effort
   **low**: its rollout (`~/.codex/sessions/2026/11/09/rollout-2026-11-09T19-36-32-*.jsonl`) has
   a `configuration_update` record with `reasoning.effort: "low"`, though `~/.codex/config.toml`
@@ -111,39 +113,59 @@ reviewed), `failed`, `out-of-usage` and `head-moved` (nothing counts).
   time Sol names, else 30 minutes (`docs/usage.md`, Usage limits); meanwhile the Opus fallback reviews
   (below), and stops and merges go on.
 
-## The Opus fallback
+## The review's fallback
 
 `fallback.py` (issue #69, part of #68; Stefan, 2026-11-16: Sol was out from 15:46 to 18:36 and
-every PR waited). While Sol is out of usage (`JobLog.sol_resume_at` in the future), the Sol lane
-doesn't wait: a PR that needs a review gets one from a T3 thread on the Claude model
-(`[claude]`: Opus 5.5), from the same review brief, posted as Sol's are.
+every PR waited; made general in #120). While the review's own provider is out of usage
+(`JobLog.out_until`: its newest review, or a job on it, met its limit and the reset hasn't
+passed), the Sol lane doesn't wait: a PR that needs a review gets one on `[jobs.review]`'s
+`fallback` (Stefan's: Opus 5.5 high in a T3 thread), from the same review brief, posted as Sol's
+are. With no fallback, reviews wait for the reset.
+
+```toml
+[jobs.review]
+provider = "codex"
+model = "gpt-6.1-sol"
+effort = "high"
+fallback = { provider = "claudeAgent", model = "claude-opus-5-5", effort = "high" }
+```
 
 - **Who reviews** (`Reviewer._who`, asked once a PR needs a review, after stops and merges, which
-  go on while Sol is out with or without the fallback): Sol; the fallback while Sol is out, if
-  the usage gate lets it (kind `review`: `docs/usage.md`, The usage gate; `Opus fallback review waits: ...`
-  said once while it holds); or nobody, until the next pass. The Runner gives the Reviewer the
-  fallback (`OpusFallback`, with T3, the gate and the effort); `--review NAME#N`, the live checks
-  and `Reviewer`s made without one wait for Sol as before.
-- **The Sol seam** (`OpusThread.review(brief, reply, workdir, out, writable)`, as
+  go on while Sol is out with or without the fallback): `[jobs.review]`, or its fallback while
+  its own provider is out. A spec on `codex` is Sol (the Codex adapter: `codex-sol.sh` at its
+  model and effort, `sol.codex_adapter`); any other is a T3 thread on its provider, model and
+  effort, which on Claude goes through the usage gate (kind `review`: `docs/usage.md`, The usage
+  gate; `Opus 5.5 fallback review waits: ...` said once while it holds). Nobody, until the next
+  pass, while both are out. A fallback on `codex` is refused at load unless the review's own
+  provider is `codex`: only a review on Codex runs through the adapter. The Runner gives the
+  Reviewer the threads (`ThreadReviews`, with T3, the gate, the effort and T3's run records);
+  `--review NAME#N`, the live checks and `Reviewer`s made without one run Sol, or wait for it.
+- **The Sol seam** (`ReviewThread.review(brief, reply, workdir, out, writable)`, as
   `SolCli.review`): the brief is Sol's, after a preamble (`brief-opus.md` in the run folder) that
   says to work in the runner's checkout of H (where the dependencies are linked in), change
   nothing in the project folder, post and push nothing, and ask nothing. The thread is `Queue
   runner review: <repo>#<n>`, started and waited on through T3's MCP in the repo's project
   folder with no worktree (T3 can't start one in an existing folder), its provider, model and
-  effort named as every Claude job's are (`docs/usage.md`, The effort). Its reply's last `sol-findings` block is the verdict
+  effort named as every job's are (`docs/usage.md`, The effort). Its reply's last `sol-findings` block is the verdict
   (`ledger.decide`), as for Sol. A thread T3 couldn't start, that failed, that waits for an
-  answer or that left no reply is a `failed` review (two on a head leave it, as for Sol's).
-- **The label** (`fallback.label`): "Opus 5.5 high, fallback while Sol is out", with the effort
+  answer or that left no reply is a `failed` review (two on a head leave it, as for Sol's). One
+  whose run stopped on a usage limit (T3's run record, `limits.limit_stop`) is `out-of-usage`,
+  as Sol's is: its provider is out until the reset.
+- **The label** (`fallback.label`): "Opus 5.5 high, fallback while Sol is out" (the model the
+  thread ran on, and the review's own reviewer), with the effort
   the run used, read back (`Effort.used`), else the config's. It's in the comment's heading
   (`## Sol review N · V · <label>`, so `HEADING` still reads it) and byline, the `sol-review`
   status's description (`<label>: Clean: ...`; the context stays `sol-review`), the Review row
   (`[Review N, <label>](...)`) and `decision.json`'s `reviewer`. The hidden marker is the same,
   so the review counts as any other: **a clean fallback review merges** (or marks
   `ready-for-stefan`), and a blocking one gets a fix round.
-- **The job record:** kind `review` with `reviewer` `opus-fallback` in its start record, and the
-  thread's `thread_id`, `run_id` and `effort` in its end. `sol_resume_at` reads only Sol's own
-  reviews, so fallback reviews never end the wait; **once Sol's reset has passed, the next review
-  goes to Sol**, and if Sol is still out, its `out-of-usage` starts the fallback again.
+- **The job record:** kind `review` with `reviewer` `opus-fallback` and its `provider`, `model`
+  and `effort` in its start record, and the thread's `thread_id`, `run_id` and `effort` in its
+  end (a Sol review's start names `codex` and the adapter's model and effort). A provider's wait
+  (`review_resume_at`) reads only reviews on it, so fallback reviews never end it; **once Sol's
+  reset has passed, the next review goes to Sol**, and if Sol is still out, its `out-of-usage`
+  starts the fallback again. A record from before #120 names no provider: a review with no
+  `reviewer` was Sol's (Codex), every other job Claude's (`state.job_provider`).
 - **A runner that dies mid-review** (PR 67's review 2, F2): its T3 thread runs on, and its reply
   is never read. The next runner finds the thread by its title (`t3.find_job_thread`, as for a
   build). While it runs (or T3 can't say), the job stays open, said once in the Sol lane: that
@@ -156,7 +178,7 @@ doesn't wait: a PR that needs a review gets one from a T3 thread on the Claude m
   reviewing lane's job.
 - **Alongside the Claude lane:** the fallback runs in the Sol lane, beside the Claude lane's
   jobs, and each side's gate counts the other (PR #74's review 1, F1): the review's check counts
-  the Claude jobs running (`OpusFallback.check(label, ...)`, with the Runner as its `beside`),
+  the Claude jobs running (`ThreadReviews.check(label, ...)`, with the Runner as its `beside`),
   and once let in it's one of the Claude jobs running for the Claude lane until it ends
   (`Runner.review_began`, `review_ended`), so a build that fits alone but not beside it waits.
   One lock (`Runner.gate_lock`) keeps each lane's check and its admission together. Each side's
@@ -166,31 +188,32 @@ doesn't wait: a PR that needs a review gets one from a T3 thread on the Claude m
   review names Claude's model, and the work lists and the Inbox's timelines say a review was
   Opus's.
 
-### Claude reviews every PR (`[review] provider`)
+### Every PR reviewed in a T3 thread (`[jobs.review]` on another provider)
 
-Issue #76 (Stefan, 2026-11-16: "Claude for now, until I say so, a full override"). A patch to
-this runner until the TypeScript rebuild makes the reviewer role a setting (#68, #36's grill);
-the key copies that role's shape, provider first.
+Issue #76 (Stefan, 2026-11-16: "Claude for now, until I say so, a full override"), a setting
+since #120: `[jobs.review]` on a provider other than `codex`.
 
 ```toml
-[review]
-provider = "claude"   # "chatgpt" (Sol) is the default
+[jobs.review]
+provider = "claudeAgent"
+model = "claude-opus-5-5"
+effort = "high"
 ```
 
-- **With "claude"**, `Reviewer._who` sends every review to the Opus thread above, whether or not
-  Sol is out of usage, through the usage gate (`Opus review waits: ...` said once while it
-  holds). Sol isn't asked, and its out-of-usage wait plays no part: the snapshot drops it, and
-  the reviewing lane shows as Claude's (provider, name and model), so the Settings page's Who
-  does what row for Review says Claude.
+- **On claudeAgent**, `Reviewer._who` sends every review to a T3 thread on that model and
+  effort, whether or not Sol is out of usage, through the usage gate (`Opus 5.5 review waits:
+  ...` said once while it holds). Sol isn't asked, and its out-of-usage wait plays no part: the
+  snapshot drops it, and the reviewing lane shows as Claude's (provider, name and model), so the
+  Settings page's Who does what row for Review says Claude.
 - **What says so:** the label is "Opus 5.5 high, set in config.toml" (`fallback.WHY`), in the
   same places as the fallback's; the job's `reviewer` is `opus-config` (`fallback.SET`); the log
-  says `Opus (config.toml says so) reviews ...`; `--gate` prints `review (Opus, set in
-  config.toml)`. The preamble says Opus reviews in Sol's place, not that Sol is out.
+  says `Opus 5.5 (config.toml says so) reviews ...`; `--gate` prints `review (Opus 5.5, set in
+  config.toml)`. The preamble says the thread reviews in Sol's place, not that Sol is out.
 - **Reviewers with no T3 thread to start** (`--review NAME#N`, the live checks) still run Sol by
   name.
-- **Back to Sol:** set `provider = "chatgpt"` (or remove `[review]`) on main; the runner restarts
-  on the merge (`docs/running.md`, Restarting on new code). Any other value stops the runner at load, naming
-  the key.
+- **Back to Sol:** set `[jobs.review]` back to `provider = "codex"`, `model = "gpt-6.1-sol"` on
+  main; the runner restarts on the merge (`docs/running.md`, Restarting on new code). The old
+  `[review]` table stops the runner at load, saying what to write instead.
 - **Issue #77:** a running review counts among the Claude jobs running at the `review` cost, as
   `review <repo>#<PR>` (Alongside the Claude lane, above), and its thread is settled once the
   review's end is recorded, whatever the outcome, a dead runner's too (`docs/stops.md`, Settling threads).
