@@ -50,7 +50,11 @@ The review loop's rules are `docs/flow.md`, The review loop; leads-dashboard's
    again, rather than reading as no screenshots); the brief's check 5 has Sol look at them and block a
    visible change without them (the rule build jobs follow is in `templates/build.md`, Screenshots). `brief.md` (`templates/review.md`) lists them, points to `AGENTS.md`, has
    `REVIEW.md` in full and, from review 2, the open findings, the classes so far, the IDs used
-   and the replies since the last review.
+   and the replies since the last review. A finding's `class` names its cause, what in the code
+   lets the failure happen, not the symptom: the fix brief (`templates/fix.md`, How to work) has
+   the fix round write that cause in one line in its commit message, fix it, test a second case
+   of it where one fits, and say why the cause can't recur when it only adjusts a value or a
+   format (#135).
 6. **Decide** (`ledger.py`, no I/O): the verdict and outcome come from the last `sol-findings`
    block in Sol's reply, never its prose. Clean when no Important finding is open; outcomes, in
    order: `stop` (a new Important finding in an earlier class, a closed finding reopened, a
