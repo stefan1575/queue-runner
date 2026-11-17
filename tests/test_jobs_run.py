@@ -168,7 +168,7 @@ class ReviewTest(Harness):
         self.reviewer((0, 'completed', reply())).review_pass()
         self.assertEqual(self.sol.briefs, [])
         [start] = self.t3.starts
-        self.assertEqual(named(start), ('claudeAgent', 'claude-fable-5-2', 'xhigh'))
+        self.assertEqual(named(start), ('claudeReviewer', 'claude-fable-5-2', 'xhigh'))   # the no-tools instance (PR #127)
         [job] = self.of('review')
         self.assertEqual((job.provider, job.model, job.effort),
                          ('claudeAgent', 'claude-fable-5-2', 'xhigh'))
@@ -206,7 +206,7 @@ class ReviewTest(Harness):
                         resume_at='2099-01-01T00:00:00+00:00')
         self.reviewer((0, 'completed', reply())).review_pass()
         [start] = self.t3.starts
-        self.assertEqual(named(start), ('claudeAgent', 'claude-fable-5-2', 'xhigh'))
+        self.assertEqual(named(start), ('claudeReviewer', 'claude-fable-5-2', 'xhigh'))   # the no-tools instance (PR #127)
         label = 'Fable 5.2 xhigh, fallback while Sol is out'
         [(_, _, body)] = self.posted('comment')
         self.assertTrue(body.startswith(f'## Sol review 1 · Clean · {label}\n'), body[:120])

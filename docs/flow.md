@@ -100,7 +100,10 @@ no tokens. Every fixed step is the script's; an agent is started only for work t
    readable ledger failed. Set the `sol-review` status on H, never on a newer commit.
 5. **Blocking:** the fix thread fixes every case of each Important class on the PR's branch, with
    a failing test first where it fits, or declines a finding on the PR with its ID, the reason
-   and evidence. The reviewer reconsiders a decline once. Then the new head is reviewed.
+   and evidence. A class names the cause (what in the code lets the failure happen), not the
+   symptom, so the fix removes the cause: its commit message says the cause in one line, a
+   second case of it gets a test where one fits, and a fix that only adjusts a value or a format
+   says why the cause can't recur. The reviewer reconsiders a decline once. Then the new head is reviewed.
 
 ### Stops
 

@@ -29,6 +29,7 @@ from tests.test_ledger import H2, H3, important, reply
 NOW = datetime.datetime(2026, 11, 16, 16, 0)
 RESUME = datetime.datetime(2026, 11, 16, 18, 36)   # Sol's reset plus ten minutes
 LABEL = 'Opus 5.5 high, fallback while Sol is out'
+REVIEW_NAMED = ('claudeReviewer', *NAMED[1:])   # [review] claude_provider, [claude]'s model and effort
 UTC = datetime.timezone.utc
 
 
@@ -92,7 +93,7 @@ class FallbackTest(unittest.TestCase):
         [start] = self.t3.starts
         self.assertEqual((start['project'], start['title'], start['worktree'], start['branch']),
                          (self.dir, 'Queue runner review: first#20', None, None))
-        self.assertEqual(named(start), NAMED)
+        self.assertEqual(named(start), REVIEW_NAMED)
         # Sol's own brief, after the fallback's: where to work, and to post nothing.
         wt = os.path.join(self.config.checkouts_dir, 'first-pr20').replace('\\', '/')
         self.assertTrue(start['message'].startswith("## First: you review in Sol's place"))
@@ -148,11 +149,38 @@ class FallbackTest(unittest.TestCase):
                           effort=Effort(self.config, files=files, say=self.said.append))
         r.review_pass()
         [start] = self.t3.starts
-        self.assertEqual(named(start), NAMED)   # named, whatever T3's default (#119)
+        # The no-tools instance, not the project's default, which has the build's tools; its
+        # model and effort named, whatever T3's default (#119).
+        self.assertEqual(named(start), REVIEW_NAMED)
         [(_, _, body)] = self.posted('comment')
         self.assertIn('Opus 5.5 medium, fallback while Sol is out', body)
         [job] = self.reviews()
         self.assertEqual(job.effort, 'medium')
+
+    def test_a_review_instance_in_config_starts_the_thread_on_it(self):
+        self.sol_out()
+        self.config = dataclasses.replace(self.config, review_claude_provider='claudeReviewer')
+        files = FakeFiles(efforts={'mcp:t1': 'medium'})
+        r = self.reviewer((0, 'completed', reply()),
+                          effort=Effort(self.config, files=files, say=self.said.append))
+        r.review_pass()
+        [start] = self.t3.starts
+        self.assertEqual((start['provider'], start['model']), ('claudeReviewer', 'claude-opus-5-5'))
+        [job] = self.reviews()
+        self.assertEqual(job.effort, 'medium')   # still read back
+
+    def test_with_no_review_instance_or_the_build_one_no_thread_starts(self):
+        # PR #127's review 1, F1: never a review on an instance with the build's tools.
+        for provider in ('', 'claudeAgent'):
+            with self.subTest(provider=provider):
+                self.jobs = JobLog(os.path.join(self.config.state_dir, f'jobs-{provider}.jsonl'))
+                self.sol_out()
+                self.config = dataclasses.replace(self.config, review_claude_provider=provider)
+                self.reviewer((0, 'completed', reply())).review_pass()
+                self.assertEqual(self.t3.starts, [])
+                [job] = self.reviews()
+                self.assertEqual(job.outcome, 'failed')
+                self.assertIn('must name a T3 instance with no MCP tools', job.error)
 
     def test_a_thread_that_fails_or_asks_is_a_failed_review(self):
         self.sol_out()
@@ -405,6 +433,38 @@ class ClaudeReviewsTest(unittest.TestCase):
         facts = snapshot.Facts(now=NOW.astimezone(), repos=[self.repo])
         lanes = {lane['id']: lane for lane in snapshot.build(facts)['lanes']}
         self.assertEqual(lanes['sol']['name'], 'ChatGPT')
+
+
+class ReviewInstanceConfigTest(unittest.TestCase):
+    """`[review] claude_provider`, the one key [review] keeps after #120: the no-tools T3
+    instance a review thread on claudeAgent starts on (PR #127)."""
+
+    def load(self, text):
+        from queue_runner.config import load_config
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, 'config.toml')
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write('state_dir = "s"\nlog_dir = "l"\n' + text)
+            return load_config(path)
+
+    def test_the_review_instance_defaults_to_the_no_tools_one(self):
+        self.assertEqual(self.load('').review_claude_provider, 'claudeReviewer')
+        self.assertEqual(self.load('[review]\nclaude_provider = "other"\n')
+                         .review_claude_provider, 'other')
+
+    def test_an_empty_or_build_review_instance_is_an_error_naming_the_key(self):
+        # PR #127's review 1, F1: a review never starts on an instance with the build's tools.
+        for text in ('[review]\nclaude_provider = ""\n',
+                     '[review]\nclaude_provider = "claudeAgent"\n',
+                     '[jobs.build]\nprovider = "codex"\nmodel = "gpt-6.1-sol"\n'
+                     '[review]\nclaude_provider = "codex"\n'):
+            with self.subTest(text=text), self.assertRaisesRegex(
+                    ValueError, r'\[review\] claude_provider must'):
+                self.load(text)
+
+    def test_its_old_provider_key_is_gone(self):
+        with self.assertRaisesRegex(ValueError, r'\[review\] is gone.*\[jobs\.review\]'):
+            self.load('[review]\nprovider = "claude"\nclaude_provider = "claudeReviewer"\n')
 
 
 class FallbackFixRoundTest(unittest.TestCase):

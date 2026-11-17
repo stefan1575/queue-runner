@@ -16,9 +16,11 @@ Sol. The differences:
 - **Where it runs:** a T3 thread in the repo's project folder with no worktree (T3 can't start a
   thread in an existing folder, and the runner's checkout of H is where the dependencies are
   linked in), told to work in that checkout and change nothing in the project folder. It starts
-  as every job does, its provider, model and effort named (#119), and the effort its run used
-  is read back. A run that stops on a usage limit (T3's run record, `limits.limit_stop`) is
-  that provider out of usage, as Sol's is (`sol.SolOutOfUsage`).
+  as every job does, its provider, model and effort named (#119), but a thread on claudeAgent
+  starts on the T3 instance `[review] claude_provider` names, one with no MCP tools
+  (docs/reviews.md, A review has no outside tools), never one another job kind runs on, and the
+  effort its run used is read back. A run that stops on a usage limit (T3's run record,
+  `limits.limit_stop`) is that provider out of usage, as Sol's is (`sol.SolOutOfUsage`).
 - **The label:** the comment, the `sol-review` status and the Review row name the model and
   say why ("Opus 5.5 high, fallback while Sol is out", or "Opus 5.5 high, set in config.toml"),
   with the effort read back when it can be.
@@ -26,7 +28,7 @@ Sol. The differences:
 import os
 import re
 
-from .config import CODEX
+from .config import CLAUDE, CODEX
 from .effort import flags
 from .ledger import SolFailed
 from .sol import SolOutOfUsage
@@ -111,7 +113,8 @@ def _preamble(workdir: str, project: str, kind: str = KIND, primary: str = 'Sol'
         'outside the workdir but tests you add there. Don\'t post on GitHub, push, comment or '
         'open anything there: the queue runner posts your reply as the review comment. Your '
         'reply is the review, and its last sol-findings block is its verdict. Ask nothing: '
-        'nobody is there to answer.\n\n')
+        'nobody is there to answer. Run tests in the foreground and wait for them: a review has '
+        'no MCP tools, T3\'s included, so nothing waits on a background run for you.\n\n')
 
 
 class ReviewThread:
@@ -139,8 +142,20 @@ class ReviewThread:
         with open(os.path.join(os.path.dirname(reply), 'brief-opus.md'), 'w', encoding='utf-8',
                   newline='\n') as fh:
             fh.write(message)
-        try:   # its provider, model and effort named (#119)
-            result = f.t3.start(repo.path, message, title=self.title, **flags(self.spec))
+        # Its provider, model and effort named (#119), but a thread on claudeAgent starts on the
+        # no-tools instance, by name: never one another job kind runs on, which have the build's
+        # tools (PR #127's review 1, F1).
+        launch = flags(self.spec)
+        if self.spec.provider == CLAUDE:
+            provider = f.config.review_claude_provider
+            if not provider or provider in f.config.build_instances():
+                raise SolFailed(f"The {self.name} didn't start: [review] claude_provider "
+                                f'({provider!r}) must name a T3 instance with no MCP tools, not '
+                                "one [jobs] runs another kind on (docs/reviews.md, A review has "
+                                'no outside tools).')
+            launch['provider'] = provider
+        try:
+            result = f.t3.start(repo.path, message, title=self.title, **launch)
         except T3Error as e:
             raise SolFailed(f"The {self.name}'s thread didn't run: {e}") from None
         self.ran = True

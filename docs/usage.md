@@ -159,7 +159,9 @@ same limit) is started on it.
   10 minutes after the reset in Sol's own rollout (codex-sol.sh logs `session id:` in
   `reply.md.log`; its `~/.codex/sessions/*/*/*/rollout-*-<id>.jsonl`'s newest `rate_limits`
   record; the window at 99% or more, the later one if both), else the time Sol's error names,
-  else 30 minutes. Until then reviews go to the Opus fallback (`docs/reviews.md`, The Opus fallback).
+  else 30 minutes, or sooner once ChatGPT's own reading shows every window under 99% again (a
+  reset credit used: `docs/reviews.md`, Usage back before that). Until then reviews go to the Opus
+  fallback (`docs/reviews.md`, The Opus fallback).
 
 **First real stop: confirm.** The fixtures are from one real Claude stop (2026-11-08, a weekly
 limit, before the runner existed): `tests/fixtures/t3/turn-item-usage-limit.json`,

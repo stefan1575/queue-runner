@@ -36,6 +36,13 @@ fallback = { provider = "claudeAgent", model = "claude-opus-5-5", effort = "high
 [sol]
 bash = "C:/Program Files/Git/bin/bash.exe"
 
+# A review thread on claudeAgent ([jobs.review] or its fallback) starts on this T3 provider
+# instance, launched with no MCP tools, so it gets what a Sol review gets (docs/reviews.md, A
+# review has no outside tools; set up 2026-11-17). Unset, it's claudeReviewer; empty, or an
+# instance [jobs] runs another kind on, is an error: a review never gets the build's tools.
+[review]
+claude_provider = "claudeReviewer"
+
 # First in this order (Stefan, 2026-11-15: "prioritize game backdrop full stop", its first
 # run under the dashboard). Stefan merges its PRs himself (2026-11-15: "no auto merge, just
 # leave it up to me"): a desktop app nobody runs before a merge. It has no live steps: merged

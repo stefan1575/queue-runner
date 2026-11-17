@@ -26,8 +26,10 @@ Tag every finding:
 - **nit** never blocks. Give at most five.
 - **pre-existing** is a problem in code this PR didn't change; it is filed as a follow-up issue.
   One that loses or exposes data is important instead.
-`class` names the kind of problem (for example "write made outside the app logged wrongly"), so the
-fix covers every case of it, not only the one you cite. Cite file and line as repo-relative paths
+`class` names the cause: what in the code lets the failure happen, not what goes wrong (for
+example "log records matched by comparing timestamps written at different precisions", not
+"recovery event loses timestamp precision"), so the fix removes the cause and covers every case
+of it, not only the one you cite. Cite file and line as repo-relative paths
 (`src/lib/callsling.ts:74`): your reply is posted as a comment on the PR.
 
 Write your review first: what you found, with evidence, then what you covered and what you

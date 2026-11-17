@@ -81,10 +81,22 @@ class Config:
     # this date (GitHub's UTC time, `YYYY-MM-DD`), counts as its own for the fix lane. '' adopts
     # none.
     adopt_reviews_before: str = ''
+    # The T3 provider instance a review thread on claudeAgent (`[jobs.review]` or its fallback)
+    # starts on (`[review] claude_provider`): one launched with no MCP tools (docs/reviews.md, A
+    # review has no outside tools), so a Claude review gets what a Sol review gets. Never an
+    # instance another job kind runs on, which has the build's tools: an empty one, or one of
+    # those, is a config error, and a review thread refuses to start on one.
+    review_claude_provider: str = 'claudeReviewer'
 
     def job(self, kind: str) -> JobSpec:
         """What a `kind` job runs on (one of KINDS)."""
         return self.jobs[kind]
+
+    def build_instances(self) -> set:
+        """The T3 provider instances every job kind but a review starts on (and their
+        fallbacks'): the build's tools are on each, so a review thread never starts on one."""
+        specs = [s for k, s in self.jobs.items() if k != 'review']
+        return {s.provider for s in specs} | {s.fallback.provider for s in specs if s.fallback}
 
 
 def set_stopped(config: Config, names) -> None:
@@ -127,7 +139,7 @@ def _merge(entry: dict) -> str:
 SPEC_KEYS = ('provider', 'model', 'effort')
 GONE = {'claude': '[jobs.default] (provider, model, effort)',
         'review': '[jobs.review] (provider "codex" for Sol, "claudeAgent" for Claude, with its '
-                  'model and effort, and a fallback)'}
+                  'model and effort, and a fallback; [review] keeps only claude_provider)'}
 
 
 def _spec(name: str, raw, base: JobSpec, fallback: bool) -> JobSpec:
@@ -154,7 +166,9 @@ def _jobs(raw: dict) -> dict:
     """Each of KINDS's JobSpec from `[jobs]`: a kind not named takes `[jobs.default]`'s, and
     a key a kind leaves out is default's too. No `[jobs]` at all: DEFAULT_JOBS."""
     for old, new in GONE.items():
-        if old in raw:
+        # [review] keeps one key, the no-tools instance a Claude review starts on
+        # (`claude_provider`); its `provider` and anything else went to [jobs.review].
+        if old in raw and (old != 'review' or set(raw[old]) - {'claude_provider'}):
             raise ValueError(f"config.toml's [{old}] is gone (issue #120): write {new} "
                              'instead (docs/running.md, config.toml)')
     if 'jobs' not in raw:
@@ -181,6 +195,22 @@ def _jobs(raw: dict) -> dict:
     return jobs
 
 
+def _review_claude_provider(review: dict, jobs: dict) -> str:
+    """`[review] claude_provider`, `claudeReviewer` when unset. A review has no outside tools
+    (docs/reviews.md), so it can't be empty or an instance another job kind runs on (`[jobs]`),
+    which have the build's tools: either is an error naming the key, not a review with tools."""
+    name = str(review.get('claude_provider', 'claudeReviewer')).strip()
+    if not name:
+        raise ValueError('[review] claude_provider must name a T3 provider instance with no MCP '
+                         'tools (docs/reviews.md, A review has no outside tools), not be empty')
+    builds = Config(repos=[], state_dir='', log_dir='', jobs=jobs).build_instances()
+    if name in builds:
+        raise ValueError(f'[review] claude_provider must not be an instance [jobs] runs other '
+                         f"kinds on ({name!r}): that instance has the build's tools, and a "
+                         'review has none')
+    return name
+
+
 def load_config(path: str = DEFAULT_CONFIG) -> Config:
     with open(path, 'rb') as f:
         raw = tomllib.load(f)
@@ -203,4 +233,5 @@ def load_config(path: str = DEFAULT_CONFIG) -> Config:
                   deps_dir=_path(raw.get('deps_dir') or os.path.join(home, 'deps')),
                   sol_script=_path(sol.get('script') or SOL_SCRIPT),
                   sol_bash=sol.get('bash') or GIT_BASH,
-                  adopt_reviews_before=str(raw.get('adopt_reviews_before') or ''))
+                  adopt_reviews_before=str(raw.get('adopt_reviews_before') or ''),
+                  review_claude_provider=_review_claude_provider(raw.get('review', {}), jobs))

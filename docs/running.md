@@ -52,8 +52,10 @@ runs through the Codex adapter (`docs/reviews.md`); every other job, and a revie
 provider, starts through T3's MCP launch with its provider, model and effort named (`docs/t3.md`).
 A job not on Claude skips the usage gate, which reads Claude's usage (`docs/usage.md`). A config
 with no `[jobs]` runs Opus 5.5 high for every kind but review, which is Sol high with Opus 5.5
-high as its fallback. The old `[claude]` and `[review]` tables fail at load with a message
-saying what to write instead.
+high as its fallback. The old `[claude]` table, and `[review]` with any key but
+`claude_provider`, fail at load with a message saying what to write instead. `[review]
+claude_provider` (default `claudeReviewer`) is the no-tools T3 instance a review thread on
+`claudeAgent` starts on (`docs/reviews.md`, A review has no outside tools).
 
 ```toml
 [jobs.default]            # every kind not named below

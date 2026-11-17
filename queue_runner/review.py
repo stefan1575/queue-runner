@@ -29,7 +29,7 @@ from .lock import RunnerBusy, runner_lock
 from .merge import Merger
 from .picker import closed_issues
 from .post import GitHubPoster, PostFailed
-from .sol import SolOutOfUsage
+from .sol import FULL, SolOutOfUsage
 from .state import FAILED_REVIEW, OUT_OF_USAGE, REVIEWED, JobLog, when
 from .stops import Stopper, base_hold, held
 from .t3 import T3Error, find_job_thread, settle_quietly
@@ -137,11 +137,32 @@ def _tests(prepared) -> str:
     return lead + said
 
 
+# Seconds between ChatGPT reads while Sol waits for a reset, as the dashboard's (`snapshot.READ_EVERY`):
+# one reader serves both, so a read either made counts for the other.
+SOL_BACK_EVERY = 300
+
+
+def _after(reading, moment: datetime.datetime) -> bool:
+    """Whether `reading` (a `usage.Reading`) has a good value read at or after `moment`."""
+    return (reading is not None and reading.value is not None and reading.at is not None
+            and reading.at.astimezone() >= moment)
+
+
+def _window_said(w) -> str:
+    name = {300: 'the session', 10080: 'the week'}.get(w.minutes, f'the {w.minutes}-minute window')
+    return f'{name} {w.used:g}%'
+
+
 class Reviewer:
     def __init__(self, config: Config, *, github, git, sol, jobs: JobLog, say,
                  now=datetime.datetime.now, poster=None, merger=None, toaster=None, deps=None,
-                 fallback=None, t3=None):
+                 fallback=None, t3=None, sol_usage=None):
         self.config, self.github, self.git, self.sol, self.jobs = config, github, git, sol, jobs
+        # snapshot.Watch, ChatGPT's usage as the dashboard reads it: while Sol waits for a
+        # reset, a reading that shows usage again ends the wait (issue #130). None waits for
+        # the reset Sol named (the CLI's --review, the live checks, most tests).
+        self.sol_usage = sol_usage
+        self._said_back: str | None = None   # the read failure last said while Sol waits
         # fallback.ThreadReviews: a review in a T3 thread, while the review's own provider is
         # out of usage (its fallback, #69) or every time config.toml names a provider other
         # than Codex (#76, #120); None has Sol review and waits for Sol's reset (the CLI's
@@ -178,6 +199,7 @@ class Reviewer:
         try:
             with runner_lock(self.config.state_dir, 'sol.lock'):
                 self.settle()
+                self._sol_waits()   # every pass: the wait can end with no PR to review
                 if self.stopper:   # first: a PR stopped now neither merges nor is reviewed
                     self.stopper.stop_pass(halted=self.lane_stopped)
                 if self.merger and not self.lane_stopped():
@@ -273,7 +295,12 @@ class Reviewer:
     def _out(self, spec, say: bool = True) -> bool:
         """Whether the review's `spec` provider is out of usage now (a review on it, or a job,
         met its limit and the reset hasn't passed: `JobLog.out_until`): said once per resume
-        time, with `say`."""
+        time, with `say`. On Codex, Sol's wait ends first if ChatGPT's usage has come back since
+        (`_sol_back`, issue #130)."""
+        if spec.provider == CODEX:
+            out = self.jobs.sol_out()
+            if out and out.resume_at and self.now().astimezone() < when(out.resume_at):
+                self._sol_back(out)
         resume = self.jobs.out_until(spec.provider, self.now().astimezone())
         if resume is None:
             return False
@@ -290,6 +317,53 @@ class Reviewer:
     def _paused(self) -> bool:
         """Whether the review's own provider is out of usage now (`_out`)."""
         return self._out(self.config.job('review'))
+
+    def _sol_waits(self) -> None:
+        """While Sol waits for a reset (and Sol, not Claude, reviews), ChatGPT's usage is checked
+        on every pass, whether or not a PR needs a review (PR 131's review 1, F1), so the
+        dashboard's wait and the wake time end once its usage is back. Quiet: `_paused` says
+        the wait when a review is held back by it."""
+        if self._opus_always():
+            return
+        out = self.jobs.sol_out()
+        if out and out.resume_at and self.now().astimezone() < when(out.resume_at):
+            self._sol_back(out)
+
+    def _sol_back(self, out) -> bool:
+        """Whether ChatGPT has usage again before the reset Sol's review named (a reset credit
+        used, issue #130): a reading taken after that review ended, read again once the last is
+        `SOL_BACK_EVERY` old (whatever it said: one still full is read again, review 1 F5), with
+        every window under `sol.FULL`. The check and the read are one step (`read_if_due`), so
+        the dashboard sharing the reader never reads too (F3). If so it's recorded
+        (`JobLog.sol_back`) against that review's job, so every reader of the wait agrees
+        without comparing stamps (F2, review 2 F6), and said. A failed read leaves the wait
+        standing (said once per error)."""
+        watch = self.sol_usage
+        if watch is None:
+            return False
+        # The job log stamps the end to the second, so the review ran out somewhere in that
+        # second: only a reading from the next second on is surely after it (review 2, F6).
+        ran_out = when(out.ended_at) + datetime.timedelta(seconds=1)
+        watch.read_if_due(SOL_BACK_EVERY)
+        reading = watch.reading()
+        if reading is not None and reading.error and reading.error != self._said_back:
+            self.say(f"ChatGPT's usage couldn't be read ({reading.error}): Sol waits for its "
+                     f'reset at {out.resume_at}')
+        self._said_back = reading.error if reading is not None else None
+        if not _after(reading, ran_out):
+            return False
+        windows = list(getattr(reading.value, 'windows', None) or ())
+        if not windows or any(w.used >= FULL for w in windows):
+            return False
+        read_at = reading.at.astimezone()
+        self.jobs.sol_back(job=out.id, read_at=read_at.isoformat(), resume_at=out.resume_at,
+                           windows=[{'minutes': w.minutes, 'used': w.used} for w in windows])
+        shown = read_at.isoformat(timespec='seconds')
+        self.say(f"ChatGPT has usage again ({', '.join(_window_said(w) for w in windows)}, "
+                 f'read at {shown}): Sol reviews again, before the reset at {out.resume_at} '
+                 'its review named')
+        self._said_paused = None
+        return True
 
     def _opus_always(self) -> bool:
         """config.toml has every PR reviewed in a T3 thread (issue #76, #120), and this Reviewer
