@@ -222,6 +222,16 @@ until its next settle. Before running it again, delete the
 `branch-exists`.
 
 ```
+python3 scripts/live_launch.py [--codex codex gpt-6.1-sol]
+```
+
+This launches a throwaway thread through T3's MCP with its model and effort named (Haiku at
+`low`; with `--codex`, that model at `reasoningEffort: high`) in a new sandbox worktree, waits
+for it, reads the effort back, then removes the worktree and branch and settles the thread.
+Run on 2026-11-17: both ran at the effort asked (`docs/t3.md`). A Codex run's effort is read by
+hand from its rollout. Like `live_mcp.py`, it signs in, so a running runner signs in again.
+
+```
 python3 scripts/live_review.py NAME#N
 ```
 
