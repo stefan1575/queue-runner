@@ -391,6 +391,16 @@ class HistoryTest(HistoryCase):
         self.assertEqual(set(tl[0]), {'at', 'actor', 'kind', 'sha', 'title', 'detail', 'tone',
                                       'findings'})
 
+    def test_activity_tells_a_pr_merged_on_github_as_that_not_as_a_reply(self):
+        """PR #125 review 1 F3."""
+        stop = self.job('stop', 5, None, sha=H2, stop='review', link='https://x/issues/40')
+        self.jobs.ended(stop.id, exit_code=None, outcome='filed')
+        self.jobs.ended(stop.id, exit_code=None, outcome='answered', answer='pr-closed')
+        titles = [r['title'] for r in self.snap()['activity']]
+        self.assertIn('Its PR was merged or closed on GitHub, so the stop had nothing left to '
+                      'decide.', titles)
+        self.assertNotIn('You replied.', titles)
+
     def test_activity_is_the_job_log_newest_first_each_a_whole_sentence(self):
         stop = self.job('stop', 5, None, sha=H2, stop='review', link='https://x/issues/40')
         self.jobs.ended(stop.id, exit_code=None, outcome='filed')
