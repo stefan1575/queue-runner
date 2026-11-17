@@ -34,7 +34,7 @@ from .merge import Merger
 from .picker import BuildJob, pick
 from .review import Reviewer
 from .snapshot import Wait
-from .state import NOT_SENT, NOT_STARTED, RESTART_FAILED, USAGE_LIMIT, Job, JobLog, when
+from .state import NOT_SENT, NOT_STARTED, RESTART_FAILED, USAGE_LIMIT, Job, JobLog,     job_provider, when
 from .stops import Stopper, red_base
 from .t3 import T3Error, Thread, find_job_thread, settle_quietly
 from .toast import NoToaster
@@ -74,7 +74,6 @@ def spec_kind(kind: str, cause: str | None) -> str:
 def _same_thread(old: Job) -> dict:
     """A job continued in its earlier job's thread runs on what that thread was started on
     (its model selection stays the thread's); an older record names none."""
-    from .state import job_provider
     return {'provider': job_provider(old), 'model': old.model, 'effort': old.effort}
 
 
@@ -102,7 +101,10 @@ class Start:
     continue in the same pass, `run` what runs it, `label` what the log calls it, and `usage`
     the gate's read when it let the job in (what its cost is measured against). `job` is its
     kind as config.toml's `[jobs]` names it, when that isn't `kind` (an ask, a conflict round,
-    a decision Stefan's words answer: issue #120)."""
+    a decision Stefan's words answer: issue #120). `on` is every provider its run may start or
+    continue a thread on (`Runner._on`): an earlier job's thread runs on what it was started
+    on, whatever `[jobs]` says now; None in it, a fresh thread with nothing to run on (its
+    kind's provider and fallback both out). Empty: its kind's provider now (PR #137, F1)."""
     repo: str
     kind: str | None
     then: str | None
@@ -110,6 +112,7 @@ class Start:
     label: str
     usage: object = None
     job: str | None = None
+    on: tuple = ()
 
     @property
     def spec_kind(self) -> str:
@@ -325,7 +328,8 @@ class Runner:
             live_waits.append(self.live.wait_until)
             if start is not None:
                 found.append(start)
-        found = [s for s in found if s.kind is None or self.effort.spec(s.spec_kind)]
+        # Only a job whose every provider has usage now (issue #120; PR #137's review 1, F1).
+        found = [s for s in found if s.kind is None or self._has_usage(s)]
         if not found:
             if not skip:
                 self.say('Nothing to start: no PR needs a fix round, and no repo has an '
@@ -344,6 +348,25 @@ class Runner:
         its fallback's isn't (issue #120). None: the lane waits for the reset, as before."""
         return any(self.effort.spec(k) is not None for k in self.LANE_KINDS)
 
+    def _fresh(self, kind: str) -> str | None:
+        """The provider a fresh `kind` thread starts on now: its own, or its fallback's while its
+        own is out (`Effort.spec`); None while neither may run."""
+        spec = self.effort.spec(kind)
+        return spec.provider if spec is not None else None
+
+    def _continues(self, old: Job) -> tuple:
+        """The providers picking `old` up may run on: its thread's, in place (`_same_thread`),
+        or its kind's now, in a fresh thread (`_restart`): `continue_job` chooses when it runs."""
+        return (job_provider(old), self._fresh(spec_kind(old.kind, old.cause)))
+
+    def _on(self, start: 'Start') -> tuple:
+        """Every provider `start` may run a thread on (`Start.on`)."""
+        return start.on or (self._fresh(start.spec_kind),)
+
+    def _has_usage(self, start: 'Start') -> bool:
+        """Whether every provider `start` may run on has usage now."""
+        return all(p is not None and not self.out_of_usage(p) for p in self._on(start))
+
     def out_of_usage(self, provider: str) -> bool:
         """Whether `provider` is out of usage now (`JobLog.out_until`): a job on it met its limit
         and the reset hasn't passed."""
@@ -356,27 +379,31 @@ class Runner:
         if mine := [j for j in limited if j.repo == name]:
             old = mine[0]
             return Start(name, old.kind, None, lambda: self.recover(old), self._name(old),
-                         job=spec_kind(old.kind, old.cause))
+                         job=spec_kind(old.kind, old.cause), on=self._continues(old))
         if ask := self.asking.next(switch, only=only):   # Stefan's click (35)
             return Start(name, 'decision', None, lambda: self.asking.open(ask),
                          f'ask {name}#{ask.number}', job='ask')
         if answered := self.answers.next(repos=only):   # Stefan's reply on GitHub (71)
             old, text, marks = answered
             return Start(name, old.kind, None,
-                         lambda: self.continue_job(old, text, marks=marks), self._name(old))
+                         lambda: self.continue_job(old, text, marks=marks), self._name(old),
+                         on=self._continues(old))
         if answered := self.asking.reply(repos=only):   # his answer in a fresh thread (72);
             # a GitHub reply read in the same pass goes first: answering there still counts
             old, text, marks = answered
             return Start(name, old.kind, None,
-                         lambda: self.continue_job(old, text, marks=marks), self._name(old))
+                         lambda: self.continue_job(old, text, marks=marks), self._name(old),
+                         on=self._continues(old))
         if case := self.decider.next_case(repos=only):
             label = f'decision {name}#{case.number}'
             if self.decider.direct_answer(case):
                 return Start(name, None, None, lambda: self.decider.run(case, self.continue_job),
                              label)
             then = case.about.kind if {'retry', 'answer'} & set(case.allowed) else None
+            # Its own thread, and the earlier job's it may continue (`then`).
+            on = (self._fresh('decision'),) + (self._continues(case.about) if then else ())
             return Start(name, 'decision', then,
-                         lambda: self.decider.run(case, self.continue_job), label)
+                         lambda: self.decider.run(case, self.continue_job), label, on=on)
         if live := self.live.next(repos=only):
             return Start(name, 'live', None, lambda: self.live.run(*live), f'live {name}')
         if fix := self.next_fix(repos=only):
@@ -427,9 +454,10 @@ class Runner:
         running = self._running(busy)
         starts, waits = [], {}
         for start in chosen:
-            spec = self.effort.spec(start.spec_kind) if start.kind else None
-            if start.kind is None or self.gate is None or (spec and spec.provider != CLAUDE):
-                starts.append(start)   # the gate reads Claude's usage only (issue #120)
+            # The gate reads Claude's usage only (issue #120): a job none of whose threads run on
+            # Claude, fresh or continued, isn't gated (PR #137's review 1, F1).
+            if start.kind is None or self.gate is None or CLAUDE not in self._on(start):
+                starts.append(start)
                 continue
             verdict = self.gate.check(start.kind, start.then, running=running)
             if not verdict.go:
