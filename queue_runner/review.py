@@ -515,6 +515,10 @@ class Reviewer:
                f'# PR #{pr.number}: {pr.title}\n\nMerges `{pr.branch}` into `{pr.base}`; head '
                f'{h}.\n\n{pr.body}\n')
         files.append("`pr.md`: the PR's description")
+        shots = self.git.evidence(path, pr.number, os.path.join(run_dir, 'evidence'))
+        files.append(f"`evidence/`: the PR's screenshots, {', '.join(f'`{s}`' for s in shots)}: "
+                     'open each one' if shots else
+                     'No screenshots are published for this PR (its `evidence/` would hold them)')
         here = repo.github.lower()
         for where, k in closed_issues(pr.body, here):
             issue = self.github.issue(where, k)
@@ -563,8 +567,8 @@ class Reviewer:
             named = ('; '.join(f'"{c}"' for c in classes) + '. When a new finding is the same '
                      'kind of problem as one of these, give it that class name, word for word, '
                      'so a kind that keeps coming back can be seen' if classes else 'none')
-            again = (f'5. **This is review {rnd}.** {scope}\n'
-                     '6. **Your earlier findings.** Each one still open is listed below, with the '
+            again = (f'6. **This is review {rnd}.** {scope}\n'
+                     '7. **Your earlier findings.** Each one still open is listed below, with the '
                      'replies posted on the PR since your last review. Give every one a status in '
                      "the block's `earlier` list: `fixed`, `open` (still open), "
                      '`decline-accepted` or `decline-kept`. A decline is a reply that names the '
@@ -574,7 +578,7 @@ class Reviewer:
                      "finding's status covers it, so don't list it again in `findings`. If a "
                      'finding that was closed comes back, list it in `findings` with its old ID. '
                      "Give a new finding an ID not used before (used so far: " + used + ').\n'
-                     f'7. **Classes raised so far:** {named}.\n')
+                     f'8. **Classes raised so far:** {named}.\n')
         if guidelines is not None:
             guide = ("\n## This repo's review guidelines (`REVIEW.md`)\n\nThey decide what counts "
                      'as Important here, what never to report and what to always check.\n\n'

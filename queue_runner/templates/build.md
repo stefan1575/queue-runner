@@ -23,6 +23,10 @@ $comments
 - When the issue is done, push `$branch` and open the PR the way the repo's own rules say, with
   `Closes #$number` in its body. Skip `/implement`'s code-review step: the runner has Sol review
   the PR. Then end your turn.
+- **If anything a person sees changes** (wherever the cause is), publish before and after
+  screenshots of each state it touches and put them in the PR's Evidence, with its `Visible:`
+  line (`~/Code/docs/evidence.md`; this repo's way of rendering them is in its docs). Take
+  and publish them with the script; don't open the images yourself: the reviewer looks.
 - Don't schedule, watch or wait on anything (no scheduled tasks, PR watches, wake-ups or
   monitors). The runner does the waiting.
 - If something only Stefan can decide stops you: commit and push what you have, comment the

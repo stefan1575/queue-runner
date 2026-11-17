@@ -410,3 +410,21 @@ python3 -m dashboard    # http://queue.localhost/ is the runner's; http://localh
 - **A dashboard started before a change to `sample.py` keeps serving the old sample** (the page
   itself is read afresh on every request). Stop it and start it again, or use `--port`.
 - The earlier React prototype is `.scratch/queue-runner/prototype-app/` (history only).
+
+## Screenshots
+
+A PR that changes anything the page shows (whichever module the cause is in) needs before and
+after screenshots of each sample state it touches (`~/Code/docs/evidence.md`; Stefan,
+2026-11-17). `scripts/shoot.py` runs the dashboard from the checkout, or from any commit with
+`--commit`, on a free port of its own, and shoots `?sample=STATE&page=PAGE` at 1440×900:
+
+```
+python3 scripts/shoot.py --commit origin/main --out shots reconnecting/settings reconnecting/usage   # before
+python3 scripts/shoot.py --out shots reconnecting/settings reconnecting/usage                         # after
+python3 -I ~/Code/tools/evidence/evidence.py publish --repo . --into pr-<N> shots/*.png
+```
+
+Name them `before-<state>-<page>.png` and `after-<state>-<page>.png`. A new state goes in
+`sample.STATES` first, so it can be shot; when the before has no such state, shoot the closest one
+and say so. Don't use the dashboard already on 5289 for this: it may be running older code. The
+review copies the PR's shots into Sol's run folder (`docs/reviews.md`).
