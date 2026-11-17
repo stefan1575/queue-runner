@@ -423,11 +423,13 @@ class JobLog:
                       'windows': windows, 'resume_at': resume_at})
 
     def out_until(self, provider: str, now: datetime.datetime) -> datetime.datetime | None:
-        """Until when `provider` is out of usage, from what its jobs met (issue #120): a build
-        or fix it cut off by a usage limit and nobody picked up yet, or its newest review that
-        found it out, whichever resets later; None if it isn't out now (`now` aware)."""
-        at = [when(j.resume_at) for j in self.limited_jobs()
-              if j.resume_at and job_provider(j) == provider]
+        """Until when `provider` is out of usage, from what its jobs met (issue #120): any job
+        on it a usage limit cut off (a build, fix or live run: picked up, released or not, since
+        the limit is the provider's, not the job's), or its newest review that found it out,
+        whichever resets later; None if it isn't out now (`now` aware). Not `limited_jobs`,
+        which lists the jobs left to recover (PR #137's review 1, F4)."""
+        at = [when(j.resume_at) for j in self.jobs()
+              if j.outcome == USAGE_LIMIT and j.resume_at and job_provider(j) == provider]
         if review := self.review_resume_at(provider):
             at.append(when(review))
         ahead = [t for t in at if t > now]
