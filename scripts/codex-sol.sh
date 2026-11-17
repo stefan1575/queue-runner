@@ -11,9 +11,11 @@
 #   extract             xhigh, live web search
 #   browse              xhigh, no web
 # Every brief starts with the fixed read-only rules below, including resumed ones: the
-# read-only sandbox covers files and commands, not MCP tools or the browser (the user's own
-# signed-in Work Chrome, through Playwright MCP, is reachable in every job: ~/Code/tools/browser). New
-# briefs also end with the reply contract unless they name their own format.
+# read-only sandbox covers files and commands, not MCP tools or the browser. A review or code job
+# starts with every MCP server in ~/.codex/config.toml switched off, so it reaches no account and
+# no browser, and nothing outside this repo (such as ~/Code/tools/browser) can stop it starting.
+# The other jobs keep them: the user's signed-in Work Chrome, through Playwright MCP, and
+# ClickUp. New briefs also end with the reply contract unless they name their own format.
 # --act (user, 2026-10-20) swaps the read-only rules for the act rules: Sol may do the
 # actions in the brief's "# Authorised actions" section, exactly as written, and nothing
 # else that writes. The brief must have that section. Files and shell stay read-only.
@@ -150,6 +152,21 @@ if [ -x "$standalone" ]; then cx=$standalone; else
 fi
 [ -n "$cx" ] || { echo "codex-sol: no codex.exe found" >&2; exit 1; }
 
+# A review or code job needs no accounts or browser: ChatGPT's apps (the built-in codex_apps
+# server, with tools that deploy sites and change settings) and plugins off, and each enabled
+# MCP server. Codex merges `-c mcp_servers={}` into the config rather than clearing it, so it
+# goes by name; only enabled ones, because naming a disabled plugin server (codex_app) without
+# its transport fails the config.
+mcp_opts=()
+case $job in review|code)
+  mcp_opts=(-c features.apps=false -c features.plugins=false)
+  while read -r name; do
+    [[ $name =~ ^[A-Za-z0-9_-]+$ ]] && mcp_opts+=(-c "mcp_servers.$name.enabled=false")
+  done < <("$cx" mcp list --json 2>/dev/null | awk -F'"' '
+    /^    "name": / { name = $4 }
+    /^    "enabled": true,$/ { print name }') ;;
+esac
+
 # Node on PATH (ticket 16): fnm's default install, ahead of anything else PATH has.
 fnm_default="$(cygpath -u "${FNM_DIR:-$HOME/scoop/apps/fnm/current}")/aliases/default"
 [ -x "$fnm_default/node.exe" ] && PATH="$fnm_default:$PATH"
@@ -164,7 +181,7 @@ fi
 
 # Codex refuses to start outside a git repo unless told otherwise; read-only makes it safe.
 opts=(-m gpt-6.1-sol -c model_reasoning_effort=$effort -c "web_search=\"$web\""
-      --skip-git-repo-check -o "$reply")
+      "${mcp_opts[@]}" --skip-git-repo-check -o "$reply")
 prompt() { printf '%s\n\n' "$rules"; cat "$brief"; [ -z "$session" ] && printf '%s\n' "$contract"; }
 rm -f "$reply"
 # TaskStop kills only the caller's bash; MSYS breaks the Windows parent chain above this script,
