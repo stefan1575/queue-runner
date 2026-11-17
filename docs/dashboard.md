@@ -116,6 +116,8 @@ python3 -m dashboard    # http://queue.localhost/ is the runner's; http://localh
   since #61 (and a `repo_order` already in the file is dropped, #50);
   each write keeps what the others wrote. The page shows a request as asked until
   `control_read_at` reaches its time.
+- **Each plan is named** beside its read time (issue #118): Claude's from its login file
+  (`usage.Plan.title`: `Max 20x`, `Pro`), ChatGPT's from `planType`; null when not read.
 - **Usage** (ticket 42): the Usage card's head has Refresh (an icon, "Refresh" on hover), and
   Details beside it again (Stefan, 2026-11-16, liking the prototype's floating card), which opens
   the Usage page; the page stays in the sidebar too. It posts `{"usage": "refresh"}`; the

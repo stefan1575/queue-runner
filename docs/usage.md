@@ -90,6 +90,21 @@ never counts it, and `--gate` prints it as its own line, held by the reviewing l
   both: its record has `shared_with` (the others' labels) and teaches nothing. So while both
   repos (and reviews) stay busy, nearly every pass is shared and a kind's expected cost stays at
   its last five solo passes until one runs alone again.
+- **On its plan** (issue #118): learned costs are percents of the plan's windows, so they
+  count only on the plan they ran on. Claude's plan is read from the same login file as the
+  token, only its `subscriptionType` and `rateLimitTier` (`usage.read_plan`; the token is never
+  copied out), with no call spent (`CachedUsage.plan`). Each record has `plan` (those two
+  fields, or null when the file couldn't be read), and a kind's expected cost comes only from
+  records on the plan read now: after a change it's the cautious default until 3 are measured on
+  the new plan, and the old plan's records count again if it comes back. Records from before
+  this carry no `plan`; they count as the plan in `<state_dir>/usage-plan.json`, stamped once
+  by the runner's first real start (`--once` or continuous; `--gate`, `--dry-run` and
+  `--snapshot` stamp nothing, and count them as the plan read now until then). When the plan read
+  isn't the last record's, the log says so once, before the Claude lane admits a job (`Claude's
+  plan is now pro (was max): learned costs start again`, or `... the costs learned on it before
+  count again`), and `--gate` says it under its first line, `Claude usage gate: plan max
+  (default_claude_max_20x), weekly reserve 5%`. ChatGPT's `planType` joins the record once the
+  gate reads ChatGPT. The Usage card names each plan (The dashboard, Usage).
   `usage.jsonl` is written like the job log (`state.append_record`: synced, a torn last line cut
   off); a bad line elsewhere, like an unreadable `gate.json`, starts nothing until it's fixed.
 - `Runner` without a `gate` (the tests, `live_sandbox.py`) starts every job; the CLI always passes
