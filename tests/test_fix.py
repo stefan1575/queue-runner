@@ -110,6 +110,18 @@ class FixTest(unittest.TestCase):
         for handoff in ('progress.md', 'notes.md', 'handoff'):
             self.assertNotIn(handoff, brief.replace('no handoff\nfiles', ''))
 
+    def test_the_brief_asks_for_the_cause_a_second_case_and_why_a_value_fix_holds(self):
+        # #135: the narrowest change that passed Sol's scenario counted as done.
+        r = self.blocking()
+        r.run_pass()
+        brief = ' '.join(self.t3.starts[0]['message'].split())
+        self.assertIn('before fixing it, write its cause in one line in the commit message', brief)
+        self.assertIn("Fix the cause, and add a test for a second case of it besides Sol's "
+                      "scenario where one fits", brief)
+        self.assertIn('only adjusts a value or a format (a precision, a pattern, a timeout, an '
+                      'indentation)', brief)
+        self.assertIn("says in the commit message why the cause can't recur", brief)
+
     def test_earlier_declines_and_fixes_are_in_the_brief(self):
         r = self.runner(PushingT3([(0, 'completed')], self.gh),
                         reply(findings=[important('F1')]),

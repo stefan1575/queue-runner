@@ -205,6 +205,16 @@ class ReviewerTest(unittest.TestCase):
         self.assertIn('Use the brand red.', issue)            # with its comments
         self.assertIn('Makes it red.', self.read('pr.md'))
 
+    def test_the_brief_defines_a_class_as_the_cause_with_a_cause_for_its_example(self):
+        # #135: a class named after the symptom let the fix round patch only Sol's scenario.
+        self.one_pr().review_pass()
+        brief = ' '.join(self.sol.briefs[0]['brief'].split())
+        self.assertIn('`class` names the cause: what in the code lets the failure happen, not '
+                      'what goes wrong', brief)
+        self.assertIn('"log records matched by comparing timestamps written at different '
+                      'precisions"', brief)
+        self.assertNotIn('write made outside the app logged wrongly', brief)
+
     def test_with_its_dependencies_linked_sol_is_told_to_run_the_tests_and_may_write_the_cache(self):
         deps = FakeDeps(Prepared(True, 'its dependencies are installed in `node_modules` (from '
                                        '`bun.lock`, as CI installs them)', 'cached (first-abc)',

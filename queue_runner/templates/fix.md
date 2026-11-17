@@ -56,8 +56,12 @@ $threads
 
 ## How to work
 
-- For each Important finding: write a failing test first where one fits, then fix it, and
-  fix every other case of its class.
+- For each Important finding: before fixing it, write its cause in one line in the commit message:
+  what in the code lets the failure happen, not the scenario Sol describes. Write a failing test
+  first where one fits. Fix the cause, and add a test for a second case of it besides Sol's
+  scenario where one fits, then fix every other case of its class. A fix that only adjusts a
+  value or a format (a precision, a pattern, a timeout, an indentation) rather than removing the
+  cause says in the commit message why the cause can't recur.
 - If a finding is wrong, decline it: comment on the PR (`gh pr comment $number --repo $github`)
   naming the finding's ID, the reason and the evidence. The best evidence is a test, committed
   and pushed, that passes now and would fail if the finding were right. Sol reconsiders a decline
