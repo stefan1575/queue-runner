@@ -163,6 +163,9 @@ and an unreadable origin raising rather than reading as none).
 The picker and a build job's start: `tests/test_picker.py`; a build's brief:
 `tests/test_brief.py`; the job log read back as a restarted runner reads it:
 `tests/test_state.py`; `scripts/shoot.py`'s file names (a before and an after never share one): `tests/test_shoot.py`;
+what every job template may say (no skill, slash command or `~/` path; screenshots only into
+`pr-<number>/`, the folder the review reads): `tests/test_templates.py`; `scripts/evidence.py`'s
+desktop capture (a path with spaces reaches PowerShell whole): `tests/test_evidence_script.py`;
 no bare `mkdtemp(` in the tests: `tests/test_no_temp_leftovers.py`
 (`docs/reviews.md`, Sol runs tests); the dashboard's favicons, meter and repository rows:
 `tests/test_favicon.py`, `tests/test_meter.py` and `tests/test_repo_rows.py`
