@@ -112,6 +112,7 @@ class Facts:
     runner: RunnerInfo | None = None
     calls: dict = field(default_factory=dict)     # source id: Call
     claude_usage: Reading | None = None
+    claude_plan: object | None = None   # usage.Plan, from the login file (issue #118)
     sol_usage: Reading | None = None
     costs: dict = field(default_factory=dict)     # kind: (gate.Cost, learned or the default)
     # The Inbox (ticket 31): the Sol lane's last collection (inbox.Inbox, None before one), the
@@ -442,6 +443,7 @@ def _claude_usage(facts: Facts) -> dict:
              if week.resets_at else None},
         ]
     return _plan('claude', 'claude', 'Claude', reading, windows, facts.now,
+                 facts.claude_plan.title if facts.claude_plan else None,
                  error=_claude_error(facts),
                  next_read_at=getattr(reading, 'next_at', None))
 
@@ -710,7 +712,10 @@ class Snapshots:
             knob = read_knob(state)
         except (OSError, ValueError):
             knob = None
-        book = CostBook(os.path.join(state, 'usage.jsonl'))
+        # Claude's plan (issue #118): the gate's reader reads it from the login file, no call
+        read_plan = getattr(self.claude, 'plan', None)
+        claude_plan = read_plan() if read_plan else None
+        book = CostBook(os.path.join(state, 'usage.jsonl'), plan=lambda: claude_plan)
         try:
             costs = {k: (book.expected(k), book.learned(k)) for k in KINDS}
         except (OSError, ValueError):
@@ -730,7 +735,7 @@ class Snapshots:
             sol_wait=None if self.config.review_provider == 'claude' else self._sol_wait(log, now),
             titles=dict(runner.titles) if runner is not None else {},
             threads=threads, runner=self.info, calls=self.calls.all(),
-            claude_usage=self.claude.reading() if self.claude else None,
+            claude_usage=self.claude.reading() if self.claude else None, claude_plan=claude_plan,
             sol_usage=self.sol.reading() if self.sol else None, costs=costs,
             usage_refresh=self._refreshed, stale=self._stale(jobs, now),
             **self._inbox(log))

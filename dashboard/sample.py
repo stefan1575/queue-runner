@@ -233,7 +233,7 @@ def build(name: str = DEFAULT, base: datetime | None = None, control: dict | Non
             # `next_read_at` (issue 66): when Claude's usage endpoint may be asked again (once every
             # 5 minutes), while that's ahead; None for a plan read whenever it's asked. `retrying`:
             # since when its reads have failed, while that isn't shown as an error.
-            {"id": "claude", "provider": "claude", "name": "Claude", "plan": None, "read_at": ago(1), "error": None,
+            {"id": "claude", "provider": "claude", "name": "Claude", "plan": "Max 20x", "read_at": ago(1), "error": None,
              "resets": {"available": 2}, "next_read_at": ahead(4), "retrying": None, "windows": [
                 {"id": "five_hour", "label": "Session", "used": 38, "resets_at": ahead(60), "gates": True},
                 {"id": "week", "label": "Weekly", "used": 46, "resets_at": ahead(60 * 49.7), "gates": True,
@@ -241,7 +241,7 @@ def build(name: str = DEFAULT, base: datetime | None = None, control: dict | Non
                 {"id": "week_fable", "label": "Weekly, Fable", "used": 100, "resets_at": ahead(60 * 49.7),
                  "gates": False, "note": "The runner doesn't use Fable."},
             ]},
-            {"id": "sol", "provider": "chatgpt", "name": "ChatGPT", "plan": None, "read_at": ago(9), "error": None,
+            {"id": "sol", "provider": "chatgpt", "name": "ChatGPT", "plan": "Plus", "read_at": ago(9), "error": None,
              "resets": None, "next_read_at": None, "retrying": None, "windows": [
                 {"id": "five_hour", "label": "Session", "used": 26, "resets_at": ahead(94), "gates": True},
                 {"id": "week", "label": "Weekly", "used": 6, "resets_at": ahead(60 * 152.9), "gates": True},

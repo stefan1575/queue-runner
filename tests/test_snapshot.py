@@ -16,7 +16,7 @@ from queue_runner.gate import Cost, Knob, write_knob
 from queue_runner.sol import Limits as SolLimits, LimitWindow as SolWindow
 from queue_runner.state import Job, JobLog
 from queue_runner.t3 import Thread
-from queue_runner.usage import Usage, UsageError, Window
+from queue_runner.usage import Plan, Usage, UsageError, Window
 from tests.fakes import FakeUsage
 
 UTC = datetime.timezone.utc
@@ -259,6 +259,9 @@ class UsageTest(unittest.TestCase):
                                 NOW - datetime.timedelta(minutes=1))
         p = plan(snapshot.build(facts(claude_usage=read, knob=Knob(reserve=7))), 'claude')
         self.assertEqual((p['provider'], p['name'], p['plan'], p['error']), ('claude', 'Claude', None, None))
+        named = plan(snapshot.build(facts(claude_usage=read, claude_plan=Plan(
+            'max', 'default_claude_max_20x'))), 'claude')
+        self.assertEqual(named['plan'], 'Max 20x')   # the Usage card names it (issue #118)
         self.assertEqual(when(p['read_at']), NOW - datetime.timedelta(minutes=1))
         five, week = window(p, 'five_hour'), window(p, 'week')
         self.assertEqual((five['label'], five['used'], when(five['resets_at']), five['gates']),
@@ -719,6 +722,21 @@ class SnapshotsTest(unittest.TestCase):
         self.assertEqual(facts.costs['build'], (Cost(60, 15), False))
         self.assertEqual(facts.runner, snapshot.RunnerInfo(42, NOW, 'abc1234'))
         self.assertEqual(facts.repos, [LD, QR])
+
+    def test_claudes_plan_is_read_from_its_reader_and_the_costs_are_learned_on_it(self):
+        from queue_runner.usage import CachedUsage, Plan
+        os.makedirs(self.state, exist_ok=True)
+        with open(os.path.join(self.state, 'usage.jsonl'), 'w', encoding='utf-8') as f:
+            for _ in range(3):
+                f.write(json.dumps({'kind': 'build', 'plan': {'subscriptionType': 'max'},
+                                    'spent': {'five_hour': 4, 'seven_day': 1}}) + '\n')
+        snaps = self.snapshots()
+        snaps.claude = CachedUsage(FakeUsage(plan=Plan('pro', 'default_claude_ai')), self.clock)
+        facts = snaps.facts()
+        self.assertEqual(facts.claude_plan, Plan('pro', 'default_claude_ai'))
+        self.assertEqual(facts.costs['build'], (Cost(60, 15), False))   # 4% was on max
+        snaps.claude.endpoint.current_plan = Plan('max', None)
+        self.assertEqual(snaps.facts().costs['build'], (Cost(4, 1), True))
 
     def test_a_snapshot_after_a_pass_reads_nothing_afresh(self):
         self.jobs.started(kind='build', repo='leads-dashboard', issue=212, branch=None, title='t')
