@@ -640,7 +640,8 @@ class Stopper:
     def answers(self, repo) -> None:
         """Each filed stop Stefan has since answered (its issue closed, or a reply on the PR or
         on the issue after it) is recorded `answered`, and the PR goes back to the loop: after a
-        reply, through a decision on it (`decisions.py`)."""
+        reply, through a decision on it (`decisions.py`). A PR merged or closed on GitHub
+        answers its stops too (`pr-closed`, issue #88), once their issues are closed."""
         for n in sorted({j.issue for j in self.jobs.jobs()
                          if j.kind == 'stop' and j.repo == repo.name}):
             stops = self.jobs.open_stops(repo.name, n)
