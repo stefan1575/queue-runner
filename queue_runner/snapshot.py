@@ -800,6 +800,5 @@ class Snapshots:
         resume = log.sol_resume_at()
         if resume and _when(resume) > now:
             return Wait(_when(resume), 'ChatGPT ran out of usage: Opus reviews in its place, '
-                        "through Claude's usage gate, until 10 minutes after its reset, or "
-                        "until ChatGPT's usage reads back sooner")
+                        "through Claude's usage gate, until 10 minutes after its reset")
         return None
