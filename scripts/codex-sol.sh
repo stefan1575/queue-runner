@@ -157,43 +157,54 @@ fi
 # MCP server. Codex merges `-c mcp_servers={}` into the config rather than clearing it, so it
 # goes by name; only enabled ones, because naming a disabled plugin server (codex_app) without
 # its transport fails the config.
-# It fails closed (PR #127's review 1, F2): a list that fails, isn't JSON, has a server it can't
-# read or a name it can't pass to -c stops the job before Codex starts, never a run with a
-# server left on. tests/test_codex_sol_mcp.py runs this block, between the >>> and <<< lines.
+# It fails closed (PR #127's review 1, F2; review 2, F3): a list that fails, or isn't a JSON list
+# whose every server has a string name and a true/false enabled, or a name it can't pass to -c,
+# stops the job before Codex starts, never a run with a server left on. The whole list is parsed
+# as JSON (python3, from scoop's shims on the user PATH), never read line by line, so its layout
+# can't hide a server. tests/test_codex_sol_mcp.py runs this block, between the >>> and <<< lines.
 # >>> mcp_off
+MCP_ENABLED_PY='
+import json, re, sys
+def stop(why):
+    sys.stderr.write(why + "\n"); sys.exit(1)
+try:
+    servers = json.loads(sys.stdin.read())
+except ValueError as e:
+    stop("is not JSON (%s)" % e)
+if not isinstance(servers, list):
+    stop("is not a JSON list")
+for i, s in enumerate(servers):
+    if not (isinstance(s, dict) and isinstance(s.get("name"), str)
+            and isinstance(s.get("enabled"), bool)):
+        stop("has server %d without a string name and a true/false enabled" % (i + 1))
+    if s["enabled"]:
+        if not re.fullmatch(r"[A-Za-z0-9_-]+", s["name"]):
+            stop("names server %r, which -c mcp_servers.<name> cannot switch off" % s["name"])
+        print(s["name"])
+'
 mcp_off() {   # appends to mcp_opts; 1 (and why, on stderr) when a server can't be switched off
-  local out status line name= entries=0 names=0 flags=0
+  local out status names why name
   out=$("$cx" mcp list --json); status=$?
   if [ $status -ne 0 ]; then
     echo "codex-sol: 'codex mcp list --json' failed (exit $status), so its MCP servers can't be switched off; not starting" >&2
     return 1
   fi
-  out=${out//$'\r'/}
-  if [[ $out != '['* ]]; then
-    echo "codex-sol: 'codex mcp list --json' printed no JSON list, so its MCP servers can't be switched off; not starting" >&2
+  if ! command -v python3 >/dev/null; then
+    echo "codex-sol: no python3 to read 'codex mcp list --json' with, so its MCP servers can't be switched off; not starting" >&2
     return 1
   fi
-  while IFS= read -r line; do
-    if [[ $line == '  {' ]]; then
-      entries=$((entries + 1)); name=
-    elif [[ $line =~ ^\ {4}\"name\":\ \"(.*)\",?$ ]]; then
-      names=$((names + 1)); name=${BASH_REMATCH[1]}
-    elif [[ $line =~ ^\ {4}\"enabled\":\ (true|false),?$ ]]; then
-      flags=$((flags + 1))
-      if [ "${BASH_REMATCH[1]}" = true ]; then
-        if ! [[ $name =~ ^[A-Za-z0-9_-]+$ ]]; then
-          echo "codex-sol: can't switch off MCP server '$name' by name (-c mcp_servers.<name>); not starting" >&2
-          return 1
-        fi
-        mcp_opts+=(-c "mcp_servers.$name.enabled=false")
-      fi
-    fi
-  done <<< "$out"
-  [[ $out =~ ^\[[[:space:]]*\][[:space:]]*$ ]] || [ $entries -gt 0 ] || entries=-1   # not [] and none read
-  if [ $entries -lt 0 ] || [ $names -ne $entries ] || [ $flags -ne $entries ]; then
-    echo "codex-sol: read $entries MCP servers from 'codex mcp list --json' but $names names and $flags enabled flags, so not every one can be switched off; not starting" >&2
-    return 1
+  why=$(mktemp) || return 1
+  names=$(printf '%s' "$out" | python3 -I -c "$MCP_ENABLED_PY" 2>"$why"); status=$?
+  if [ $status -ne 0 ]; then
+    echo "codex-sol: 'codex mcp list --json' $(tr -d '\r' < "$why" | tail -n 1), so its MCP servers can't be switched off; not starting" >&2
+    rm -f "$why"; return 1
   fi
+  rm -f "$why"
+  while IFS= read -r name; do
+    name=${name%$'\r'}
+    [ -n "$name" ] && mcp_opts+=(-c "mcp_servers.$name.enabled=false")
+  done <<< "$names"
+  return 0
 }
 # <<< mcp_off
 mcp_opts=()

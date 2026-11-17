@@ -112,7 +112,9 @@ reviewed), `failed`, `out-of-usage` and `head-moved` (nothing counts).
     tools that deploy sites and change settings. It fails closed (`mcp_off`; PR #127's review 1,
     F2): a list that fails, isn't JSON, holds a server it can't read or a name `-c` can't take
     ends the job with exit 1 (a `failed` review) before Codex starts, never a run with a server
-    on. `tests/test_codex_sol_mcp.py` runs that block under Git's bash with a fake `codex`.
+    on. The list is parsed whole as JSON (`python3 -I`), never line by line, so no layout of it
+    can leave a server on (review 2, F3); with no `python3` the job stops too.
+    `tests/test_codex_sol_mcp.py` runs that block under Git's bash with a fake `codex`.
   - **Opus** (checked 2026-11-17: the thread found no MCP tools, even with ToolSearch): it starts
     on the T3 provider instance `[review] claude_provider` names, `claudeReviewer` in
     `~/.t3/userdata/settings.json` (`providerInstances`; back the file up first), driver

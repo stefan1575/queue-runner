@@ -78,20 +78,45 @@ class McpOffTest(unittest.TestCase):
     def test_output_that_isnt_a_json_list_stops_the_job(self):
         rc, _, err = self.run_off('Error: config.toml: bad mcp_servers')
         self.assertEqual(rc, 1)
-        self.assertIn('printed no JSON list', err)
+        self.assertIn("'codex mcp list --json' is not JSON", err)
+
+    def test_any_layout_of_the_list_switches_every_enabled_server_off(self):
+        """Review 2, F3: the list is parsed whole, so a compact or differently indented server
+        (here after a normally formatted one) can't slip through switched on."""
+        for printed in (
+                '[\n  {\n    "name": "clickup",\n    "enabled": true\n  },\n'
+                '  {"name": "playwright", "enabled": true}\n]',
+                '[\n  {\n    "name": "clickup",\n    "enabled": true\n  },\n'
+                '      {\n "enabled": true,\n        "name": "playwright"\n  }\n]',
+                '[{"name":"clickup","enabled":true},{"name":"playwright","enabled":true}]',
+                LISTED.replace('\n', '\r\n')):
+            with self.subTest(printed=printed):
+                rc, opts, _ = self.run_off(printed)
+                self.assertEqual(rc, 0)
+                self.assertEqual(opts, ['-c', 'mcp_servers.clickup.enabled=false',
+                                        '-c', 'mcp_servers.playwright.enabled=false'])
 
     def test_a_server_it_cant_read_stops_the_job(self):
-        # Compact JSON, or a key order it doesn't expect: servers it can't count as read.
-        for printed in ('[{"name": "clickup", "enabled": true}]',
-                        '[\n  {\n    "enabled": true,\n    "name": "clickup"\n  }\n]',
-                        '[\n  {\n    "name": "clickup",\n    "enabled": "yes"\n  }\n]'):
+        for printed in ('[{"name": "clickup", "enabled": "yes"}]',
+                        '[{"name": "clickup"}]',
+                        '[{"enabled": true}]',
+                        '[{"name": 7, "enabled": true}]',
+                        '["clickup"]',
+                        '{"name": "clickup", "enabled": true}',
+                        '[{"name": "clickup", "enabled": true}'):
             with self.subTest(printed=printed):
-                self.assertEqual(self.run_off(printed)[0], 1)
+                rc, opts, err = self.run_off(printed)
+                self.assertEqual((rc, opts), (1, []))
+                self.assertIn('not starting', err)
 
     def test_an_enabled_name_it_cant_pass_to_c_stops_the_job(self):
         rc, _, err = self.run_off('[\n  {\n    "name": "my.server",\n    "enabled": true\n  }\n]')
         self.assertEqual(rc, 1)
-        self.assertIn("can't switch off MCP server 'my.server'", err)
+        self.assertIn("names server 'my.server', which -c mcp_servers.<name> cannot switch off",
+                      err)
+
+    def test_a_disabled_name_it_cant_pass_to_c_is_left_alone(self):
+        self.assertEqual(self.run_off('[{"name": "my.server", "enabled": false}]')[:2], (0, []))
 
     def test_the_review_and_code_jobs_stop_when_it_fails(self):
         with open(SCRIPT, encoding='utf-8') as f:
