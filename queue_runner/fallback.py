@@ -94,7 +94,8 @@ def _preamble(workdir: str, project: str, kind: str = KIND) -> str:
         'outside the workdir but tests you add there. Don\'t post on GitHub, push, comment or '
         'open anything there: the queue runner posts your reply as the review comment. Your '
         'reply is the review, and its last sol-findings block is its verdict. Ask nothing: '
-        'nobody is there to answer.\n\n')
+        'nobody is there to answer. Run tests in the foreground and wait for them: a review has '
+        'no MCP tools, T3\'s included, so nothing waits on a background run for you.\n\n')
 
 
 class OpusThread:
@@ -119,8 +120,11 @@ class OpusThread:
         with open(os.path.join(os.path.dirname(reply), 'brief-opus.md'), 'w', encoding='utf-8',
                   newline='\n') as fh:
             fh.write(message)
-        flags = f.effort.flags(repo) if f.effort else {
-            'provider': f.config.claude_provider, 'model': f.config.claude_model}
+        if f.config.review_claude_provider:   # the no-tools instance: always by name
+            flags = {'provider': f.config.review_claude_provider, 'model': f.config.claude_model}
+        else:
+            flags = f.effort.flags(repo) if f.effort else {
+                'provider': f.config.claude_provider, 'model': f.config.claude_model}
         try:
             result = f.t3.start(repo.path, message, title=self.title, **flags)
         except T3Error as e:

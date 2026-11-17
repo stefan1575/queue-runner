@@ -59,6 +59,10 @@ class Config:
     # steps in only while Sol is out of usage, #69) or 'claude' (an Opus thread in T3 at
     # [claude]'s model and effort, through the usage gate). `[review] provider` in config.toml.
     review_provider: str = 'chatgpt'
+    # The T3 provider instance an Opus review starts on (`[review] claude_provider`): one launched
+    # with no MCP tools (docs/reviews.md, A review has no outside tools), so an Opus review gets
+    # what a Sol review gets. Empty: [claude]'s, as a build starts.
+    review_claude_provider: str = ''
 
 
 def set_stopped(config: Config, names) -> None:
@@ -144,4 +148,5 @@ def load_config(path: str = DEFAULT_CONFIG) -> Config:
                   sol_script=_path(sol.get('script') or SOL_SCRIPT),
                   sol_bash=sol.get('bash') or GIT_BASH,
                   adopt_reviews_before=str(raw.get('adopt_reviews_before') or ''),
-                  review_provider=_review_provider(raw.get('review', {})))
+                  review_provider=_review_provider(raw.get('review', {})),
+                  review_claude_provider=str(raw.get('review', {}).get('claude_provider') or ''))

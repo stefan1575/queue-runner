@@ -102,11 +102,22 @@ reviewed), `failed`, `out-of-usage` and `head-moved` (nothing counts).
   review --effort high` logs `reasoning effort: high` in `reply.md.log`. Each run is a fresh
   Codex session with no network: Sol can't post, so the runner posts (04). Files are read-only
   except the checkout and `deps_dir` (`--write`, `--writable-root`: Sol runs tests, below).
-- **A review has no MCP tools** (checked 2026-11-17: Sol reported none). codex-sol.sh turns off
-  ChatGPT's apps and plugins (`features.apps`, `features.plugins`) and each MCP server `codex
-  mcp list` shows enabled, so nothing in `~/.codex/config.toml` reaches a review: not Stefan's
-  Work Chrome (whose Playwright MCP lives in `~/Code/tools/browser`), not ClickUp, not the
-  `codex_apps` tools that deploy sites and change settings.
+- **A review has no outside tools, whoever reviews** (Stefan, 2026-11-17: reviews stay
+  provider-agnostic). A review reads the checkout and runs its tests; it reaches no account, no
+  browser and nothing outside the repo. Each reviewer's launcher holds to it, and a new one must:
+  - **Sol** (checked 2026-11-17: Sol reported no MCP tools): codex-sol.sh turns off ChatGPT's
+    apps and plugins (`features.apps`, `features.plugins`) and each MCP server `codex mcp list`
+    shows enabled, so nothing in `~/.codex/config.toml` reaches it: not Stefan's Work Chrome
+    (whose Playwright MCP lives in `~/Code/tools/browser`), not ClickUp, not the `codex_apps`
+    tools that deploy sites and change settings.
+  - **Opus** (checked 2026-11-17: the thread found no MCP tools, even with ToolSearch): it starts
+    on the T3 provider instance `[review] claude_provider` names, `claudeReviewer` in
+    `~/.t3/userdata/settings.json` (`providerInstances`; back the file up first), driver
+    `claudeAgent`, launch args `--strict-mcp-config --no-chrome --disallowedTools mcp__t3-code`
+    (Claude's own MCP config, Claude in Chrome and T3's own tools off) and environment
+    `ENABLE_CLAUDEAI_MCP_SERVERS=false` (the claude.ai connectors off). Started by name, it runs
+    at the model's default effort (medium for Opus 5.5, as `[claude]` says today), read back as
+    before; `--effort high` in its launch args would raise it (checked: read back `high`).
 - It runs under Git's bash by full path, through a parent bash that waits: codex-sol.sh's
   watchdog ends the run once its caller is gone. 75 minutes, then tree-killed and `failed`.
 - **Out of usage** ("hit your usage limit" in `run.out` or `reply.md.log`): `out-of-usage`, and

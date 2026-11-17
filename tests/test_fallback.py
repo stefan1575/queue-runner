@@ -154,6 +154,18 @@ class FallbackTest(unittest.TestCase):
         [job] = self.reviews()
         self.assertEqual(job.effort, 'medium')
 
+    def test_a_review_instance_in_config_starts_the_thread_on_it(self):
+        self.sol_out()
+        self.config = dataclasses.replace(self.config, review_claude_provider='claudeReviewer')
+        files = FakeFiles(set_high(self.dir), efforts={'mcp:t1': 'medium'})
+        r = self.reviewer((0, 'completed', reply()),
+                          effort=Effort(self.config, files=files, say=self.said.append))
+        r.review_pass()
+        [start] = self.t3.starts
+        self.assertEqual((start['provider'], start['model']), ('claudeReviewer', 'claude-opus-5-5'))
+        [job] = self.reviews()
+        self.assertEqual(job.effort, 'medium')   # still read back
+
     def test_a_thread_that_fails_or_asks_is_a_failed_review(self):
         self.sol_out()
         r = self.reviewer((1, 'failed'), (2, 'waiting'), (0, 'completed', reply()))
@@ -418,6 +430,11 @@ class ReviewProviderConfigTest(unittest.TestCase):
 
     def test_claude(self):
         self.assertEqual(self.load('[review]\nprovider = "claude"\n').review_provider, 'claude')
+
+    def test_the_review_instance_defaults_to_none(self):
+        self.assertEqual(self.load('').review_claude_provider, '')
+        self.assertEqual(self.load('[review]\nclaude_provider = "claudeReviewer"\n')
+                         .review_claude_provider, 'claudeReviewer')
 
     def test_anything_else_is_an_error_naming_the_key(self):
         with self.assertRaisesRegex(ValueError, r'\[review\] provider must be one of'):
