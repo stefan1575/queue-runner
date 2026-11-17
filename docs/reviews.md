@@ -109,7 +109,10 @@ reviewed), `failed`, `out-of-usage` and `head-moved` (nothing counts).
     apps and plugins (`features.apps`, `features.plugins`) and each MCP server `codex mcp list`
     shows enabled, so nothing in `~/.codex/config.toml` reaches it: not Stefan's Work Chrome
     (whose Playwright MCP lives in `~/Code/tools/browser`), not ClickUp, not the `codex_apps`
-    tools that deploy sites and change settings.
+    tools that deploy sites and change settings. It fails closed (`mcp_off`; PR #127's review 1,
+    F2): a list that fails, isn't JSON, holds a server it can't read or a name `-c` can't take
+    ends the job with exit 1 (a `failed` review) before Codex starts, never a run with a server
+    on. `tests/test_codex_sol_mcp.py` runs that block under Git's bash with a fake `codex`.
   - **Opus** (checked 2026-11-17: the thread found no MCP tools, even with ToolSearch): it starts
     on the T3 provider instance `[review] claude_provider` names, `claudeReviewer` in
     `~/.t3/userdata/settings.json` (`providerInstances`; back the file up first), driver

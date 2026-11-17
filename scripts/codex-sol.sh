@@ -157,14 +157,49 @@ fi
 # MCP server. Codex merges `-c mcp_servers={}` into the config rather than clearing it, so it
 # goes by name; only enabled ones, because naming a disabled plugin server (codex_app) without
 # its transport fails the config.
+# It fails closed (PR #127's review 1, F2): a list that fails, isn't JSON, has a server it can't
+# read or a name it can't pass to -c stops the job before Codex starts, never a run with a
+# server left on. tests/test_codex_sol_mcp.py runs this block, between the >>> and <<< lines.
+# >>> mcp_off
+mcp_off() {   # appends to mcp_opts; 1 (and why, on stderr) when a server can't be switched off
+  local out status line name= entries=0 names=0 flags=0
+  out=$("$cx" mcp list --json); status=$?
+  if [ $status -ne 0 ]; then
+    echo "codex-sol: 'codex mcp list --json' failed (exit $status), so its MCP servers can't be switched off; not starting" >&2
+    return 1
+  fi
+  out=${out//$'\r'/}
+  if [[ $out != '['* ]]; then
+    echo "codex-sol: 'codex mcp list --json' printed no JSON list, so its MCP servers can't be switched off; not starting" >&2
+    return 1
+  fi
+  while IFS= read -r line; do
+    if [[ $line == '  {' ]]; then
+      entries=$((entries + 1)); name=
+    elif [[ $line =~ ^\ {4}\"name\":\ \"(.*)\",?$ ]]; then
+      names=$((names + 1)); name=${BASH_REMATCH[1]}
+    elif [[ $line =~ ^\ {4}\"enabled\":\ (true|false),?$ ]]; then
+      flags=$((flags + 1))
+      if [ "${BASH_REMATCH[1]}" = true ]; then
+        if ! [[ $name =~ ^[A-Za-z0-9_-]+$ ]]; then
+          echo "codex-sol: can't switch off MCP server '$name' by name (-c mcp_servers.<name>); not starting" >&2
+          return 1
+        fi
+        mcp_opts+=(-c "mcp_servers.$name.enabled=false")
+      fi
+    fi
+  done <<< "$out"
+  [[ $out =~ ^\[[[:space:]]*\][[:space:]]*$ ]] || [ $entries -gt 0 ] || entries=-1   # not [] and none read
+  if [ $entries -lt 0 ] || [ $names -ne $entries ] || [ $flags -ne $entries ]; then
+    echo "codex-sol: read $entries MCP servers from 'codex mcp list --json' but $names names and $flags enabled flags, so not every one can be switched off; not starting" >&2
+    return 1
+  fi
+}
+# <<< mcp_off
 mcp_opts=()
 case $job in review|code)
   mcp_opts=(-c features.apps=false -c features.plugins=false)
-  while read -r name; do
-    [[ $name =~ ^[A-Za-z0-9_-]+$ ]] && mcp_opts+=(-c "mcp_servers.$name.enabled=false")
-  done < <("$cx" mcp list --json 2>/dev/null | awk -F'"' '
-    /^    "name": / { name = $4 }
-    /^    "enabled": true,$/ { print name }') ;;
+  mcp_off || exit 1 ;;
 esac
 
 # Node on PATH (ticket 16): fnm's default install, ahead of anything else PATH has.
