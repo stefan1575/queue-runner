@@ -286,6 +286,9 @@ class GateTest(Harness):
         class OnlyDecisions:
             asked = []
 
+            def plan_note(self):   # no Claude plan change (issue #118)
+                return None
+
             def check(self, kind, then=None, running=()):
                 self.asked.append(kind)
                 return (Verdict(True, FITS, 'a decision fits', usage=ROOM) if kind == 'decision'

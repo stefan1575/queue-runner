@@ -217,6 +217,9 @@ class OpenTest(ThreadCase):
         class Shut:
             kinds = []
 
+            def plan_note(self):   # no Claude plan change (issue #118)
+                return None
+
             def check(self, kind, then=None, running=()):
                 self.kinds.append((kind, then))
                 return Verdict(False, 'five-hour', 'the session is full')

@@ -383,7 +383,8 @@ class Runner:
             return self._admit_locked(chosen, busy)
 
     def _admit_locked(self, chosen, busy) -> list:
-        if self.gate is not None and any(s.kind is not None for s in chosen) and                 (note := self.gate.plan_note()):
+        gated = self.gate is not None and any(s.kind is not None for s in chosen)
+        if gated and (note := self.gate.plan_note()):
             self.say(note)   # a Claude plan change: learned costs start again (issue #118)
         running = self._running(busy)
         starts, waits = [], {}
