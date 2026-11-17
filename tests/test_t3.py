@@ -151,6 +151,16 @@ class StartTest(unittest.TestCase):
             T3Cli(mcp=FakeMcp()).start('C:/nowhere', 'Do it.', title='A job', **CLAUDE)
         self.assertIn('No T3 Code project', str(caught.exception))
 
+    def test_a_relative_folder_matches_its_projects_absolute_root(self):
+        # config keeps a served repo's path as written ('.'); T3 holds the absolute root
+        here = os.getcwd()
+        mcp = FakeMcp()
+        mcp.call = lambda tool, arguments, _call=mcp.call: (
+            {'projects': [{'id': 'proj-here', 'workspaceRoot': here}], 'nextCursor': None}
+            if tool == 't3_project_list' else _call(tool, arguments))
+        T3Cli(mcp=mcp).launch('.', 'Ask.', title='Decide: x', **CLAUDE)
+        self.assertEqual(mcp.launched()['projectId'], 'proj-here')
+
     def test_a_refused_launch_raises(self):
         mcp = FakeMcp(launch_error=T3Error('t3_thread_launch failed: no'))
         with self.assertRaises(T3Error):

@@ -38,7 +38,9 @@ def selection(provider: str, model: str, effort: str) -> dict:
 
 
 def _same_folder(a: str, b: str) -> bool:
-    return os.path.normcase(os.path.normpath(a)) == os.path.normcase(os.path.normpath(b))
+    """A relative folder is read from the runner's working directory, as the CLI read it: a
+    served repo's path stays as config.toml wrote it ('.'), T3 holds the absolute root."""
+    return os.path.normcase(os.path.abspath(a)) == os.path.normcase(os.path.abspath(b))
 
 
 class T3Error(RuntimeError):
