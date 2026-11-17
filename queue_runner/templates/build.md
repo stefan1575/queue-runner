@@ -70,9 +70,11 @@ looks):
 ```
 python3 -I $evidence shoot URL OUT.png --size 1440x900   # a page, in headless Edge
 python3 -I $evidence screen OUT.png                       # the whole desktop
-python3 -I $evidence publish --repo . --into issue-$number FILE.png ...
+python3 -I $evidence publish --repo . --into pr-<the PR's number> FILE.png ...
 ```
 
-Name the files `before-<state>-<page>.png` and `after-<state>-<page>.png`. `publish` prints one
-Markdown image line per file: put them in the Evidence table. If the screen can't be captured,
-write `Screenshot owed: <why>` there instead.
+Name the files `before-<state>-<page>.png` and `after-<state>-<page>.png`, and keep them out of
+the commits. Publish them once the PR is open, into `pr-<the PR's number>`: that folder is the
+only one the review reads. `publish` prints one Markdown image line per file: put them in the
+Evidence table (`gh pr edit <number> --body-file ...`). If the screen can't be captured, write
+`Screenshot owed: <why>` there instead.

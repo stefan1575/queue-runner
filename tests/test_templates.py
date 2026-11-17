@@ -35,6 +35,16 @@ class TemplatesTest(unittest.TestCase):
         self.assertTrue(os.path.isfile(EVIDENCE), EVIDENCE)
         self.assertTrue(EVIDENCE.endswith('scripts/evidence.py'))
 
+    def test_screenshots_go_where_the_review_reads_them(self):
+        # PR #115 review 1, F1: GitCli.evidence copies only `pr-<number>/` off the evidence
+        # branch, so a template that publishes anywhere else leaves the review with no shots.
+        found = 0
+        for name, text in templates().items():
+            for into in re.findall(r'--into\s+(\S+)', text):
+                found += 1
+                self.assertTrue(into.startswith('pr-'), f'{name}: --into {into}')
+        self.assertGreaterEqual(found, 2)
+
 
 if __name__ == '__main__':
     unittest.main()

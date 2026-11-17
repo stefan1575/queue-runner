@@ -66,7 +66,10 @@ class BuildBriefTest(unittest.TestCase):
         from queue_runner.brief import EVIDENCE
         text = self.brief()
         self.assertIn(f'python3 -I {EVIDENCE} shoot URL OUT.png', text)
-        self.assertIn('--into issue-42', text)
+        # PR #115 review 1, F1: GitCli.evidence reads pr-<number>/, so a build publishes there,
+        # once the PR is open and has its number, never into issue-<number>/.
+        self.assertIn("--into pr-<the PR's number>", text)
+        self.assertNotIn('issue-42', text)
 
 
 if __name__ == '__main__':
