@@ -37,7 +37,7 @@ never counts it, and `--gate` prints it as its own line, held by the reviewing l
   than 30 minutes (`STALE_AFTER`), even if the latest call failed. A 429 beside such a reading
   never holds the lane. "Ended" is any Claude thread the runner sees end (`Gate.job_ended`): a
   measured job's, and outside a measured pass a dead runner's build, fix or live job settled, a
-  waiting job that ran on Stefan's answer (ended, or asking again), a decision thread whose
+  waiting job that ran on Stefan's answer (ended, or asking again: a `latest_run_id` newer than the run its end record names, told once by that run id, seen running or not, #85), a decision thread whose
   retry or answer never reached its job (PR 67's review 1, F1), and a dead runner's Opus review
   (the fallback, or config.toml's) whose thread has ended (review 2, F2: The Opus fallback, The
   job record). With the
