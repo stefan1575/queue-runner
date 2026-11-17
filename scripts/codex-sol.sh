@@ -136,15 +136,19 @@ if [ -n "$act" ] && ! grep -q '^# Authorised actions' "$brief"; then
   echo "codex-sol: --act needs a '# Authorised actions' section in the brief" >&2; exit 1
 fi
 
-# Bundled copies only: the codex on PATH (0.154) refuses gpt-6.1-sol. Globs, not ls, which
-# appends * to executables here. The last match is the newest extension version.
+# The standalone CLI first (`codex update` keeps it current, and it runs gpt-6.1-sol and the
+# playwright browser). Else a bundled copy: globs, not ls, which appends * to
+# executables here; the last match is the newest extension version.
 cx=
-for c in ~/.vscode/extensions/openai.chatgpt-*-win32-x64/bin/windows-x86_64/codex.exe \
-         ~/AppData/Local/OpenAI/Codex/bin/*/codex.exe; do
-  [ -x "$c" ] && cx=$c && [[ $c == *vscode* ]] && latest_ext=$c
-done
-cx=${latest_ext:-$cx}
-[ -n "$cx" ] || { echo "codex-sol: no bundled codex.exe found" >&2; exit 1; }
+standalone=~/AppData/Local/Programs/OpenAI/Codex/bin/codex.exe
+if [ -x "$standalone" ]; then cx=$standalone; else
+  for c in ~/.vscode/extensions/openai.chatgpt-*-win32-x64/bin/windows-x86_64/codex.exe \
+           ~/AppData/Local/OpenAI/Codex/bin/*/codex.exe; do
+    [ -x "$c" ] && cx=$c && [[ $c == *vscode* ]] && latest_ext=$c
+  done
+  cx=${latest_ext:-$cx}
+fi
+[ -n "$cx" ] || { echo "codex-sol: no codex.exe found" >&2; exit 1; }
 
 # Node on PATH (ticket 16): fnm's default install, ahead of anything else PATH has.
 fnm_default="$(cygpath -u "${FNM_DIR:-$HOME/scoop/apps/fnm/current}")/aliases/default"
