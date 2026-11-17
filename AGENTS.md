@@ -2,8 +2,7 @@
 
 A script with no AI in it that runs Stefan's build-and-review flow: it picks the next ticket,
 keeps the review loop moving, merges clean PRs, and starts T3 Code threads for the work that
-needs an agent. The flow's rules live outside this repo: `~/Code/docs/orchestration.md`,
-`~/Code/docs/pr-review.md` and `~/Code/docs/sol.md`.
+needs an agent. The flow's rules are `docs/flow.md`.
 
 **On GitHub as the private `stefan1575/queue-runner`**, with GitHub issues as its tracker
 (`docs/agents/issue-tracker.md`). Commit after every completed step, with a message that says
@@ -34,5 +33,5 @@ it up (`TemporaryDirectory` with `addCleanup`; `tests/test_no_temp_leftovers.py`
 
 ## Where to look
 
-`docs/` has one file per area (running, usage, claude-lane, reviews, stops, t3, dashboard,
+`docs/` has one file per area (flow, running, usage, claude-lane, reviews, stops, t3, dashboard,
 tests, layout). Read the one a task touches before changing it.

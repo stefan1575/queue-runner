@@ -1,5 +1,5 @@
 """Posting a review (ticket 04): the review loop's automated posts on the repo's own PR, which
-need no go-ahead (`~/Code/AGENTS.md`; `~/Code/docs/pr-review.md`, A round, step 4).
+need no go-ahead (`docs/flow.md`, Who runs it; A round, step 4).
 
 In order: each new Pre-existing finding filed once as a `needs-triage` issue (an open issue that
 already holds it is linked instead), the review comment with those links and its ledger, the

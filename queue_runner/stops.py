@@ -1,4 +1,4 @@
-"""Stops for Stefan (ticket 06; `~/Code/docs/pr-review.md`, Stops), in the Sol lane.
+"""Stops for Stefan (ticket 06; `docs/flow.md`, Stops), in the Sol lane.
 
 When the loop has to come to Stefan, the runner files the stop: one `needs-info` issue per PR
 (opened, or a comment on the one still open), a comment on the PR that records the stop and links
@@ -35,7 +35,7 @@ count. A check that fails on H but passes on the base is the PR's, as before. On
 repo's own base (`base` in config.toml) is compared: a stacked PR's failure is its own.
 
 Filing is an automated post in the repo's own issues and PRs, which needs no go-ahead
-(`~/Code/AGENTS.md`).
+(`docs/flow.md`, Who runs it).
 """
 import datetime
 import json

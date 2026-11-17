@@ -4,7 +4,7 @@ The usage gate before each Claude job, recovering from a usage limit, and the ef
 
 ## The usage gate
 
-`gate.py` and `usage.py` (ticket 08; `orchestration.md`, Limits). Before each Claude job (a build,
+`gate.py` and `usage.py` (ticket 08; `docs/flow.md`, Limits). Before each Claude job (a build,
 a fix round, a decision thread; a continued job runs inside its decision's pass), after settling
 and choosing it, the Claude lane reads Claude's windows and the job kind's expected cost, and the
 expected cost of every Claude job still running (#50: `docs/claude-lane.md`, Two lanes). **Sol
@@ -97,7 +97,7 @@ never counts it, and `--gate` prints it as its own line, held by the reviewing l
 
 ## Usage limits
 
-`limits.py` (ticket 09; `orchestration.md`, Limits). A build or fix thread that ends failed on a
+`limits.py` (ticket 09; `docs/flow.md`, Limits). A build or fix thread that ends failed on a
 Claude usage limit ends `usage-limit`, not `failed`, so no decision thread (which would hit the
 same limit) is started on it.
 

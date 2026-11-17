@@ -40,7 +40,7 @@ WRITES = ('.vite-temp', '.vite')
 
 
 def node_dir() -> str | None:
-    """fnm's default Node (`~/Code/docs/node-toolchain.md`), else the node on PATH. The runner
+    """fnm's default Node, else the node on PATH. The runner
     starts at logon under pythonw, without fnm's per-shell PATH."""
     fnm = os.environ.get('FNM_DIR') or os.path.join(HOME, 'scoop', 'apps', 'fnm', 'current')
     default = os.path.join(fnm, 'aliases', 'default')

@@ -27,7 +27,6 @@ effort = "medium"
 
 # Sol reviews run through codex-sol.sh at effort high (a T3 thread can't be given an effort).
 [sol]
-script = "~/Code/tools/codex-sol/codex-sol.sh"
 bash = "C:/Program Files/Git/bin/bash.exe"
 # Who reviews every PR (issue #76): "claude" (an Opus thread in T3 at [claude]'s model and effort,
 # through the usage gate) or "chatgpt" (Sol, the default; Opus steps in only while Sol is out of

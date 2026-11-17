@@ -342,7 +342,7 @@ class GhCli:
                         created_at=c['created_at'], body=c.get('body') or '')
                 for c in self._all(f'repos/{repo.github}/issues/{number}/comments?per_page=100')]
 
-    # --- writes: the review's automated posts (no go-ahead needed, ~/Code/AGENTS.md) --------
+    # --- writes: the review's automated posts (no go-ahead needed, docs/flow.md) --------
 
     def _send(self, method, endpoint, data) -> dict:
         out = self._run(['api', '-X', method, endpoint, '--input', '-'],
