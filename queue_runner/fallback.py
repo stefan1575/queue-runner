@@ -15,6 +15,8 @@ Sol. The differences:
   thread in an existing folder, and the runner's checkout of H is where the dependencies are
   linked in), told to work in that checkout and change nothing in the project folder. It starts
   as every Claude job does, its provider, model and effort named (`effort.claude_job`, #119),
+  but its provider is the T3 instance `[review] claude_provider` names, one with no MCP tools
+  (docs/reviews.md, A review has no outside tools), never [claude]'s or the project's default,
   and the effort its run used is read back.
 - **The label:** the comment, the `sol-review` status and the Review row name it and say why
   ("Opus 5.5 high, fallback while Sol is out", or "Opus 5.5 high, set in config.toml"), with the
@@ -95,7 +97,8 @@ def _preamble(workdir: str, project: str, kind: str = KIND) -> str:
         'outside the workdir but tests you add there. Don\'t post on GitHub, push, comment or '
         'open anything there: the queue runner posts your reply as the review comment. Your '
         'reply is the review, and its last sol-findings block is its verdict. Ask nothing: '
-        'nobody is there to answer.\n\n')
+        'nobody is there to answer. Run tests in the foreground and wait for them: a review has '
+        'no MCP tools, T3\'s included, so nothing waits on a background run for you.\n\n')
 
 
 class OpusThread:
@@ -120,7 +123,15 @@ class OpusThread:
         with open(os.path.join(os.path.dirname(reply), 'brief-opus.md'), 'w', encoding='utf-8',
                   newline='\n') as fh:
             fh.write(message)
-        flags = claude_job(f.config)   # its provider, model and effort named (#119)
+        # Always the no-tools instance, by name: never [claude]'s or the project's default, which
+        # have the build's tools (PR #127's review 1, F1).
+        provider = f.config.review_claude_provider
+        if not provider or provider == f.config.claude_provider:
+            raise SolFailed(f"The {self.name} didn't start: [review] claude_provider "
+                            f'({provider!r}) must name a T3 instance with no MCP tools, not '
+                            "[claude]'s (docs/reviews.md, A review has no outside tools).")
+        # Its model and effort named as every Claude job's are (#119), on the no-tools instance.
+        flags = {**claude_job(f.config), 'provider': provider}
         try:
             result = f.t3.start(repo.path, message, title=self.title, **flags)
         except T3Error as e:

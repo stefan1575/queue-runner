@@ -104,6 +104,28 @@ reviewed), `failed`, `out-of-usage` and `head-moved` (nothing counts).
   review --effort high` logs `reasoning effort: high` in `reply.md.log`. Each run is a fresh
   Codex session with no network: Sol can't post, so the runner posts (04). Files are read-only
   except the checkout and `deps_dir` (`--write`, `--writable-root`: Sol runs tests, below).
+- **A review has no outside tools, whoever reviews** (Stefan, 2026-11-17: reviews stay
+  provider-agnostic). A review reads the checkout and runs its tests; it reaches no account, no
+  browser and nothing outside the repo. Each reviewer's launcher holds to it, and a new one must:
+  - **Sol** (checked 2026-11-17: Sol reported no MCP tools): codex-sol.sh turns off ChatGPT's
+    apps and plugins (`features.apps`, `features.plugins`) and each MCP server `codex mcp list`
+    shows enabled, so nothing in `~/.codex/config.toml` reaches it: not Stefan's Work Chrome
+    (whose Playwright MCP lives in `~/Code/tools/browser`), not ClickUp, not the `codex_apps`
+    tools that deploy sites and change settings. It fails closed (`mcp_off`; PR #127's review 1,
+    F2): a list that fails, isn't JSON, holds a server it can't read or a name `-c` can't take
+    ends the job with exit 1 (a `failed` review) before Codex starts, never a run with a server
+    on. The list is parsed whole as JSON (`python3 -I`), never line by line, so no layout of it
+    can leave a server on (review 2, F3); with no `python3` the job stops too.
+    `tests/test_codex_sol_mcp.py` runs that block under Git's bash with a fake `codex`.
+  - **Opus** (checked 2026-11-17: the thread found no MCP tools, even with ToolSearch): it starts
+    on the T3 provider instance `[review] claude_provider` names, `claudeReviewer` in
+    `~/.t3/userdata/settings.json` (`providerInstances`; back the file up first), driver
+    `claudeAgent`, launch args `--strict-mcp-config --no-chrome --disallowedTools mcp__t3-code`
+    (Claude's own MCP config, Claude in Chrome and T3's own tools off) and environment
+    `ENABLE_CLAUDEAI_MCP_SERVERS=false` (the claude.ai connectors off). The key defaults to
+    `claudeReviewer`; it can't be empty or `[claude]`'s instance (The Opus fallback). Started by name, it runs
+    at `[claude]`'s model and effort, named at launch as every Claude job's are (#119), and the
+    effort is read back as before.
 - It runs under Git's bash by full path, through a parent bash that waits: codex-sol.sh's
   watchdog ends the run once its caller is gone. 75 minutes, then tree-killed and `failed`.
 - **Out of usage** ("hit your usage limit" in `run.out` or `reply.md.log`): `out-of-usage`, and
@@ -148,8 +170,12 @@ doesn't wait: a PR that needs a review gets one from a T3 thread on the Claude m
   says to work in the runner's checkout of H (where the dependencies are linked in), change
   nothing in the project folder, post and push nothing, and ask nothing. The thread is `Queue
   runner review: <repo>#<n>`, started and waited on through T3's MCP in the repo's project
-  folder with no worktree (T3 can't start one in an existing folder), its provider, model and
-  effort named as every Claude job's are (`docs/usage.md`, The effort). Its reply's last `sol-findings` block is the verdict
+  folder with no worktree (T3 can't start one in an existing folder), its model and effort named
+  as every Claude job's are (`docs/usage.md`, The effort), always on `[review] claude_provider`'s
+  no-tools instance (A review has no outside tools, above), never on `[claude]`'s or the
+  project's default, which have the build's tools. That key defaults to `claudeReviewer`; empty
+  or `[claude]`'s own is a config error, and a thread asked to start on either is a `failed`
+  review, never one with tools (PR #127's review 1, F1). Its reply's last `sol-findings` block is the verdict
   (`ledger.decide`), as for Sol. A thread T3 couldn't start, that failed, that waits for an
   answer or that left no reply is a `failed` review (two on a head leave it, as for Sol's).
 - **The label** (`fallback.label`): "Opus 5.5 high, fallback while Sol is out", with the effort
