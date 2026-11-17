@@ -268,6 +268,17 @@ class ReviewerTest(unittest.TestCase):
         self.assertIn('No screenshots are published for this PR', brief)
         self.assertIn('**Screenshots:**', brief)
 
+    def test_screenshots_that_cant_be_read_fail_the_review_not_block_the_pr(self):
+        # Sol's review 1 of PR #114, F2: a read failure isn't "none published".
+        from queue_runner.git import GitError
+        r = self.one_pr()
+        self.git.shots[20] = GitError('git ls-remote origin evidence failed (128): DNS')
+        r.review_pass()
+        [job] = self.jobs.jobs()
+        self.assertEqual(job.outcome, 'failed')
+        self.assertIn('ls-remote', job.error)
+        self.assertEqual(self.sol.briefs, [])
+
     def test_review_2_brief_has_the_change_since_the_last_review_its_findings_and_replies(self):
         replies = [Comment('claude', '2026-11-06T01:00:00Z', 'Before the review.'),
                    Comment('claude', '2026-11-07T00:00:00Z', 'F1 declined: no test fails.',

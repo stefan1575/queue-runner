@@ -5,7 +5,7 @@ import subprocess
 import tempfile
 import unittest
 
-from queue_runner.git import GitCli
+from queue_runner.git import GitCli, GitError
 
 
 def git(*args, cwd):
@@ -140,6 +140,50 @@ class GitCliTest(unittest.TestCase):
         self.assertEqual(sorted(os.listdir(checkouts)), ['repo-pr6.stale-20261116-010203',
                                                          'repo-pr7'])
         self.assertEqual(self.cli.sweep_stale(os.path.join(checkouts, 'none')), [])
+
+
+    # --- a PR's screenshots, on the repo's `evidence` branch (PR #114) ---------------------------
+
+    def origin_with_evidence(self, shots=None):
+        """`self.repo` gets an origin; with `shots`, an `evidence` branch holding them."""
+        origin = os.path.join(os.path.dirname(self.repo), 'origin')
+        git('clone', '-q', '--bare', self.repo, origin, cwd=self.repo)
+        git('remote', 'add', 'origin', origin, cwd=self.repo)
+        if shots:
+            git('checkout', '-q', '--orphan', 'evidence', cwd=self.wt)
+            git('rm', '-rfq', '.', cwd=self.wt)
+            for name, data in shots.items():
+                os.makedirs(os.path.dirname(os.path.join(self.wt, name)), exist_ok=True)
+                with open(os.path.join(self.wt, name), 'wb') as f:
+                    f.write(data)
+                git('add', name, cwd=self.wt)
+            git('commit', '-q', '-m', 'Shots', cwd=self.wt)
+            git('push', '-q', origin, 'evidence', cwd=self.wt)
+        return origin
+
+    def test_a_prs_published_screenshots_are_copied_out(self):
+        self.origin_with_evidence({'pr-5/after-busy-usage.png': b'PNG2',
+                                   'pr-5/before-busy-usage.png': b'PNG1',
+                                   'pr-6/after-x.png': b'other'})
+        dest = os.path.join(os.path.dirname(self.repo), 'run', 'evidence')
+        self.assertEqual(self.cli.evidence(self.repo, 5, dest),
+                         ['after-busy-usage.png', 'before-busy-usage.png'])
+        with open(os.path.join(dest, 'before-busy-usage.png'), 'rb') as f:
+            self.assertEqual(f.read(), b'PNG1')
+
+    def test_no_evidence_branch_or_no_shots_for_the_pr_is_none(self):
+        self.origin_with_evidence()
+        dest = os.path.join(os.path.dirname(self.repo), 'run', 'evidence')
+        self.assertEqual(self.cli.evidence(self.repo, 5, dest), [])
+
+    def test_an_unreadable_origin_is_a_git_error_not_no_screenshots(self):
+        # Sol's review 1, F2: a fetch failing for any other reason (network, auth) mustn't read as
+        # "none published", which would block the PR for shots it has.
+        self.origin_with_evidence({'pr-5/after-x.png': b'PNG'})
+        git('remote', 'set-url', 'origin', os.path.join(os.path.dirname(self.repo), 'gone'),
+            cwd=self.repo)
+        with self.assertRaises(GitError):
+            self.cli.evidence(self.repo, 5, os.path.join(os.path.dirname(self.repo), 'run'))
 
 
 def deny_delete(test, folder):

@@ -91,11 +91,19 @@ class GitCli:
 
     def evidence(self, path: str, number: int, dest: str) -> list[str]:
         """Copies the PR's screenshots, `pr-<number>/` on the repo's `evidence` branch
-        (~/Code/docs/evidence.md), into `dest`; returns their names. No branch or none: []."""
+        (~/Code/docs/evidence.md), into `dest`; returns their names. No branch or none: [].
+        Raises GitError when origin can't be read (network, auth): that isn't "none published",
+        which would block the PR for shots it has (PR #114 review 1, F2), so the review fails and
+        is tried again."""
         import os
         ref = 'refs/queue-runner/evidence'
-        if self._run(['-C', path, 'fetch', '--quiet', 'origin', f'+refs/heads/evidence:{ref}'])[0]:
+        code, _, err = self._run(['-C', path, 'ls-remote', '--exit-code', '--heads', 'origin',
+                                  'refs/heads/evidence'])
+        if code == 2:   # origin answered and has no such branch
             return []
+        if code:
+            raise GitError(f'git ls-remote origin evidence failed ({code}): {err.strip()}')
+        self._ok(['-C', path, 'fetch', '--quiet', 'origin', f'+refs/heads/evidence:{ref}'])
         names = [n for n in self._ok(['-C', path, 'ls-tree', '--name-only', ref,
                                       f'pr-{number}/']).splitlines() if n]
         for name in names:
