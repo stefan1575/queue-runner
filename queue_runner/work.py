@@ -15,6 +15,8 @@ import re
 import threading
 from dataclasses import dataclass, field
 
+from .usage import failing_since
+
 QUEUE_EMPTY = {
     'claude': "Nothing to start: no PR needs a fix round, and no repo has an unblocked "
               "ready-for-agent issue that isn't already being built or held.",
@@ -251,7 +253,8 @@ def _writer(j) -> str:
 
 class Reader:
     """The last read of each served repo, for the snapshot. A repo GitHub couldn't be read keeps
-    what its last good read found, and `stale` says since when and why."""
+    what its last good read found, and `stale` says since when, why, and since when its reads
+    have failed."""
 
     def __init__(self, config, github, git, jobs, clock):
         self.config, self.github, self.git, self.jobs, self.clock = config, github, git, jobs, clock
@@ -272,7 +275,8 @@ class Reader:
                 with self._lock:
                     self._stale[repo.name] = (self._whole.get(repo.name),
                                               f"{repo.name}: couldn't read its work "
-                                              f'({type(e).__name__}: {e})')
+                                              f'({type(e).__name__}: {e})',
+                                              failing_since(self._stale, repo.name, self.clock()))
                 continue
             now = self.clock()
             with self._lock:
@@ -280,7 +284,8 @@ class Reader:
                 # its last whole read) until a read has every part.
                 self._good[repo.name] = _at(kept(got, self._good.get(repo.name)), now)
                 if got.failed:
-                    self._stale[repo.name] = (self._whole.get(repo.name), got.errors[0])
+                    self._stale[repo.name] = (self._whole.get(repo.name), got.errors[0],
+                                              failing_since(self._stale, repo.name, now))
                 else:
                     self._whole[repo.name] = now
                     self._stale.pop(repo.name, None)
@@ -875,14 +880,14 @@ def stale_github(sources: list[dict], stale: dict) -> None:
     if not stale or src is None:
         return
     names = ', '.join(sorted(stale))
-    whens = [when for when, _ in stale.values() if when is not None]
-    error = next((e for _, e in stale.values() if e), '')
+    whens = [v[0] for v in stale.values() if v[0] is not None]
+    error = next((v[1] for v in stale.values() if v[1]), '')
     text = (f'The queues, issues and PRs are as GitHub last showed them for {names}: some may '
             'have changed since.')
     earlier = None if src['ok'] else src
     at = min(whens).astimezone().isoformat(timespec='seconds')         if len(whens) == len(stale) else None
     if earlier is not None:   # the Inbox's line was there first: both are said, the older time
         at = min(filter(None, (at, earlier['checked_at'])), default=None)             if at and earlier['checked_at'] else None
-    src.update(ok=False, note=earlier['note'] if earlier else _sentence(
+    src.update(ok=False, retrying=None, note=earlier['note'] if earlier else _sentence(
         error.split(': ', 1)[-1]) or "Couldn't be read", checked_at=at,
         affects=f'{earlier["affects"]} {text}' if earlier and earlier.get('affects') else text)

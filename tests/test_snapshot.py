@@ -384,6 +384,88 @@ class SourcesAndRunnerTest(unittest.TestCase):
         self.assertIn('Queue runner.lnk', snap['start_hint'])
 
 
+class ReconnectingTest(unittest.TestCase):
+    """Stefan, 2026-11-17: the PC slept 05:58 to 12:05, and the first reads after it woke failed
+    (gh timed out, Claude's token had expired in its sleep, Codex's app server started slow), so
+    the page went red, and the next reads answered. A failure is red only once it has lasted
+    `usage.SHOW_AFTER`; until then it's reconnecting, its last good reading shown."""
+
+    def woke(self, minutes):
+        """The snapshot `minutes` after the first reads after the wake failed."""
+        failed = NOW - datetime.timedelta(minutes=minutes)
+        slept = failed - datetime.timedelta(hours=6)
+        usage = Usage(Window(0, None), Window(9, WEEK_RESET))
+        sol = SolLimits('plus', (SolWindow(300, 0.0, FIVE_RESET),))
+        return snapshot.build(facts(
+            calls={'github': snapshot.Call(failed, False, 'Command timed out after 120 seconds', slept, failed),
+                   'claude_usage': snapshot.Call(failed, False, 'the usage endpoint answered HTTP 401', slept, failed),
+                   'sol_usage': snapshot.Call(failed, False, 'Codex did not answer initialize in time', slept, failed)},
+            claude_usage=snapshot.Reading(usage, slept, 'the usage endpoint answered HTTP 401', login=True, since=failed),
+            sol_usage=snapshot.Reading(sol, slept, 'Codex did not answer initialize in time', since=failed),
+            inbox_stale={'leads-dashboard': (slept, 'leads-dashboard: gh timed out', failed)}))
+
+    def test_just_after_a_wake_nothing_is_red_and_each_says_it_is_reconnecting(self):
+        snap = self.woke(minutes=2)
+        for s in snap['sources']:
+            if s['id'] != 't3':
+                with self.subTest(s['id']):
+                    self.assertEqual((s['ok'], s['note'], 'affects' in s), (True, 'Reconnecting', False))
+                    self.assertEqual(when(s['retrying']), NOW - datetime.timedelta(minutes=2))
+        for id in ('claude', 'sol'):
+            with self.subTest(id):
+                p = plan(snap, id)
+                self.assertIsNone(p['error'])
+                self.assertEqual(when(p['retrying']), NOW - datetime.timedelta(minutes=2))
+                self.assertTrue(p['windows'])   # the last good reading stays
+
+    def test_still_failing_ten_minutes_on_it_is_red_as_before(self):
+        snap = self.woke(minutes=10)
+        github = next(s for s in snap['sources'] if s['id'] == 'github')
+        self.assertFalse(github['ok'])
+        self.assertIsNone(github['retrying'])
+        self.assertIn('The Inbox is as GitHub last showed it', github['affects'])
+        self.assertEqual(plan(snap, 'claude')['error'], 'The usage endpoint answered HTTP 401.')
+        claude = next(s for s in snap['sources'] if s['id'] == 'claude_usage')
+        self.assertFalse(claude['ok'])
+
+    def test_a_lasting_repo_failure_is_red_though_another_repo_is_only_reconnecting(self):
+        # Review 1, F1: one repo's reads have failed 20 minutes, another's 2, and GitHub's
+        # latest call answered (or failed 2 minutes ago): the lasting one is red, not
+        # reconnecting, for the Inbox's reads and the work's alike.
+        lasting, recent = NOW - datetime.timedelta(minutes=20), NOW - datetime.timedelta(minutes=2)
+        stale = {'leads-dashboard': (None, 'leads-dashboard: gh timed out', lasting),
+                 'queue-runner': (None, 'queue-runner: gh timed out', recent)}
+        calls = {'answered': snapshot.Call(NOW, True, None, NOW),
+                 'failed recently': snapshot.Call(recent, False, 'gh timed out', recent - datetime.timedelta(hours=1), recent)}
+        for which in ('inbox_stale', 'work_stale'):
+            for name, call in calls.items():
+                with self.subTest(which, call=name):
+                    snap = snapshot.build(facts(calls={'github': call}, **{which: stale}))
+                    github = self.source(snap)
+                    self.assertFalse(github['ok'])
+                    self.assertIsNone(github['retrying'])
+                    self.assertIn('leads-dashboard', github['affects'])
+
+    def source(self, snap, id='github'):
+        return next(s for s in snap['sources'] if s['id'] == id)
+
+    def test_chatgpt_failing_beside_a_recent_reading_stands_as_claudes_does(self):
+        # Its numbers are 20 minutes old: under 30, so they stand though the reads have failed
+        # for 15 minutes; it's still reconnecting, not an error.
+        sol = SolLimits('plus', (SolWindow(300, 0.0, FIVE_RESET),))
+        read = snapshot.Reading(sol, NOW - datetime.timedelta(minutes=20), 'Codex did not answer',
+                                since=NOW - datetime.timedelta(minutes=15))
+        p = plan(snapshot.build(facts(sol_usage=read)), 'sol')
+        self.assertEqual((p['error'], when(p['retrying'])), (None, NOW - datetime.timedelta(minutes=15)))
+
+    def test_a_plan_not_read_yet_that_just_failed_says_not_read_yet(self):
+        read = snapshot.Reading(None, None, 'Codex did not answer', since=NOW)
+        p = plan(snapshot.build(facts(sol_usage=read, claude_usage=read)), 'sol')
+        self.assertEqual(p['error'], 'Not read yet.')
+        self.assertEqual(plan(snapshot.build(facts(claude_usage=read)), 'claude')['error'],
+                         'Not read yet.')
+
+
 def busy_facts():
     """A real snapshot with everything in it: both lanes working, usage read, every source called."""
     call = snapshot.Call(NOW, True, None, NOW)
@@ -490,8 +572,16 @@ class CallsTest(unittest.TestCase):
         gh.down = True
         with self.assertRaises(RuntimeError):
             watched.open_pulls('r')
+        failed = clock()
         self.assertEqual(calls.all()['github'],
-                         snapshot.Call(clock(), False, 'gh api failed (1): HTTP 503', good))
+                         snapshot.Call(failed, False, 'gh api failed (1): HTTP 503', good, failed))
+        clock.tick(minutes=5)
+        with self.assertRaises(RuntimeError):
+            watched.open_pulls('r')
+        self.assertEqual(calls.all()['github'].since, failed)   # still failing since the first
+        gh.down = False
+        watched.open_pulls('r')
+        self.assertIsNone(calls.all()['github'].since)
 
 
 class WatchTest(unittest.TestCase):
@@ -516,7 +606,7 @@ class WatchTest(unittest.TestCase):
         self.assertTrue(watch.due(300))
         with self.assertRaises(UsageError):
             watch.read()
-        self.assertEqual(watch.reading(), snapshot.Reading(first, NOW, 'HTTP 401'))
+        self.assertEqual(watch.reading(), snapshot.Reading(first, NOW, 'HTTP 401', since=clock()))
         self.assertFalse(calls.all()['claude_usage'].ok)
 
     def test_a_read_that_returns_when_it_was_read_keeps_that_time(self):

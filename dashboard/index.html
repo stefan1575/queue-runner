@@ -1831,10 +1831,16 @@ function meter(w, full) {
     <span class="pct">${known ? left + "% left" : "?"}</span>
     <span class="when"${w.resets_at ? ` title="${esc(stamp(w.resets_at))}"` : ""}>${w.resets_at ? `Resets ${esc(clock(w.resets_at))}` : "Not started"}${full && !w.gates ? `. ${esc(w.note || "Not used by the runner.")}` : ""}</span></div>`;
 }
+// A source or plan whose calls failed, but not for long enough to be red: the runner tries again
+// (`retrying`, since when). The first calls after the PC wakes fail and the next ones answer.
+const reconnecting = (x) => `Reconnecting since ${clock(x.retrying)}`;
+// A source that's failing (not ok) is red whatever its `retrying` says.
+const retrying = (x) => x.ok && !!x.retrying;
+const dotOf = (x, down) => (down || retrying(x) ? "" : x.ok ? "ok" : "bad");
 // A plan's reset credits (ticket 42): said only while it has some. Redeeming one is T3's.
 const resetsLeft = (p) => (p.resets && p.resets.available > 0 ? plural(p.resets.available, "reset", "resets") + " left, " : "");
 const plan = (p, full) => `<div class="plan">
-    <p class="plan-name">${who(p.provider, p.name)}<span class="read">${p.plan ? esc(p.plan) + ", " : ""}${resetsLeft(p)}${p.read_at ? `<span title="${esc(stamp(p.read_at))}, ${esc(ago(p.read_at))} ago">read ${esc(hm(p.read_at))}</span>` : "not read yet"}</span></p>
+    <p class="plan-name">${who(p.provider, p.name)}<span class="read">${p.plan ? esc(p.plan) + ", " : ""}${resetsLeft(p)}${p.read_at ? `<span title="${esc(stamp(p.read_at))}, ${esc(ago(p.read_at))} ago">read ${esc(hm(p.read_at))}</span>` : "not read yet"}${p.retrying && !p.error ? `, <span title="${esc(reconnecting(p))}: the runner tries again">reconnecting</span>` : ""}</span></p>
     ${p.error ? `<p class="plan-note bad">${esc(p.error)}</p>` : ""}
     ${(p.windows || []).map((w) => meter(w, full)).join("")}
     ${(p.windows || []).filter((w) => w.reserve).map((w) => `<p class="plan-note">${w.reserve}% of the week is kept for you.</p>`).join("")}
@@ -1847,7 +1853,7 @@ function status() {
   const down = frozen(), all = snap.sources || [], bad = all.filter((x) => !x.ok);
   const known = SOURCE_GROUPS.map((g) => g[0]);
   const groups = [...SOURCE_GROUPS, ["", "Other"]].map(([id, label]) => [label, all.filter((x) => (known.includes(x.group) ? x.group : "") === id)]).filter((g) => g[1].length);
-  const one = (x) => `<span class="${x.ok || down ? "" : "no"}" title="${esc(x.name)}: ${esc(x.note || "")}"><i class="dot ${down ? "" : x.ok ? "ok" : "bad"}"></i>${esc(x.short || x.name)}</span>`;
+  const one = (x) => `<span class="${x.ok || down ? "" : "no"}" title="${esc(x.name)}: ${esc(retrying(x) ? reconnecting(x) : x.note || "")}"><i class="dot ${dotOf(x, down)}"></i>${esc(x.short || x.name)}</span>`;
   return `<a class="card status${down ? " down" : ""}" href="${esc(href({ page: "settings", pr: null }))}" data-act="page" data-page="settings" title="Connections are in Settings">
     <span class="h-top"><i class="dot ${down ? "bad" : "ok"}"></i><b>${down ? "Runner silent" : "Runner running"}</b></span>
     ${(down ? snap.written_at : (snap.runner || {}).started_at) ? `<span class="h-when">since ${esc(stamp(down ? snap.written_at : snap.runner.started_at))}</span>` : ""}
@@ -1890,6 +1896,7 @@ function refreshNotes() {
   const at = refreshAsked();
   if (!at || refreshPending() || !snap.usage_refresh) return [];
   return (snap.usage || []).flatMap((p) => p.error ? [{ bad: true, text: `The refresh couldn't read ${p.name}: ${p.error}` }]
+    : p.retrying ? [{ bad: false, text: `${p.name}: reconnecting since ${clock(p.retrying)}${p.read_at ? `; last read ${hm(p.read_at)}` : ""}.` }]
     : p.read_at && p.next_read_at && ms(p.read_at) < ms(at) ? [{ bad: false, text: `${p.name}: read ${ago(p.read_at)} ago. Next read from ${hm(p.next_read_at)}.` }]
     : []);
 }
@@ -1949,7 +1956,7 @@ function settings() {
     <section class="card"><header class="card-head"><h2>Connections</h2></header>
       <ul class="rows">
         <li><i class="dot ${stale ? "bad" : "ok"}"></i><span class="strong">Runner</span><span class="${stale ? "no" : "mute"}">${stale ? `Silent since ${esc(clock(snap.written_at))}` : `Up${r.started_at ? ` since ${esc(clock(r.started_at))}` : ""}, process ${esc(r.pid ?? "unknown")}, on commit <span class="sha">${esc(r.commit)}</span>`}</span><span class="dim small">wrote ${esc(clock(snap.written_at))}</span></li>
-        ${(snap.sources || []).map((s) => `<li><i class="dot ${stale ? "" : s.ok ? "ok" : "bad"}"></i><span class="strong">${esc(s.name)}</span><span class="${s.ok ? "mute" : "no"}">${esc(s.note || (s.ok ? "ok" : "failing"))}${!s.ok && s.affects ? `. ${esc(s.affects)}` : ""}</span><span class="dim small">${s.checked_at ? `${s.ok ? "checked" : "last good"} ${esc(clock(s.checked_at))}` : s.ok ? "" : "never answered"}</span></li>`).join("")}
+        ${(snap.sources || []).map((s) => `<li><i class="dot ${dotOf(s, stale)}"></i><span class="strong">${esc(s.name)}</span><span class="${s.ok ? "mute" : "no"}">${esc(retrying(s) ? reconnecting(s) : s.note || (s.ok ? "ok" : "failing"))}${!s.ok && s.affects ? `. ${esc(s.affects)}` : ""}</span><span class="dim small">${s.checked_at ? `${s.ok && !s.retrying ? "checked" : "last good"} ${esc(clock(s.checked_at))}` : s.ok && !s.retrying ? "" : "never answered"}</span></li>`).join("")}
       </ul></section>`;
 }
 

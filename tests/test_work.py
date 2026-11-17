@@ -71,7 +71,8 @@ class WorkCase(unittest.TestCase):
             reader.read()
         kw.setdefault('repos', self.config.repos)
         kw.setdefault('released', frozenset(self.jobs.released_ids()))
-        return snapshot.build(snapshot.Facts(now=NOW, jobs=self.jobs.jobs(), work=reader.last(),
+        kw.setdefault('now', NOW)
+        return snapshot.build(snapshot.Facts(jobs=self.jobs.jobs(), work=reader.last(),
                                              work_stale=reader.stale(), **kw))
 
 
@@ -432,7 +433,14 @@ class GitHubDownTest(WorkCase):
         reader.read()
         self.gh.fail.add('work_issues')
         reader.read()
-        snap = self.snap(reader, calls={'github': snapshot.Call(NOW, True, None, NOW)})
+        failed = NOW + datetime.timedelta(minutes=5)
+        calls = {'github': snapshot.Call(NOW, True, None, NOW)}
+        # Just failed: GitHub is reconnecting, not red (the first reads after a wake fail).
+        snap = self.snap(reader, calls=calls, now=failed + datetime.timedelta(minutes=1))
+        src = next(s for s in snap['sources'] if s['id'] == 'github')
+        self.assertEqual((src['ok'], src['note'], 'affects' in src), (True, 'Reconnecting', False))
+        self.assertEqual(datetime.datetime.fromisoformat(src['retrying']), failed)
+        snap = self.snap(reader, calls=calls, now=failed + datetime.timedelta(minutes=10))
         self.assertEqual(refs(lane(snap, 'sol')['queue']), [('review', 'PR #6')])
         src = next(s for s in snap['sources'] if s['id'] == 'github')
         self.assertFalse(src['ok'])
@@ -454,7 +462,8 @@ class GitHubDownTest(WorkCase):
             raise RuntimeError('HTTP 503')
         self.gh.ready_issues = fail
         reader.read()
-        got = self.snap(reader, calls={'github': snapshot.Call(NOW, True, None, NOW)})
+        got = self.snap(reader, calls={'github': snapshot.Call(NOW, True, None, NOW)},
+                        now=NOW + datetime.timedelta(minutes=15))   # failing for 10 minutes
         self.assertEqual(lane(got, 'claude')['queue'], lane(before, 'claude')['queue'])
         self.assertEqual(got['issues'][0]['state'], 'ready')
         self.assertIn('first', reader.stale())
@@ -541,7 +550,7 @@ class GitHubDownTest(WorkCase):
         self.gh.fail.add('work_issues')
         reader = self.reader()
         reader.read()
-        snap = self.snap(reader)
+        snap = self.snap(reader, now=NOW + datetime.timedelta(minutes=10))
         self.assertEqual(lane(snap, 'claude')['queue'], [])
         src = next(s for s in snap['sources'] if s['id'] == 'github')
         self.assertIsNone(src['checked_at'])

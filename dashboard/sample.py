@@ -31,6 +31,7 @@ STATES = {
     "repo-stopped": "leads-dashboard is stopped: its running jobs finish, then only queue-runner is worked on",
     "side-by-side": "Claude runs a job in each repo at once",
     "usage-stale": "Claude's usage hasn't been read for 40 minutes: every call answered 429",
+    "reconnecting": "The PC woke 3 minutes ago: GitHub, Claude and ChatGPT haven't answered yet, so each is reconnecting",
     "inbox-unread": "The runner just started: the Inbox hasn't been read yet (asks null)",
     "stale": "Two threads waiting on you went cold: their Inbox items open fresh ones",
 }
@@ -78,11 +79,12 @@ def build(name: str = DEFAULT, base: datetime | None = None, control: dict | Non
         "sources": [
             # Only what the runner depends on, the real snapshot's `SOURCES` (ticket 43). `short` is
             # the name beside its dot; `group` sorts them on the page: "provider", "local" (on
-            # this PC) or "external"
-            {"id": "github", "group": "external", "name": "GitHub", "short": "GitHub", "ok": True, "note": "gh as stefan1575", "checked_at": ago(1)},
-            {"id": "t3", "group": "local", "name": "T3 Code", "short": "T3 Code", "ok": True, "note": "server up", "checked_at": ago(1)},
-            {"id": "claude_usage", "group": "provider", "name": "Claude usage", "short": "Claude", "ok": True, "note": "read", "checked_at": ago(1)},
-            {"id": "sol_usage", "group": "provider", "name": "ChatGPT usage", "short": "ChatGPT", "ok": True, "note": "read", "checked_at": ago(9)},
+            # this PC) or "external". `retrying`: since when its calls have failed, while that's
+            # too short to be red (`usage.SHOW_AFTER`): the page says it's reconnecting
+            {"id": "github", "group": "external", "name": "GitHub", "short": "GitHub", "ok": True, "note": "gh as stefan1575", "checked_at": ago(1), "retrying": None},
+            {"id": "t3", "group": "local", "name": "T3 Code", "short": "T3 Code", "ok": True, "note": "server up", "checked_at": ago(1), "retrying": None},
+            {"id": "claude_usage", "group": "provider", "name": "Claude usage", "short": "Claude", "ok": True, "note": "read", "checked_at": ago(1), "retrying": None},
+            {"id": "sol_usage", "group": "provider", "name": "ChatGPT usage", "short": "ChatGPT", "ok": True, "note": "read", "checked_at": ago(9), "retrying": None},
         ],
         # `stopped` (ticket 37): when Stefan stopped the repo (`at`), or null. A stopped repo
         # gets nothing from either lane; its asks stay in the Inbox.
@@ -229,9 +231,10 @@ def build(name: str = DEFAULT, base: datetime | None = None, control: dict | Non
             # A model's own weekly window (Fable's here) is listed only when the account has one.
             # `resets`: the reset credits a plan has left (ticket 42), or None when it has none to give.
             # `next_read_at` (issue 66): when Claude's usage endpoint may be asked again (once every
-            # 5 minutes), while that's ahead; None for a plan read whenever it's asked.
+            # 5 minutes), while that's ahead; None for a plan read whenever it's asked. `retrying`:
+            # since when its reads have failed, while that isn't shown as an error.
             {"id": "claude", "provider": "claude", "name": "Claude", "plan": None, "read_at": ago(1), "error": None,
-             "resets": {"available": 2}, "next_read_at": ahead(4), "windows": [
+             "resets": {"available": 2}, "next_read_at": ahead(4), "retrying": None, "windows": [
                 {"id": "five_hour", "label": "Session", "used": 38, "resets_at": ahead(60), "gates": True},
                 {"id": "week", "label": "Weekly", "used": 46, "resets_at": ahead(60 * 49.7), "gates": True,
                  "reserve": 5, "reserve_opens_at": ahead(60 * 25.7)},
@@ -239,7 +242,7 @@ def build(name: str = DEFAULT, base: datetime | None = None, control: dict | Non
                  "gates": False, "note": "The runner doesn't use Fable."},
             ]},
             {"id": "sol", "provider": "chatgpt", "name": "ChatGPT", "plan": None, "read_at": ago(9), "error": None,
-             "resets": None, "next_read_at": None, "windows": [
+             "resets": None, "next_read_at": None, "retrying": None, "windows": [
                 {"id": "five_hour", "label": "Session", "used": 26, "resets_at": ahead(94), "gates": True},
                 {"id": "week", "label": "Weekly", "used": 6, "resets_at": ahead(60 * 152.9), "gates": True},
             ]},
@@ -592,6 +595,11 @@ def _vary(snap: dict, name: str, ago, ahead) -> None:
     elif name == "github-down":
         _source(snap, "github").update(ok=False, note="No answer since then (HTTP 503)", checked_at=ago(18),
                                        affects="Asks, PRs and the work list are as they were then; some may be missing.")
+    elif name == "reconnecting":   # a failure is red only once it lasts (usage.SHOW_AFTER)
+        for id, good in (("github", 362), ("claude_usage", 361), ("sol_usage", 361)):
+            _source(snap, id).update(note="Reconnecting", checked_at=ago(good), retrying=ago(3))
+        for p, good in zip(snap["usage"], (361, 361)):
+            p.update(read_at=ago(good), retrying=ago(3), next_read_at=ahead(2) if p["id"] == "claude" else None)
     elif name == "usage-stale":   # a failure shows only past 30 minutes (issue 66)
         snap["usage"][0].update(read_at=ago(40), next_read_at=ahead(3), error=(
             "The usage endpoint answered HTTP 429; the reading is over 30 minutes old, so no Claude job "

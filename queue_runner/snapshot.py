@@ -26,7 +26,7 @@ from . import control
 from .favicon import repo_icon
 from .gate import RECENT, RESERVE_RELEASE, SAMPLES, Knob
 from .state import when
-from .usage import STALE_AFTER, Reading
+from .usage import STALE_AFTER, Reading, lasted
 
 VERSION = 1
 WRITE_EVERY = 30    # seconds: the longest the runner goes between writes
@@ -72,12 +72,13 @@ WINDOW_LABELS = {300: ('five_hour', 'Session'), 10080: ('week', 'Weekly')}
 
 @dataclass(frozen=True)
 class Call:
-    """The last real call of one kind (a source): when, whether it answered, and when one last
-    did."""
+    """The last real call of one kind (a source): when, whether it answered, when one last
+    did, and since when the calls have failed (None: answering, or not known)."""
     at: datetime.datetime
     ok: bool
     note: str | None                       # what went wrong, when it failed
     good_at: datetime.datetime | None      # the last call that answered
+    since: datetime.datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -160,11 +161,31 @@ def build(facts: Facts) -> dict:
     }
     snap.update(_work(facts))
     from .asks import stale_github
-    stale_github(snap['sources'], facts.inbox_stale)   # the Inbox from an older read, said
-    if facts.work_stale:
-        from .work import stale_github as work_stale
-        work_stale(snap['sources'], facts.work_stale)   # ... and the work lists
+    # The Inbox from an older read, said, once GitHub has failed for it long enough to show
+    _reconnecting(snap['sources'], facts.inbox_stale, facts.work_stale, now=facts.now)
+    stale_github(snap['sources'], _lasting(facts.inbox_stale, facts.now))
+    if work_stale := _lasting(facts.work_stale, facts.now):
+        from .work import stale_github as said
+        said(snap['sources'], work_stale)   # ... and the work lists
     return snap
+
+
+def _reconnecting(sources: list[dict], *stales, now) -> None:
+    """A repo GitHub couldn't be read for, but not long enough to show, makes the GitHub
+    source retrying (since the first such read) though its latest call answered."""
+    since = [v[2] for stale in stales for v in stale.values()
+             if len(v) > 2 and v[2] is not None and not lasted(v[2], now)]
+    src = next((s for s in sources if s['id'] == 'github'), None)
+    if since and src is not None and src['ok']:
+        first = min(since)
+        if src['retrying'] is None or first < datetime.datetime.fromisoformat(src['retrying']):
+            src.update(note='Reconnecting', retrying=_iso(first))
+
+
+def _lasting(stale: dict, now) -> dict:
+    """The stale repos (`inbox.Reader.stale`, `work.Reader.stale`) whose reads have failed long
+    enough to show (`usage.SHOW_AFTER`)."""
+    return {repo: v for repo, v in stale.items() if lasted(v[2] if len(v) > 2 else None, now)}
 
 
 def _repos(facts: Facts) -> list[dict]:
@@ -357,36 +378,43 @@ def _runner(facts: Facts) -> dict:
 
 
 def _sources(facts: Facts) -> list[dict]:
+    """Each source's last call. One failing isn't red at once: while its calls have failed for
+    less than `usage.SHOW_AFTER`, or beside a plan's recent reading (issue 66), it's `ok` and
+    `retrying` says since when (the first calls after the PC wakes fail, and the next answer)."""
     out = []
     for id, group, name, short, answered in SOURCES:
         call = facts.calls.get(id)
+        retrying = None
         if call is None:
             note, ok, at = 'Not called yet', True, None
         elif call.ok:
             note, ok, at = answered, True, call.at
-        elif id == 'claude_usage' and _claude_stands(facts):
-            # A failed call beside a recent Claude reading isn't shown (issue 66): it stands.
-            note, ok, at = answered, True, call.good_at
+        elif not lasted(call.since, facts.now) or (
+                id in USAGE_SOURCES and _stands(getattr(facts, USAGE_SOURCES[id]), facts.now)):
+            note, ok, at, retrying = 'Reconnecting', True, call.good_at, call.since or call.at
         else:   # the page shows a failing source's time as its last good one
             note, ok, at = call.note or 'Failed', False, call.good_at
         out.append({'id': id, 'group': group, 'name': name, 'short': short, 'ok': ok,
-                    'note': note, 'checked_at': _iso(at)})
+                    'note': note, 'checked_at': _iso(at), 'retrying': _iso(retrying)})
     return out
 
 
-def _claude_stands(facts: Facts) -> bool:
-    """Whether Claude's reading stands though its latest call failed: it's good, under
-    `STALE_AFTER` old, and the login isn't the trouble (`usage.Reading.failing`)."""
-    r = facts.claude_usage
-    return r is not None and r.value is not None and not r.failing(facts.now)
+USAGE_SOURCES = {'claude_usage': 'claude_usage', 'sol_usage': 'sol_usage'}   # source: its Facts
 
 
-def _plan(id: str, provider: str, name: str, reading: Reading | None, windows,
+def _stands(r: Reading | None, now) -> bool:
+    """Whether a plan's reading stands though its latest call failed: it's good and its error
+    isn't worth showing yet (`usage.Reading.failing`)."""
+    return r is not None and r.value is not None and not r.failing(now)
+
+
+def _plan(id: str, provider: str, name: str, reading: Reading | None, windows, now,
           plan=None, error: str | None = None, next_read_at=None) -> dict:
     """`resets` (ticket 42): the reset credits the plan has left, from the same read as its
     windows, or None when it has none to give (or isn't read yet). `error`: what to say instead
     of the reading's own ('' for nothing). `next_read_at` (issue 66): when the endpoint may be
-    asked again, while that's ahead; None for a plan that's read whenever it's asked."""
+    asked again, while that's ahead; None for a plan that's read whenever it's asked.
+    `retrying`: since when its reads have failed, while that isn't shown as an error."""
     good = reading is not None and reading.value is not None
     if error is None:
         error = reading.error if reading and reading.error else None if good else 'Not read yet'
@@ -395,7 +423,9 @@ def _plan(id: str, provider: str, name: str, reading: Reading | None, windows,
             'read_at': _iso(reading.at) if good else None,
             'error': _sentence(error) if error else None, 'windows': windows,
             'resets': {'available': resets} if resets is not None else None,
-            'next_read_at': _iso(next_read_at)}
+            'next_read_at': _iso(next_read_at),
+            'retrying': _iso(reading.since or reading.at) if reading and reading.error
+            and not reading.failing(now) else None}
 
 
 def _claude_usage(facts: Facts) -> dict:
@@ -411,7 +441,8 @@ def _claude_usage(facts: Facts) -> dict:
              'reserve_opens_at': _iso(week.resets_at - RESERVE_RELEASE)
              if week.resets_at else None},
         ]
-    return _plan('claude', 'claude', 'Claude', reading, windows, error=_claude_error(facts),
+    return _plan('claude', 'claude', 'Claude', reading, windows, facts.now,
+                 error=_claude_error(facts),
                  next_read_at=getattr(reading, 'next_at', None))
 
 
@@ -422,7 +453,7 @@ def _claude_error(facts: Facts) -> str:
     if r is None or r.value is None and r.error is None:
         return 'Not read yet'
     if not r.failing(facts.now):
-        return ''
+        return '' if r.value is not None else 'Not read yet'
     if r.value is not None and not r.login:
         return (f'{r.error}; the reading is over {STALE_AFTER.total_seconds() / 60:g} minutes '
                 'old, so no Claude job starts until a read answers')
@@ -438,7 +469,9 @@ def _sol_usage(facts: Facts) -> dict:
         windows.append({'id': id, 'label': label, 'used': w.used, 'resets_at': _iso(w.resets_at),
                         'gates': True})
     plan = limits.plan.title() if limits and limits.plan else None
-    return _plan('sol', 'chatgpt', 'ChatGPT', reading, windows, plan)
+    # Its error shows as Claude's does: not beside a recent reading, nor before it has lasted.
+    error = None if reading is None or reading.failing(facts.now) else         '' if reading.value is not None else 'Not read yet'
+    return _plan('sol', 'chatgpt', 'ChatGPT', reading, windows, facts.now, plan, error=error)
 
 
 def _costs(facts: Facts) -> list[dict]:
@@ -475,7 +508,8 @@ class Calls:
             now = self.clock()
             last = self._calls.get(id)
             good = now if ok else (last.good_at if last else None)
-            self._calls[id] = Call(now, ok, None if ok else note, good)
+            since = None if ok else (last.since or last.at) if last and not last.ok else now
+            self._calls[id] = Call(now, ok, None if ok else note, good, since)
 
     def all(self) -> dict[str, Call]:
         with self._lock:
@@ -525,6 +559,7 @@ class Watch:
         self._good: Reading | None = None
         self._error: str | None = None
         self._tried: datetime.datetime | None = None
+        self._since: datetime.datetime | None = None   # the first failure since one answered
 
     def read(self):
         with self._lock:
@@ -533,10 +568,11 @@ class Watch:
                 got = self.read_fn()
             except Exception as e:
                 self._error = _short(e)
+                self._since = self._since or self._tried
                 self.calls.record(self.id, False, self._error)
                 raise
             at, value = got if self.timed else (self._tried, got)
-            self._good, self._error = Reading(value, at), None
+            self._good, self._error, self._since = Reading(value, at), None, None
             self.calls.record(self.id, True)
             return value
 
@@ -545,7 +581,7 @@ class Watch:
             if self._good is None and self._error is None:
                 return None
             good = self._good or Reading(None, None)
-            return Reading(good.value, good.at, self._error)
+            return Reading(good.value, good.at, self._error, since=self._since)
 
     def due(self, seconds: float) -> bool:
         with self._lock:

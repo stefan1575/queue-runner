@@ -127,12 +127,30 @@ python3 -m dashboard    # http://queue.localhost/ is the runner's; http://localh
   now. The button spins until the request is taken (the page reads every 2 seconds meanwhile),
   then the card says which plan it couldn't read; it's off while the runner is silent or its
   snapshot has no `usage_refresh` (older code). A request left from before the runner started
-  is taken by its first read. **A failure shows only when it matters:** Claude's plan has an
-  `error`, and its source's dot turns red, only once its reading is past 30 minutes (the error
-  then says no Claude job starts until a read answers) or its login is the trouble (no token,
-  HTTP 401); until then it shows its numbers and "read N min ago". Whether a plan failed is the
-  snapshot's `error` alone, never a time the page compares. The sample's `usage-stale` state
-  shows a reading 40 minutes old. **Reset credits** come from
+  is taken by its first read. **A failure shows only when it matters:** a plan (Claude's or
+  ChatGPT's) has an `error`, and its source's dot turns red, only once its reads have failed for
+  10 minutes (`usage.SHOW_AFTER`) and its reading is past 30 minutes (the error then says no
+  Claude job starts until a read answers), its login is the trouble (no token, HTTP 401), or it
+  has no reading; until then it shows its numbers and "read N min ago". Whether a plan failed is
+  the snapshot's `error` alone, never a time the page compares. The sample's `usage-stale` state
+  shows a reading 40 minutes old.
+- **Reconnecting, not red** (Stefan, 2026-11-17, after the PC slept 05:58 to 12:05 and the first
+  reads after it woke failed: gh timed out, Claude's token had expired in its sleep and a Claude
+  Code session refreshed it four minutes later, Codex's app server started slow; the next reads
+  answered). Three states, not two: answering, reconnecting, and red. **A failure is red only
+  once it has lasted 10 minutes** (`usage.SHOW_AFTER`, two more tries at the usual 5 minutes),
+  or for a plan as above; until then the source or plan has `retrying`, since when its calls
+  have failed, and the page shows a grey dot and "Reconnecting since 12:05", the plan its last
+  reading with "reconnecting" after it, and no banner. A failure that clears in that time never
+  shows red. Since when is kept beside each call (`Call.since`, `Reading.since`, and the third
+  part of `inbox.Reader.stale`'s and `work.Reader.stale`'s entries); a repo GitHub couldn't be
+  read for, under 10 minutes, makes the GitHub source reconnecting and says nothing about the
+  Inbox or the work lists yet (`snapshot._reconnecting`, `_lasting`). One that has lasted
+  makes it red, whatever another repo or its latest call says: red clears `retrying`
+  (`asks.stale_github`, `work.stale_github`), and the page reads `retrying` only beside `ok`.
+  Nothing the runner does
+  changes: it retries as before, and the gate decides on its own rule (`docs/usage.md`). The
+  sample's `reconnecting` state shows it. **Reset credits** come from
   the same read as the windows, counted as T3 counts them: Claude's from the usage answer's
   `cedar_ember` grants (usable, not paused or ended; none when the grant to use next isn't one:
   `usage.resets`, T3's `claudeResetCreditsToContract`), ChatGPT's from `codex app-server`'s
