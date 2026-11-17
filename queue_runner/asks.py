@@ -565,7 +565,9 @@ def _next(story, w) -> str:
 
 def stale_github(sources: list[dict], stale: dict) -> None:
     """When the Sol lane couldn't read GitHub for a repo, its asks are the last good read's: the
-    GitHub source says so, since when, and what it affects (as the sample's `github-down`)."""
+    GitHub source says so, since when, and what it affects (as the sample's `github-down`). It's
+    red, so not reconnecting, whatever another repo's or the latest call's failure says (PR #113
+    review 1, F1)."""
     if not stale:
         return
     src = next((s for s in sources if s['id'] == 'github'), None)
@@ -574,7 +576,7 @@ def stale_github(sources: list[dict], stale: dict) -> None:
     names = ', '.join(sorted(stale))
     whens = [v[0] for v in stale.values() if v[0] is not None]
     error = next((v[1] for v in stale.values() if v[1]), '')
-    src.update(ok=False, note=sentence(error.split(': ', 1)[-1]) or "Couldn't be read",
+    src.update(ok=False, retrying=None, note=sentence(error.split(': ', 1)[-1]) or "Couldn't be read",
                checked_at=min(whens).astimezone().isoformat(timespec='seconds')
                if len(whens) == len(stale) else None,
                affects=f'The Inbox is as GitHub last showed it for {names}: an ask since then '

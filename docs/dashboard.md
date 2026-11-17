@@ -145,7 +145,10 @@ python3 -m dashboard    # http://queue.localhost/ is the runner's; http://localh
   shows red. Since when is kept beside each call (`Call.since`, `Reading.since`, and the third
   part of `inbox.Reader.stale`'s and `work.Reader.stale`'s entries); a repo GitHub couldn't be
   read for, under 10 minutes, makes the GitHub source reconnecting and says nothing about the
-  Inbox or the work lists yet (`snapshot._reconnecting`, `_lasting`). Nothing the runner does
+  Inbox or the work lists yet (`snapshot._reconnecting`, `_lasting`). One that has lasted
+  makes it red, whatever another repo or its latest call says: red clears `retrying`
+  (`asks.stale_github`, `work.stale_github`), and the page reads `retrying` only beside `ok`.
+  Nothing the runner does
   changes: it retries as before, and the gate decides on its own rule (`docs/usage.md`). The
   sample's `reconnecting` state shows it. **Reset credits** come from
   the same read as the windows, counted as T3 counts them: Claude's from the usage answer's

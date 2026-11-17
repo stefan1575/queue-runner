@@ -31,6 +31,7 @@ from .ledger import RUNNER_MARK, said_since
 from .merge import Merger
 from .picker import blockers, closed_issues
 from .stops import BASE, BASE_HOLD, KINDS, number_of, utc
+from .usage import failing_since
 
 BUILD_QUESTIONS = ('failed', 'no-pr')   # a decision's stop on a build: on its issue
 ORDER = ('base', 'ready', 'stop', 'build', 'thread')   # `--inbox`'s sections, in its order
@@ -392,12 +393,6 @@ def report(config, github, jobs) -> str:
 
 # --- the running runner's copy ------------------------------------------------------------------
 
-def _since(stale: dict, repo: str, now):
-    """When `repo`'s reads began failing: its stale entry's, or now for a first failure."""
-    was = stale.get(repo)
-    return was[2] if was and len(was) > 2 else now
-
-
 class Reader:
     """The Sol lane's last collection, for the snapshot. A repo GitHub couldn't be read keeps
     what the last good read of it found, an ask GitHub failed on part-way keeps the last good
@@ -428,7 +423,7 @@ class Reader:
                     _, mine, done = self._good.get(repo.name, (None, mine, done))
                     error = next((e for e in mine_errors if e.startswith(f'{repo.name}:')), '')
                     self._stale[repo.name] = (self._whole.get(repo.name), error,
-                                              _since(self._stale, repo.name, now))
+                                              failing_since(self._stale, repo.name, now))
                 else:
                     _, was, was_done = self._good.get(repo.name, (None, [], []))
                     last = {key(w): w for w in was + was_done}
@@ -438,7 +433,7 @@ class Reader:
                     partial = [e for e in mine_errors if not gone(e)]
                     if partial:   # part-way: what failed is the last good read's, said
                         self._stale[repo.name] = (self._whole.get(repo.name), partial[0],
-                                                  _since(self._stale, repo.name, now))
+                                                  failing_since(self._stale, repo.name, now))
                     else:
                         self._whole[repo.name] = now
                         self._stale.pop(repo.name, None)

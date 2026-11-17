@@ -52,6 +52,13 @@ def lasted(since: datetime.datetime | None, now: datetime.datetime) -> bool:
     return since is None or now - since >= SHOW_AFTER
 
 
+def failing_since(stale: dict, repo: str, now: datetime.datetime) -> datetime.datetime | None:
+    """When `repo`'s reads began failing, for a stale entry (`inbox.Reader.stale`,
+    `work.Reader.stale`): the entry it has already, or now for a first failure."""
+    was = stale.get(repo)
+    return was[2] if was and len(was) > 2 else now
+
+
 class UsageError(Exception):
     """Usage couldn't be read. Its message never holds the token. `login`: the Claude login is
     the trouble (none readable, or HTTP 401); `called`: the endpoint was asked, so the call

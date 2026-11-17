@@ -15,6 +15,8 @@ import re
 import threading
 from dataclasses import dataclass, field
 
+from .usage import failing_since
+
 QUEUE_EMPTY = {
     'claude': "Nothing to start: no PR needs a fix round, and no repo has an unblocked "
               "ready-for-agent issue that isn't already being built or held.",
@@ -249,12 +251,6 @@ def _writer(j) -> str:
     return f'its {what} is writing to the branch'
 
 
-def _since(stale: dict, repo: str, now):
-    """When `repo`'s reads began failing: its stale entry's, or now for a first failure."""
-    was = stale.get(repo)
-    return was[2] if was and len(was) > 2 else now
-
-
 class Reader:
     """The last read of each served repo, for the snapshot. A repo GitHub couldn't be read keeps
     what its last good read found, and `stale` says since when, why, and since when its reads
@@ -280,7 +276,7 @@ class Reader:
                     self._stale[repo.name] = (self._whole.get(repo.name),
                                               f"{repo.name}: couldn't read its work "
                                               f'({type(e).__name__}: {e})',
-                                              _since(self._stale, repo.name, self.clock()))
+                                              failing_since(self._stale, repo.name, self.clock()))
                 continue
             now = self.clock()
             with self._lock:
@@ -289,7 +285,7 @@ class Reader:
                 self._good[repo.name] = _at(kept(got, self._good.get(repo.name)), now)
                 if got.failed:
                     self._stale[repo.name] = (self._whole.get(repo.name), got.errors[0],
-                                              _since(self._stale, repo.name, now))
+                                              failing_since(self._stale, repo.name, now))
                 else:
                     self._whole[repo.name] = now
                     self._stale.pop(repo.name, None)
@@ -892,6 +888,6 @@ def stale_github(sources: list[dict], stale: dict) -> None:
     at = min(whens).astimezone().isoformat(timespec='seconds')         if len(whens) == len(stale) else None
     if earlier is not None:   # the Inbox's line was there first: both are said, the older time
         at = min(filter(None, (at, earlier['checked_at'])), default=None)             if at and earlier['checked_at'] else None
-    src.update(ok=False, note=earlier['note'] if earlier else _sentence(
+    src.update(ok=False, retrying=None, note=earlier['note'] if earlier else _sentence(
         error.split(': ', 1)[-1]) or "Couldn't be read", checked_at=at,
         affects=f'{earlier["affects"]} {text}' if earlier and earlier.get('affects') else text)

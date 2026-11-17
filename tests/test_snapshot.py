@@ -428,6 +428,27 @@ class ReconnectingTest(unittest.TestCase):
         claude = next(s for s in snap['sources'] if s['id'] == 'claude_usage')
         self.assertFalse(claude['ok'])
 
+    def test_a_lasting_repo_failure_is_red_though_another_repo_is_only_reconnecting(self):
+        # Review 1, F1: one repo's reads have failed 20 minutes, another's 2, and GitHub's
+        # latest call answered (or failed 2 minutes ago): the lasting one is red, not
+        # reconnecting, for the Inbox's reads and the work's alike.
+        lasting, recent = NOW - datetime.timedelta(minutes=20), NOW - datetime.timedelta(minutes=2)
+        stale = {'leads-dashboard': (None, 'leads-dashboard: gh timed out', lasting),
+                 'queue-runner': (None, 'queue-runner: gh timed out', recent)}
+        calls = {'answered': snapshot.Call(NOW, True, None, NOW),
+                 'failed recently': snapshot.Call(recent, False, 'gh timed out', recent - datetime.timedelta(hours=1), recent)}
+        for which in ('inbox_stale', 'work_stale'):
+            for name, call in calls.items():
+                with self.subTest(which, call=name):
+                    snap = snapshot.build(facts(calls={'github': call}, **{which: stale}))
+                    github = self.source(snap)
+                    self.assertFalse(github['ok'])
+                    self.assertIsNone(github['retrying'])
+                    self.assertIn('leads-dashboard', github['affects'])
+
+    def source(self, snap, id='github'):
+        return next(s for s in snap['sources'] if s['id'] == id)
+
     def test_chatgpt_failing_beside_a_recent_reading_stands_as_claudes_does(self):
         # Its numbers are 20 minutes old: under 30, so they stand though the reads have failed
         # for 15 minutes; it's still reconnecting, not an error.
