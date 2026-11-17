@@ -158,10 +158,12 @@ after its repo was stopped; `apply_control` and `--pause NAME` writing the same 
 once, an unserved name, an unreadable entry, wake tasks, the Inbox, the snapshot, `--gate`, the
 dry run, and the sample's `repo-stopped` state).
 `tests/test_git.py` runs `GitCli` on a real local repo in a
-temp folder.
+temp folder, with a bare clone as origin for a PR's screenshots (`evidence`: copied out, none,
+and an unreadable origin raising rather than reading as none).
 The picker and a build job's start: `tests/test_picker.py`; a build's brief:
 `tests/test_brief.py`; the job log read back as a restarted runner reads it:
-`tests/test_state.py`; no bare `mkdtemp(` in the tests: `tests/test_no_temp_leftovers.py`
+`tests/test_state.py`; `scripts/shoot.py`'s file names (a before and an after never share one): `tests/test_shoot.py`;
+no bare `mkdtemp(` in the tests: `tests/test_no_temp_leftovers.py`
 (`docs/reviews.md`, Sol runs tests); the dashboard's favicons, meter and repository rows:
 `tests/test_favicon.py`, `tests/test_meter.py` and `tests/test_repo_rows.py`
 (`docs/dashboard.md`).

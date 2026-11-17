@@ -11,6 +11,12 @@ Review independently (the only files you change are tests you add to show a prob
 2. **Spec fit:** does it do what the issue asks, and is anything it asks missing?
 3. **Standards:** does it follow this repo's $agents and `docs/agents/`?
 4. **Tests:** do the tests cover the behaviour it changes? $tests
+5. **Screenshots:** does the change alter anything a person sees, wherever its cause is (a
+   backend fix that turns a dot grey counts)? Then the PR needs a before and an after screenshot of
+   each state it touches; look at each one and check it shows what the PR and the ticket say. A
+   visible change without them, shots that don't show the change, or a `Visible: no` the diff
+   contradicts is **important** (`rule`: "a visible change needs screenshots"). A PR that says
+   `Screenshot owed` is important too, until they're added.
 $again$guide
 Tag every finding:
 - **important** blocks the merge. It needs `file` and `line`, plus either a `scenario` (a failure

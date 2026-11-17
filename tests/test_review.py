@@ -250,6 +250,35 @@ class ReviewerTest(unittest.TestCase):
         self.assertIn('First ticket.', self.read('issue-a-b_c-9.md'))
         self.assertIn('Second ticket.', self.read('issue-a_b-c-9.md'))
 
+    def test_the_prs_screenshots_are_copied_in_and_the_brief_asks_sol_to_look(self):
+        # Stefan, 2026-11-17: a visible change needs before and after shots (~/Code/docs/evidence.md).
+        r = self.one_pr()
+        self.git.shots[20] = {'before-busy-usage.png': b'PNG1', 'after-busy-usage.png': b'PNG2'}
+        r.review_pass()
+        brief = self.sol.briefs[0]['brief']
+        self.assertIn('`evidence/`', brief)
+        self.assertIn('after-busy-usage.png', brief)
+        self.assertIn('**Screenshots:**', brief)
+        with open(os.path.join(self.run_dir(), 'evidence', 'after-busy-usage.png'), 'rb') as f:
+            self.assertEqual(f.read(), b'PNG2')
+
+    def test_a_pr_without_screenshots_says_none_were_published(self):
+        self.one_pr().review_pass()
+        brief = self.sol.briefs[0]['brief']
+        self.assertIn('No screenshots are published for this PR', brief)
+        self.assertIn('**Screenshots:**', brief)
+
+    def test_screenshots_that_cant_be_read_fail_the_review_not_block_the_pr(self):
+        # Sol's review 1 of PR #114, F2: a read failure isn't "none published".
+        from queue_runner.git import GitError
+        r = self.one_pr()
+        self.git.shots[20] = GitError('git ls-remote origin evidence failed (128): DNS')
+        r.review_pass()
+        [job] = self.jobs.jobs()
+        self.assertEqual(job.outcome, 'failed')
+        self.assertIn('ls-remote', job.error)
+        self.assertEqual(self.sol.briefs, [])
+
     def test_review_2_brief_has_the_change_since_the_last_review_its_findings_and_replies(self):
         replies = [Comment('claude', '2026-11-06T01:00:00Z', 'Before the review.'),
                    Comment('claude', '2026-11-07T00:00:00Z', 'F1 declined: no test fails.',

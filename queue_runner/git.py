@@ -89,6 +89,34 @@ class GitCli:
                   f'+refs/heads/{base}:refs/remotes/origin/{base}'])
         return ref, self._ok(['-C', path, 'rev-parse', ref]).strip()
 
+    def evidence(self, path: str, number: int, dest: str) -> list[str]:
+        """Copies the PR's screenshots, `pr-<number>/` on the repo's `evidence` branch
+        (~/Code/docs/evidence.md), into `dest`; returns their names. No branch or none: [].
+        Raises GitError when origin can't be read (network, auth): that isn't "none published",
+        which would block the PR for shots it has (PR #114 review 1, F2), so the review fails and
+        is tried again."""
+        import os
+        ref = 'refs/queue-runner/evidence'
+        code, _, err = self._run(['-C', path, 'ls-remote', '--exit-code', '--heads', 'origin',
+                                  'refs/heads/evidence'])
+        if code == 2:   # origin answered and has no such branch
+            return []
+        if code:
+            raise GitError(f'git ls-remote origin evidence failed ({code}): {err.strip()}')
+        self._ok(['-C', path, 'fetch', '--quiet', 'origin', f'+refs/heads/evidence:{ref}'])
+        names = [n for n in self._ok(['-C', path, 'ls-tree', '--name-only', ref,
+                                      f'pr-{number}/']).splitlines() if n]
+        for name in names:
+            blob = subprocess.run(['git', '-C', path, 'cat-file', 'blob', f'{ref}:{name}'],
+                                  capture_output=True, timeout=120, stdin=subprocess.DEVNULL,
+                                  creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+            if blob.returncode:
+                raise GitError(f'git cat-file {name} failed: {blob.stderr.decode(errors="replace").strip()}')
+            os.makedirs(dest, exist_ok=True)
+            with open(os.path.join(dest, name.rsplit('/', 1)[-1]), 'wb') as f:
+                f.write(blob.stdout)
+        return sorted(n.rsplit('/', 1)[-1] for n in names)
+
     def checkout(self, path: str, ref: str, worktree: str) -> str | None:
         """A detached worktree at `ref` for Sol to read, made afresh. Returns where a leftover
         at `worktree` was moved aside, if it was (`remove_checkout`)."""

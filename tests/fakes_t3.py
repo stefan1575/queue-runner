@@ -162,9 +162,21 @@ class FakeReviewGit(FakeGit):
         self.stuck = set()   # worktrees git can't remove
         self.moved_aside = {}   # a review checkout git can't delete: where it's moved
         self.stale = []         # what sweep_stale can't delete
+        self.shots = {}         # PR number -> {name: bytes} on its evidence branch, or what reading it raises
 
     def sweep_stale(self, checkouts_dir):
         return list(self.stale)
+
+    def evidence(self, path, number, dest):
+        import os
+        shots = self.shots.get(number, {})
+        if isinstance(shots, Exception):   # origin unreadable
+            raise shots
+        for name, data in shots.items():
+            os.makedirs(dest, exist_ok=True)
+            with open(os.path.join(dest, name), 'wb') as f:
+                f.write(data)
+        return sorted(shots)
 
     def fetch_pr(self, path, number, base):
         self.fetches.append((path, f'pr{number}', base))
