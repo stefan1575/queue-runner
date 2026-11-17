@@ -14,8 +14,9 @@ Sol. The differences:
 - **Where it runs:** a T3 thread in the repo's project folder with no worktree (T3 can't start a
   thread in an existing folder, and the runner's checkout of H is where the dependencies are
   linked in), told to work in that checkout and change nothing in the project folder. It starts
-  as every Claude job does (`effort.Effort.flags`: on the project's default model at the config's
-  effort when that's set, else with --model), and the effort its run used is read back.
+  on the T3 instance `[review] claude_provider` names, one with no MCP tools (docs/reviews.md, A
+  review has no outside tools), never on [claude]'s or the project's default, and the effort its
+  run used is read back.
 - **The label:** the comment, the `sol-review` status and the Review row name it and say why
   ("Opus 5.5 high, fallback while Sol is out", or "Opus 5.5 high, set in config.toml"), with the
   effort read back when it can be.
@@ -120,11 +121,14 @@ class OpusThread:
         with open(os.path.join(os.path.dirname(reply), 'brief-opus.md'), 'w', encoding='utf-8',
                   newline='\n') as fh:
             fh.write(message)
-        if f.config.review_claude_provider:   # the no-tools instance: always by name
-            flags = {'provider': f.config.review_claude_provider, 'model': f.config.claude_model}
-        else:
-            flags = f.effort.flags(repo) if f.effort else {
-                'provider': f.config.claude_provider, 'model': f.config.claude_model}
+        # Always the no-tools instance, by name: never [claude]'s or the project's default, which
+        # have the build's tools (PR #127's review 1, F1).
+        provider = f.config.review_claude_provider
+        if not provider or provider == f.config.claude_provider:
+            raise SolFailed(f"The {self.name} didn't start: [review] claude_provider "
+                            f'({provider!r}) must name a T3 instance with no MCP tools, not '
+                            "[claude]'s (docs/reviews.md, A review has no outside tools).")
+        flags = {'provider': provider, 'model': f.config.claude_model}
         try:
             result = f.t3.start(repo.path, message, title=self.title, **flags)
         except T3Error as e:

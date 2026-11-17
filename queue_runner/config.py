@@ -61,8 +61,9 @@ class Config:
     review_provider: str = 'chatgpt'
     # The T3 provider instance an Opus review starts on (`[review] claude_provider`): one launched
     # with no MCP tools (docs/reviews.md, A review has no outside tools), so an Opus review gets
-    # what a Sol review gets. Empty: [claude]'s, as a build starts.
-    review_claude_provider: str = ''
+    # what a Sol review gets. Never [claude]'s instance, which has the build's tools: an empty
+    # one is a config error, and an Opus review refuses to start without one.
+    review_claude_provider: str = 'claudeReviewer'
 
 
 def set_stopped(config: Config, names) -> None:
@@ -123,6 +124,20 @@ def _review_provider(review: dict) -> str:
     return provider
 
 
+def _review_claude_provider(review: dict, build_provider: str) -> str:
+    """`[review] claude_provider`, `claudeReviewer` when unset. A review has no outside tools
+    (docs/reviews.md), so it can't be empty or [claude]'s instance, which builds start on with
+    their tools: either is an error naming the key, not a review with tools."""
+    name = str(review.get('claude_provider', 'claudeReviewer')).strip()
+    if not name:
+        raise ValueError('[review] claude_provider must name a T3 provider instance with no MCP '
+                         'tools (docs/reviews.md, A review has no outside tools), not be empty')
+    if name == build_provider:
+        raise ValueError(f'[review] claude_provider must not be [claude] provider ({name!r}): '
+                         "that instance has the build's tools, and a review has none")
+    return name
+
+
 def load_config(path: str = DEFAULT_CONFIG) -> Config:
     with open(path, 'rb') as f:
         raw = tomllib.load(f)
@@ -149,4 +164,5 @@ def load_config(path: str = DEFAULT_CONFIG) -> Config:
                   sol_bash=sol.get('bash') or GIT_BASH,
                   adopt_reviews_before=str(raw.get('adopt_reviews_before') or ''),
                   review_provider=_review_provider(raw.get('review', {})),
-                  review_claude_provider=str(raw.get('review', {}).get('claude_provider') or ''))
+                  review_claude_provider=_review_claude_provider(
+                      raw.get('review', {}), claude.get('provider', 'claudeAgent')))

@@ -115,7 +115,8 @@ reviewed), `failed`, `out-of-usage` and `head-moved` (nothing counts).
     `~/.t3/userdata/settings.json` (`providerInstances`; back the file up first), driver
     `claudeAgent`, launch args `--strict-mcp-config --no-chrome --disallowedTools mcp__t3-code`
     (Claude's own MCP config, Claude in Chrome and T3's own tools off) and environment
-    `ENABLE_CLAUDEAI_MCP_SERVERS=false` (the claude.ai connectors off). Started by name, it runs
+    `ENABLE_CLAUDEAI_MCP_SERVERS=false` (the claude.ai connectors off). The key defaults to
+    `claudeReviewer`; it can't be empty or `[claude]`'s instance (The Opus fallback). Started by name, it runs
     at the model's default effort (medium for Opus 5.5, as `[claude]` says today), read back as
     before; `--effort high` in its launch args would raise it (checked: read back `high`).
 - It runs under Git's bash by full path, through a parent bash that waits: codex-sol.sh's
@@ -143,8 +144,11 @@ doesn't wait: a PR that needs a review gets one from a T3 thread on the Claude m
   says to work in the runner's checkout of H (where the dependencies are linked in), change
   nothing in the project folder, post and push nothing, and ask nothing. The thread is `Queue
   runner review: <repo>#<n>`, `t3 thread start --wait` in the repo's project folder with no
-  worktree (T3 can't start one in an existing folder), started as every Claude job is
-  (`Effort.flags`: `docs/usage.md`, The effort). Its reply's last `sol-findings` block is the verdict
+  worktree (T3 can't start one in an existing folder), always on `[review] claude_provider`'s
+  no-tools instance with `--model` (A review has no outside tools, above), never on `[claude]`'s or
+  the project's default, which have the build's tools. That key defaults to `claudeReviewer`;
+  empty or `[claude]`'s own is a config error, and a thread asked to start on either is a `failed`
+  review, never one with tools (PR #127's review 1, F1). Its reply's last `sol-findings` block is the verdict
   (`ledger.decide`), as for Sol. A thread T3 couldn't start, that failed, that waits for an
   answer or that left no reply is a `failed` review (two on a head leave it, as for Sol's).
 - **The label** (`fallback.label`): "Opus 5.5 high, fallback while Sol is out", with the effort

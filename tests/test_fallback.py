@@ -92,7 +92,7 @@ class FallbackTest(unittest.TestCase):
         [start] = self.t3.starts
         self.assertEqual((start['project'], start['title'], start['worktree'], start['branch']),
                          (self.dir, 'Queue runner review: first#20', None, None))
-        self.assertEqual((start['provider'], start['model']), ('claudeAgent', 'claude-opus-5-5'))
+        self.assertEqual((start['provider'], start['model']), ('claudeReviewer', 'claude-opus-5-5'))
         # Sol's own brief, after the fallback's: where to work, and to post nothing.
         wt = os.path.join(self.config.checkouts_dir, 'first-pr20').replace('\\', '/')
         self.assertTrue(start['message'].startswith("## First: you review in Sol's place"))
@@ -148,7 +148,8 @@ class FallbackTest(unittest.TestCase):
                           effort=Effort(self.config, files=files, say=self.said.append))
         r.review_pass()
         [start] = self.t3.starts
-        self.assertEqual((start['provider'], start['model']), (None, None))   # the default
+        # The no-tools instance, not the project's default, which has the build's tools.
+        self.assertEqual((start['provider'], start['model']), ('claudeReviewer', 'claude-opus-5-5'))
         [(_, _, body)] = self.posted('comment')
         self.assertIn('Opus 5.5 medium, fallback while Sol is out', body)
         [job] = self.reviews()
@@ -165,6 +166,19 @@ class FallbackTest(unittest.TestCase):
         self.assertEqual((start['provider'], start['model']), ('claudeReviewer', 'claude-opus-5-5'))
         [job] = self.reviews()
         self.assertEqual(job.effort, 'medium')   # still read back
+
+    def test_with_no_review_instance_or_the_build_one_no_thread_starts(self):
+        # PR #127's review 1, F1: never a review on an instance with the build's tools.
+        for provider in ('', 'claudeAgent'):
+            with self.subTest(provider=provider):
+                self.jobs = JobLog(os.path.join(self.config.state_dir, f'jobs-{provider}.jsonl'))
+                self.sol_out()
+                self.config = dataclasses.replace(self.config, review_claude_provider=provider)
+                self.reviewer((0, 'completed', reply())).review_pass()
+                self.assertEqual(self.t3.starts, [])
+                [job] = self.reviews()
+                self.assertEqual(job.outcome, 'failed')
+                self.assertIn('must name a T3 instance with no MCP tools', job.error)
 
     def test_a_thread_that_fails_or_asks_is_a_failed_review(self):
         self.sol_out()
@@ -431,10 +445,19 @@ class ReviewProviderConfigTest(unittest.TestCase):
     def test_claude(self):
         self.assertEqual(self.load('[review]\nprovider = "claude"\n').review_provider, 'claude')
 
-    def test_the_review_instance_defaults_to_none(self):
-        self.assertEqual(self.load('').review_claude_provider, '')
-        self.assertEqual(self.load('[review]\nclaude_provider = "claudeReviewer"\n')
-                         .review_claude_provider, 'claudeReviewer')
+    def test_the_review_instance_defaults_to_the_no_tools_one(self):
+        self.assertEqual(self.load('').review_claude_provider, 'claudeReviewer')
+        self.assertEqual(self.load('[review]\nclaude_provider = "other"\n')
+                         .review_claude_provider, 'other')
+
+    def test_an_empty_or_build_review_instance_is_an_error_naming_the_key(self):
+        # PR #127's review 1, F1: a review never starts on an instance with the build's tools.
+        for text in ('[review]\nclaude_provider = ""\n',
+                     '[review]\nclaude_provider = "claudeAgent"\n',
+                     '[claude]\nprovider = "mine"\n[review]\nclaude_provider = "mine"\n'):
+            with self.subTest(text=text), self.assertRaisesRegex(
+                    ValueError, r'\[review\] claude_provider must'):
+                self.load(text)
 
     def test_anything_else_is_an_error_naming_the_key(self):
         with self.assertRaisesRegex(ValueError, r'\[review\] provider must be one of'):

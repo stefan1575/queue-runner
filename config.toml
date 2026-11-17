@@ -35,7 +35,8 @@ bash = "C:/Program Files/Git/bin/bash.exe"
 [review]
 provider = "chatgpt"
 # An Opus review starts on this T3 provider instance, launched with no MCP tools, so it gets what a
-# Sol review gets (docs/reviews.md, A review has no outside tools; set up 2026-11-17).
+# Sol review gets (docs/reviews.md, A review has no outside tools; set up 2026-11-17). Unset, it's
+# claudeReviewer; empty or [claude]'s provider is an error: a review never gets the build's tools.
 claude_provider = "claudeReviewer"
 
 # First in this order (Stefan, 2026-11-15: "prioritize game backdrop full stop", its first
