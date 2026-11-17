@@ -2,8 +2,8 @@
 time.
 
 The Claude lane settles what earlier passes left open, then chooses each working repo's job (#50:
-the repos run side by side, each in a worker thread of its own that blocks on `t3 thread start
---wait` while its job runs): a decision on a case the flow doesn't cover (`decisions.py`), then
+the repos run side by side, each in a worker thread of its own that blocks on its T3
+thread's run while its job runs): a decision on a case the flow doesn't cover (`decisions.py`), then
 the repo's live steps after merges (`live.py`), then a fix round on a PR the runner found blocking
 (`fix.py`), before any new build, so open PRs finish first. The usage gate lets each in only
 when it fits beside the jobs still running, the repo whose work has waited longest first. The
@@ -121,8 +121,8 @@ class Runner:
         # limits.T3Store, where T3 keeps a usage-limit stop's reset; None reads only what the
         # thread said (tests, the live checks).
         self.limits = limits
-        # effort.Effort (ticket 39): how a job's thread is started, and the effort its run used
-        # read back into its end record; with no T3 files (tests), --model as before.
+        # effort.Effort (ticket 39): the provider, model and effort a job's thread names (#119),
+        # and the effort its run used read back into its end record; none with no T3 files.
         from .effort import Effort
         self.effort = effort or Effort(config)
         self.now = now or (lambda: datetime.datetime.now(datetime.timezone.utc))
@@ -750,7 +750,7 @@ class Runner:
         it ended."""
         try:
             result = self.t3.start(repo.path, brief, title=job.title, worktree=base,
-                                   branch=branch, **self.effort.flags(repo))
+                                   branch=branch, **self.effort.job())
         except T3Error as e:
             try:
                 thread = self._find_thread(job)

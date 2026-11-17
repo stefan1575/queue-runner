@@ -1,7 +1,7 @@
-"""Ticket 39: the effort the runner's Claude jobs run at. `[claude] effort` in config.toml; the
-T3 project default a thread started without `--model` takes (`effort.T3Files`, on a temp
-settings file, SQLite and transcript folder); and the Runner's start flags, end records and log
-lines through real jobs with T3 faked."""
+"""Ticket 39 and issue #119: the effort the runner's Claude jobs run at. `[claude] effort` in
+config.toml; every job kind starting with its provider, model and effort named, whatever the T3
+project's default model is; and the effort read back for its end record (`effort.T3Files`, on a
+temp SQLite and transcript folder), through real jobs with T3 faked."""
 import json
 import os
 import sqlite3
@@ -49,18 +49,15 @@ HIGH = {'instanceId': 'claudeAgent', 'model': 'claude-opus-5-5',
 
 
 class T3Folder:
-    """A T3 userdata folder in a temp dir: `settings.json`, `statev2.sqlite` with the tables the
-    runner reads (the columns it reads, as T3's are, 2026-11-15), and a Claude projects folder."""
+    """A T3 userdata folder in a temp dir: `statev2.sqlite` with the tables the runner reads
+    (the columns it reads, as T3's are, 2026-11-15), and a Claude projects folder."""
 
     def __init__(self, folder):
-        self.settings = os.path.join(folder, 'settings.json')
         self.db = os.path.join(folder, 'statev2.sqlite')
         self.projects = os.path.join(folder, 'claude-projects')
         os.makedirs(self.projects)
         db = sqlite3.connect(self.db)
         db.executescript("""
-            create table projection_projects (project_id text, title text, workspace_root text,
-                deleted_at text, default_model_selection_json text);
             create table orchestration_v2_projection_runs (run_id text, thread_id text,
                 ordinal integer, payload_json text);
             create table orchestration_v2_projection_provider_threads (thread_id text,
@@ -68,15 +65,6 @@ class T3Folder:
         """)
         db.commit()
         db.close()
-
-    def write_settings(self, **settings):
-        with open(self.settings, 'w', encoding='utf-8') as f:
-            json.dump(settings, f)
-
-    def project(self, pid, root, default=None, deleted=None):
-        self._exec('insert into projection_projects values (?, ?, ?, ?, ?)',
-                   (pid, os.path.basename(root), root, deleted,
-                    json.dumps(default) if default else None))
 
     def run(self, thread_id, run_id, selection, started='2026-11-15T10:00:00.000Z', session='s1'):
         self._exec('insert into orchestration_v2_projection_runs values (?, ?, 1, ?)',
@@ -103,7 +91,7 @@ class T3Folder:
 
     def files(self):
         from queue_runner.effort import T3Files
-        return T3Files(settings=self.settings, db=self.db, projects=self.projects)
+        return T3Files(db=self.db, projects=self.projects)
 
 
 def said(effort, at='2026-11-15T10:05:00.000Z', model='claude-opus-5-5'):
@@ -111,83 +99,6 @@ def said(effort, at='2026-11-15T10:05:00.000Z', model='claude-opus-5-5'):
     return {'type': 'assistant', 'timestamp': at, 'effort': effort, 'perTurnEffort': effort,
             'message': {'model': model, 'role': 'assistant',
                         'content': [{'type': 'text', 'text': 'ok'}]}}
-
-
-class ProjectDefaultTest(unittest.TestCase):
-    """What `t3_thread_launch` uses for a thread started with no --model: with T3's settings
-    folded (`projectSettingsFolded`, as on this PC), the project's entry in settings.json's
-    `projectSettingsOverrides`, else the global `defaultModelSelection`; the project row's own
-    default counts only before folding."""
-
-    def setUp(self):
-        tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(tmp.cleanup)
-        self.t3 = T3Folder(tmp.name)
-        self.root = 'C:\\Users\\Anon\\Code\\Personal\\first'
-        self.t3.project('p1', self.root)
-
-    def test_the_projects_override_in_folded_settings_is_its_default(self):
-        self.t3.write_settings(projectSettingsFolded=True,
-                               projectSettingsOverrides={'p1': {'defaultModelSelection': HIGH}})
-        found = self.t3.files().project_default('c:/users/anon/code/personal/first')
-        self.assertEqual(found.project_id, 'p1')
-        self.assertEqual(found.selection, HIGH)
-        self.assertIsNone(found.fallback)
-
-    def test_once_folded_the_project_rows_own_default_is_not_read(self):
-        # What t3_project_update writes: live check B (2026-11-15) failed on it with "the
-        # project has no default model".
-        self.t3.project('p2', 'C:\\sandbox', default=HIGH)
-        self.t3.write_settings(projectSettingsFolded=True)
-        found = self.t3.files().project_default('C:/sandbox')
-        self.assertEqual(found.project_id, 'p2')
-        self.assertIsNone(found.selection)
-
-    def test_before_folding_the_project_rows_default_counts(self):
-        self.t3.project('p2', 'C:\\sandbox', default=HIGH)
-        self.t3.write_settings()
-        self.assertEqual(self.t3.files().project_default('C:/sandbox').selection, HIGH)
-
-    def test_with_no_override_the_global_default_and_fallback_apply(self):
-        fallback = {'instanceId': 'codex', 'model': 'gpt-6.1-sol'}
-        self.t3.write_settings(projectSettingsFolded=True, defaultModelSelection=HIGH,
-                               fallbackModelSelection=fallback)
-        found = self.t3.files().project_default(self.root)
-        self.assertEqual((found.selection, found.fallback), (HIGH, fallback))
-
-    def test_the_fallback_is_only_the_global_one(self):
-        # PR #100's review 1, F1: fallbackModelSelection isn't one of T3's project-scoped keys
-        # (PROJECT_SCOPED_SERVER_SETTING_KEYS in server.asar, read 2026-11-16), so a project's
-        # entry neither clears the global fallback nor sets one of its own.
-        fallback = {'instanceId': 'codex', 'model': 'gpt-6.1-sol'}
-        self.t3.write_settings(projectSettingsFolded=True, fallbackModelSelection=fallback,
-                               projectSettingsOverrides={'p1': {'defaultModelSelection': HIGH,
-                                                                'fallbackModelSelection': None}})
-        self.assertEqual(self.t3.files().project_default(self.root).fallback, fallback)
-        self.t3.write_settings(projectSettingsFolded=True,
-                               projectSettingsOverrides={'p1': {'defaultModelSelection': HIGH,
-                                                                'fallbackModelSelection': fallback}})
-        self.assertIsNone(self.t3.files().project_default(self.root).fallback)
-
-    def test_an_override_of_null_clears_the_global_default(self):
-        self.t3.write_settings(projectSettingsFolded=True, defaultModelSelection=HIGH,
-                               projectSettingsOverrides={'p1': {'defaultModelSelection': None}})
-        self.assertIsNone(self.t3.files().project_default(self.root).selection)
-
-    def test_a_folder_t3_has_no_project_for_reads_as_none(self):
-        self.t3.project('p3', 'C:\\gone', deleted='2026-11-01T00:00:00.000Z')
-        self.t3.write_settings(projectSettingsFolded=True)
-        self.assertIsNone(self.t3.files().project_default('C:/elsewhere'))
-        self.assertIsNone(self.t3.files().project_default('C:/gone'))
-
-    def test_unreadable_files_read_as_none(self):
-        from queue_runner.effort import T3Files
-        files = T3Files(settings=os.path.join(self.t3.projects, 'none.json'),
-                        db=os.path.join(self.t3.projects, 'none.sqlite'),
-                        projects=self.t3.projects)
-        self.assertIsNone(files.project_default(self.root))
-        self.assertIsNone(T3Files(settings=None, db=None, projects=None)
-                          .project_default(self.root))
 
 
 class RunEffortTest(unittest.TestCase):
@@ -244,26 +155,22 @@ class RunEffortTest(unittest.TestCase):
 
 
 class FakeFiles:
-    """Plays `T3Files` for the Runner: `defaults` maps a folder to its ProjectDefault, `efforts`
-    a thread id to the effort its runs used."""
+    """Plays `T3Files` for the Runner: `efforts` maps a thread id to the effort its runs used."""
 
-    def __init__(self, defaults=None, efforts=None):
-        self.defaults, self.efforts = dict(defaults or {}), dict(efforts or {})
+    def __init__(self, efforts=None):
+        self.efforts = dict(efforts or {})
         self.read = []
-
-    def project_default(self, folder):
-        return self.defaults.get(folder)
 
     def run_effort(self, thread_id, run_id):
         self.read.append((thread_id, run_id))
         return self.efforts.get(thread_id)
 
 
-def set_high(folder, model='claude-opus-5-5', effort='high', fallback=None):
-    from queue_runner.effort import ProjectDefault
-    return {folder: ProjectDefault('p1', {'instanceId': 'claudeAgent', 'model': model,
-                                          'options': [{'id': 'effort', 'value': effort}]},
-                                   fallback)}
+NAMED = ('claudeAgent', 'claude-opus-5-5', 'high')   # [claude]'s provider, model and effort
+
+
+def named(start):
+    return start['provider'], start['model'], start['effort']
 
 
 class RunnerHarness(unittest.TestCase):
@@ -311,69 +218,23 @@ class BuildTest(RunnerHarness):
                         effort=self.effort(files))
         return self.r
 
-    def test_a_project_set_to_the_configs_model_and_effort_starts_with_no_model(self):
-        r = self.runner(FakeFiles(set_high(self.dir), efforts={'mcp:t1': 'high'}))
+    def test_a_build_starts_with_its_provider_model_and_effort_named(self):
+        r = self.runner(FakeFiles(efforts={'mcp:t1': 'high'}))
         self.assertEqual(r.run_pass(), 'started')
         [start] = self.t3.starts
-        self.assertEqual((start['provider'], start['model']), (None, None))
+        self.assertEqual(named(start), NAMED)
         [build] = self.jobs('build')
         self.assertEqual(build.effort, 'high')
-        self.assertEqual(self.told('ran at effort'), [])
+        self.assertEqual(self.told('effort'), [])
 
-    def test_a_project_not_set_so_starts_with_the_model_and_says_how_to_set_it_once(self):
-        r = self.runner(FakeFiles(efforts={'mcp:t1': 'medium', 'mcp:t2': 'medium'}))
-        r.run_pass()
-        r.run_pass()
-        self.assertEqual([(s['provider'], s['model']) for s in self.t3.starts],
-                         [('claudeAgent', 'claude-opus-5-5')] * 2)
-        [line] = self.told('start with --model')
-        self.assertIn('first', line)
-        self.assertNotIn('New threads', line)
-        self.assertIn('projectSettingsOverrides[<its project id>].defaultModelSelection', line)
-        self.assertIn('{"instanceId": "claudeAgent", "model": "claude-opus-5-5", '
-                      '"options": [{"id": "effort", "value": "high"}]}', line)
-        self.assertIn('with T3 closed', line)
-
-    def test_a_project_with_another_default_names_its_id_in_the_step(self):
-        r = self.runner(FakeFiles(set_high(self.dir, effort='medium')))
-        r.run_pass()
-        [line] = self.told('start with --model')
-        self.assertIn('projectSettingsOverrides["p1"].defaultModelSelection', line)
-
-    def test_a_global_fallback_is_named_in_the_step_as_the_top_level_key(self):
-        # PR #100's review 1, F1: a project's entry can't clear it, so the step says where it is.
-        fallback = {'instanceId': 'codex', 'model': 'gpt-6.1-sol'}
-        r = self.runner(FakeFiles(set_high(self.dir, effort='medium', fallback=fallback)))
-        r.run_pass()
-        [line] = self.told('start with --model')
-        self.assertIn('projectSettingsOverrides["p1"].defaultModelSelection', line)
-        self.assertIn('remove the top-level fallbackModelSelection (gpt-6.1-sol)', line)
-        self.assertIn('every project', line)
-        self.assertNotIn('no fallbackModelSelection there', line)
-
-    def test_with_no_fallback_set_the_step_says_nothing_of_one(self):
-        r = self.runner(FakeFiles(set_high(self.dir, effort='medium')))
-        r.run_pass()
-        [line] = self.told('start with --model')
-        self.assertNotIn('fallbackModelSelection', line)
-
-    def test_another_model_effort_or_a_fallback_is_not_the_configs(self):
-        fallback = {'instanceId': 'codex', 'model': 'gpt-6.1-sol'}
+    def test_the_configs_effort_is_the_one_named(self):
         from dataclasses import replace
-        for i, defaults in enumerate((set_high(self.dir, model='claude-fable-5-2'),
-                                      set_high(self.dir, effort='medium'),
-                                      set_high(self.dir, fallback=fallback))):
-            with self.subTest(defaults=defaults):
-                self.said.clear()
-                self.config = replace(self.config, state_dir=os.path.join(self.dir, f'state{i}'))
-                r = self.runner(FakeFiles(defaults))
-                r.run_pass()
-                self.assertEqual(self.t3.starts[0]['model'], 'claude-opus-5-5')
-                self.assertEqual(len(self.told('start with --model')), 1, self.said)
+        self.config = replace(self.config, claude_model='claude-fable-5-2', claude_effort='xhigh')
+        self.runner(FakeFiles()).run_pass()
+        self.assertEqual(named(self.t3.starts[0]), ('claudeAgent', 'claude-fable-5-2', 'xhigh'))
 
     def test_a_job_at_another_effort_is_said_once_per_repo(self):
-        r = self.runner(FakeFiles(set_high(self.dir),
-                                  efforts={'mcp:t1': 'medium', 'mcp:t2': 'medium'}))
+        r = self.runner(FakeFiles(efforts={'mcp:t1': 'medium', 'mcp:t2': 'medium'}))
         r.run_pass()
         r.run_pass()
         self.assertEqual([b.effort for b in self.jobs('build')], ['medium', 'medium'])
@@ -381,7 +242,7 @@ class BuildTest(RunnerHarness):
         self.assertIn('first', line)
 
     def test_an_effort_that_cannot_be_read_back_is_recorded_as_unknown_and_said_once(self):
-        r = self.runner(FakeFiles(set_high(self.dir)))
+        r = self.runner(FakeFiles())
         r.run_pass()
         r.run_pass()
         self.assertEqual([b.effort for b in self.jobs('build')], [None, None])
@@ -389,13 +250,13 @@ class BuildTest(RunnerHarness):
 
     def test_a_decision_thread_starts_the_same_way_and_records_its_effort(self):
         from tests.fakes_t3 import decision_reply
-        r = self.runner(FakeFiles(set_high(self.dir), efforts={'mcp:t1': 'high',
+        r = self.runner(FakeFiles(efforts={'mcp:t1': 'high',
                                                                'mcp:t2': 'medium'}),
                         (1, 'failed'),
                         (0, 'completed', decision_reply('stop', question='Which one?')))
         r.run_pass()   # the build fails
         r.run_pass()   # a decision on it
-        self.assertEqual([(s['provider'], s['model']) for s in self.t3.starts], [(None, None)] * 2)
+        self.assertEqual([named(s) for s in self.t3.starts], [NAMED] * 2)
         [decision] = self.jobs('decision')
         self.assertEqual(decision.effort, 'medium')
         [line] = self.told('ran at effort medium')
@@ -403,7 +264,7 @@ class BuildTest(RunnerHarness):
 
     def test_a_continued_job_records_the_effort_of_its_new_run(self):
         from tests.fakes_t3 import decision_reply
-        r = self.runner(FakeFiles(set_high(self.dir), efforts={'mcp:t1': 'high',
+        r = self.runner(FakeFiles(efforts={'mcp:t1': 'high',
                                                                'mcp:t2': 'high'}),
                         (1, 'failed'),
                         (0, 'completed', decision_reply('retry', add='Run the tests again.')),
@@ -416,7 +277,7 @@ class BuildTest(RunnerHarness):
                          [('failed', 'high'), ('done', 'high')])
         self.assertEqual(r.effort.files.read[-1], ('mcp:t1', 'run:mcp:t1:1'))
 
-    def test_a_runner_with_no_t3_files_starts_with_the_model_and_records_no_effort(self):
+    def test_a_runner_with_no_t3_files_names_the_model_and_records_no_effort(self):
         import io
         from queue_runner.run import Runner
         from tests.fakes import FakeGitHubWithPulls, issue
@@ -425,7 +286,7 @@ class BuildTest(RunnerHarness):
         self.r = Runner(self.config, github=FakeGitHubWithPulls(issues=[issue(4, 'Red', 'R')]),
                         t3=self.t3, git=FakeGit(), out=io.StringIO(), log_line=self.said.append)
         self.r.run_pass()
-        self.assertEqual(self.t3.starts[0]['model'], 'claude-opus-5-5')
+        self.assertEqual(named(self.t3.starts[0]), NAMED)
         [build] = self.jobs('build')
         self.assertIsNone(build.effort)
         self.assertEqual(self.told('effort'), [])
@@ -450,12 +311,11 @@ class FixAndLiveTest(RunnerHarness):
         self.r = Runner(self.config, github=gh, t3=self.t3, git=git, out=io.StringIO(),
                         log_line=self.said.append,
                         sol=FakeSol([reply(findings=[important('F1')])]),
-                        effort=self.effort(FakeFiles(set_high(self.dir),
-                                                     efforts={'mcp:t1': 'high'})))
+                        effort=self.effort(FakeFiles(efforts={'mcp:t1': 'high'})))
         self.r.reviewer.review_pass()
         self.assertEqual(self.r.run_pass(), 'started')
         [start] = self.t3.starts
-        self.assertEqual((start['provider'], start['model']), (None, None))
+        self.assertEqual(named(start), NAMED)
         [fix] = self.jobs('fix')
         self.assertEqual((fix.outcome, fix.effort), ('pushed', 'high'))
 
@@ -465,7 +325,7 @@ class FixAndLiveTest(RunnerHarness):
         harness = tl.LiveHarness('setUp')
         harness.setUp()
         self.addCleanup(harness.doCleanups)
-        effort = self.effort(FakeFiles(set_high(harness.dir), efforts={'mcp:t1': 'xhigh'}))
+        effort = self.effort(FakeFiles(efforts={'mcp:t1': 'xhigh'}))
         effort.config = harness.config
         effort.say = harness.said.append
 
@@ -488,56 +348,11 @@ class FixAndLiveTest(RunnerHarness):
         steps = live()
         steps.run(*steps.next())
         [start] = harness.t3.starts
-        self.assertEqual((start['provider'], start['model'], start['worktree']), (None, None, B))
+        self.assertEqual((*named(start), start['worktree']), (*NAMED, B))
         job = harness.jobs.live('first')[-1]
         self.assertEqual((job.outcome, job.effort), ('live', 'xhigh'))
         self.assertTrue(any('live first ran at effort xhigh, not high' in s
                             for s in harness.said), harness.said)
-
-
-class StartTest(unittest.TestCase):
-    """`main` reads T3's real files through its limits store (`limits.T3Store`: the database
-    and Claude's projects folder) and `t3_settings`, and says at start how each served repo's
-    jobs will start."""
-
-    def run_main(self, set_up):
-        import io
-        from queue_runner.cli import main
-        from queue_runner.limits import T3Store
-        from queue_runner.wake import NoWaker
-        from tests.fakes import FakeGitHubWithPulls, FakeToaster, FakeUsage
-        from tests.fakes_t3 import FakeGit, FakeSol, FakeT3
-        tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(tmp.cleanup)
-        config = write_config(tmp.name)
-        t3 = T3Folder(tmp.name)
-        root = os.path.join(tmp.name, 'first')
-        t3.project('p1', root)
-        t3.write_settings(projectSettingsFolded=True, projectSettingsOverrides=(
-            {'p1': {'defaultModelSelection': HIGH}} if set_up else {}))
-        out = io.StringIO()
-        code = main(['--once', '--config', config], github=FakeGitHubWithPulls(), out=out,
-                    t3=FakeT3(), git=FakeGit(), sleep=lambda s: None, sol=FakeSol(),
-                    toaster=FakeToaster(), usage=FakeUsage(), limits=T3Store(t3.db, t3.projects),
-                    t3_settings=t3.settings, waker=NoWaker())
-        self.assertEqual(code, 0)
-        return out.getvalue()
-
-    def test_a_repo_whose_project_is_not_set_is_said_at_start_with_the_step(self):
-        said = self.run_main(set_up=False)
-        self.assertIn('first: its Claude jobs start with --model claude-opus-5-5', said)
-        self.assertIn('it has no default model', said)
-        self.assertNotIn('New threads', said)
-        self.assertIn('settings.json, under projectSettingsOverrides["p1"].defaultModelSelection',
-                      said)
-        self.assertIn('{"instanceId": "claudeAgent", "model": "claude-opus-5-5", '
-                      '"options": [{"id": "effort", "value": "high"}]}', said)
-        self.assertIn('with T3 closed', said)
-
-    def test_a_repo_whose_project_is_set_is_said_at_start_too(self):
-        said = self.run_main(set_up=True)
-        self.assertIn("first: its T3 project's default model is claude-opus-5-5 at effort high",
-                      said)
 
 
 if __name__ == '__main__':

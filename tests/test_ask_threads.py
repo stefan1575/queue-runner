@@ -85,23 +85,27 @@ class RecordTest(unittest.TestCase):
 
 
 class LaunchTest(unittest.TestCase):
-    def test_a_thread_is_started_without_waiting_and_its_id_read(self):
-        calls = []
+    """An ask thread starts through T3's MCP launch and isn't waited on (issue #119)."""
 
-        def run(args, stdin):
-            calls.append((args, stdin))
-            return 0, '{"threadId": "mcp:x1", "projectId": "p1", "runId": "run:x1:1"}', ''
-        got = T3Cli(run=run).launch('C:/repo', 'The brief.', title='Queue runner ask: first#20',
-                                    provider='claudeAgent', model='claude-opus-5-5')
-        self.assertEqual((got.thread_id, got.run_id), ('mcp:x1', 'run:x1:1'))
-        self.assertEqual(calls, [(['thread', 'start', '--json', '--title',
-                                   'Queue runner ask: first#20', '--provider', 'claudeAgent',
-                                   '--model', 'claude-opus-5-5', 'C:/repo', '-'], 'The brief.')])
+    def test_a_thread_is_started_without_waiting_and_its_id_read(self):
+        from tests.test_t3 import FakeMcp
+        mcp = FakeMcp()
+        got = T3Cli(mcp=mcp).launch('C:/repo', 'The brief.', title='Queue runner ask: first#20',
+                                    provider='claudeAgent', model='claude-opus-5-5',
+                                    effort='medium')
+        self.assertEqual((got.thread_id, got.run_id), ('mcp:t1', 'run:t1:1'))
+        self.assertEqual(mcp.tools(), ['t3_project_list', 't3_thread_launch'])
+        launch = mcp.launched()
+        self.assertEqual((launch['title'], launch['message'], launch['modelSelection']),
+                         ('Queue runner ask: first#20', 'The brief.',
+                          {'instanceId': 'claudeAgent', 'model': 'claude-opus-5-5',
+                           'options': [{'id': 'effort', 'value': 'medium'}]}))
 
     def test_t3_failing_is_a_t3_error(self):
+        from tests.test_t3 import FakeMcp
         with self.assertRaises(T3Error):
-            T3Cli(run=lambda a, s: (1, '', 'No T3 Code project matches')).launch(
-                'C:/repo', 'b', title='t')
+            T3Cli(mcp=FakeMcp(launch_error=T3Error('down'))).launch(
+                'C:/repo', 'b', title='t', provider='claudeAgent', model='m', effort='high')
 
 
 class ThreadCase(unittest.TestCase):
@@ -147,9 +151,11 @@ class OpenTest(ThreadCase):
         self.t3.outcomes = []   # nothing waits on a run: a start with --wait would fail here
         self.assertEqual(self.r.run_pass(), 'started')
         [launch] = self.t3.launches
-        self.assertEqual((launch['title'], launch['project'], launch['model']),
-                         ('Decide: Queue runner ask: first#20', self.dir,
-                          self.config.claude_model))   # it waits on his decision (issue #71)
+        self.assertEqual((launch['title'], launch['project']),
+                         ('Decide: Queue runner ask: first#20', self.dir))   # issue #71
+        self.assertEqual((launch['provider'], launch['model'], launch['effort']),
+                         (self.config.claude_provider, self.config.claude_model,
+                          self.config.claude_effort))   # named, whatever T3's default (#119)
         brief = launch['message']
         self.assertIn('Review 3 is still blocking', brief)            # the ask's situation
         self.assertIn('Rework the approach, fix on with the same approach, or hold it?', brief)

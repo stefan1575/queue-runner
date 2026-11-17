@@ -790,11 +790,10 @@ def main(argv=None, github=None, out=None, t3=None, git=None, sleep=None,
         calls = Calls(snap_clock)
         github, t3 = calls.watch(github, 'github'), calls.watch(t3, 't3')
         gate.reader.on_call = _heard(calls)   # one reader, the gate's and the snapshot's
-    # The effort Claude jobs run at (ticket 39): read from T3's own files when the limits store
-    # is T3's real database (a test's fake store reads none, so nothing is read back).
-    from .effort import Effort, T3Files, T3_SETTINGS
-    effort = Effort(config, files=T3Files(settings=t3_settings or T3_SETTINGS, db=limits.path,
-                                          projects=limits.projects)
+    # The effort Claude jobs ran at (ticket 39), read back from T3's own files when the limits
+    # store is T3's real database (a test's fake store reads none, so nothing is read back).
+    from .effort import Effort, T3Files
+    effort = Effort(config, files=T3Files(db=limits.path, projects=limits.projects)
                     if isinstance(limits, T3Store) else None)
     runner = Runner(config, github=github, t3=t3, git=git, out=out, log_line=log_line, sol=sol,
                     toaster=toaster, gate=gate, limits=limits, now=clock, waker=waker,
@@ -805,7 +804,6 @@ def main(argv=None, github=None, out=None, t3=None, git=None, sleep=None,
                                       log_line, snapshot_every or WRITE_EVERY)
     if warning := auto_resume_warning(*([t3_settings] if t3_settings else [])):
         runner.say(f'Warning: {warning}')
-    effort.check(config.repos)   # how each served repo's Claude jobs start, and at what effort
     restart = None
     try:
         with runner_lock(config.state_dir):

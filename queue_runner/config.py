@@ -42,8 +42,7 @@ class Config:
     log_dir: str
     claude_provider: str = 'claudeAgent'     # T3 provider instance for Claude jobs
     claude_model: str = 'claude-opus-5-5'
-    # The effort every Claude job runs at (ticket 39, `effort.py`): T3's CLI has no flag for it,
-    # so a job gets it from its T3 project's default model when that is this model at this effort.
+    # The effort every Claude job runs at (ticket 39, `effort.py`): named in its T3 launch (#119).
     claude_effort: str = 'high'
     poll_seconds: int = 300                  # continuous mode: the pause after an idle pass
     runs_dir: str = ''        # a review's run folder: brief, inputs, reply, would-be comment
