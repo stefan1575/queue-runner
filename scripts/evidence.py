@@ -46,14 +46,17 @@ $b = [System.Windows.Forms.SystemInformation]::VirtualScreen
 $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
 $g = [System.Drawing.Graphics]::FromImage($bmp)
 $g.CopyFromScreen($b.Left, $b.Top, 0, 0, $bmp.Size)
-$bmp.Save($args[0], [System.Drawing.Imaging.ImageFormat]::Png)
+$bmp.Save($env:EVIDENCE_OUT, [System.Drawing.Imaging.ImageFormat]::Png)
 """
 
 
 def screen(out: Path) -> None:
     out.parent.mkdir(parents=True, exist_ok=True)
-    r = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
-                        "& {" + SCREEN_PS + "}", str(out.resolve())], capture_output=True, text=True)
+    # The path goes in the environment, not after -Command: PowerShell joins those arguments
+    # into the script text and splits them again on spaces (PR #115 review 1, F2).
+    r = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", SCREEN_PS],
+                       capture_output=True, text=True,
+                       env={**os.environ, "EVIDENCE_OUT": str(out.resolve())})
     if r.returncode or not out.exists():
         sys.exit("evidence: the desktop can't be captured (locked, or no one signed in): "
                  "mark the PR 'screenshot owed'.\n" + r.stderr)
@@ -114,7 +117,7 @@ def main(argv: list[str] | None = None) -> None:
     c.add_argument("out", type=Path)
     p = sub.add_parser("publish")
     p.add_argument("--repo", type=Path, default=Path("."))
-    p.add_argument("--into", required=True, help="folder on the evidence branch, e.g. pr-113 or issue-40")
+    p.add_argument("--into", required=True, help="folder on the evidence branch: pr-<the PR's number>, the only one a review reads")
     p.add_argument("files", type=Path, nargs="+")
     a = ap.parse_args(argv)
     if a.cmd == "shoot":
