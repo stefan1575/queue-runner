@@ -98,8 +98,8 @@ def publish(repo: Path, into: str, files: list[Path]) -> list[str]:
         sys.exit("evidence: nothing published; these before and after shots are byte-identical, "
                  "so they can't show a change:\n"
                  + "".join(f"  {b} = {a}\n" for b, a in same)
-                 + "Reshoot what the change touches (a change that shows only in the runner's own "
-                   "data is shot from a state folder: the repo's docs say how), or write "
+                 + "Reshoot what the change touches (a change that shows only in the app's own "
+                   "data is shot from that data: the repo's docs say how), or write "
                    "`Screenshot owed: <why>` in the PR's Evidence instead.")
     into = into.strip("/")
     paths = [f"{into}/{f.name}" for f in files]
