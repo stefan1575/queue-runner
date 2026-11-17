@@ -48,7 +48,7 @@ The review loop's rules are `~/Code/docs/pr-review.md`; leads-dashboard's
    ledgers). `evidence/`: the PR's screenshots, copied from `pr-<n>/` on the repo's
    `evidence` branch (`GitCli.evidence`; origin unreadable fails the review, so it's tried
    again, rather than reading as no screenshots); the brief's check 5 has Sol look at them and block a
-   visible change without them (`~/Code/docs/evidence.md`). `brief.md` (`templates/review.md`) lists them, points to `AGENTS.md`, has
+   visible change without them (the rule build jobs follow is in `templates/build.md`, Screenshots). `brief.md` (`templates/review.md`) lists them, points to `AGENTS.md`, has
    `REVIEW.md` in full and, from review 2, the open findings, the classes so far, the IDs used
    and the replies since the last review.
 6. **Decide** (`ledger.py`, no I/O): the verdict and outcome come from the last `sol-findings`

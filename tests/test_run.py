@@ -78,7 +78,7 @@ class RunTest(RunHarness):
         self.assertEqual((start['project'], start['worktree'], start['branch']),
                          (os.path.normpath(self.dir), 'origin/main', 'claude/red-widget-4'))
         self.assertEqual((start['provider'], start['model']), ('claudeAgent', 'claude-opus-5-5'))
-        self.assertTrue(start['message'].startswith('/implement GitHub issue #4 in owner/first'))
+        self.assertTrue(start['message'].startswith('Build GitHub issue #4 in owner/first'))
         self.assertEqual(git.fetches, [(os.path.normpath(self.dir), 'main')])
 
         [job] = self.log.jobs()
@@ -455,7 +455,7 @@ class LimitRecoveryTest(RunHarness):
         fresh = t3.starts[1]
         self.assertEqual((fresh['worktree'], fresh['branch'], fresh['title']),
                          ('abc1234def', 'claude/a-ticket-4', 'Queue runner build: first#4'))
-        self.assertTrue(fresh['message'].startswith('/implement GitHub issue #4 in owner/first'))
+        self.assertTrue(fresh['message'].startswith('Build GitHub issue #4 in owner/first'))
         self.assertIn('## Picking up from an earlier thread', fresh['message'])
         self.assertIn('cut off by a usage limit', fresh['message'])
         self.assertIn('cold (its last request started 5 h 15 min ago) and 120,000 tokens',

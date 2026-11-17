@@ -91,7 +91,7 @@ class GitCli:
 
     def evidence(self, path: str, number: int, dest: str) -> list[str]:
         """Copies the PR's screenshots, `pr-<number>/` on the repo's `evidence` branch
-        (~/Code/docs/evidence.md), into `dest`; returns their names. No branch or none: [].
+        (`templates/build.md`, Screenshots), into `dest`; returns their names. No branch or none: [].
         Raises GitError when origin can't be read (network, auth): that isn't "none published",
         which would block the PR for shots it has (PR #114 review 1, F2), so the review fails and
         is tried again."""

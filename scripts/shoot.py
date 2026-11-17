@@ -7,8 +7,8 @@ Each shot is `?sample=STATE&page=PAGE` (PAGE defaults to the Overview), saved as
 `DIR/LABEL-STATE-PAGE.png`: LABEL is `before` with `--commit` and `after` without (`--label`
 names it), so a before and an after into the same DIR never overwrite each other. The dashboard runs from the checkout, or from a throwaway worktree at REF,
 on a free port of its own, so the one already running on 5289 (possibly older code) doesn't
-matter. Shooting and publishing are `~/Code/tools/evidence/evidence.py`; the rule for when a PR
-needs screenshots is `~/Code/docs/evidence.md`, and this repo's part is `docs/dashboard.md`,
+matter. Shooting and publishing are `scripts/evidence.py`; the rule for when a PR
+needs screenshots is `templates/build.md`, Screenshots, and this repo's part is `docs/dashboard.md`,
 Screenshots.
 """
 from __future__ import annotations

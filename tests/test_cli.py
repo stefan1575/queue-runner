@@ -42,11 +42,11 @@ path = "{self.dir}"
         self.assertIn('owner/first', out)
         self.assertIn('#4 Red', out)
         self.assertIn('claude/red-4 from origin/main', out)
-        self.assertIn('/implement GitHub issue #4 in owner/first', out)
+        self.assertIn('Build GitHub issue #4 in owner/first', out)
         # each working repo's job, side by side (#50)
         self.assertLess(out.index("dry run: first's Claude job:"),
                         out.index("dry run: second's Claude job:"))
-        self.assertIn('/implement GitHub issue #4 in owner/second', out)
+        self.assertIn('Build GitHub issue #4 in owner/second', out)
 
     def test_says_so_when_no_repo_has_work(self):
         code, out = self.run_main(['--once', '--dry-run', '--config', self.config], FakeGitHub())

@@ -56,7 +56,7 @@ $threads
 
 - Don't add features or fix review findings in this round: only the merge, its conflicts, and
   what the merge broke. Sol reviews the result.
-- Skip any code-review step. Don't merge the PR, review it, set statuses or edit its
+- Don't review your own work. Don't merge the PR, review it, set statuses or edit its
   `## Review` table: the runner does those.
 - Don't schedule, watch or wait on anything (no scheduled tasks, PR watches, wake-ups or
   monitors). The runner does the waiting.

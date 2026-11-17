@@ -21,8 +21,8 @@ class BuildBriefTest(unittest.TestCase):
     def brief(self):
         return build_brief(self.job, self.comments)
 
-    def test_starts_the_implement_skill_on_the_issue(self):
-        self.assertTrue(self.brief().startswith('/implement GitHub issue #42 in owner/demo'))
+    def test_starts_with_the_issue(self):
+        self.assertTrue(self.brief().startswith('Build GitHub issue #42 in owner/demo'))
 
     def test_carries_the_issue_title_body_and_comments(self):
         text = self.brief()
@@ -53,8 +53,23 @@ class BuildBriefTest(unittest.TestCase):
         text = self.brief()
         self.assertIn('Commit after every step', text)
         self.assertIn('decision', text)
-        self.assertIn("open the PR the way the repo's own rules say", text)
+        self.assertIn('open the PR with the body below', text)
+        self.assertIn('## Merge Danger', text)
         self.assertIn('Closes #42', text)
+
+    def test_says_how_to_work_without_naming_a_skill(self):
+        text = self.brief()
+        self.assertIn('Write a failing test first where one fits', text)
+        self.assertIn('the full test suite once at the end', text)
+
+    def test_names_the_runners_own_screenshot_script(self):
+        from queue_runner.brief import EVIDENCE
+        text = self.brief()
+        self.assertIn(f'python3 -I {EVIDENCE} shoot URL OUT.png', text)
+        # PR #115 review 1, F1: GitCli.evidence reads pr-<number>/, so a build publishes there,
+        # once the PR is open and has its number, never into issue-<number>/.
+        self.assertIn("--into pr-<the PR's number>", text)
+        self.assertNotIn('issue-42', text)
 
 
 if __name__ == '__main__':

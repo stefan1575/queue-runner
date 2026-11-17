@@ -414,14 +414,14 @@ python3 -m dashboard    # http://queue.localhost/ is the runner's; http://localh
 ## Screenshots
 
 A PR that changes anything the page shows (whichever module the cause is in) needs before and
-after screenshots of each sample state it touches (`~/Code/docs/evidence.md`; Stefan,
-2026-11-17). `scripts/shoot.py` runs the dashboard from the checkout, or from any commit with
+after screenshots of each sample state it touches (`templates/build.md`, Screenshots;
+Stefan, 2026-11-17). `scripts/shoot.py` runs the dashboard from the checkout, or from any commit with
 `--commit`, on a free port of its own, and shoots `?sample=STATE&page=PAGE` at 1440×900:
 
 ```
 python3 scripts/shoot.py --commit origin/main --out shots reconnecting/settings reconnecting/usage   # before
 python3 scripts/shoot.py --out shots reconnecting/settings reconnecting/usage                         # after
-python3 -I ~/Code/tools/evidence/evidence.py publish --repo . --into pr-<N> shots/*.png
+python3 -I scripts/evidence.py publish --repo . --into pr-<N> shots/*.png
 ```
 
 The script names them `before-<state>-<page>.png` with `--commit` and `after-<state>-<page>.png`
