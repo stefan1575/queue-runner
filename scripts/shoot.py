@@ -1,10 +1,11 @@
 """Screenshots of the dashboard's sample states, as a PR's evidence.
 
-    python3 scripts/shoot.py --out DIR STATE[/PAGE] ...               # the code in this checkout
-    python3 scripts/shoot.py --commit REF --out DIR STATE[/PAGE] ...  # the page as it was at REF
+    python3 scripts/shoot.py --out DIR STATE[/PAGE] ...               # after: the code in this checkout
+    python3 scripts/shoot.py --commit REF --out DIR STATE[/PAGE] ...  # before: the page as it was at REF
 
 Each shot is `?sample=STATE&page=PAGE` (PAGE defaults to the Overview), saved as
-`DIR/STATE-PAGE.png`. The dashboard runs from the checkout, or from a throwaway worktree at REF,
+`DIR/LABEL-STATE-PAGE.png`: LABEL is `before` with `--commit` and `after` without (`--label`
+names it), so a before and an after into the same DIR never overwrite each other. The dashboard runs from the checkout, or from a throwaway worktree at REF,
 on a free port of its own, so the one already running on 5289 (possibly older code) doesn't
 matter. Shooting and publishing are `~/Code/tools/evidence/evidence.py`; the rule for when a PR
 needs screenshots is `~/Code/docs/evidence.md`, and this repo's part is `docs/dashboard.md`,
@@ -22,8 +23,6 @@ import urllib.request
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(Path.home() / "Code" / "tools" / "evidence"))
-import evidence  # noqa: E402
 
 
 def free_port() -> int:
@@ -43,7 +42,18 @@ def wait_up(url: str, seconds: float = 20) -> None:
     sys.exit(f"shoot: the dashboard didn't answer on {url}")
 
 
-def shoot_from(src: Path, shots: list[str], out: Path, size: str) -> list[Path]:
+def shot_name(label: str, shot: str) -> str:
+    st, _, page = shot.partition("/")
+    return f"{label}-{st}-{page or 'overview'}.png"
+
+
+def label(a: argparse.Namespace) -> str:
+    return a.label or ("before" if a.commit else "after")
+
+
+def shoot_from(src: Path, shots: list[str], out: Path, size: str, label: str) -> list[Path]:
+    sys.path.insert(0, str(Path.home() / "Code" / "tools" / "evidence"))
+    import evidence
     port = free_port()
     with tempfile.TemporaryDirectory() as state:
         server = subprocess.Popen([sys.executable, "-m", "dashboard", "--port", str(port), "--state-dir", state],
@@ -54,7 +64,7 @@ def shoot_from(src: Path, shots: list[str], out: Path, size: str) -> list[Path]:
             made = []
             for shot in shots:
                 st, _, page = shot.partition("/")
-                f = out / f"{st}-{page or 'overview'}.png"
+                f = out / shot_name(label, shot)
                 evidence.shoot(f"{base}?sample={st}" + (f"&page={page}" if page else ""), f, size)
                 made.append(f)
             return made
@@ -63,21 +73,27 @@ def shoot_from(src: Path, shots: list[str], out: Path, size: str) -> list[Path]:
             server.wait(10)
 
 
-def main(argv: list[str] | None = None) -> None:
+def parse(argv: list[str] | None = None) -> argparse.Namespace:
     ap = argparse.ArgumentParser(prog="shoot")
     ap.add_argument("--commit")
+    ap.add_argument("--label", choices=("before", "after"),
+                    help="the file names' prefix (default: before with --commit, else after)")
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--size", default="1440x900")
     ap.add_argument("shots", nargs="+", help="STATE or STATE/PAGE, e.g. reconnecting/usage")
-    a = ap.parse_args(argv)
+    return ap.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> None:
+    a = parse(argv)
     if not a.commit:
-        made = shoot_from(REPO, a.shots, a.out, a.size)
+        made = shoot_from(REPO, a.shots, a.out, a.size, label(a))
     else:
         with tempfile.TemporaryDirectory() as tmp:
             wt = Path(tmp) / "wt"
             subprocess.run(["git", "-C", str(REPO), "worktree", "add", "--detach", "--quiet", str(wt), a.commit], check=True)
             try:
-                made = shoot_from(wt, a.shots, a.out, a.size)
+                made = shoot_from(wt, a.shots, a.out, a.size, label(a))
             finally:
                 subprocess.run(["git", "-C", str(REPO), "worktree", "remove", "--force", str(wt)], check=False)
     print("\n".join(str(f) for f in made))

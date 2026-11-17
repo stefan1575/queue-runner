@@ -424,7 +424,8 @@ python3 scripts/shoot.py --out shots reconnecting/settings reconnecting/usage   
 python3 -I ~/Code/tools/evidence/evidence.py publish --repo . --into pr-<N> shots/*.png
 ```
 
-Name them `before-<state>-<page>.png` and `after-<state>-<page>.png`. A new state goes in
+The script names them `before-<state>-<page>.png` with `--commit` and `after-<state>-<page>.png`
+without (`--label before|after` overrides), so both land in one folder side by side. A new state goes in
 `sample.STATES` first, so it can be shot; when the before has no such state, shoot the closest one
 and say so. Don't use the dashboard already on 5289 for this: it may be running older code. The
 review copies the PR's shots into Sol's run folder (`docs/reviews.md`).
