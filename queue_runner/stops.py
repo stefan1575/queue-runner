@@ -73,6 +73,10 @@ KINDS = {
     'live': 'Merged, but not live yet',
     'live-todo': 'Live, with steps only you can do',
 }
+# A stop's `answer` when its PR was merged or closed on GitHub while it was filed (issue #88).
+PR_CLOSED = 'pr-closed'
+# Stops filed on a PR that's merged already (live runs): its merge answers nothing.
+ON_MERGED = ('live', 'live-todo')
 SIGNALS = {   # decide()'s stop signals, when the review's run folder can't say more
     'repeated-class': 'a new Important finding repeats an earlier class',
     'reopened': 'a fixed finding came back',
@@ -636,7 +640,8 @@ class Stopper:
     def answers(self, repo) -> None:
         """Each filed stop Stefan has since answered (its issue closed, or a reply on the PR or
         on the issue after it) is recorded `answered`, and the PR goes back to the loop: after a
-        reply, through a decision on it (`decisions.py`)."""
+        reply, through a decision on it (`decisions.py`). A PR merged or closed on GitHub
+        answers its stops too (`pr-closed`, issue #88), once their issues are closed."""
         for n in sorted({j.issue for j in self.jobs.jobs()
                          if j.kind == 'stop' and j.repo == repo.name}):
             stops = self.jobs.open_stops(repo.name, n)
@@ -645,6 +650,8 @@ class Stopper:
             try:
                 closed = {u for u in {j.link for j in stops if j.link}
                           if self.github.issue_state(repo.github, number_of(u)) == 'closed'}
+                gone = (self.github.pull(repo, n).state
+                        if any(j.stop not in ON_MERGED for j in stops) else 'open')
                 said = (self.github.issue_comments(repo, n)
                         + self.github.review_replies(repo, n))
                 on_issue = {u: self.github.issue_comments(repo, number_of(u))
@@ -652,8 +659,11 @@ class Stopper:
             except Exception as e:
                 self.say(f'stop {repo.name}#{n}: reading its answer failed ({e}); next pass')
                 continue
+            if gone != 'open' and not self._close_for_pr(repo, n, gone, stops, closed):
+                continue
             for j in stops:
                 how = ('issue-closed' if j.link in closed else
+                       PR_CLOSED if gone != 'open' and j.stop not in ON_MERGED else
                        'replied' if said_since(said + on_issue.get(j.link, []),
                                                utc(j.started_at)) else None)
                 if how:
@@ -662,7 +672,36 @@ class Stopper:
                     self.say(f'stop {repo.name}#{n}: answered ('
                              + ('its issue was closed); the PR is back in the loop'
                                 if how == 'issue-closed' else
+                                f'the PR was {gone} outside the runner); nothing left to do'
+                                if how == PR_CLOSED else
                                 'a reply); a decision on the reply comes first'))
+
+    def _close_for_pr(self, repo, n: int, state: str, stops, closed) -> bool:
+        """Issue #88: the PR was merged or closed on GitHub while its stops were filed, so
+        there's nothing left for Stefan to decide. Each of their `needs-info` issues still open
+        gets a one-line note and is closed (completed for a merge, not planned for a close),
+        except one a `live` or `live-todo` stop shares: that work is still Stefan's, and closing
+        its issue would answer it. False when GitHub failed: the stops stay filed and the next
+        pass tries again, and a note already posted isn't posted twice."""
+        mark = f'{RUNNER_MARK}stop pr-closed pr={n} -->'
+        live = {j.link for j in stops if j.stop in ON_MERGED}
+        for u in sorted({j.link for j in stops if j.link and j.stop not in ON_MERGED}
+                        - closed - live):
+            i = number_of(u)
+            try:
+                if not any(mark in c.body for c in self.github.issue_comments(repo, i)):
+                    self.github.post_comment(repo, i, (
+                        f'PR #{n} was {state} outside the queue runner, so nothing here waits '
+                        f'on Stefan any more: closing this.\n\n{mark}\n'))
+                if state == 'merged':
+                    self.github.close_completed(repo, i)
+                else:
+                    self.github.close_not_planned(repo, i)
+            except Exception as e:
+                self.say(f'stop {repo.name}#{n}: the PR was {state}, but closing {u} failed '
+                         f'({e}); next pass')
+                return False
+        return True
 
 
 def held(jobs, repo, n: int) -> str | None:
