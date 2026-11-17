@@ -1,4 +1,4 @@
-"""Toasting Stefan (ticket 06; `~/Code/docs/orchestration.md`, Notifications): a native Windows
+"""Toasting Stefan (ticket 06; `docs/flow.md`, Notifications): a native Windows
 toast under the runner's own name and icon, not PowerShell's, whose click opens a URL (the stop's
 `needs-info` issue, or a waiting thread).
 

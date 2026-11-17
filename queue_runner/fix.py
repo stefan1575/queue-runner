@@ -1,4 +1,4 @@
-"""A fix round on a blocking PR (ticket 05; `~/Code/docs/pr-review.md`, A round, step 5), in
+"""A fix round on a blocking PR (ticket 05; `docs/flow.md`, A round, step 5), in
 the Claude lane.
 
 A PR gets a fix round when the runner's own newest review of its head H is `blocking` (decide()'s

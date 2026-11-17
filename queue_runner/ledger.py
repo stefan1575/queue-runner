@@ -3,7 +3,7 @@ works out a review's verdict and outcome from Sol's sol-findings block, never fr
 
 Ported from `~/sol-pr-review.py` (`decide()`, the marker and block parsing) without its labels,
 spend guard, token counts or session forks. leads-dashboard's `docs/agents/review-loop.md` and
-`REVIEW.md` define the words; `~/Code/docs/pr-review.md` the loop.
+`REVIEW.md` define the words; `docs/flow.md` the loop.
 
 A PR's state lives in its review comments. The newest one holds every finding raised so far, each
 with a status, so a review reads only the newest. Three formats are read:
@@ -32,7 +32,7 @@ STATUSES = {'fixed': 'Fixed', 'open': 'Still open', 'decline-accepted': 'Decline
             'decline-kept': 'Decline kept open'}
 OPEN = ('open', 'decline-kept')
 # From this review on, a blocking review comes to Stefan with an approach note, not a fix round
-# (pr-review.md: no fourth review without his answer). The old script did it at review 3 only,
+# (docs/flow.md: no fourth review without his answer). The old script did it at review 3 only,
 # with its spend guard behind it; with that guard gone, every later blocking review does too.
 APPROACH_REVIEW = 3
 # Every comment the runner posts outside a review carries a hidden line starting with this: the
@@ -84,7 +84,7 @@ def _visible_findings(body: str) -> list | None:
 def read_review(body: str, at: str = '') -> dict | None:
     """One comment's review: {round, verdict, sha, findings, at}, or None if it isn't one. A
     review whose ledger can't be read isn't one: it failed, so it isn't counted and doesn't
-    replace the PR's state (pr-review.md)."""
+    replace the PR's state (docs/flow.md)."""
     if m := MARK.search(body):
         found = _marker_findings(body, m.start())
         if found is None:

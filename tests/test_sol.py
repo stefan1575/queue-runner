@@ -1,4 +1,4 @@
-"""The Sol adapter: one review through ~/Code/tools/codex-sol/codex-sol.sh, its reply, a failed run, Sol out of usage."""
+"""The Sol adapter: one review through scripts/codex-sol.sh, its reply, a failed run, Sol out of usage."""
 import datetime
 import os
 import tempfile

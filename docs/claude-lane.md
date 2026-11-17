@@ -187,7 +187,7 @@ it) and is no newer job to the decisions (`Decider.cases` passes over `not-start
 
 ## Decision threads
 
-`decisions.py` and `templates/decision.md` (ticket 07; `orchestration.md`, Judgement). When the
+`decisions.py` and `templates/decision.md` (ticket 07; `docs/flow.md`, Judgement). When the
 fixed flow can't say what to do next, the Claude lane starts a one-off thread, `Queue runner
 decision: <repo>#<n>`, in the repo's T3 project with no worktree (it changes nothing), with one
 question and the state it needs: the PR and its open findings and classes from the ledger, the
@@ -302,7 +302,7 @@ click, never by itself.
 
 ## Live steps
 
-`live.py` and `templates/live.md` (ticket 11; `pr-review.md`, Merge). A repo whose `config.toml`
+`live.py` and `templates/live.md` (ticket 11; `docs/flow.md`, Merge). A repo whose `config.toml`
 entry has `live_doc` (leads-dashboard: `docs/agents/lovable-cloud.md`; `live_migrations` and
 `live_functions` default to `supabase/migrations` and `supabase/functions`) gets one Claude thread
 per batch, `Queue runner live: <repo>`, gated as kind `live` (default cost 20% of 5 hours, 5% of

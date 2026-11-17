@@ -86,6 +86,8 @@ What each module and script is for.
   `scripts/live_merge.py` and `scripts/live_mcp.py`: the live checks.
 - `scripts/shoot.py`: screenshots of the dashboard's sample states at any commit, for a PR's
   evidence (`docs/dashboard.md`, Screenshots).
+- `scripts/codex-sol.sh`: runs one Sol review in Codex at the effort it's given (`queue_runner/sol.py`).
+- `scripts/evidence.py`: shoots and publishes a PR's screenshots for build and fix jobs (`templates/build.md`, Screenshots).
 - `scripts/make_icon.py`: draws the toast icon, `queue_runner/assets/icon.png`.
 - `scripts/make_shortcut.py`: makes the logon shortcuts, the runner's and the dashboard's
   (`--startup` copies both into the Startup folder); `scripts/live_wake.py`: the wake task's

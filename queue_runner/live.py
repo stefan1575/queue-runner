@@ -1,4 +1,4 @@
-"""Live steps after merges (ticket 11; `~/Code/docs/pr-review.md`, Merge), in the Claude lane.
+"""Live steps after merges (ticket 11; `docs/flow.md`, Merge), in the Claude lane.
 
 A repo whose `config.toml` entry names a `live_doc` (leads-dashboard: `docs/agents/lovable-cloud.md`)
 needs an AI to make a merge live: the Lovable connector's `deploy_project`, `query_database` for each

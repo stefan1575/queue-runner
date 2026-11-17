@@ -45,7 +45,7 @@ and `[sol]`,
 
 ## Running unattended
 
-Ticket 10 (`orchestration.md`, The runner and Sleep).
+Ticket 10 (`docs/flow.md`, The runner and Limits).
 
 - **Start:** at logon, `~/.queue-runner/Queue runner.lnk` (made by `scripts/make_shortcut.py`)
   runs `~/scoop/apps/python/current/pythonw.exe -m queue_runner` in this repo. A copy is in

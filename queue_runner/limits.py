@@ -1,4 +1,4 @@
-"""Limit recovery (ticket 09; `orchestration.md`, Limits): a Claude job cut off by a usage limit.
+"""Limit recovery (ticket 09; `docs/flow.md`, Limits): a Claude job cut off by a usage limit.
 
 T3's CLI doesn't say when a limit resets: `thread show --json` gives the thread `failed` and
 Claude Code's message ("You've hit your weekly limit · resets Nov 9, 7pm (Asia/Singapore)"), and

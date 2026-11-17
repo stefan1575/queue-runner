@@ -4,7 +4,7 @@ Stops for Stefan, and how the runner settles, prefixes and refreshes the T3 thre
 
 ## Stops for Stefan
 
-`stops.py` (`~/Code/docs/pr-review.md`, Stops). Each Sol pass, for every open PR (not one a Claude job
+`stops.py` (`docs/flow.md`, Stops). Each Sol pass, for every open PR (not one a Claude job
 is writing to), the runner looks for stops on its head H, and
 files each kind once per H (`JobLog.stopped`). The kinds: `review` (the runner's review of H
 stopped: a repeated class, a reopened finding, a kept decline; the reason is decide()'s text from
