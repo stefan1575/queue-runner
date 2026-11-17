@@ -14,7 +14,7 @@ one job log (a lock per file inside the process).
   whose job still runs (`choose`, `_choose_in`; `Start`). The gate lets each in, in turn, only
   when it fits beside the jobs running and the ones let in before it (`_admit`; The usage gate,
   Beside running jobs). Each starts in a worker thread of its own (`Worker`, `_launch`) that
-  blocks on `t3 thread start --wait`. A job that doesn't fit doesn't hold back a later repo's
+  blocks on its thread's run (`T3Cli.start`: T3's MCP launch and wait, `docs/t3.md`). A job that doesn't fit doesn't hold back a later repo's
   that does.
 - **Who goes first** when the gate has room for one more: the repo whose work has waited
   longest, read as since its last Claude job ended (`Runner._waited`, from the job log, so a
@@ -82,7 +82,7 @@ and it gets no other fix round. A repo has one Claude job at a time, so two neve
    once a round on H ended (except `not-started`), H gets no other until `--release NAME#PR`. The
    runner fetches the PR's head (moved since listing: nothing starts, Sol reviews it first),
    writes a start record (`sha` H, `round` the review's, `branch` the PR's), then blocks on
-   `t3 thread start --wait --json --worktree H --branch claude/fix-pr<n>-<H7>`: a fresh T3
+   `T3Cli.start(worktree=H, branch=claude/fix-pr<n>-<H7>)`: a fresh T3
    worktree at H on a local branch that never goes to origin, because T3 can't run a thread in
    an existing worktree and the build's may still hold the PR's branch. The thread pushes to the
    PR's branch (`git push origin HEAD:<branch>`). The brief (`templates/fix.md`) has no handoff
@@ -99,7 +99,7 @@ and it gets no other fix round. A repo has one Claude job at a time, so two neve
    main fails its checks (...)`), and the dashboard's Claude queue lists none; fix rounds,
    conflict rounds and decisions above still run. The runner
    fetches `origin/<base>`, writes a start record, then blocks on
-   `t3 thread start --wait --json --worktree origin/<base> --branch claude/<slug>-<n>` with the
+   `T3Cli.start(worktree=origin/<base>, branch=claude/<slug>-<n>)` with the
    brief on stdin. Afterwards it records the outcome.
 
 **The job log** is `<state_dir>/jobs.jsonl` (`state.py`): `start`, `end` and `release` events, one
@@ -257,7 +257,7 @@ click, never by itself.
   (`JobLog.released_ids`: a release leaves a stop's outcome `filed`), in a repo it works, with
   the PR open, and starts `Decide: Queue runner ask: <repo>#<n>` (the job's own `title` has no
   prefix: `docs/stops.md`, Threads that need Stefan) in the repo's T3 project with no worktree,
-  **without waiting** (`T3Cli.launch`: `t3 thread start --json` prints `{threadId, projectId,
+  **without waiting** (`T3Cli.launch`: T3's MCP `t3_thread_launch` answers `{threadId, projectId,
   runId}`, read in `server.asar` 2026-11-15), then reads its link with `thread show`. Gated as a
   decision; it teaches the learned costs nothing (`measured` records only passes that made a
   Claude job of a gated kind). A stopped Claude lane or repo keeps the request and starts nothing

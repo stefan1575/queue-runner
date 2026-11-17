@@ -2,8 +2,8 @@
 time.
 
 The Claude lane settles what earlier passes left open, then chooses each working repo's job (#50:
-the repos run side by side, each in a worker thread of its own that blocks on `t3 thread start
---wait` while its job runs): a decision on a case the flow doesn't cover (`decisions.py`), then
+the repos run side by side, each in a worker thread of its own that blocks on its T3
+thread's run while its job runs): a decision on a case the flow doesn't cover (`decisions.py`), then
 the repo's live steps after merges (`live.py`), then a fix round on a PR the runner found blocking
 (`fix.py`), before any new build, so open PRs finish first. The usage gate lets each in only
 when it fits beside the jobs still running, the repo whose work has waited longest first. The
@@ -108,7 +108,7 @@ class Worker:
 class Runner:
     def __init__(self, config: Config, *, github, t3, git, out, log_line, sol=None,
                  toaster=None, gate=None, limits=None, now=None, waker=None, self_update=None,
-                 deps=None, effort=None):
+                 deps=None, effort=None, sol_usage=None):
         self.config, self.github, self.t3, self.git = config, github, t3, git
         # restart.SelfUpdate: the runner's own checkout, restarted on when its base moves
         # (continuous mode, and only when the runner serves its own repo)
@@ -121,8 +121,8 @@ class Runner:
         # limits.T3Store, where T3 keeps a usage-limit stop's reset; None reads only what the
         # thread said (tests, the live checks).
         self.limits = limits
-        # effort.Effort (ticket 39): how a job's thread is started, and the effort its run used
-        # read back into its end record; with no T3 files (tests), --model as before.
+        # effort.Effort (ticket 39): the provider, model and effort a job's thread names (#119),
+        # and the effort its run used read back into its end record; none with no T3 files.
         from .effort import Effort
         self.effort = effort or Effort(config)
         self.now = now or (lambda: datetime.datetime.now(datetime.timezone.utc))
@@ -149,7 +149,6 @@ class Runner:
         self._rest: dict[str, datetime.datetime] = {}
         # Each repo's wait as the last pass left it (a snapshot.Wait), for the Repositories card.
         self.repo_waits: dict[str, Wait] = {}
-        self._seen_running: set[str] = set()   # waiting jobs a pass saw running again (settle)
         # A dead runner's Opus fallback review still running in T3: the Claude lane starts
         # nothing beside it until it ends (PR 67's review 2, F2; `_fallback_runs`).
         self._orphan_review = False
@@ -167,7 +166,7 @@ class Runner:
                                  say=self.say, toaster=self.toaster, deps=deps,
                                  fallback=OpusFallback(config, t3=t3, gate=gate,
                                                        effort=self.effort, beside=self),
-                                 t3=t3) if sol is not None else None
+                                 t3=t3, sol_usage=sol_usage) if sol is not None else None
         self.fixer = Fixer(config, github=github, git=git, jobs=self.jobs)
         stopper = Stopper(config, github=github, jobs=self.jobs, say=self.say,
                           toaster=self.toaster)
@@ -543,11 +542,12 @@ class Runner:
 
     # --- the switch ----------------------------------------------------------------------
 
-    def _thread_ended(self) -> None:
+    def _thread_ended(self, key: str | None = None) -> None:
         """A Claude job's thread was seen to end outside a measured pass (`settle`): the next
-        check waits for a usage reading taken after now (PR 67's review 1, F1)."""
+        check waits for a usage reading taken after now (PR 67's review 1, F1). With `key`
+        (a run id), only the first telling counts."""
         if self.gate is not None:
-            self.gate.job_ended()
+            self.gate.job_ended(key)
 
     def held(self, lane: str) -> bool:
         """Whether Stefan stopped `lane` (control.json, read now), or control.json is unreadable:
@@ -680,11 +680,12 @@ class Runner:
                 continue
             if thread.active and not thread.pending_requests:
                 busy[job.repo] = (self._name(job), job.kind)   # answered, and running again
-                self._seen_running.add(job.id)
-            elif job.id in self._seen_running and _exit_code(thread) == 2:
-                self._seen_running.discard(job.id)
-                self._thread_ended()   # it ran on Stefan's answer and asks again
-            elif _exit_code(thread) != 2:
+            elif _exit_code(thread) == 2:
+                # A run newer than the one that asked ran on Stefan's answer and asks again,
+                # seen running or not (#85): the gate is told once, keyed on that run.
+                if thread.latest_run_id and thread.latest_run_id != job.run_id:
+                    self._thread_ended(thread.latest_run_id)
+            else:
                 self.finish(job, thread.thread_id, _exit_code(thread), thread.status, None,
                             thread.latest_run_id)
                 self._thread_ended()   # Stefan's answer set it running again, and it ended
@@ -749,7 +750,7 @@ class Runner:
         it ended."""
         try:
             result = self.t3.start(repo.path, brief, title=job.title, worktree=base,
-                                   branch=branch, **self.effort.flags(repo))
+                                   branch=branch, **self.effort.job())
         except T3Error as e:
             try:
                 thread = self._find_thread(job)

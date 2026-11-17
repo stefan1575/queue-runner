@@ -413,7 +413,7 @@ class Decider:
         try:
             brief = self.brief(case)
             result = self.t3.start(repo.path, brief, title=job.title,
-                                   **self.effort.flags(repo))
+                                   **self.effort.job())
         except Exception as e:   # T3 down, or the brief couldn't be built: the next pass
             self.jobs.ended(job.id, exit_code=None, outcome=NOT_STARTED,
                             error=f'{type(e).__name__}: {e}')

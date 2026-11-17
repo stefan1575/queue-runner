@@ -80,6 +80,18 @@ class AskTitleTest(ta.ThreadCase):
         self.assertEqual(self.title(ask.thread_id), ASK)
         self.assertTrue(self.t3.threads[ask.thread_id].settled)
 
+    def test_its_pr_merged_on_github_without_deciding_takes_the_prefix_off(self):
+        """Issue #88: Stefan merges PR #20 on GitHub without deciding in the ask thread."""
+        ask = self.opened()
+        self.says(ask, Message('assistant', 'The case: ...'), status='completed')
+        self.gh.now.setdefault(20, {})['state'] = 'merged'
+        self.r.reviewer.review_pass()   # the Sol lane reads the PR's state
+        self.r.plan()
+        [stop] = [j for j in self.r.jobs.jobs() if j.kind == 'stop']
+        self.assertEqual((stop.outcome, stop.answer), ('answered', 'pr-closed'))
+        self.assertEqual(self.title(ask.thread_id), ASK)
+        self.assertTrue(self.t3.threads[ask.thread_id].settled)
+
     def test_a_released_stop_takes_the_prefix_off(self):
         ask = self.opened()
         self.says(ask, Message('assistant', 'The case: ...'), status='completed')

@@ -542,6 +542,64 @@ class StopsTest(unittest.TestCase):
         self.reviewer().review_pass()
         self.assertEqual({s.outcome for s in self.stops()}, {'filed'})
 
+    def test_a_stop_on_a_pr_merged_outside_the_runner_is_answered_and_its_issue_closed(self):
+        """Issue #88: Stefan merges a stopped PR on GitHub without deciding."""
+        r = self.stopped_then_pushed()
+        self.gh.now[20] = {'head_sha': H3, 'state': 'merged'}
+        r.review_pass()
+        [stop] = self.stops()
+        self.assertEqual((stop.outcome, stop.answer), ('answered', 'pr-closed'))
+        [(n, note)] = [c for c in self.calls('comment') if c[0] == 901]
+        self.assertIn('PR #20 was merged', note)
+        self.assertIn(RUNNER_MARK, note)
+        self.assertEqual(self.calls('close-done'), [(901,)])
+        self.assertIsNone(held(self.jobs, self.repo, 20))
+
+    def test_a_stop_on_a_pr_closed_outside_the_runner_closes_its_issue_not_planned(self):
+        r = self.stopped_then_pushed()
+        self.gh.now[20] = {'head_sha': H3, 'state': 'closed'}
+        r.review_pass()
+        self.assertEqual(self.stops()[0].answer, 'pr-closed')
+        [(n, note)] = [c for c in self.calls('comment') if c[0] == 901]
+        self.assertIn('PR #20 was closed', note)
+        self.assertEqual(self.calls('close'), [(901,)])
+
+    def test_closing_the_issue_of_a_closed_pr_failing_leaves_the_stop_for_next_pass(self):
+        r = self.stopped_then_pushed()
+        self.gh.now[20] = {'head_sha': H3, 'state': 'closed'}
+        self.gh.fail.add('close')
+        r.review_pass()
+        self.assertEqual(self.stops()[0].outcome, 'filed')
+        self.gh.fail.discard('close')
+        r.review_pass()
+        self.assertEqual(self.stops()[0].answer, 'pr-closed')
+        self.assertEqual(len([c for c in self.calls('comment') if c[0] == 901]), 1)
+
+    def live_stop_on_the_same_issue(self, kind):
+        """A live run on the merged PR files a `live` or `live-todo` stop: it shares issue 901."""
+        j = self.jobs.started(kind='stop', repo='first', issue=20, branch='claude/red-5',
+                              title='Queue runner stop: first#20', sha=H3, stop=kind)
+        self.jobs.ended(j.id, exit_code=None, outcome='filed', link=ISSUE_URL, reason='not live')
+        return j.id
+
+    def test_a_merged_pr_leaves_the_issue_open_while_a_live_stop_shares_it(self):
+        """Review 1 F1 on PR #125: closing 901 for the merged PR would answer the live stops."""
+        for kind in ('live', 'live-todo'):
+            with self.subTest(kind):
+                self.setUp()
+                r = self.stopped_then_pushed()
+                self.gh.now[20] = {'head_sha': H3, 'state': 'merged'}
+                self.gh.states[901] = 'open'
+                live = self.live_stop_on_the_same_issue(kind)
+                r.review_pass()
+                r.review_pass()
+                by_id = {j.id: j for j in self.stops()}
+                self.assertEqual(by_id.pop(live).outcome, 'filed')
+                [review] = by_id.values()
+                self.assertEqual((review.outcome, review.answer), ('answered', 'pr-closed'))
+                self.assertEqual((self.calls('close-done'), self.calls('close')), ([], []))
+                self.assertEqual([c for c in self.calls('comment') if c[0] == 901], [])
+
     def test_release_puts_a_stopped_pr_back(self):
         r = self.stopped_then_pushed()
         self.jobs.released('first', 20)

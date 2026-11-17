@@ -14,9 +14,10 @@ Sol. The differences:
 - **Where it runs:** a T3 thread in the repo's project folder with no worktree (T3 can't start a
   thread in an existing folder, and the runner's checkout of H is where the dependencies are
   linked in), told to work in that checkout and change nothing in the project folder. It starts
-  on the T3 instance `[review] claude_provider` names, one with no MCP tools (docs/reviews.md, A
-  review has no outside tools), never on [claude]'s or the project's default, and the effort its
-  run used is read back.
+  as every Claude job does, its provider, model and effort named (`effort.claude_job`, #119),
+  but its provider is the T3 instance `[review] claude_provider` names, one with no MCP tools
+  (docs/reviews.md, A review has no outside tools), never [claude]'s or the project's default,
+  and the effort its run used is read back.
 - **The label:** the comment, the `sol-review` status and the Review row name it and say why
   ("Opus 5.5 high, fallback while Sol is out", or "Opus 5.5 high, set in config.toml"), with the
   effort read back when it can be.
@@ -24,6 +25,7 @@ Sol. The differences:
 import os
 import re
 
+from .effort import claude_job
 from .ledger import SolFailed
 from .t3 import T3Error, settle_quietly
 
@@ -128,7 +130,8 @@ class OpusThread:
             raise SolFailed(f"The {self.name} didn't start: [review] claude_provider "
                             f'({provider!r}) must name a T3 instance with no MCP tools, not '
                             "[claude]'s (docs/reviews.md, A review has no outside tools).")
-        flags = {'provider': provider, 'model': f.config.claude_model}
+        # Its model and effort named as every Claude job's are (#119), on the no-tools instance.
+        flags = {**claude_job(f.config), 'provider': provider}
         try:
             result = f.t3.start(repo.path, message, title=self.title, **flags)
         except T3Error as e:
@@ -171,7 +174,7 @@ class OpusThread:
 
 class OpusFallback:
     """What the Sol lane needs for the fallback: T3, the usage gate (None: every review starts,
-    as for the tests' Runner without one), the effort (None: --model, nothing read back) and
+    as for the tests' Runner without one), the effort (None: nothing read back) and
     `beside`, the Claude lane (`run.Runner`: its jobs running, and the review counted among them
     while it runs; `Alone` without one)."""
 

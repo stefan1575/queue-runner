@@ -334,15 +334,57 @@ class EndedElsewhereTest(Harness):
         self.assert_held_until_the_next_read()
 
     def test_a_waiting_job_that_ran_on_stefans_answer_and_asks_again_holds_the_next_job(self):
-        job = self.a_build()
-        self.log.ended(job.id, exit_code=2, outcome='waiting', thread_id='mcp:w')
-        self.t3.add('mcp:w', job.title, 'running')     # Stefan answered it in T3
+        self.a_waiting_build()
+        self.ran_again('mcp:w', 'running')             # Stefan answered it in T3
         self.endpoint.five = 10
         self.tick()
         self.assertEqual(self.r.run_pass(), BUSY)
         self.clock.at(14, 2, 49)
         self.endpoint.five = 90
         self.t3.set_status('mcp:w', 'waiting')         # it ran, and asks him again
+        self.assert_held_until_the_next_read()
+        self.assertEqual(self.log.jobs()[0].outcome, 'waiting')
+
+    def test_a_waiting_job_still_on_the_run_that_asked_holds_nothing(self):
+        self.a_waiting_build()                         # Stefan hasn't answered
+        self.tick()
+        self.clock.at(14, 2, 49)
+        self.r.run_pass()
+        self.assertIsNone(self.gate.ended)             # no run since it asked: nothing ended
+
+    def test_a_run_on_stefans_answer_is_told_to_the_gate_once(self):
+        self.a_waiting_build()
+        self.ran_again('mcp:w', 'waiting')
+        self.endpoint.five = 10
+        self.tick()
+        self.clock.at(14, 2, 49)
+        self.endpoint.five = 90
+        self.assert_held_until_the_next_read()        # its next pass decides on 14:06:49's
+        self.clock.at(14, 8)
+        self.r.run_pass()
+        self.assertEqual(self.gate.ended, t(14, 2, 49))   # the same run: not told again
+
+    def a_waiting_build(self):
+        """A build waiting on Stefan, its end record naming the run that asked (#85)."""
+        job = self.a_build()
+        self.log.ended(job.id, exit_code=2, outcome='waiting', thread_id='mcp:w',
+                       run_id='run:mcp:w:1')
+        self.t3.add('mcp:w', job.title, 'waiting')
+        return job
+
+    def ran_again(self, thread_id, status):
+        """Stefan answered the thread in T3: a newer run, now `status`."""
+        from dataclasses import replace
+        self.t3.threads[thread_id] = replace(self.t3.threads[thread_id], status=status,
+                                             latest_run_id=f'run:{thread_id}:2')
+
+    def test_a_run_on_stefans_answer_no_pass_saw_running_holds_the_next_job(self):
+        self.a_waiting_build()
+        self.endpoint.five = 10
+        self.tick()
+        self.clock.at(14, 2, 49)
+        self.endpoint.five = 90
+        self.ran_again('mcp:w', 'waiting')             # ran and asked again, all between passes
         self.assert_held_until_the_next_read()
         self.assertEqual(self.log.jobs()[0].outcome, 'waiting')
 

@@ -192,7 +192,8 @@ class Story:
             if j.outcome == 'answered':
                 add(j.ended_at, j, f'You closed needs-info issue #{number_of(j.link)}.'
                     if j.answer == 'issue-closed' and j.link else 'You decided in T3.'
-                    if j.answer == 'thread' else 'You replied.')
+                    if j.answer == 'thread' else 'Its PR was merged or closed on GitHub, so the stop had nothing left to decide.'
+                    if j.answer == 'pr-closed' else 'You replied.')
         for j in self.on('ask', repo, n):   # a thread Stefan opened to decide in (ticket 35)
             if j.outcome == 'opened':   # or a fresh one in place of a stale one (#72)
                 add(j.ended_at or j.started_at, j,

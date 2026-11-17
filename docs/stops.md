@@ -24,14 +24,22 @@ stop and links the issue (`<!-- queue-runner stop kind=K sha=H issue=I -->`; `le
 keeps it, like the reviews, from counting as a reply), then a toast. An issue that can't be filed
 makes the stop `failed`, and the next pass files it; a failed PR comment or toast is said and
 left. **Stop job records** (kind `stop`, `issue` = the PR): `stop` (the kind), `sha` H, `link`
-the issue, `reason`; outcomes `filed`, `answered` (with `answer`: `issue-closed`, `replied`, or `thread` when
-Stefan decided it in its ask thread: `docs/claude-lane.md`, Deciding an ask in T3) and
-`failed`.
+the issue, `reason`; outcomes `filed`, `answered` (with `answer`: `issue-closed`, `replied`, `thread` when
+Stefan decided it in its ask thread: `docs/claude-lane.md`, Deciding an ask in T3, or
+`pr-closed` when its PR was merged or closed on GitHub: below) and `failed`.
 
 **Left alone until Stefan answers:** while a stop is `filed`, the PR gets no review (even on a new
 head), no fix round and no merge (`stops.held`). It's answered when its issue is closed or someone
 (not a bot, not the runner's own posts) says something on the PR or on that issue after the
-stop; `--release NAME#PR` lets it go too. Answers are read at the start of each Sol pass. A
+stop; `--release NAME#PR` lets it go too. **Its PR merged or closed on GitHub** (issue #88:
+Stefan merging or closing it without deciding left the stop, and its ask thread's "Decide: ",
+there for good) answers it too, `pr-closed`: each of its `needs-info` issues still open gets a
+one-line note (hidden `stop pr-closed pr=N` line, so a retry doesn't post it twice) and is
+closed, completed for a merge and not planned for a close, and only then is the stop recorded,
+so GitHub failing leaves it `filed` for the next pass. An issue he closed himself still reads
+`issue-closed`. `live` and `live-todo` stops sit on merged PRs by design, so a merge never
+answers them, and an issue one of them shares is left open (no note): closing it would answer
+that live work without Stefan. Answers are read at the start of each Sol pass. A
 closed issue puts the PR back in the loop; a reply holds it until a decision acts on what it asks
 (`docs/claude-lane.md`, Decision threads). Every comment the runner posts outside a review carries a hidden
 `<!-- queue-runner ... -->` line (`ledger.RUNNER_MARK`), so none counts as a reply.

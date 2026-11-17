@@ -214,12 +214,22 @@ python3 scripts/live_sandbox.py
 This runs one real build job, a small Haiku thread, through `Runner.run_build` on a hand-made
 issue ("Add a line to README") in the sandbox. The sandbox is `~/.queue-runner/sandbox/repo`: T3
 project "queue-runner sandbox", with a bare `../origin.git` as its `origin` and no GitHub. Its
-job log and runner log stay in `~/.queue-runner/sandbox/`. It says how the sandbox's jobs start
+job log and runner log stay in `~/.queue-runner/sandbox/`. Its thread names Haiku and the config's effort
 (`docs/usage.md`, The effort) and its record has the `effort` read back. Its thread is settled at its end
 (`docs/stops.md`, Settling threads): that signs in to T3's MCP endpoint, which signs a running runner out
 until its next settle. Before running it again, delete the
 `claude/add-a-line-to-1` branch locally and in `origin.git`, or the job is held as
 `branch-exists`.
+
+```
+python3 scripts/live_launch.py [--codex codex gpt-6.1-sol]
+```
+
+This launches a throwaway thread through T3's MCP with its model and effort named (Haiku at
+`low`; with `--codex`, that model at `reasoningEffort: high`) in a new sandbox worktree, waits
+for it, reads the effort back, then removes the worktree and branch and settles the thread.
+Run on 2026-11-17: both ran at the effort asked (`docs/t3.md`). A Codex run's effort is read by
+hand from its rollout. Like `live_mcp.py`, it signs in, so a running runner signs in again.
 
 ```
 python3 scripts/live_review.py NAME#N

@@ -23,12 +23,13 @@ from queue_runner.t3 import T3Error
 from queue_runner.usage import Usage, Window
 from tests.fakes import FakeGitHubForReviews, FakeToaster, FakeUsage, full_pr
 from tests.fakes_t3 import FakeReviewGit, FakeSol, FakeT3
-from tests.test_effort import FakeFiles, set_high
+from tests.test_effort import NAMED, FakeFiles, named
 from tests.test_ledger import H2, H3, important, reply
 
 NOW = datetime.datetime(2026, 11, 16, 16, 0)
 RESUME = datetime.datetime(2026, 11, 16, 18, 36)   # Sol's reset plus ten minutes
 LABEL = 'Opus 5.5 high, fallback while Sol is out'
+REVIEW_NAMED = ('claudeReviewer', *NAMED[1:])   # [review] claude_provider, [claude]'s model and effort
 UTC = datetime.timezone.utc
 
 
@@ -92,7 +93,7 @@ class FallbackTest(unittest.TestCase):
         [start] = self.t3.starts
         self.assertEqual((start['project'], start['title'], start['worktree'], start['branch']),
                          (self.dir, 'Queue runner review: first#20', None, None))
-        self.assertEqual((start['provider'], start['model']), ('claudeReviewer', 'claude-opus-5-5'))
+        self.assertEqual(named(start), REVIEW_NAMED)
         # Sol's own brief, after the fallback's: where to work, and to post nothing.
         wt = os.path.join(self.config.checkouts_dir, 'first-pr20').replace('\\', '/')
         self.assertTrue(start['message'].startswith("## First: you review in Sol's place"))
@@ -143,13 +144,14 @@ class FallbackTest(unittest.TestCase):
 
     def test_the_label_says_the_effort_the_run_used(self):
         self.sol_out()
-        files = FakeFiles(set_high(self.dir), efforts={'mcp:t1': 'medium'})
+        files = FakeFiles(efforts={'mcp:t1': 'medium'})
         r = self.reviewer((0, 'completed', reply()),
                           effort=Effort(self.config, files=files, say=self.said.append))
         r.review_pass()
         [start] = self.t3.starts
-        # The no-tools instance, not the project's default, which has the build's tools.
-        self.assertEqual((start['provider'], start['model']), ('claudeReviewer', 'claude-opus-5-5'))
+        # The no-tools instance, not the project's default, which has the build's tools; its
+        # model and effort named, whatever T3's default (#119).
+        self.assertEqual(named(start), REVIEW_NAMED)
         [(_, _, body)] = self.posted('comment')
         self.assertIn('Opus 5.5 medium, fallback while Sol is out', body)
         [job] = self.reviews()
@@ -158,7 +160,7 @@ class FallbackTest(unittest.TestCase):
     def test_a_review_instance_in_config_starts_the_thread_on_it(self):
         self.sol_out()
         self.config = dataclasses.replace(self.config, review_claude_provider='claudeReviewer')
-        files = FakeFiles(set_high(self.dir), efforts={'mcp:t1': 'medium'})
+        files = FakeFiles(efforts={'mcp:t1': 'medium'})
         r = self.reviewer((0, 'completed', reply()),
                           effort=Effort(self.config, files=files, say=self.said.append))
         r.review_pass()

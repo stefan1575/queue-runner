@@ -34,6 +34,7 @@ STATES = {
     "reconnecting": "The PC woke 3 minutes ago: GitHub, Claude and ChatGPT haven't answered yet, so each is reconnecting",
     "inbox-unread": "The runner just started: the Inbox hasn't been read yet (asks null)",
     "stale": "Two threads waiting on you went cold: their Inbox items open fresh ones",
+    "asked-again": "Claude's run on your answer asked again between two passes: the next job waits for a fresh usage reading",
 }
 DEFAULT = "busy"
 # Takes of the page before this one, kept while its look is being agreed: `serve.py` serves the
@@ -608,6 +609,11 @@ def _vary(snap: dict, name: str, ago, ahead) -> None:
         _lane(snap, "claude").update(state="waiting", job=None, wait={
             "until": ahead(3), "reason": "Claude usage was last read 40 minutes ago (the latest read failed: the "
             "usage endpoint answered HTTP 429): no Claude job starts until the next read."})
+    elif name == "asked-again":   # #85: told to the gate by run id, seen running or not
+        snap["usage"][0].update(read_at=ago(4), next_read_at=ahead(1))
+        _lane(snap, "claude").update(state="waiting", job=None, wait={
+            "until": ahead(1), "reason": f"Claude usage was last read at {ago(4)[11:16]}, before the last "
+            f"Claude job ended: no Claude job starts, until the next read at {ahead(1)[11:16]}."})
     elif name == "repo-stopped":
         _repo(snap, LD)["stopped"] = {"at": ago(6)}   # after the jobs on it began
     elif name == "side-by-side":   # #50: each repo runs its own Claude job

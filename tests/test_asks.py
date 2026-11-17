@@ -350,6 +350,13 @@ class AnsweredTest(AskCase):
         self.assertEqual(self.snap()['answered'], [])
         self.assertTrue(decision)
 
+    def test_a_pr_merged_on_github_is_not_told_as_a_reply(self):
+        """PR #125 review 1 F3: a `pr-closed` answer reads as the merge or close, not 'You replied.'"""
+        self.answered('pr-closed')
+        [a] = self.snap()['answered']
+        self.assertEqual(self.texts(a)[-1], 'Its PR was merged or closed on GitHub, so the stop '
+                                            'had nothing left to decide.')
+
     def test_a_closed_issue_is_answered_until_the_next_job_on_the_pr_ends(self):
         self.answered('issue-closed')
         [a] = self.snap()['answered']

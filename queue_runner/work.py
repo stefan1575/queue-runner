@@ -785,7 +785,9 @@ def _event(story, j) -> list[tuple]:
         if j.outcome == 'answered':
             out.append((j.ended_at, 'you', 'answer', sha,
                         f'You closed needs-info issue #{number_of(j.link)}.'
-                        if j.answer == 'issue-closed' and j.link else 'You replied.', None, []))
+                        if j.answer == 'issue-closed' and j.link else
+                        'Its PR was merged or closed on GitHub, so the stop had nothing left to decide.'
+                        if j.answer == 'pr-closed' else 'You replied.', None, []))
         return out
     else:
         return []

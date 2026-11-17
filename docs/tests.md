@@ -51,10 +51,12 @@ start; every test that runs `main` passes it, and a `t3_settings` path, so none 
 database or settings). A decision's `retry` and `answer` in place or fresh: the `cold` tests in
 `tests/test_decisions.py` (its `Runner` gets a `FakeLimits` whose threads are warm unless a test
 says otherwise).
-The effort: `tests/test_effort.py` (`[claude] effort`; `T3Files` on a temp `settings.json`,
-SQLite and transcript folder; the start flags, end records and log lines through a real build,
-decision, continued job, fix round and live run with `FakeFiles`; the start line through `main`
-with a `T3Store` on the temp files).
+The effort: `tests/test_effort.py` (`[claude] effort`; `T3Files` on a temp SQLite and
+transcript folder; the provider, model and effort named, end records and log lines through a
+real build, decision, continued job, fix round and live run with `FakeFiles`). Every kind's
+start names them on `FakeT3` (which requires them): also the conflict round
+(`test_conflicts.py`), the Opus review (`test_fallback.py`) and the ask thread
+(`test_ask_threads.py`). The MCP launch and wait: `tests/test_t3.py` (`FakeMcp`).
 Local tickets: `tests/test_tickets.py` (both status forms, blocker lines, a sandbox git repo
 with three tickets in a blocker chain) and `LocalTicketsDryRunTest` in `tests/test_cli.py`.
 Live steps: `tests/test_live.py` (the answer block, the batch from `FakeLiveGit`, about to land,

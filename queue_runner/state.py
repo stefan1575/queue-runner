@@ -26,8 +26,10 @@ decision's retry or answer, a limit's recovery) also has `resume`: in place or f
 (`limits.ResumeChoice.record`); a fresh one has no `thread_id`.
 
 Events: `start` (a job is about to start), `end` (how it ended; a later `end` for the same job
-replaces the earlier one, e.g. when a waiting thread later completes) and `release` (Stefan
-handled a held issue, so the picker may take it again).
+replaces the earlier one, e.g. when a waiting thread later completes), `release` (Stefan
+handled a held issue, so the picker may take it again) and `sol-back` (a ChatGPT reading taken
+after Sol's out-of-usage review `job`, with every window under `sol.FULL`, ended that review's
+wait before the `resume_at` it recorded: issue #130; `read_at` and `windows` are that reading).
 """
 import datetime
 import json
@@ -361,14 +363,33 @@ class JobLog:
                  and j.outcome != NOT_STARTED]
         return found[-1] if found else None
 
-    def sol_resume_at(self) -> str | None:
-        """When Sol may review again, if Sol's newest ended review found it out of usage. The
-        Opus fallback's reviews meanwhile (`reviewer`) aren't Sol's, so they don't end the wait
-        (issue #69)."""
+    def sol_out(self) -> Job | None:
+        """Sol's newest ended review, if it found Sol out of usage and no `sol-back` record
+        since says ChatGPT has usage again (issue #130). The Opus fallback's reviews meanwhile
+        (`reviewer`) aren't Sol's, so they don't end the wait (issue #69)."""
         ended = [j for j in self.jobs() if j.kind == 'review' and not j.open and not j.reviewer]
         # Stamps are to the second: a tie goes to the one written later.
         last = max(reversed(ended), key=lambda j: j.ended_at, default=None)
-        return last.resume_at if last and last.outcome == OUT_OF_USAGE else None
+        if not last or last.outcome != OUT_OF_USAGE:
+            return None
+        # A sol-back record names the review whose wait it ended (PR 131's review 2, F6): no
+        # stamp is compared, so a later out-of-usage review ending in the same second as the
+        # reading starts a wait of its own.
+        if any(e['event'] == 'sol-back' and e.get('job') == last.id for e in self._events()):
+            return None
+        return last
+
+    def sol_resume_at(self) -> str | None:
+        """When Sol may review again, if it's out of usage now (`sol_out`)."""
+        out = self.sol_out()
+        return out.resume_at if out else None
+
+    def sol_back(self, *, job: str, read_at: str, windows: list, resume_at: str | None) -> None:
+        """A ChatGPT reading at `read_at`, after Sol's out-of-usage review `job` ran out, shows
+        usage again: that review's wait, which would have lasted until `resume_at`, ends now
+        (issue #130)."""
+        self._append({'event': 'sol-back', 'at': _now(), 'job': job, 'read_at': read_at,
+                      'windows': windows, 'resume_at': resume_at})
 
     def held_issues(self, repo: str) -> set[int]:
         """Issues the build picker must leave alone: a build is open on them, or ended without

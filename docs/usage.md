@@ -37,7 +37,7 @@ never counts it, and `--gate` prints it as its own line, held by the reviewing l
   than 30 minutes (`STALE_AFTER`), even if the latest call failed. A 429 beside such a reading
   never holds the lane. "Ended" is any Claude thread the runner sees end (`Gate.job_ended`): a
   measured job's, and outside a measured pass a dead runner's build, fix or live job settled, a
-  waiting job that ran on Stefan's answer (ended, or asking again), a decision thread whose
+  waiting job that ran on Stefan's answer (ended, or asking again: a `latest_run_id` newer than the run its end record names, told once by that run id, seen running or not, #85), a decision thread whose
   retry or answer never reached its job (PR 67's review 1, F1), and a dead runner's Opus review
   (the fallback, or config.toml's) whose thread has ended (review 2, F2: The Opus fallback, The
   job record). With the
@@ -159,7 +159,9 @@ same limit) is started on it.
   10 minutes after the reset in Sol's own rollout (codex-sol.sh logs `session id:` in
   `reply.md.log`; its `~/.codex/sessions/*/*/*/rollout-*-<id>.jsonl`'s newest `rate_limits`
   record; the window at 99% or more, the later one if both), else the time Sol's error names,
-  else 30 minutes. Until then reviews go to the Opus fallback (`docs/reviews.md`, The Opus fallback).
+  else 30 minutes, or sooner once ChatGPT's own reading shows every window under 99% again (a
+  reset credit used: `docs/reviews.md`, Usage back before that). Until then reviews go to the Opus
+  fallback (`docs/reviews.md`, The Opus fallback).
 
 **First real stop: confirm.** The fixtures are from one real Claude stop (2026-11-08, a weekly
 limit, before the runner existed): `tests/fixtures/t3/turn-item-usage-limit.json`,
@@ -174,59 +176,20 @@ the runner should confirm the log line `<thread> stopped on a usage limit; T3 sa
 plan ends). Every Claude job (build, fix or conflict round, decision, live run) is meant to run
 at `[claude] effort` (`high`).
 
-- **What T3 does** (read 2026-11-15 in `resources/server.asar`, `apps/server/dist/`):
-  `threadStartCommand` (`binCli-*.mjs`) calls MCP's `t3_thread_launch` with
-  `modelSelection: {instanceId, model}` and no options when `--provider` and `--model` are given,
-  and with no `modelSelection` when they aren't. `t3_thread_launch` (`server-*.mjs`) takes the
-  given selection as it is; with none, the project's default (`resolveProjectSettings` then
-  `resolveNewThreadModelSelection`), options and all, swapped for the fallback model while the
-  default's provider is out of usage. A selection with no effort option compiles to the model's
-  default (`compileClaudeModelSelection`: Opus 5.5's is medium, `model-manifest.json`).
-- **Where a project's default lives:** T3's settings are folded (`projectSettingsFolded: true` in
-  `~/.t3/userdata/settings.json`), so launch reads only that file's
-  `projectSettingsOverrides[<project id>].defaultModelSelection`, else its global
-  `defaultModelSelection` (`resolveProjectOverrides`, `ManagedEndpointRuntime-*.mjs`). **The
-  fallback model is the file's top-level `fallbackModelSelection` only**: it isn't one of the
-  project-scoped keys (`PROJECT_SCOPED_SERVER_SETTING_KEYS`, read 2026-11-16: PR #100's review
-  1, F1), so a project's entry can neither set nor clear it, and `T3Files.project_default` reads
-  only the top-level one. None is set on this PC (2026-11-16). The
-  project row's `default_model_selection_json` (`projection_projects`, what MCP's
-  `t3_project_update` writes; personal-ops has Opus 5.5 at high there) is not read once folded.
-  T3 has no Settings screen that writes the override yet (Stefan, 2026-11-16: issue #90), so it's
-  added to the file by hand (Stefan's step, below).
-- **Checked live on 2026-11-15** in the "queue-runner sandbox" project, Haiku threads, reading
-  each run's `modelSelection` in `orchestration_v2_projection_runs` and its Claude transcript:
-  A, `--provider claudeAgent --model claude-haiku-5-5`: the run's selection has no options, and
-  the transcript's API request had `output_config.effort: "medium"`, its assistant record
-  `effort: "medium"`. Then the sandbox's project row was set to Haiku at high with
-  `t3_project_update` (it still is). B, no `--model`: refused, "Pass modelSelection: the project
-  has no default model.", so the row isn't read. C, `--model` again: medium, as A. The override
-  itself wasn't set live: no T3 tool writes it, and editing `settings.json` changes T3's global
-  settings. That step is code-read; each job's read-back confirms it.
-- **So the runner** (`Effort.flags`) starts a repo's job with no `--provider`/`--model` only when
-  its T3 project's default, read as launch reads it (`T3Files.project_default`), is the config's
-  provider, model and effort and no fallback model is set (one would start it on another
-  model); else with `--model` as before, at the model's default. It says which, per repo, at
-  start and again whenever it changes, with the step when it isn't set. A continued job (`t3
-  thread send`) keeps its thread's selection.
+- **Every job names its provider, model and effort** (issue #119): builds, fix and conflict
+  rounds, decisions, live steps, Opus reviews and ask threads start through T3's MCP launch
+  (`T3Cli.start`/`launch`, `docs/t3.md`) with `effort.claude_job`: `[claude]`'s provider, model
+  and effort, whatever the T3 project's default model is. A continued job (`t3 thread send`)
+  keeps its thread's selection. Checked live on 2026-11-17 (`docs/t3.md`).
+- **Before #119** T3's CLI was the only way in, and `t3 thread start --provider --model` sends no
+  effort option, so a run got the model's default (Opus 5.5's is medium). The runner leaned on
+  the T3 project's default model instead (`projectSettingsOverrides[<id>].defaultModelSelection`
+  in T3's `settings.json`, set by hand): that workaround and its start line are gone. Entries
+  set for it in T3's settings stay and do nothing for the runner.
 - **Read back** (`T3Files.run_effort`, into the end record's `effort`): the `effort` on the
   thread's Claude transcript's assistant records since the run started (Claude Code's own record
   of what it sent; `<synthetic>` ones skipped), else the effort option on T3's run record, else
   null. Anything but the config's effort is said once per repo (`<repo>: <job> ran at effort
   medium, not high`), and an unreadable one too; it's said again only when it changes. Only
-  `main` reads T3's files (`effort.T3Files`, read-only); a `Runner` without an `Effort` (tests,
-  `live_merge.py`) starts with `--model` and records no effort.
-- **Stefan's step, once per served project** (game-backdrop and queue-runner had one;
-  leads-dashboard's, `67f79781-c6fd-499d-b309-af07e13304b0`, was added by script on 2026-11-16
-  after backing the file up to `~/Code/backups/t3/`): with T3 closed (it may write over the file
-  while it runs), in `~/.t3/userdata/settings.json`, under
-  `projectSettingsOverrides[<project id>].defaultModelSelection`, put `{"instanceId":
-  "claudeAgent", "model": "claude-opus-5-5", "options": [{"id": "effort", "value": "high"}]}`
-  (the config's provider, model and effort), then start T3 again. A top-level
-  `fallbackModelSelection` also keeps jobs on `--model`, and taking it out changes every
-  project's new threads, so it's his choice; the start line names it when one is set. The
-  runner's start line for a repo not set says the same with its project id and the JSON for
-  the config (`Effort.step`). Once set it says `<repo>: its T3 project's default
-  model is claude-opus-5-5 at effort high; its Claude jobs start on it (no --model)`. If it still
-  says "it has no default model", the entry is under another id or went to the project row,
-  which launch doesn't read.
+  `main` reads T3's files (`effort.T3Files`, read-only); a `Runner` without an `Effort`'s files
+  (tests, `live_merge.py`) records no effort.

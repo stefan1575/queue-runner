@@ -521,9 +521,12 @@ def _repo_ref(value, config, flag, out):
     return repos[m[1]], int(m[2])
 
 
-def _review(config, github, git, sol, value, out, log_line, toaster=None, deps=None) -> int:
-    """`--review NAME#N`: one Sol review now, under sol.lock, if the PR needs one."""
+def _review(config, github, git, sol, value, out, log_line, toaster=None, deps=None,
+            sol_usage=None, clock=None) -> int:
+    """`--review NAME#N`: one Sol review now, under sol.lock, if the PR needs one. While Sol
+    waits on a reset, ChatGPT's usage is read first, as the Sol lane reads it (issue #130)."""
     from .review import Reviewer
+    from .snapshot import Calls, Watch
     ref = _repo_ref(value, config, '--review', out)
     if ref is None:
         return 2
@@ -531,8 +534,10 @@ def _review(config, github, git, sol, value, out, log_line, toaster=None, deps=N
     def say(line):
         log_line(line)
         print(line, file=out)
+    clock = clock or _utc_now
+    watch = Watch(sol_usage, Calls(clock), 'sol_usage', clock, timed=True) if sol_usage else None
     reviewer = Reviewer(config, github=github, git=git, sol=sol, jobs=_jobs(config), say=say,
-                        toaster=toaster, deps=deps)
+                        toaster=toaster, deps=deps, sol_usage=watch)
     try:
         _, why = reviewer.review_one(*ref)
     except RunnerBusy:
@@ -595,11 +600,12 @@ def _heard(calls):
     return lambda ok, note: calls.record('claude_usage', ok, note)
 
 
-def _publisher(config, runner, calls, claude, sol_usage, clock, log_line, every):
-    """The running runner's snapshot (`snapshot.py`): written by both lanes and its own thread."""
-    from .snapshot import Publisher, RunnerInfo, Snapshots, Watch
+def _publisher(config, runner, calls, claude, sol_watch, clock, log_line, every):
+    """The running runner's snapshot (`snapshot.py`): written by both lanes and its own thread.
+    `sol_watch` is ChatGPT's reader, shared with the Sol lane (issue #130)."""
+    from .snapshot import Publisher, RunnerInfo, Snapshots
     snaps = Snapshots(config, calls=calls, clock=clock, runner=runner, claude=claude,
-                      sol=Watch(sol_usage, calls, 'sol_usage', clock, timed=True),
+                      sol=sol_watch,
                       info=RunnerInfo(os.getpid(), clock(), _commit()))
     return Publisher(os.path.join(config.state_dir, 'snapshot.json'), snaps.build, log_line,
                      every=every)
@@ -770,7 +776,8 @@ def main(argv=None, github=None, out=None, t3=None, git=None, sleep=None,
         from .toast import WindowsToaster
         toaster = WindowsToaster()
     if args.review:
-        return _review(config, github, git, sol, args.review, out, log_line, toaster, deps)
+        return _review(config, github, git, sol, args.review, out, log_line, toaster, deps,
+                       sol_usage, snap_clock)
 
     if t3 is None:   # settle and rename go to T3's MCP endpoint (ticket 70)
         from .t3 import T3Cli
@@ -790,22 +797,24 @@ def main(argv=None, github=None, out=None, t3=None, git=None, sleep=None,
         calls = Calls(snap_clock)
         github, t3 = calls.watch(github, 'github'), calls.watch(t3, 't3')
         gate.reader.on_call = _heard(calls)   # one reader, the gate's and the snapshot's
-    # The effort Claude jobs run at (ticket 39): read from T3's own files when the limits store
-    # is T3's real database (a test's fake store reads none, so nothing is read back).
-    from .effort import Effort, T3Files, T3_SETTINGS
-    effort = Effort(config, files=T3Files(settings=t3_settings or T3_SETTINGS, db=limits.path,
-                                          projects=limits.projects)
+    # The effort Claude jobs ran at (ticket 39), read back from T3's own files when the limits
+    # store is T3's real database (a test's fake store reads none, so nothing is read back).
+    from .effort import Effort, T3Files
+    effort = Effort(config, files=T3Files(db=limits.path, projects=limits.projects)
                     if isinstance(limits, T3Store) else None)
+    # ChatGPT's usage, one reader for the dashboard and the Sol lane, which reads it while Sol
+    # waits for a reset (issue #130). --once keeps its calls to itself: it writes no snapshot.
+    from .snapshot import Calls, Watch
+    sol_watch = Watch(sol_usage, calls or Calls(snap_clock), 'sol_usage', snap_clock, timed=True)
     runner = Runner(config, github=github, t3=t3, git=git, out=out, log_line=log_line, sol=sol,
                     toaster=toaster, gate=gate, limits=limits, now=clock, waker=waker,
-                    self_update=self_update, deps=deps, effort=effort)
+                    self_update=self_update, deps=deps, effort=effort, sol_usage=sol_watch)
     if calls is not None:   # continuous mode only: --once writes no snapshot
         from .snapshot import WRITE_EVERY
-        runner.publisher = _publisher(config, runner, calls, gate.reader, sol_usage, snap_clock,
+        runner.publisher = _publisher(config, runner, calls, gate.reader, sol_watch, snap_clock,
                                       log_line, snapshot_every or WRITE_EVERY)
     if warning := auto_resume_warning(*([t3_settings] if t3_settings else [])):
         runner.say(f'Warning: {warning}')
-    effort.check(config.repos)   # how each served repo's Claude jobs start, and at what effort
     restart = None
     try:
         with runner_lock(config.state_dir):
