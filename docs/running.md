@@ -214,7 +214,7 @@ python3 scripts/live_sandbox.py
 This runs one real build job, a small Haiku thread, through `Runner.run_build` on a hand-made
 issue ("Add a line to README") in the sandbox. The sandbox is `~/.queue-runner/sandbox/repo`: T3
 project "queue-runner sandbox", with a bare `../origin.git` as its `origin` and no GitHub. Its
-job log and runner log stay in `~/.queue-runner/sandbox/`. It says how the sandbox's jobs start
+job log and runner log stay in `~/.queue-runner/sandbox/`. Its thread names Haiku and the config's effort
 (`docs/usage.md`, The effort) and its record has the `effort` read back. Its thread is settled at its end
 (`docs/stops.md`, Settling threads): that signs in to T3's MCP endpoint, which signs a running runner out
 until its next settle. Before running it again, delete the

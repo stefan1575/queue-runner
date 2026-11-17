@@ -413,7 +413,7 @@ class LiveSteps:
         try:
             result = self.t3.start(repo.path, brief, title=job.title, worktree=b.target,
                                    branch=live_branch(b.target, job.id),
-                                   **self.effort.flags(repo))
+                                   **self.effort.job())
         except T3Error as e:
             try:
                 thread = self.find_thread(job) if self.find_thread else None

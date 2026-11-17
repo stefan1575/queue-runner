@@ -41,11 +41,13 @@ class FakeT3:
         from dataclasses import replace
         self.threads[thread_id] = replace(self.threads[thread_id], status=status)
 
-    def start(self, project, message, *, title, provider=None, model=None, worktree=None,
+    def start(self, project, message, *, title, provider, model, effort, worktree=None,
               branch=None):
+        """As `T3Cli.start`: every thread names its provider, model and effort (issue #119)."""
         with self.lock:
             self.starts.append(dict(project=project, message=message, title=title,
-                                    provider=provider, model=model, worktree=worktree,
+                                    provider=provider, model=model, effort=effort,
+                                    worktree=worktree,
                                     branch=branch))
             outcome = self.outcomes.pop(0)
             if isinstance(outcome, Exception):
@@ -62,10 +64,10 @@ class FakeT3:
         return RunResult(exit_code=code, thread_id=thread_id, run_id=f'run:{thread_id}:1',
                          status=status, reply=reply, error='It broke.' if code == 1 else None)
 
-    def launch(self, project, message, *, title, provider=None, model=None):
+    def launch(self, project, message, *, title, provider, model, effort):
         """A thread started without waiting: it's running, with no reply yet."""
         self.launches.append(dict(project=project, message=message, title=title,
-                                  provider=provider, model=model))
+                                  provider=provider, model=model, effort=effort))
         if self.launch_error is not None:
             error, self.launch_error = self.launch_error, None
             raise error

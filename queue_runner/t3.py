@@ -1,6 +1,9 @@
-"""T3 Code as the runner sees it: the `t3` CLI (`~/.t3/bin/t3.cmd`) and its `--json` output.
+"""T3 Code as the runner sees it: the `t3` CLI (`~/.t3/bin/t3.cmd`) and its `--json` output,
+and T3's MCP endpoint for what the CLI can't do: start a thread with its effort named (issue
+#119), settle, rename (docs/t3.md).
 
-`thread start|send --wait --json` blocks until the run ends and always prints
+`start` launches through MCP and waits as the CLI's `--wait` does, giving the same result.
+`thread send --wait --json` blocks until the run ends and always prints
 `{threadId, runId, status, reply, error}` once a thread exists. It exits 0 when the run
 completed, 2 when the agent waits for an answer (status `waiting`), and 1 when the run ended any
 other way (failed, interrupted, cancelled...). It also exits 1, printing nothing on stdout, when

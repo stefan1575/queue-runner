@@ -14,8 +14,8 @@ Sol. The differences:
 - **Where it runs:** a T3 thread in the repo's project folder with no worktree (T3 can't start a
   thread in an existing folder, and the runner's checkout of H is where the dependencies are
   linked in), told to work in that checkout and change nothing in the project folder. It starts
-  as every Claude job does (`effort.Effort.flags`: on the project's default model at the config's
-  effort when that's set, else with --model), and the effort its run used is read back.
+  as every Claude job does, its provider, model and effort named (`effort.claude_job`, #119),
+  and the effort its run used is read back.
 - **The label:** the comment, the `sol-review` status and the Review row name it and say why
   ("Opus 5.5 high, fallback while Sol is out", or "Opus 5.5 high, set in config.toml"), with the
   effort read back when it can be.
@@ -23,6 +23,7 @@ Sol. The differences:
 import os
 import re
 
+from .effort import claude_job
 from .ledger import SolFailed
 from .t3 import T3Error, settle_quietly
 
@@ -119,8 +120,7 @@ class OpusThread:
         with open(os.path.join(os.path.dirname(reply), 'brief-opus.md'), 'w', encoding='utf-8',
                   newline='\n') as fh:
             fh.write(message)
-        flags = f.effort.flags(repo) if f.effort else {
-            'provider': f.config.claude_provider, 'model': f.config.claude_model}
+        flags = claude_job(f.config)   # its provider, model and effort named (#119)
         try:
             result = f.t3.start(repo.path, message, title=self.title, **flags)
         except T3Error as e:
@@ -163,7 +163,7 @@ class OpusThread:
 
 class OpusFallback:
     """What the Sol lane needs for the fallback: T3, the usage gate (None: every review starts,
-    as for the tests' Runner without one), the effort (None: --model, nothing read back) and
+    as for the tests' Runner without one), the effort (None: nothing read back) and
     `beside`, the Claude lane (`run.Runner`: its jobs running, and the review counted among them
     while it runs; `Alone` without one)."""
 

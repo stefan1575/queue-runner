@@ -70,8 +70,8 @@ What each module and script is for.
   reset, the transcript's last call (its context and its request's start), when a job resumes,
   in place or fresh for any job picking up an earlier thread (`resume_choice`), the auto-resume
   warning.
-- `queue_runner/effort.py`: the effort Claude jobs run at: the start flags from the T3 project's
-  default, and the effort a run used, read back (ticket 39).
+- `queue_runner/effort.py`: the effort Claude jobs run at: the provider, model and effort every
+  job names (`claude_job`, #119), and the effort a run used, read back (ticket 39).
 - `queue_runner/lock.py`: `runner.lock` and `sol.lock`.
 - `queue_runner/wake.py`: the wake tasks: `Waker.sync` and the `schtasks` adapter.
 - `queue_runner/restart.py`: restarting on its own new code after main moves (ticket 14).

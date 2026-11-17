@@ -3,8 +3,8 @@
 On a stopped PR's ask in the dashboard's Inbox, Stefan clicks "Decide in T3": the page writes
 `asks.<ask id>.open` in control.json (`dashboard/serve.py`'s `apply_control`). The Claude lane's
 next pass starts one thread for it, `Decide: Queue runner ask: <repo>#<n>` (issue #71), in the
-repo's T3 project with no worktree, and doesn't wait on it (`t3 thread start` without
-`--wait`): Stefan talks it through there. Its brief (`templates/ask.md`) is the ask as the Inbox
+repo's T3 project with no worktree, and doesn't wait on it (`T3Cli.launch`, T3's MCP
+launch): Stefan talks it through there. Its brief (`templates/ask.md`) is the ask as the Inbox
 writes it, the PR's open findings and the earlier threads, and it tells the thread to end with a
 `queue-runner-decision` block once Stefan has decided.
 
@@ -378,9 +378,8 @@ class AskThreads:
         # log is read again, so nothing but its own write lies between that check and the launch.
         failed = None
         try:
-            # Started as every Claude job is (ticket 39): on the project's default model when
-            # that is the config's model at its effort, else with --model.
-            brief, flags = self.brief_for(o), self.decider.effort.flags(repo)
+            # Started as every Claude job is: its provider, model and effort named (#119).
+            brief, flags = self.brief_for(o), self.decider.effort.job()
         except Exception as e:   # the brief couldn't be built
             failed = e
         if why := self._gone(o, before=True):

@@ -94,7 +94,9 @@ reviewed), `failed`, `out-of-usage` and `head-moved` (nothing counts).
 
 ## Sol, as a script sees it
 
-- **Sol runs through `scripts/codex-sol.sh`, not a T3 thread** (`queue_runner/sol.py`). Checked
+- **Sol runs through `scripts/codex-sol.sh`, not a T3 thread** (`queue_runner/sol.py`). Since
+  #119 a T3 thread could run it at its effort (`reasoningEffort`, `docs/t3.md`); moving it is a
+  later step of #68. Checked
   2026-11-09: a thread from `t3 thread start --provider codex --model gpt-6.1-sol` ran at effort
   **low**: its rollout (`~/.codex/sessions/2026/11/09/rollout-2026-11-09T19-36-32-*.jsonl`) has
   a `configuration_update` record with `reasoning.effort: "low"`, though `~/.codex/config.toml`
@@ -126,9 +128,9 @@ doesn't wait: a PR that needs a review gets one from a T3 thread on the Claude m
   `SolCli.review`): the brief is Sol's, after a preamble (`brief-opus.md` in the run folder) that
   says to work in the runner's checkout of H (where the dependencies are linked in), change
   nothing in the project folder, post and push nothing, and ask nothing. The thread is `Queue
-  runner review: <repo>#<n>`, `t3 thread start --wait` in the repo's project folder with no
-  worktree (T3 can't start one in an existing folder), started as every Claude job is
-  (`Effort.flags`: `docs/usage.md`, The effort). Its reply's last `sol-findings` block is the verdict
+  runner review: <repo>#<n>`, started and waited on through T3's MCP in the repo's project
+  folder with no worktree (T3 can't start one in an existing folder), its provider, model and
+  effort named as every Claude job's are (`docs/usage.md`, The effort). Its reply's last `sol-findings` block is the verdict
   (`ledger.decide`), as for Sol. A thread T3 couldn't start, that failed, that waits for an
   answer or that left no reply is a `failed` review (two on a head leave it, as for Sol's).
 - **The label** (`fallback.label`): "Opus 5.5 high, fallback while Sol is out", with the effort
