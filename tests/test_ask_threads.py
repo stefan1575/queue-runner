@@ -146,6 +146,8 @@ class ThreadCase(unittest.TestCase):
 
 class OpenTest(ThreadCase):
     def test_his_click_starts_a_thread_briefed_with_the_ask_and_the_lane_does_not_wait(self):
+        from queue_runner.config import JobSpec   # the ask's own (#120), not the decision's
+        self.config.jobs['ask'] = JobSpec('claudeAgent', 'claude-fable-5-2', 'xhigh')
         self.noted()
         self.ask_to_open()
         self.t3.outcomes = []   # nothing waits on a run: a start with --wait would fail here

@@ -166,6 +166,16 @@ def _read(path: str) -> str:
         return ''
 
 
+def codex_adapter(config, **kw) -> 'SolCli':
+    """The Codex adapter config.toml asks for (issue #120): codex-sol.sh under its bash, at
+    `[jobs.review]`'s model and effort when reviews are on Codex, else at codex-sol.sh's own."""
+    review = config.job('review')
+    at = ({'model': review.model, 'effort': review.effort} if review.provider == 'codex'
+          else {})
+    return SolCli(script=config.sol_script or SOL_SCRIPT, bash=config.sol_bash or GIT_BASH,
+                  **at, **kw)
+
+
 class SolCli:
     """`run(cmd, out_path, timeout)` runs the command and returns its exit code, raising
     TimeoutError if it ran past `timeout` seconds."""

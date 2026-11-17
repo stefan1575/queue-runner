@@ -78,6 +78,8 @@ class ConflictRoundTest(unittest.TestCase):
     # --- one conflicted PR ----------------------------------------------------------------
 
     def test_a_conflicted_pr_gets_a_conflict_round_from_its_head(self):
+        from queue_runner.config import JobSpec   # the conflict's own (#120), not the fix's
+        self.config.jobs['conflict'] = JobSpec('claudeAgent', 'claude-fable-5-2', 'xhigh')
         self.only(20)
         r = self.runner(pushes={20: H3})
         self.assertEqual(r.run_pass(), 'started')

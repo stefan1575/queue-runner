@@ -774,11 +774,8 @@ def main(argv=None, github=None, out=None, t3=None, git=None, sleep=None,
     deps = None   # a test's fake Sol reviews with no dependency installs
     if sol is None:
         from .deps import Deps
-        from .sol import SolCli
-        codex = config.job('review')   # the Codex adapter's model and effort (issue #120)
-        sol = (SolCli(script=config.sol_script, bash=config.sol_bash, model=codex.model,
-                      effort=codex.effort) if codex.provider == 'codex' else
-               SolCli(script=config.sol_script, bash=config.sol_bash))
+        from .sol import codex_adapter
+        sol = codex_adapter(config)   # at [jobs.review]'s model and effort (issue #120)
         deps = Deps(config.deps_dir)
     if toaster is None:
         from .toast import WindowsToaster
