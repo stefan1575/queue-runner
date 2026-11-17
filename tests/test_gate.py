@@ -1,12 +1,14 @@
 """The usage gate: whether a Claude job starts now, with fixed clocks and fake usage."""
 import datetime
+import json
 import os
 import tempfile
 import unittest
 
-from queue_runner.gate import (FITS, FIVE_HOUR, RELEASED, RESERVE, WEEKLY, Cost,
+from queue_runner.gate import (DEFAULTS, FITS, FIVE_HOUR, RELEASED, RESERVE, WEEKLY, Cost,
                                CostBook, Knob, decide, read_knob, write_knob)
-from queue_runner.usage import Usage, Window
+from queue_runner.state import read_records
+from queue_runner.usage import Plan, Usage, Window
 
 UTC = datetime.timezone.utc
 NOW = datetime.datetime(2026, 11, 10, 12, 0, tzinfo=UTC)
@@ -104,6 +106,84 @@ class CostBookTest(unittest.TestCase):
         for _ in range(3):
             self.book.record('decision', [], snap(0, 10, five_reset=None), snap(4, 10))
         self.assertEqual(self.book.expected('decision').five_hour, 4)
+
+
+MAX = Plan('max', 'default_claude_max_20x')
+PRO = Plan('pro', 'default_claude_ai')
+
+
+class PlanCostTest(unittest.TestCase):
+    """Learned costs are percents of a plan's windows, so they count only on it (issue #118)."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.dir = tmp.name
+        self.plan = MAX
+        self.book = CostBook(os.path.join(tmp.name, 'usage.jsonl'), plan=lambda: self.plan)
+
+    def builds(self, n, spent=4):
+        for _ in range(n):
+            self.book.record('build', [], snap(10, 10), snap(10 + spent, 11))
+
+    def test_each_record_carries_the_plan_it_ran_on(self):
+        self.builds(1)
+        self.assertEqual(list(read_records(self.book.path))[-1]['plan'],
+                         {'subscriptionType': 'max', 'rateLimitTier': 'default_claude_max_20x'})
+
+    def test_a_plan_change_starts_from_the_defaults_until_three_jobs_are_measured_on_it(self):
+        self.builds(3)
+        self.assertEqual(self.book.expected('build'), Cost(4, 1))
+        self.plan = PRO
+        self.assertEqual(self.book.expected('build'), DEFAULTS['build'])
+        self.assertFalse(self.book.learned('build'))
+        self.builds(2, spent=30)
+        self.assertEqual(self.book.expected('build'), DEFAULTS['build'])
+        self.builds(1, spent=30)
+        self.assertEqual(self.book.expected('build'), Cost(30, 1))
+
+    def test_the_old_plans_records_count_again_when_it_comes_back(self):
+        self.builds(3)
+        self.plan = PRO
+        self.builds(3, spent=30)
+        self.plan = MAX
+        self.assertEqual(self.book.expected('build'), Cost(4, 1))
+        self.assertEqual(len(list(read_records(self.book.path))), 6)
+
+    def test_records_without_a_plan_count_as_the_plan_stamped_at_the_first_start(self):
+        plain = CostBook(self.book.path)   # records as before this landed: no plan read
+        for _ in range(3):
+            plain.record('fix', [], snap(10, 10), snap(12, 10))
+        with open(self.book.path, encoding='utf-8') as f:
+            lines = [json.loads(line) for line in f]
+        with open(self.book.path, 'w', encoding='utf-8') as f:   # older code wrote no `plan`
+            f.writelines(json.dumps({k: v for k, v in r.items() if k != 'plan'}) + '\n'
+                         for r in lines)
+        # Not stamped yet: they count as the plan read now.
+        self.assertEqual(self.book.expected('fix'), Cost(2, 0))
+        self.assertTrue(self.book.stamp_unmarked(MAX))
+        self.assertFalse(self.book.stamp_unmarked(PRO))   # once: the first start's plan stays
+        self.plan = PRO
+        self.assertEqual(self.book.expected('fix'), DEFAULTS['fix'])
+        self.plan = MAX
+        self.assertEqual(self.book.expected('fix'), Cost(2, 0))
+
+    def test_an_unread_plan_stamps_nothing(self):
+        self.assertFalse(self.book.stamp_unmarked(None))
+        self.assertFalse(os.path.exists(os.path.join(self.dir, 'usage-plan.json')))
+
+    def test_the_plan_change_is_against_the_last_records(self):
+        self.assertIsNone(self.book.plan_change())   # nothing recorded: nothing changed
+        self.builds(1)
+        self.assertIsNone(self.book.plan_change())
+        self.plan = PRO
+        self.assertEqual(self.book.plan_change(),
+                         "Claude's plan is now pro (was max): learned costs start again")
+        self.builds(1)
+        self.assertIsNone(self.book.plan_change())
+        self.plan = MAX
+        self.assertEqual(self.book.plan_change(), "Claude's plan is now max (was pro): the "
+                         'costs learned on it before count again')
 
 
 if __name__ == '__main__':

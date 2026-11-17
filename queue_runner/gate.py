@@ -30,7 +30,7 @@ import threading
 from dataclasses import dataclass
 
 from .state import append_record, read_records
-from .usage import STALE_AFTER, CachedUsage, Usage, UsageError, Window
+from .usage import STALE_AFTER, CachedUsage, Plan, Usage, UsageError, Window, plan_change
 
 DEFAULT_RESERVE = 5.0
 RESERVE_RELEASE = datetime.timedelta(hours=24)   # before the weekly reset, the reserve is free
@@ -206,18 +206,69 @@ def _spent(before: Window, after: Window) -> float | None:
 
 
 class CostBook:
-    def __init__(self, path: str):
+    """The learned costs in `usage.jsonl`, on the plan `plan()` reads now (issue #118): each
+    record carries the plan it ran on, and only records on the current plan count, so after a
+    plan change a kind starts from the cautious default again, and the old plan's records count
+    again if it comes back. Records from before plans were recorded count as the plan stamped in
+    `usage-plan.json` at the runner's first start after that (`stamp_unmarked`), or as the
+    current plan until then. `plan` is None (no plan read: tests, the live checks) counts every
+    record written without one."""
+
+    def __init__(self, path: str, plan=None):
         self.path = path
+        self.plan = plan or (lambda: None)
+        self.unmarked_path = os.path.join(os.path.dirname(path), 'usage-plan.json')
 
     @staticmethod
     def default(kind: str) -> Cost:
         return DEFAULTS[kind]
 
+    def _unmarked(self, current: Plan | None) -> Plan | None:
+        """The plan a record with none counts as. Raises OSError or ValueError on a bad stamp."""
+        try:
+            with open(self.unmarked_path, encoding='utf-8') as f:
+                return Plan.from_record(json.load(f).get('unmarked'))
+        except FileNotFoundError:
+            return current
+
+    def stamp_unmarked(self, plan: Plan | None) -> bool:
+        """At the runner's start: the records written before plans were recorded are on `plan`
+        from now on. Only the first readable plan is kept; returns whether it was written."""
+        if plan is None or os.path.exists(self.unmarked_path):
+            return False
+        os.makedirs(os.path.dirname(self.unmarked_path) or '.', exist_ok=True)
+        with open(self.unmarked_path + '.tmp', 'w', encoding='utf-8') as f:
+            json.dump({'unmarked': plan.record(),
+                       'at': datetime.datetime.now().astimezone().isoformat(timespec='seconds')},
+                      f)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(self.unmarked_path + '.tmp', self.unmarked_path)
+        return True
+
+    def _plans(self, current: Plan | None):
+        """(record, the plan it ran on) for each record."""
+        unmarked = self._unmarked(current)
+        return [(r, Plan.from_record(r['plan']) if 'plan' in r else unmarked)
+                for r in read_records(self.path)]
+
+    def plan_change(self) -> str | None:
+        """What the log says when the plan read now isn't the last record's, else None."""
+        current = self.plan()
+        plans = self._plans(current)
+        if not plans or plans[-1][1] == current:
+            return None
+        again = any(p == current for _, p in plans)
+        return (f"Claude's plan is now {plan_change(current, plans[-1][1])}: "
+                + ('the costs learned on it before count again' if again
+                   else 'learned costs start again'))
+
     def record(self, kind: str, jobs: list, before: Usage, after: Usage | None,
                error: str | None = None, shared_with: list | None = None) -> None:
+        plan = self.plan()
         rec = {'at': datetime.datetime.now().astimezone().isoformat(timespec='seconds'),
-               'kind': kind, 'jobs': jobs, 'before': before.record(),
-               'after': after.record() if after else None}
+               'kind': kind, 'jobs': jobs, 'plan': plan.record() if plan else None,
+               'before': before.record(), 'after': after.record() if after else None}
         if shared_with:   # other Claude jobs ran meanwhile: their spending is in it too (#50)
             rec['shared_with'] = shared_with
         if after:
@@ -227,24 +278,27 @@ class CostBook:
             rec['error'] = error
         append_record(self.path, rec)
 
-    def _spent(self, kind: str, window: str) -> list[float]:
-        return [r['spent'][window] for r in read_records(self.path)
-                if r.get('kind') == kind and r.get('spent') and not r.get('shared_with')
-                and r['spent'].get(window) is not None]
+    def _spent(self, kind: str) -> dict[str, list[float]]:
+        """What each window's usable records of `kind` on the current plan spent, oldest first."""
+        current = self.plan()
+        recs = [r for r, p in self._plans(current) if p == current and r.get('kind') == kind
+                and r.get('spent') and not r.get('shared_with')]
+        return {w: [r['spent'][w] for r in recs if r['spent'].get(w) is not None]
+                for w in ('five_hour', 'seven_day')}
 
     def expected(self, kind: str) -> Cost:
         """Raises ValueError if usage.jsonl has a bad line (other than a torn last one)."""
-        default = self.default(kind)
+        default, spent = self.default(kind), self._spent(kind)
 
         def learned(window, fallback):
-            got = self._spent(kind, window)
+            got = spent[window]
             return max(got[-RECENT:]) if len(got) >= SAMPLES else fallback
         return Cost(learned('five_hour', default.five_hour),
                     learned('seven_day', default.seven_day))
 
     def learned(self, kind: str) -> bool:
         """Whether `expected(kind)` is learned in both windows, not the cautious default."""
-        return all(len(self._spent(kind, w)) >= SAMPLES for w in ('five_hour', 'seven_day'))
+        return all(len(got) >= SAMPLES for got in self._spent(kind).values())
 
 
 class Gate:
