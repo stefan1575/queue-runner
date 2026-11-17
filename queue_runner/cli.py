@@ -521,9 +521,12 @@ def _repo_ref(value, config, flag, out):
     return repos[m[1]], int(m[2])
 
 
-def _review(config, github, git, sol, value, out, log_line, toaster=None, deps=None) -> int:
-    """`--review NAME#N`: one Sol review now, under sol.lock, if the PR needs one."""
+def _review(config, github, git, sol, value, out, log_line, toaster=None, deps=None,
+            sol_usage=None, clock=None) -> int:
+    """`--review NAME#N`: one Sol review now, under sol.lock, if the PR needs one. While Sol
+    waits on a reset, ChatGPT's usage is read first, as the Sol lane reads it (issue #130)."""
     from .review import Reviewer
+    from .snapshot import Calls, Watch
     ref = _repo_ref(value, config, '--review', out)
     if ref is None:
         return 2
@@ -531,8 +534,10 @@ def _review(config, github, git, sol, value, out, log_line, toaster=None, deps=N
     def say(line):
         log_line(line)
         print(line, file=out)
+    clock = clock or _utc_now
+    watch = Watch(sol_usage, Calls(clock), 'sol_usage', clock, timed=True) if sol_usage else None
     reviewer = Reviewer(config, github=github, git=git, sol=sol, jobs=_jobs(config), say=say,
-                        toaster=toaster, deps=deps)
+                        toaster=toaster, deps=deps, sol_usage=watch)
     try:
         _, why = reviewer.review_one(*ref)
     except RunnerBusy:
@@ -771,7 +776,8 @@ def main(argv=None, github=None, out=None, t3=None, git=None, sleep=None,
         from .toast import WindowsToaster
         toaster = WindowsToaster()
     if args.review:
-        return _review(config, github, git, sol, args.review, out, log_line, toaster, deps)
+        return _review(config, github, git, sol, args.review, out, log_line, toaster, deps,
+                       sol_usage, snap_clock)
 
     if t3 is None:   # settle and rename go to T3's MCP endpoint (ticket 70)
         from .t3 import T3Cli

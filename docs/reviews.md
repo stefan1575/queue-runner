@@ -117,8 +117,9 @@ reviewed), `failed`, `out-of-usage` and `head-moved` (nothing counts).
   time and windows, and the `resume_at` it ends), said once, and the next review goes to Sol.
   `JobLog.sol_resume_at` reads the record, so the dashboard's wait, the wake times and a restarted
   runner agree. A window at 99% or more, a reading from before the review ran out, or a failed
-  read (said once per error) leaves the wait standing. `--review` and a Reviewer made without a
-  reader wait for the reset.
+  read (said once per error) leaves the wait standing. `--review NAME#N` reads it too, so
+  Stefan's own review isn't refused for a wait that's over; a Reviewer made without a reader (the
+  live checks, most tests) waits for the reset.
 
 ## The Opus fallback
 

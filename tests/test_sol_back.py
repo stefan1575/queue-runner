@@ -168,6 +168,34 @@ class SolBackTest(unittest.TestCase):
         self.assertEqual(len([s for s in self.said if "couldn't be read" in s]), 1)
         self.assertEqual(self.backs(), [])
 
+    # --- Stefan's own --review ----------------------------------------------------------------
+
+    def run_review(self, answer):
+        """`--review first#20` with Sol's wait recorded an hour ago (in real time: `--review`'s
+        Reviewer reads the PC's clock) and ChatGPT reading `answer` now."""
+        import io
+        from queue_runner import cli
+        real = datetime.datetime.now(UTC)
+        os.remove(self.path)
+        self.sol_out(at=real - datetime.timedelta(hours=1), resume=real + datetime.timedelta(days=3))
+        self.clock.at = real
+        self.chatgpt = ChatGPT(self.clock, answer)
+        self.sol = FakeSol([reply()])
+        out = io.StringIO()
+        code = cli._review(self.config, self.gh, self.git, self.sol, 'first#20', out,
+                           lambda line: None, sol_usage=self.chatgpt, clock=self.clock)
+        return code, out.getvalue()
+
+    def test_review_reads_chatgpt_and_sol_reviews_once_its_usage_is_back(self):
+        code, out = self.run_review(limits(2, 0))
+        self.assertEqual((code, len(self.sol.briefs), len(self.backs())), (0, 1, 1))
+        self.assertIn('usage again', out)
+
+    def test_review_still_refuses_while_a_window_is_full(self):
+        code, out = self.run_review(limits(2, 100))
+        self.assertEqual((code, self.sol.briefs, self.backs()), (1, [], []))
+        self.assertIn('Sol is out of usage until', out)
+
     def test_with_no_reader_the_wait_lasts_until_the_reset(self):
         r = self.reviewer(None, opus=[(0, 'completed', reply())])
         self.assertTrue(r._paused())
