@@ -251,7 +251,7 @@ class ReviewerTest(unittest.TestCase):
         self.assertIn('Second ticket.', self.read('issue-a_b-c-9.md'))
 
     def test_the_prs_screenshots_are_copied_in_and_the_brief_asks_sol_to_look(self):
-        # Stefan, 2026-11-17: a visible change needs before and after shots (~/Code/docs/evidence.md).
+        # Stefan, 2026-11-17: a visible change needs before and after shots (templates/build.md).
         r = self.one_pr()
         self.git.shots[20] = {'before-busy-usage.png': b'PNG1', 'after-busy-usage.png': b'PNG2'}
         r.review_pass()
