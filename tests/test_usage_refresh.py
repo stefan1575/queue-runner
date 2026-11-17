@@ -156,6 +156,12 @@ class RunnerTest(unittest.TestCase):
         self.ask()
         snap = self.snaps.build(fresh=True)
         claude = snap['usage'][0]
+        # Just failed: reconnecting, not an error yet (the first reads after a wake fail).
+        self.assertEqual((claude['read_at'], claude['error'], claude['retrying']),
+                         (first, None, iso(self.clock())))
+        self.assertEqual(snap['usage_refresh']['asked_at'], iso(NOW + datetime.timedelta(minutes=5)))
+        self.clock.tick(minutes=10)   # still failing: now it's said
+        claude = self.snaps.build(fresh=True)['usage'][0]
         self.assertEqual((claude['read_at'], claude['error']), (first, 'The usage endpoint answered HTTP 401.'))
         self.assertEqual(snap['usage_refresh']['asked_at'], iso(NOW + datetime.timedelta(minutes=5)))
 

@@ -106,7 +106,8 @@ The logon shortcuts: `tests/test_make_shortcut.py` (real `.lnk` files in temp fo
 through WScript.Shell).
 The runner's snapshot:
 `tests/test_snapshot.py` (`build` from plain facts with a fixed clock, `Calls`, `Watch`,
-`Publisher`, `Snapshots` on a temp state folder, and the contract: the real snapshot holds the
+`Publisher`, `Snapshots` on a temp state folder, `ReconnectingTest`: the first reads after a
+wake failing are reconnecting and red only once they last, and the contract: the real snapshot holds the
 sample's keys at the top, in a lane, its job, a plan, a window and a source, and every sample
 lists `SOURCES` and nothing else) and
 `tests/test_snapshot_runner.py` (through `main`: written while a build blocks the lane, after a

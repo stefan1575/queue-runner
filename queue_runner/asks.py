@@ -572,8 +572,8 @@ def stale_github(sources: list[dict], stale: dict) -> None:
     if src is None:
         return
     names = ', '.join(sorted(stale))
-    whens = [when for when, _ in stale.values() if when is not None]
-    error = next((e for _, e in stale.values() if e), '')
+    whens = [v[0] for v in stale.values() if v[0] is not None]
+    error = next((v[1] for v in stale.values() if v[1]), '')
     src.update(ok=False, note=sentence(error.split(': ', 1)[-1]) or "Couldn't be read",
                checked_at=min(whens).astimezone().isoformat(timespec='seconds')
                if len(whens) == len(stale) else None,

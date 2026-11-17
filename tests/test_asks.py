@@ -373,13 +373,19 @@ class GitHubDownTest(AskCase):
         got = reader.read()
         self.assertEqual([(w.title, w.number) for w in got.items],
                          [('Ring-to number per Client', 152)])   # as the last good read had it
-        snap = snapshot.build(snapshot.Facts(
-            now=datetime.datetime(2026, 11, 15, 4, 6, tzinfo=datetime.timezone.utc),
-            repos=[self.repo], jobs=self.jobs.jobs(), inbox=reader.last(),
-            inbox_stale=reader.stale(),
-            calls={'github': snapshot.Call(datetime.datetime(2026, 11, 15, 4, 5,
-                                                             tzinfo=datetime.timezone.utc),
-                                           True, None, None)}))
+        def snap_at(minute):
+            return snapshot.build(snapshot.Facts(
+                now=datetime.datetime(2026, 11, 15, 4, minute, tzinfo=datetime.timezone.utc),
+                repos=[self.repo], jobs=self.jobs.jobs(), inbox=reader.last(),
+                inbox_stale=reader.stale(),
+                calls={'github': snapshot.Call(datetime.datetime(2026, 11, 15, 4, 5,
+                                                                 tzinfo=datetime.timezone.utc),
+                                               True, None, None)}))
+        # A minute after the read failed, GitHub is reconnecting: not red, nothing said missing.
+        github = next(s for s in snap_at(6)['sources'] if s['id'] == 'github')
+        self.assertEqual((github['ok'], github['note'], 'affects' in github),
+                         (True, 'Reconnecting', False))
+        snap = snap_at(15)   # failing for 10 minutes: red, and what it affects said
         [ask] = snap['asks']
         self.assertEqual(ask['subject'], 'Ring-to number per Client')
         github = next(s for s in snap['sources'] if s['id'] == 'github')
@@ -457,7 +463,8 @@ class PartialReadTest(AskCase):
         after = reader.read()
         self.assertTrue(after.errors)
         self.assertEqual(after.items[0], before.items[0])
-        when, error = reader.stale()['first']
+        when, error, since = reader.stale()['first']
+        self.assertEqual(since, datetime.datetime(2026, 11, 15, 4, 5, tzinfo=datetime.timezone.utc))
         self.assertEqual(when, datetime.datetime(2026, 11, 15, 4, 0, tzinfo=datetime.timezone.utc))
         self.assertIn('HTTP 503', error)
         del self.gh.blocking   # back: the next read is whole, and fresh

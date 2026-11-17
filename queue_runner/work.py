@@ -249,9 +249,16 @@ def _writer(j) -> str:
     return f'its {what} is writing to the branch'
 
 
+def _since(stale: dict, repo: str, now):
+    """When `repo`'s reads began failing: its stale entry's, or now for a first failure."""
+    was = stale.get(repo)
+    return was[2] if was and len(was) > 2 else now
+
+
 class Reader:
     """The last read of each served repo, for the snapshot. A repo GitHub couldn't be read keeps
-    what its last good read found, and `stale` says since when and why."""
+    what its last good read found, and `stale` says since when, why, and since when its reads
+    have failed."""
 
     def __init__(self, config, github, git, jobs, clock):
         self.config, self.github, self.git, self.jobs, self.clock = config, github, git, jobs, clock
@@ -272,7 +279,8 @@ class Reader:
                 with self._lock:
                     self._stale[repo.name] = (self._whole.get(repo.name),
                                               f"{repo.name}: couldn't read its work "
-                                              f'({type(e).__name__}: {e})')
+                                              f'({type(e).__name__}: {e})',
+                                              _since(self._stale, repo.name, self.clock()))
                 continue
             now = self.clock()
             with self._lock:
@@ -280,7 +288,8 @@ class Reader:
                 # its last whole read) until a read has every part.
                 self._good[repo.name] = _at(kept(got, self._good.get(repo.name)), now)
                 if got.failed:
-                    self._stale[repo.name] = (self._whole.get(repo.name), got.errors[0])
+                    self._stale[repo.name] = (self._whole.get(repo.name), got.errors[0],
+                                              _since(self._stale, repo.name, now))
                 else:
                     self._whole[repo.name] = now
                     self._stale.pop(repo.name, None)
@@ -875,8 +884,8 @@ def stale_github(sources: list[dict], stale: dict) -> None:
     if not stale or src is None:
         return
     names = ', '.join(sorted(stale))
-    whens = [when for when, _ in stale.values() if when is not None]
-    error = next((e for _, e in stale.values() if e), '')
+    whens = [v[0] for v in stale.values() if v[0] is not None]
+    error = next((v[1] for v in stale.values() if v[1]), '')
     text = (f'The queues, issues and PRs are as GitHub last showed them for {names}: some may '
             'have changed since.')
     earlier = None if src['ok'] else src

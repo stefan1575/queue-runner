@@ -39,6 +39,17 @@ HEADERS = {'anthropic-beta': 'oauth-2025-04-20',
 CALL_EVERY = 300   # seconds: the endpoint is asked no more often than this, failed calls counted
 # A reading older than this isn't decided on (the gate), and its failure is shown (the page).
 STALE_AFTER = datetime.timedelta(minutes=30)
+# A failure isn't shown until it has lasted this long, two more tries at the usual 5 minutes
+# apart. The first reads after the PC wakes fail and the next ones answer: the network isn't
+# back, a login expired while it slept (a Claude Code session refreshes it within minutes), Codex
+# starts slow (Stefan, 2026-11-17: "I'm not supposed to see this in the first place").
+SHOW_AFTER = datetime.timedelta(minutes=10)
+
+
+def lasted(since: datetime.datetime | None, now: datetime.datetime) -> bool:
+    """Whether a failure that began at `since` has lasted long enough to show; one whose start
+    isn't known has."""
+    return since is None or now - since >= SHOW_AFTER
 
 
 class UsageError(Exception):
@@ -189,20 +200,22 @@ class OAuthUsage:
 @dataclass(frozen=True)
 class Reading:
     """A usage reading: the last good value (a `Usage`, or ChatGPT's `sol.Limits`) and when it
-    was read, the newest read's error if that one failed, whether that error is the login's, and
-    (Claude's) when the endpoint may be asked again, None for now."""
+    was read, the newest read's error if that one failed, whether that error is the login's,
+    (Claude's) when the endpoint may be asked again, None for now, and since when the reads have
+    failed without one answering (None: not known)."""
     value: object | None
     at: datetime.datetime | None
     error: str | None = None
     login: bool = False
     next_at: datetime.datetime | None = None
+    since: datetime.datetime | None = None
 
     def failing(self, now: datetime.datetime) -> bool:
-        """Whether its error is worth showing: there's no good value, the login is the trouble,
-        or the good value is older than `STALE_AFTER`. A failed call beside a recent good
-        reading isn't: the reading stands, as in T3."""
-        return self.error is not None and (self.value is None or self.at is None or self.login
-                                           or now - self.at > STALE_AFTER)
+        """Whether its error is worth showing: it has lasted `SHOW_AFTER`, and there's no good
+        value, the login is the trouble, or the good value is older than `STALE_AFTER`. A failed
+        call beside a recent good reading isn't: the reading stands, as in T3."""
+        return self.error is not None and lasted(self.since, now) and (
+            self.value is None or self.at is None or self.login or now - self.at > STALE_AFTER)
 
 
 def _first_line(e: BaseException) -> str:
@@ -225,6 +238,7 @@ class CachedUsage:
         self._error: UsageError | None = None
         self._called: datetime.datetime | None = None   # the last call to the endpoint
         self._tried: datetime.datetime | None = None    # the last attempt, a login's too
+        self._since: datetime.datetime | None = None    # the first failure since one answered
 
     def _next(self, now) -> datetime.datetime | None:
         at = self._called + self.every if self._called is not None else None
@@ -270,10 +284,11 @@ class CachedUsage:
             if err.called:
                 self._called = now
             self._error = err
+            self._since = self._since or now
             if self.on_call:
                 self.on_call(False, _first_line(err))
             return
-        self._called, self._good, self._error = now, (value, now), None
+        self._called, self._good, self._error, self._since = now, (value, now), None, None
         if self.on_call:
             self.on_call(True, None)
 
@@ -285,4 +300,4 @@ class CachedUsage:
             value, at = self._good or (None, None)
             err = self._error
             return Reading(value, at, _first_line(err) if err else None,
-                           bool(err and err.login), self._next(self.clock()))
+                           bool(err and err.login), self._next(self.clock()), self._since)

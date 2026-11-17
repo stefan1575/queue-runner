@@ -185,13 +185,16 @@ class CachedUsageTest(unittest.TestCase):
         self.clock.tick(seconds=1)
         self.assertTrue(self.usage.reading().failing(self.clock()))
 
-    def test_a_login_that_cant_be_read_asks_nothing_and_is_failing_at_once(self):
+    def test_a_login_that_cant_be_read_asks_nothing_and_is_failing_once_it_lasts(self):
         self.usage.read()
         os.remove(os.path.join(self.dir, '.credentials.json'))
         self.clock.tick(minutes=5)
         self.usage.read()
         r = self.usage.reading()
-        self.assertTrue(r.login and r.failing(self.clock()))
+        self.assertTrue(r.login)
+        self.assertEqual(r.since, self.clock())
+        self.assertFalse(r.failing(self.clock()))   # reconnecting: not shown yet
+        self.assertTrue(r.failing(self.clock() + timedelta(minutes=10)))
         self.assertIsNone(r.next_at)   # it spent no call: the next read may ask at once
         self.assertEqual(len(self.endpoint.calls), 1)
 
@@ -200,14 +203,31 @@ class CachedUsageTest(unittest.TestCase):
         self.clock.tick(minutes=5)
         self.endpoint.fail = 401
         self.usage.read()
-        self.assertTrue(self.usage.reading().failing(self.clock()))
+        r = self.usage.reading()
+        self.assertTrue(r.login)
+        self.assertTrue(r.failing(self.clock() + timedelta(minutes=10)))
+
+    def test_a_401_after_the_pc_wakes_is_not_shown_once_the_next_read_answers(self):
+        # Stefan, 2026-11-17: the token expired while the PC slept, a Claude Code session
+        # refreshed it four minutes after it woke, and the next read answered.
+        self.usage.read()
+        self.clock.tick(hours=6)
+        self.endpoint.fail = 401
+        self.usage.read()
+        self.assertFalse(self.usage.reading().failing(self.clock()))
+        self.clock.tick(minutes=5)
+        self.endpoint.fail = None
+        self.usage.read()
+        r = self.usage.reading()
+        self.assertEqual((r.error, r.since), (None, None))
 
     def test_with_no_good_reading_a_read_raises_the_error(self):
         self.endpoint.fail = 429
         with self.assertRaises(UsageError) as e:
             self.usage.read()
         self.assertIn('HTTP 429', str(e.exception))
-        self.assertTrue(self.usage.reading().failing(self.clock()))
+        self.assertFalse(self.usage.reading().failing(self.clock()))   # reconnecting
+        self.assertTrue(self.usage.reading().failing(self.clock() + timedelta(minutes=10)))
         self.assertIsNone(CachedUsage(self.endpoint.oauth(self.dir), self.clock).reading())
 
 

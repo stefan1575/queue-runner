@@ -392,10 +392,17 @@ def report(config, github, jobs) -> str:
 
 # --- the running runner's copy ------------------------------------------------------------------
 
+def _since(stale: dict, repo: str, now):
+    """When `repo`'s reads began failing: its stale entry's, or now for a first failure."""
+    was = stale.get(repo)
+    return was[2] if was and len(was) > 2 else now
+
+
 class Reader:
     """The Sol lane's last collection, for the snapshot. A repo GitHub couldn't be read keeps
     what the last good read of it found, an ask GitHub failed on part-way keeps the last good
-    read of that ask, and `stale` says since when (the repo's last whole read)."""
+    read of that ask, and `stale` says since when (the repo's last whole read) and since when
+    its reads have failed."""
 
     def __init__(self, config, github, jobs, clock):
         self.config, self.github, self.jobs, self.clock = config, github, jobs, clock
@@ -403,7 +410,7 @@ class Reader:
         self._last: Inbox | None = None
         self._good: dict[str, tuple] = {}     # repo: (when, its items, its answered)
         self._reviews: dict = {}
-        self._stale: dict[str, tuple] = {}    # repo: (last whole read or None, the error)
+        self._stale: dict[str, tuple] = {}    # repo: (last whole read or None, the error, since)
         self._whole: dict[str, datetime.datetime] = {}   # repo: its last read with no error
 
     def read(self, github=None) -> Inbox:
@@ -420,7 +427,8 @@ class Reader:
                 if repo.name in got.failed:
                     _, mine, done = self._good.get(repo.name, (None, mine, done))
                     error = next((e for e in mine_errors if e.startswith(f'{repo.name}:')), '')
-                    self._stale[repo.name] = (self._whole.get(repo.name), error)
+                    self._stale[repo.name] = (self._whole.get(repo.name), error,
+                                              _since(self._stale, repo.name, now))
                 else:
                     _, was, was_done = self._good.get(repo.name, (None, [], []))
                     last = {key(w): w for w in was + was_done}
@@ -429,7 +437,8 @@ class Reader:
                     self._good[repo.name] = (now, mine, done)
                     partial = [e for e in mine_errors if not gone(e)]
                     if partial:   # part-way: what failed is the last good read's, said
-                        self._stale[repo.name] = (self._whole.get(repo.name), partial[0])
+                        self._stale[repo.name] = (self._whole.get(repo.name), partial[0],
+                                                  _since(self._stale, repo.name, now))
                     else:
                         self._whole[repo.name] = now
                         self._stale.pop(repo.name, None)
@@ -448,6 +457,7 @@ class Reader:
             return self._last
 
     def stale(self) -> dict[str, tuple]:
-        """Repos whose asks are an older read's: (when that read was, or None, and why)."""
+        """Repos whose asks are an older read's: (when that read was, or None, why, and when
+        the first read that failed was)."""
         with self._lock:
             return dict(self._stale)
