@@ -22,6 +22,22 @@ ACTIVE = frozenset({'preparing', 'queued', 'starting', 'running'})
 _CMD_SPECIALS = re.compile(r'[&|<>^%"!\r\n]')
 
 
+# The option a driver reads its effort from (`runtimeLayer-*.mjs` in T3's server.asar, read
+# 2026-11-17; checked live: docs/t3.md). Codex ignores `effort`.
+EFFORT_OPTION = {'codex': 'reasoningEffort'}
+WAIT_SLICE_MS = 15_000   # T3's CLI waits in 15-second slices, so a run that asks is noticed soon
+
+
+def selection(provider: str, model: str, effort: str) -> dict:
+    """T3's model selection for `provider`'s `model` at `effort`."""
+    return {'instanceId': provider, 'model': model,
+            'options': [{'id': EFFORT_OPTION.get(provider, 'effort'), 'value': effort}]}
+
+
+def _same_folder(a: str, b: str) -> bool:
+    return os.path.normcase(os.path.normpath(a)) == os.path.normcase(os.path.normpath(b))
+
+
 class T3Error(RuntimeError):
     """T3 failed without starting or finishing a run it can report (no JSON on stdout)."""
 
@@ -107,9 +123,10 @@ def _thread(raw: dict) -> Thread:
 
 
 class T3Cli:
-    """`run(args, stdin)` returns the CLI's (exit code, stdout, stderr). The CLI has no settle
-    or rename command, so those go to `mcp`, T3's MCP endpoint called directly
-    (`t3_mcp.T3Mcp`, ticket 70); with none, they raise T3Error."""
+    """`run(args, stdin)` returns the CLI's (exit code, stdout, stderr). Starting a thread,
+    settling and renaming go to `mcp`, T3's MCP endpoint called directly (`t3_mcp.T3Mcp`):
+    the CLI has no settle or rename command (ticket 70), and its `thread start` can't name an
+    effort (issue #119). With no `mcp`, they raise T3Error."""
 
     def __init__(self, run=run_t3, mcp=None):
         self._run = run
@@ -136,29 +153,114 @@ class T3Cli:
         return RunResult(exit_code=code, thread_id=raw['threadId'], run_id=raw.get('runId'),
                          status=raw['status'], reply=raw.get('reply'), error=raw.get('error'))
 
-    def start(self, project: str, message: str, *, title: str, provider: str | None = None,
-              model: str | None = None, worktree: str | None = None,
-              branch: str | None = None) -> RunResult:
-        """Starts a thread and blocks until its run ends. `worktree` is the base ref of a new T3
-        worktree, `branch` the branch T3 makes there."""
-        args = ['thread', 'start', '--wait', '--json', '--title', title]
-        if provider:
-            args += ['--provider', provider, '--model', model]
-        if worktree:
-            args += ['--worktree', worktree]
-        if branch:
-            args += ['--branch', branch]
-        return self._run_result(args + [project, '-'], message)
+    # --- a job's thread, through T3's MCP (issue #119; docs/t3.md) -------------------------
 
-    def launch(self, project: str, message: str, *, title: str, provider: str | None = None,
-               model: str | None = None) -> Launched:
-        """Starts a thread in the project folder and returns at once (no `--wait`): T3 prints
-        `{threadId, projectId, runId}` (`threadStartCommand` in `server.asar`, read 2026-11-15)."""
-        args = ['thread', 'start', '--json', '--title', title]
-        if provider:
-            args += ['--provider', provider, '--model', model]
-        raw = self._json(args + [project, '-'], message)
-        return Launched(thread_id=raw['threadId'], run_id=raw.get('runId'))
+    def _mcp(self):
+        if self.mcp is None:
+            raise T3Error("starting a thread needs T3's MCP endpoint (no MCP client given)")
+        return self.mcp
+
+    def _project(self, folder: str) -> str:
+        """The id of the T3 project whose folder is `folder`."""
+        mcp, cursor = self._mcp(), 0
+        while cursor is not None:
+            page = mcp.call('t3_project_list', {'cursor': cursor, 'limit': 100}) or {}
+            for p in page.get('projects') or ():
+                if p.get('workspaceRoot') and _same_folder(p['workspaceRoot'], folder):
+                    return p['id']
+            cursor = page.get('nextCursor')
+        raise T3Error(f'No T3 Code project matches {folder!r}')
+
+    def _launch(self, project, message, title, provider, model, effort, worktree, branch):
+        """`t3_thread_launch` with the model and its effort named: `{threadId, runId, ...}`."""
+        if branch and not worktree:
+            raise ValueError('a branch needs a worktree base')
+        arguments = {'projectId': self._project(project), 'title': title, 'message': message,
+                     'runtimeMode': 'full-access',
+                     'modelSelection': selection(provider, model, effort)}
+        if worktree:   # as the CLI's --worktree and --branch (`launchWorkspaceStrategy`)
+            arguments['workspaceStrategy'] = {'type': 'worktree', 'baseRef': worktree,
+                                              **({'branch': branch} if branch else {})}
+        launched = self._mcp().call('t3_thread_launch', arguments)
+        if not isinstance(launched, dict) or not launched.get('threadId'):
+            raise T3Error(f't3_thread_launch started no thread: {launched!r}'[:300])
+        return launched
+
+    def start(self, project: str, message: str, *, title: str, provider: str, model: str,
+              effort: str, worktree: str | None = None, branch: str | None = None) -> RunResult:
+        """Starts a thread on `provider`'s `model` at `effort` and blocks until its run ends.
+        `worktree` is the base ref of a new T3 worktree, `branch` the branch T3 makes there."""
+        launched = self._launch(project, message, title, provider, model, effort, worktree,
+                                branch)
+        thread_id, run_id = launched['threadId'], launched.get('runId')
+        if not run_id:
+            raise T3Error(f'T3 started thread {thread_id} with no run')
+        return self._finish(thread_id, run_id)
+
+    def launch(self, project: str, message: str, *, title: str, provider: str, model: str,
+               effort: str) -> Launched:
+        """Starts a thread in the project folder on `provider`'s `model` at `effort` and
+        returns at once."""
+        launched = self._launch(project, message, title, provider, model, effort, None, None)
+        return Launched(thread_id=launched['threadId'], run_id=launched.get('runId'))
+
+    def _wait(self, thread_id: str, run_id: str, timeout_ms: int) -> dict:
+        return self._mcp().call('t3_thread_wait', {'threadId': thread_id, 'runId': run_id,
+                                                   'timeoutMs': timeout_ms}) or {}
+
+    def _finish(self, thread_id: str, run_id: str) -> RunResult:
+        """Waits for the run as `t3 thread start --wait --json` does (`waitForRun` and
+        `finishRun` in T3's binCli): slices of `t3_thread_wait`; a pending request after a
+        timed-out slice is a run waiting for an answer, unless one more short wait ends it."""
+        while True:
+            waited = self._wait(thread_id, run_id, WAIT_SLICE_MS)
+            if not waited.get('timedOut'):
+                break
+            read = self._mcp().call('t3_thread_read', {'threadId': thread_id, 'limit': 1,
+                                                       'runLimit': 1}) or {}
+            if (read.get('thread') or {}).get('pendingRequestCount'):
+                waited = self._wait(thread_id, run_id, 1)
+                if waited.get('timedOut'):
+                    return RunResult(exit_code=2, thread_id=thread_id, run_id=run_id,
+                                     status='waiting', reply=None, error=None)
+                break
+        run_id = waited.get('runId') or run_id
+        status = waited.get('status') or 'unknown'
+        done = status == 'completed'
+        return RunResult(exit_code=0 if done else 1, thread_id=thread_id, run_id=run_id,
+                         status=status,
+                         reply=self._run_text(thread_id, run_id, 'assistant_message')
+                         if done else None,
+                         error=None if done else self._run_text(thread_id, run_id, 'error'))
+
+    def _run_text(self, thread_id: str, run_id: str, kind: str) -> str | None:
+        """The run's last `kind` item's full text (`runResultText` in T3's binCli)."""
+        mcp, items, after = self._mcp(), [], None
+        view = 'messages' if kind == 'assistant_message' else 'activity'
+        while True:
+            page = mcp.call('t3_thread_read', {
+                'threadId': thread_id, 'view': view, 'limit': 100, 'runLimit': 1,
+                **({} if after is None else {'afterPosition': after})}) or {}
+            items += page.get('items') or []
+            after = page.get('nextPosition')
+            if not page.get('hasMore') or after is None:
+                break
+        found = [i for i in items if i.get('runId') == run_id and i.get('type') == kind]
+        if not found:
+            return None
+        last = found[-1]
+        text = last.get('text') or ''
+        offset = last.get('nextTextOffset') if last.get('textTruncated') else None
+        while offset is not None:
+            page = mcp.call('t3_thread_read', {'threadId': thread_id, 'itemId': last['itemId'],
+                                               'textOffset': offset, 'runLimit': 1}) or {}
+            chunk = next((i for i in page.get('items') or ()
+                          if i.get('itemId') == last['itemId']), None)
+            if chunk is None:
+                break
+            text += chunk.get('text') or ''
+            offset = chunk.get('nextTextOffset') if chunk.get('textTruncated') else None
+        return text
 
     def send(self, thread_id: str, message: str) -> RunResult:
         """Sends a message and blocks until the run it starts ends."""
