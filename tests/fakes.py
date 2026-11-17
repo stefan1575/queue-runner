@@ -237,15 +237,20 @@ class FakeUsage:
     """Plays Claude's usage endpoint: each read gives the next of `reads` (the last one again
     once they run out); an exception in it is raised. Tests never read the real one. It never
     answers 429, so it may be asked at any pace: `call_every` 0 leaves `usage.CachedUsage`'s
-    budget out of the tests that use it (the budget's own tests give their endpoint one)."""
+    budget out of the tests that use it (the budget's own tests give their endpoint one).
+    `plan`: the Claude plan its login file would name (issue #118), None by default."""
     call_every = 0
 
-    def __init__(self, *reads):
+    def __init__(self, *reads, plan=None):
         import datetime
         from queue_runner.usage import Usage, Window
         far = datetime.datetime(2099, 1, 1, tzinfo=datetime.timezone.utc)
         self.reads = list(reads) or [Usage(Window(0, None), Window(0, far))]
         self.count = 0
+        self.current_plan = plan
+
+    def plan(self):
+        return self.current_plan
 
     def read(self):
         got = self.reads[min(self.count, len(self.reads) - 1)]

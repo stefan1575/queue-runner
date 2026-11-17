@@ -312,13 +312,27 @@ class Gate:
         self.reader = reader if isinstance(reader, CachedUsage) else \
             CachedUsage(reader, self.clock)
         self.sleep = sleep
-        self.book = CostBook(os.path.join(state_dir, 'usage.jsonl'))
+        # Claude's plan, from the login file the reader's endpoint reads (issue #118)
+        self.book = CostBook(os.path.join(state_dir, 'usage.jsonl'), plan=self.reader.plan)
+        self._plan_said: str | None = None   # plan_note: each change said once
         self.ended: datetime.datetime | None = None   # when the last measured Claude job ended
         self._told: dict[str, datetime.datetime] = {}   # job_ended(job_id): each told once
         self._ended_lock = threading.Lock()   # both lanes say a job ended (the Opus fallback)
 
     def knob(self) -> Knob:
         return read_knob(self.state_dir)
+
+    def plan_note(self) -> str | None:
+        """The plan change to say (`CostBook.plan_change`), once per change; None otherwise or
+        when usage.jsonl can't be read (the check says that)."""
+        try:
+            note = self.book.plan_change()
+        except (OSError, ValueError):
+            return None
+        if note is None or note == self._plan_said:
+            return None
+        self._plan_said = note
+        return note
 
     def cost(self, kind: str, then: str | None = None) -> Cost:
         """A `kind` job's expected cost, with the `then` job it may continue. Raises OSError or

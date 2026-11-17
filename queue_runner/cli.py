@@ -98,7 +98,16 @@ def _print_gate(gate, out, config) -> None:
         print(f'gate.json is unreadable ({e}): no Claude job starts until it is fixed or removed',
               file=out)
         return
-    print(f'Claude usage gate: weekly reserve {knob.reserve:g}%', file=out)
+    plan = gate.reader.plan()
+    named = f'plan {plan}' + (f' ({plan.tier})' if plan and plan.subscription and plan.tier
+                              else '') if plan else 'plan not read'
+    print(f'Claude usage gate: {named}, weekly reserve {knob.reserve:g}%', file=out)
+    try:
+        if note := gate.book.plan_change():
+            print(f'  {note}', file=out)
+    except (OSError, ValueError) as e:
+        print(f'  usage.jsonl is unreadable ({e}): no Claude job starts until it is fixed or '
+              'removed', file=out)
     try:
         usage = gate.reader.read()
     except UsageError as e:
@@ -806,6 +815,11 @@ def main(argv=None, github=None, out=None, t3=None, git=None, sleep=None,
     if warning := auto_resume_warning(*([t3_settings] if t3_settings else [])):
         runner.say(f'Warning: {warning}')
     effort.check(config.repos)   # how each served repo's Claude jobs start, and at what effort
+    # The usage records from before plans were recorded are on the plan read now (issue #118).
+    with contextlib.suppress(OSError):
+        if gate.book.stamp_unmarked(gate.reader.plan()):
+            log_line(f"usage.jsonl's records with no plan count as Claude's {gate.reader.plan()} "
+                     'plan from now on (usage-plan.json)')
     restart = None
     try:
         with runner_lock(config.state_dir):

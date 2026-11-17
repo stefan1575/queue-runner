@@ -10,7 +10,7 @@ import unittest
 from queue_runner.cli import main
 from queue_runner.wake import NoWaker
 from queue_runner.state import JobLog
-from queue_runner.usage import Usage, UsageError, Window
+from queue_runner.usage import Plan, Usage, UsageError, Window
 from tests.fakes import FakeGitHubWithPulls, FakeLimits, FakeToaster, FakeUsage, issue
 from tests.fakes_t3 import FakeGit, FakeSol, FakeT3
 
@@ -163,6 +163,57 @@ path = "{self.dir}"
         self.assertIn('5 hours: 80%', out)
         for kind in ('build', 'fix', 'decision'):
             self.assertIn(f'{kind}:', out)
+
+
+    def builds_on(self, plan, n=3, spent=4):
+        os.makedirs(os.path.join(self.dir, 'state'), exist_ok=True)
+        with open(os.path.join(self.dir, 'state', 'usage.jsonl'), 'a', encoding='utf-8') as f:
+            for _ in range(n):
+                rec = {'kind': 'build', 'jobs': [], 'spent': {'five_hour': spent, 'seven_day': 1}}
+                if plan is not None:
+                    rec['plan'] = plan.record()
+                f.write(json.dumps(rec) + '\n')
+
+
+MAX = Plan('max', 'default_claude_max_20x')
+PRO = Plan('pro', 'default_claude_ai')
+
+
+class PlanChangeTest(GatingTest):
+    """A Claude plan change (issue #118): the learned costs start again, and it's said once."""
+
+    def test_after_a_plan_change_a_build_is_gated_on_the_cautious_default_and_it_is_said(self):
+        self.builds_on(MAX)
+        self.assertIn('4% of 5 hours', self.run_main(['--gate'], FakeUsage(
+            usage(50, 20), plan=MAX))[1])   # 4% learned on max: it would fit
+        self.run_main(['--once'], FakeUsage(usage(50, 20), plan=PRO))
+        self.assertEqual(self.t3.starts, [])       # 60% by default on pro: it waits
+        log = self.runner_log()
+        self.assertEqual(log.count("Claude's plan is now pro (was max): learned costs start "
+                                   'again'), 1)
+        self.assertIn('a build is expected to take 60% of 5 hours', log)
+
+    def test_the_first_start_stamps_the_plan_on_the_records_from_before(self):
+        self.builds_on(None)
+        self.run_main(['--once'], FakeUsage(usage(90, 20), plan=MAX))
+        with open(os.path.join(self.dir, 'state', 'usage-plan.json'), encoding='utf-8') as f:
+            self.assertEqual(json.load(f)['unmarked'], MAX.record())
+        code, out = self.run_main(['--gate'], FakeUsage(usage(10, 20), plan=PRO))
+        self.assertIn("Claude's plan is now pro (was max)", out)
+
+    def test_gate_names_the_plan_and_whether_each_cost_is_learned_on_it(self):
+        self.builds_on(MAX)
+        code, out = self.run_main(['--gate'], FakeUsage(usage(10, 20), plan=MAX))
+        self.assertIn('Claude usage gate: plan max (default_claude_max_20x), weekly reserve 5%',
+                      out)
+        self.assertNotIn("plan is now", out)
+        self.assertIn('build: starts', out)
+        self.assertIn('4% of 5 hours', out)
+
+    def test_a_dry_run_stamps_nothing(self):
+        self.builds_on(None)
+        self.run_main(['--gate'], FakeUsage(usage(10, 20), plan=MAX))
+        self.assertFalse(os.path.exists(os.path.join(self.dir, 'state', 'usage-plan.json')))
 
 
 if __name__ == '__main__':
