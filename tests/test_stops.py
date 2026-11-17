@@ -542,6 +542,39 @@ class StopsTest(unittest.TestCase):
         self.reviewer().review_pass()
         self.assertEqual({s.outcome for s in self.stops()}, {'filed'})
 
+    def test_a_stop_on_a_pr_merged_outside_the_runner_is_answered_and_its_issue_closed(self):
+        """Issue #88: Stefan merges a stopped PR on GitHub without deciding."""
+        r = self.stopped_then_pushed()
+        self.gh.now[20] = {'head_sha': H3, 'state': 'merged'}
+        r.review_pass()
+        [stop] = self.stops()
+        self.assertEqual((stop.outcome, stop.answer), ('answered', 'pr-closed'))
+        [(n, note)] = [c for c in self.calls('comment') if c[0] == 901]
+        self.assertIn('PR #20 was merged', note)
+        self.assertIn(RUNNER_MARK, note)
+        self.assertEqual(self.calls('close-done'), [(901,)])
+        self.assertIsNone(held(self.jobs, self.repo, 20))
+
+    def test_a_stop_on_a_pr_closed_outside_the_runner_closes_its_issue_not_planned(self):
+        r = self.stopped_then_pushed()
+        self.gh.now[20] = {'head_sha': H3, 'state': 'closed'}
+        r.review_pass()
+        self.assertEqual(self.stops()[0].answer, 'pr-closed')
+        [(n, note)] = [c for c in self.calls('comment') if c[0] == 901]
+        self.assertIn('PR #20 was closed', note)
+        self.assertEqual(self.calls('close'), [(901,)])
+
+    def test_closing_the_issue_of_a_closed_pr_failing_leaves_the_stop_for_next_pass(self):
+        r = self.stopped_then_pushed()
+        self.gh.now[20] = {'head_sha': H3, 'state': 'closed'}
+        self.gh.fail.add('close')
+        r.review_pass()
+        self.assertEqual(self.stops()[0].outcome, 'filed')
+        self.gh.fail.discard('close')
+        r.review_pass()
+        self.assertEqual(self.stops()[0].answer, 'pr-closed')
+        self.assertEqual(len([c for c in self.calls('comment') if c[0] == 901]), 1)
+
     def test_release_puts_a_stopped_pr_back(self):
         r = self.stopped_then_pushed()
         self.jobs.released('first', 20)
