@@ -110,11 +110,15 @@ reviewed), `failed`, `out-of-usage` and `head-moved` (nothing counts).
   (below), and stops and merges go on.
 - **Usage back before that** (issue #130; Stefan, 2026-11-18: a ChatGPT reset credit used on a
   week-long wait, and Opus went on reviewing): while Sol waits, the Sol lane reads ChatGPT's usage
-  (`Reviewer._sol_back`) through the dashboard's own reader (`snapshot.Watch`, one for both, built
-  in `cli.main`), using its last reading and reading again once that's `SOL_BACK_EVERY` (5
-  minutes) old. A reading taken after the out-of-usage review ended, with every window under 99%
-  (`sol.FULL`), ends the wait: a `sol-back` record in the job log (`JobLog.sol_back`: the reading's
-  time and windows, and the `resume_at` it ends), said once, and the next review goes to Sol.
+  on every pass, whether or not a PR needs a review (`Reviewer._sol_waits`, `_sol_back`), through
+  the dashboard's own reader (`snapshot.Watch`, one for both, built in `cli.main`), using its last
+  reading and reading again once that's `SOL_BACK_EVERY` (5 minutes) old, whatever it said. The
+  check and the read are one step under the reader's lock (`Watch.read_if_due`), so the lane and
+  the dashboard never both read. A reading taken after the out-of-usage review ended, with every
+  window under 99% (`sol.FULL`), ends the wait: a `sol-back` record in the job log
+  (`JobLog.sol_back`: the reading's time to the microsecond, so it compares with the review's end
+  as the lane compared it, its windows, and the `resume_at` it ends), said once, and the next
+  review goes to Sol.
   `JobLog.sol_resume_at` reads the record, so the dashboard's wait, the wake times and a restarted
   runner agree. A window at 99% or more, a reading from before the review ran out, or a failed
   read (said once per error) leaves the wait standing. `--review NAME#N` reads it too, so

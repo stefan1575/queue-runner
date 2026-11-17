@@ -124,7 +124,8 @@ SOL_BACK_EVERY = 300
 
 def _after(reading, moment: datetime.datetime) -> bool:
     """Whether `reading` (a `usage.Reading`) has a good value read after `moment`."""
-    return reading is not None and reading.value is not None and reading.at is not None         and reading.at.astimezone() > moment
+    return (reading is not None and reading.value is not None and reading.at is not None
+            and reading.at.astimezone() > moment)
 
 
 def _window_said(w) -> str:
@@ -177,6 +178,7 @@ class Reviewer:
         try:
             with runner_lock(self.config.state_dir, 'sol.lock'):
                 self.settle()
+                self._sol_waits()   # every pass: the wait can end with no PR to review
                 if self.stopper:   # first: a PR stopped now neither merges nor is reviewed
                     self.stopper.stop_pass(halted=self.lane_stopped)
                 if self.merger and not self.lane_stopped():
@@ -281,23 +283,32 @@ class Reviewer:
             return True
         return False
 
+    def _sol_waits(self) -> None:
+        """While Sol waits for a reset (and Sol, not Claude, reviews), ChatGPT's usage is checked
+        on every pass, whether or not a PR needs a review (PR 131's review 1, F1), so the
+        dashboard's wait and the wake time end once its usage is back. Quiet: `_paused` says
+        the wait when a review is held back by it."""
+        if self._opus_always():
+            return
+        out = self.jobs.sol_out()
+        if out and out.resume_at and self.now().astimezone() < when(out.resume_at):
+            self._sol_back(out)
+
     def _sol_back(self, out) -> bool:
         """Whether ChatGPT has usage again before the reset Sol's review named (a reset credit
         used, issue #130): a reading taken after that review ended, read again once the last is
-        `SOL_BACK_EVERY` old, with every window under `sol.FULL`. If so it's recorded
-        (`JobLog.sol_back`), so every reader of the wait agrees, and said. A failed read leaves
-        the wait standing (said once per error)."""
+        `SOL_BACK_EVERY` old (whatever it said: one still full is read again, review 1 F5), with
+        every window under `sol.FULL`. The check and the read are one step (`read_if_due`), so
+        the dashboard sharing the reader never reads too (F3). If so it's recorded
+        (`JobLog.sol_back`) with the reading's own time to the microsecond, so every reader of
+        the wait agrees (F2), and said. A failed read leaves the wait standing (said once per
+        error)."""
         watch = self.sol_usage
         if watch is None:
             return False
         ran_out = when(out.ended_at)
+        watch.read_if_due(SOL_BACK_EVERY)
         reading = watch.reading()
-        if not _after(reading, ran_out) and watch.due(SOL_BACK_EVERY):
-            try:
-                watch.read()
-            except Exception:
-                pass   # kept in the reading as its error
-            reading = watch.reading()
         if reading is not None and reading.error and reading.error != self._said_back:
             self.say(f"ChatGPT's usage couldn't be read ({reading.error}): Sol waits for its "
                      f'reset at {out.resume_at}')
@@ -307,11 +318,12 @@ class Reviewer:
         windows = list(getattr(reading.value, 'windows', None) or ())
         if not windows or any(w.used >= FULL for w in windows):
             return False
-        read_at = reading.at.astimezone().isoformat(timespec='seconds')
-        self.jobs.sol_back(read_at=read_at, resume_at=out.resume_at,
+        read_at = reading.at.astimezone()
+        self.jobs.sol_back(read_at=read_at.isoformat(), resume_at=out.resume_at,
                            windows=[{'minutes': w.minutes, 'used': w.used} for w in windows])
+        shown = read_at.isoformat(timespec='seconds')
         self.say(f"ChatGPT has usage again ({', '.join(_window_said(w) for w in windows)}, "
-                 f'read at {read_at}): Sol reviews again, before the reset at {out.resume_at} '
+                 f'read at {shown}): Sol reviews again, before the reset at {out.resume_at} '
                  'its review named')
         self._said_paused = None
         return True

@@ -137,6 +137,54 @@ class SolBackTest(unittest.TestCase):
         self.assertEqual(self.jobs.sol_resume_at(), (later + datetime.timedelta(hours=5))
                          .astimezone().isoformat(timespec='seconds'))
 
+    def test_with_no_pr_to_review_a_pass_still_ends_the_wait(self):
+        """Review 1 F1: the lane reads ChatGPT on every pass, not only when a PR needs Sol."""
+        self.gh.prs = []
+        watch = self.watch(limits(2, 0))
+        watch.read()   # the publisher's read
+        self.assertEqual(self.reviewer(watch).review_pass(), 'idle')
+        self.assertEqual(len(self.backs()), 1)
+        self.assertIsNone(self.jobs.sol_resume_at())   # the dashboard's wait and the wake time
+
+    def test_a_reading_within_the_second_the_review_ran_out_ends_the_wait_for_every_reader(self):
+        """Review 1 F2: the record keeps the reading's own time, to the microsecond, so the job
+        log's `sol_out` agrees with the lane that accepted it."""
+        self.clock.at = OUT_AT + datetime.timedelta(microseconds=500000)
+        r = self.reviewer(self.watch(limits(2, 0)), sol=[reply()])
+        self.assertFalse(r._paused())
+        self.assertIsNone(JobLog(self.path).sol_out())
+        self.assertFalse(r._paused())
+        self.assertEqual(len(self.backs()), 1)   # recorded once: the log agrees after it
+
+    def test_a_reading_still_full_is_read_again_once_due(self):
+        """Review 1 F5: a post-stop reading at 100% doesn't stop the lane reading again."""
+        r = self.reviewer(self.watch(limits(2, 100), limits(2, 0)))
+        self.assertTrue(r._paused())
+        self.clock.at += datetime.timedelta(seconds=SOL_BACK_EVERY)
+        self.assertFalse(r._paused())
+        self.assertEqual((self.chatgpt.reads, len(self.backs())), (2, 1))
+
+    def test_the_lane_and_the_dashboard_checking_at_once_read_chatgpt_once(self):
+        """Review 1 F3: the check and the read are one step under the reader's lock. Here the
+        dashboard's pass runs the moment the lane's check returns, before its read: were the
+        check apart from the read, both would find a read due and both would read."""
+        snaps = []
+
+        class Racing(Watch):
+            def due(self, seconds):
+                was = super().due(seconds)
+                if snaps:
+                    snaps.pop().facts(fresh=True)
+                return was
+
+        watch = Racing(ChatGPT(self.clock, limits(2, 0)), Calls(self.clock), 'sol_usage',
+                       self.clock, timed=True)
+        self.chatgpt = watch.read_fn
+        snaps.append(Snapshots(self.config, calls=Calls(self.clock), clock=self.clock,
+                               claude=None, sol=watch, info=None))
+        self.reviewer(watch, sol=[reply()])._paused()
+        self.assertEqual(self.chatgpt.reads, 1)
+
     # --- the wait stands --------------------------------------------------------------------
 
     def test_a_window_still_full_keeps_the_wait_and_opus_reviews(self):

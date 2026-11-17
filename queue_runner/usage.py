@@ -21,6 +21,7 @@ taken; a failed call keeps the last good reading, with its error beside it (T3's
 `CAPABILITIES_PROBE_TTL` and `resolveUsageLimitsAfterProbe`, read 2026-11-16). The endpoint
 answers 429 when it's asked about once a minute, per login, and T3 and Claude Code share it.
 """
+import contextlib
 import datetime
 import json
 import os
@@ -269,6 +270,13 @@ class CachedUsage:
             now = self.clock()
             return self._next(now) is None and (
                 self._tried is None or (now - self._tried).total_seconds() >= seconds)
+
+    def read_if_due(self, seconds: float) -> None:
+        """Reads if `due(seconds)`, as `snapshot.Watch.read_if_due`. `read` keeps to the budget
+        itself, so two callers both finding it due still ask the endpoint once."""
+        if self.due(seconds):
+            with contextlib.suppress(Exception):   # kept as the last error
+                self.read()
 
     def read(self):
         """Asks the endpoint if the budget allows, then gives the last good value, which may be
