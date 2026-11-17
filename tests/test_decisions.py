@@ -349,7 +349,7 @@ class DecisionTest(unittest.TestCase):
         self.assertTrue(brief.startswith('## Direction first\n\nAn earlier thread on this job '
                                          'failed'))
         self.assertIn('Install deps first.', brief)
-        self.assertLess(brief.index('Install deps first.'), brief.index('/implement'))
+        self.assertLess(brief.index('Install deps first.'), brief.index('Build GitHub issue'))
         self.assertIn('## Picking up from an earlier thread', brief)
         self.assertIn('cold (its last request started 2 h ago) and 200,000 tokens', brief)
         self.assertIn('npm test failed: missing module', brief)
@@ -373,7 +373,7 @@ class DecisionTest(unittest.TestCase):
         self.assertIn('An earlier thread on this job stopped to ask a question', brief)
         self.assertIn('The earlier thread asked:\n\n> Which blue: navy or sky?', brief)
         self.assertIn('Use blue.', brief)
-        self.assertLess(brief.index('Use blue.'), brief.index('/implement'))
+        self.assertLess(brief.index('Use blue.'), brief.index('Build GitHub issue'))
         first, second = self.jobs('build')
         self.assertEqual((first.outcome, second.outcome), ('continued', 'done-no-pr'))
         self.assertEqual(self.r.jobs.waiting_jobs(), [])

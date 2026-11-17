@@ -7,6 +7,12 @@ from .github import Comment
 from .picker import BuildJob
 
 
+# The screenshot script jobs run (`templates/build.md`, Screenshots): the runner's own copy, so a
+# job in any repo reaches it.
+EVIDENCE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'scripts',
+                        'evidence.py').replace(os.sep, '/')
+
+
 def _template(kind: str) -> Template:
     return Template(resources.files(__package__).joinpath(f'templates/{kind}.md')
                     .read_text(encoding='utf-8'))
@@ -30,4 +36,4 @@ def build_brief(job: BuildJob, comments: list[Comment]) -> str:
         number=job.issue.number, github=job.repo.github, title=job.issue.title,
         branch=job.branch, base=job.base, agents=_agents_pointer(job.repo.path),
         body=(job.issue.body or '').strip() or '(The issue has no body.)',
-        comments=_comments(comments))
+        comments=_comments(comments), evidence=EVIDENCE)

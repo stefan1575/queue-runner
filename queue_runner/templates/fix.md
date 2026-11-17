@@ -56,20 +56,22 @@ $threads
 
 ## How to work
 
-- For each Important finding: write a failing test first where one fits (the tdd skill), then
-  fix it, and fix every other case of its class.
+- For each Important finding: write a failing test first where one fits, then fix it, and
+  fix every other case of its class.
 - If a finding is wrong, decline it: comment on the PR (`gh pr comment $number --repo $github`)
   naming the finding's ID, the reason and the evidence. The best evidence is a test, committed
   and pushed, that passes now and would fail if the finding were right. Sol reconsiders a decline
   once, in the next review.
-- **A missing or wrong screenshot finding:** shoot and publish them as
-  `~/Code/docs/evidence.md` says, add them to the PR body, and push (an empty commit if the
+- **A missing or wrong screenshot finding:** shoot and publish them with the runner's script
+  (`python3 -I $evidence shoot URL OUT.png --size 1440x900`, or `screen OUT.png` for the
+  desktop, then `publish --repo . --into pr-$number FILE.png ...`, which prints the image lines),
+  don't open them yourself, add them to the PR body, and push (an empty commit if the
   code didn't change, so there is a new head to review). If the screen can't be captured,
   say so on the PR and end your turn.
 - Commit after every step, with the decision in the commit message: what you chose and why. A
   usage limit can cut this thread off at any point, and the next job starts from your commits.
 - End the round by pushing to `$branch`. A round that ends without a push isn't reviewed again:
-  the PR waits for Stefan. Skip any code-review step: the runner has Sol review the new head.
+  the PR waits for Stefan. Don't review your own work: the runner has the new head reviewed.
 - Don't merge, review, set statuses or edit the PR's `## Review` table: the runner does those.
 - Don't schedule, watch or wait on anything (no scheduled tasks, PR watches, wake-ups or
   monitors). The runner does the waiting.
