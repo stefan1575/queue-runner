@@ -70,8 +70,11 @@ $threads
   (`python3 -I $evidence shoot URL OUT.png --size 1440x900`, or `screen OUT.png` for the
   desktop, then `publish --repo . --into pr-$number FILE.png ...`, which prints the image lines),
   don't open them yourself, add them to the PR body, and push (an empty commit if the
-  code didn't change, so there is a new head to review). If the screen can't be captured,
-  say so on the PR and end your turn.
+  code didn't change, so there is a new head to review). A change that shows only in the app's
+  own data is shot from that data, not a sample page: the repo's docs say how. If `publish`
+  refuses a before and after as byte-identical, the shot missed the change: reshoot it, or
+  write `Screenshot owed: <why>`. If the screen can't be captured, say so on the PR and end
+  your turn.
 - Commit after every step, with the decision in the commit message: what you chose and why. A
   usage limit can cut this thread off at any point, and the next job starts from your commits.
 - End the round by pushing to `$branch`. A round that ends without a push isn't reviewed again:
