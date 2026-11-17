@@ -4,7 +4,7 @@ How the runner is started, kept running, restarted on its own code, stopped per 
 
 ## The command line
 
-Every command, with what it does in full (`AGENTS.md` keeps a short copy):
+Every command, with what it does in full:
 
 ```
 python3 -m queue_runner                       # run: both lanes, pass after pass (unattended: see Running unattended)

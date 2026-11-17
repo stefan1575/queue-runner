@@ -2,6 +2,10 @@
 
 Issues and specs for this repo live as GitHub issues. Use the `gh` CLI for all operations.
 
+The spec is #8, each ticket a sub-issue with native blocked-by links. Tickets were local markdown
+in `.scratch/queue-runner/` until 2026-11-16, and older docs and commits still use those numbers:
+**ticket NN is issue #(NN+9)**; #8 has the table.
+
 ## Conventions
 
 - **Create an issue**: `gh issue create --title "..." --body "..."`. Use a heredoc for multi-line bodies.
