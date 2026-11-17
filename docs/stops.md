@@ -38,7 +38,8 @@ one-line note (hidden `stop pr-closed pr=N` line, so a retry doesn't post it twi
 closed, completed for a merge and not planned for a close, and only then is the stop recorded,
 so GitHub failing leaves it `filed` for the next pass. An issue he closed himself still reads
 `issue-closed`. `live` and `live-todo` stops sit on merged PRs by design, so a merge never
-answers them. Answers are read at the start of each Sol pass. A
+answers them, and an issue one of them shares is left open (no note): closing it would answer
+that live work without Stefan. Answers are read at the start of each Sol pass. A
 closed issue puts the PR back in the loop; a reply holds it until a decision acts on what it asks
 (`docs/claude-lane.md`, Decision threads). Every comment the runner posts outside a review carries a hidden
 `<!-- queue-runner ... -->` line (`ledger.RUNNER_MARK`), so none counts as a reply.

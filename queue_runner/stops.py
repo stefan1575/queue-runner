@@ -679,11 +679,14 @@ class Stopper:
     def _close_for_pr(self, repo, n: int, state: str, stops, closed) -> bool:
         """Issue #88: the PR was merged or closed on GitHub while its stops were filed, so
         there's nothing left for Stefan to decide. Each of their `needs-info` issues still open
-        gets a one-line note and is closed (completed for a merge, not planned for a close).
-        False when GitHub failed: the stops stay filed and the next pass tries again, and a
-        note already posted isn't posted twice."""
+        gets a one-line note and is closed (completed for a merge, not planned for a close),
+        except one a `live` or `live-todo` stop shares: that work is still Stefan's, and closing
+        its issue would answer it. False when GitHub failed: the stops stay filed and the next
+        pass tries again, and a note already posted isn't posted twice."""
         mark = f'{RUNNER_MARK}stop pr-closed pr={n} -->'
-        for u in sorted({j.link for j in stops if j.link and j.stop not in ON_MERGED} - closed):
+        live = {j.link for j in stops if j.stop in ON_MERGED}
+        for u in sorted({j.link for j in stops if j.link and j.stop not in ON_MERGED}
+                        - closed - live):
             i = number_of(u)
             try:
                 if not any(mark in c.body for c in self.github.issue_comments(repo, i)):
