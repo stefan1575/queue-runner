@@ -549,9 +549,10 @@ class Watched:
 
 class Watch:
     """A usage reader whose reads are kept (ChatGPT's): `read()`, `reading()` for the snapshot,
-    and `due(seconds)` once the last read (good or not) is that old. With `timed`, `read_fn`
-    returns (when it was read, the value). Claude's is `usage.CachedUsage`, which has the same
-    three and a 5-minute budget (issue 66)."""
+    `due(seconds)` once the last read (good or not) is that old, and `read_if_due(seconds)`, the
+    check and the read in one step, so two callers sharing it (the dashboard and the Sol lane,
+    issue #130) never both read. With `timed`, `read_fn` returns (when it was read, the value).
+    Claude's is `usage.CachedUsage`, which has the same four and a 5-minute budget (issue 66)."""
 
     def __init__(self, read_fn, calls: Calls, id: str, clock, timed: bool = False):
         self.read_fn, self.calls, self.id, self.clock, self.timed = read_fn, calls, id, clock, timed
@@ -563,18 +564,29 @@ class Watch:
 
     def read(self):
         with self._lock:
-            self._tried = self.clock()
-            try:
-                got = self.read_fn()
-            except Exception as e:
-                self._error = _short(e)
-                self._since = self._since or self._tried
-                self.calls.record(self.id, False, self._error)
-                raise
-            at, value = got if self.timed else (self._tried, got)
-            self._good, self._error, self._since = Reading(value, at), None, None
-            self.calls.record(self.id, True)
-            return value
+            return self._read()
+
+    def read_if_due(self, seconds: float) -> None:
+        """Reads if the last read is `seconds` old, holding the lock from the check through the
+        read. A failed read is kept in the reading as its error."""
+        with self._lock:
+            if self._due(seconds):
+                with contextlib.suppress(Exception):
+                    self._read()
+
+    def _read(self):
+        self._tried = self.clock()
+        try:
+            got = self.read_fn()
+        except Exception as e:
+            self._error = _short(e)
+            self._since = self._since or self._tried
+            self.calls.record(self.id, False, self._error)
+            raise
+        at, value = got if self.timed else (self._tried, got)
+        self._good, self._error, self._since = Reading(value, at), None, None
+        self.calls.record(self.id, True)
+        return value
 
     def reading(self) -> Reading | None:
         with self._lock:
@@ -585,8 +597,10 @@ class Watch:
 
     def due(self, seconds: float) -> bool:
         with self._lock:
-            return self._tried is None or \
-                (self.clock() - self._tried).total_seconds() >= seconds
+            return self._due(seconds)
+
+    def _due(self, seconds: float) -> bool:
+        return self._tried is None or (self.clock() - self._tried).total_seconds() >= seconds
 
 
 # --- writing it -------------------------------------------------------------------------------
@@ -700,9 +714,13 @@ class Snapshots:
         if fresh:
             asked = self._refresh(switch)
             for watch in (self.claude, self.sol):
-                if watch is not None and (asked or watch.due(READ_EVERY)):
-                    with contextlib.suppress(Exception):   # kept in the reading as its error
-                        watch.read()
+                if watch is None:
+                    continue
+                if not asked:   # the check and the read in one step: the Sol lane shares it
+                    watch.read_if_due(READ_EVERY)
+                    continue
+                with contextlib.suppress(Exception):   # kept in the reading as its error
+                    watch.read()
             if asked:
                 self._refreshed = (switch.refresh_at, self.clock())
             self._find_threads(jobs)

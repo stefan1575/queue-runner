@@ -108,7 +108,7 @@ class Worker:
 class Runner:
     def __init__(self, config: Config, *, github, t3, git, out, log_line, sol=None,
                  toaster=None, gate=None, limits=None, now=None, waker=None, self_update=None,
-                 deps=None, effort=None):
+                 deps=None, effort=None, sol_usage=None):
         self.config, self.github, self.t3, self.git = config, github, t3, git
         # restart.SelfUpdate: the runner's own checkout, restarted on when its base moves
         # (continuous mode, and only when the runner serves its own repo)
@@ -166,7 +166,7 @@ class Runner:
                                  say=self.say, toaster=self.toaster, deps=deps,
                                  fallback=OpusFallback(config, t3=t3, gate=gate,
                                                        effort=self.effort, beside=self),
-                                 t3=t3) if sol is not None else None
+                                 t3=t3, sol_usage=sol_usage) if sol is not None else None
         self.fixer = Fixer(config, github=github, git=git, jobs=self.jobs)
         stopper = Stopper(config, github=github, jobs=self.jobs, say=self.say,
                           toaster=self.toaster)
