@@ -36,6 +36,7 @@ from dataclasses import dataclass, replace
 from importlib import resources
 from string import Template
 
+from .effort import asked
 from .ledger import OPEN, RUNNER_MARK, norm, read_reviews, said_since, state
 from .review import _open_line
 from .state import NOT_SENT, NOT_STARTED, Job
@@ -400,7 +401,7 @@ class Decider:
         sha = case.pr.head_sha if case.pr is not None else case.about.sha
         job = self.jobs.started(kind='decision', repo=repo.name, issue=n, branch=None,
                                 title=decision_title(repo, n), sha=sha, about=case.about.id,
-                                question=case.question)
+                                question=case.question, **self.effort.job('decision'))
         if answer := self.direct_answer(case):
             self.say(f'{case.name}: Stefan answered the Approach note: {answer.action}')
             return self.act(case, job, answer, None, continue_thread)
@@ -412,8 +413,7 @@ class Decider:
                 f'{case.about.outcome} again')}), None, continue_thread)
         try:
             brief = self.brief(case)
-            result = self.t3.start(repo.path, brief, title=job.title,
-                                   **self.effort.job())
+            result = self.t3.start(repo.path, brief, title=job.title, **asked(job))
         except Exception as e:   # T3 down, or the brief couldn't be built: the next pass
             self.jobs.ended(job.id, exit_code=None, outcome=NOT_STARTED,
                             error=f'{type(e).__name__}: {e}')
@@ -440,7 +440,8 @@ class Decider:
                 pass
         ran = {} if result is None else dict(
             thread_id=result.thread_id, run_id=result.run_id, status=result.status,
-            **self.effort.used(repo.name, case.name, result.thread_id, result.run_id))
+            **self.effort.used(repo.name, case.name, result.thread_id, result.run_id,
+                               job.effort))
         code = None if result is None else result.exit_code
         text = answer.text
 

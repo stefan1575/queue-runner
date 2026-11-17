@@ -154,8 +154,8 @@ class OpenTest(ThreadCase):
         self.assertEqual((launch['title'], launch['project']),
                          ('Decide: Queue runner ask: first#20', self.dir))   # issue #71
         self.assertEqual((launch['provider'], launch['model'], launch['effort']),
-                         (self.config.claude_provider, self.config.claude_model,
-                          self.config.claude_effort))   # named, whatever T3's default (#119)
+                         tuple(vars(self.config.job('ask'))[k] for k in
+                               ('provider', 'model', 'effort')))   # named (#119), the ask's (#120)
         brief = launch['message']
         self.assertIn('Review 3 is still blocking', brief)            # the ask's situation
         self.assertIn('Rework the approach, fix on with the same approach, or hold it?', brief)

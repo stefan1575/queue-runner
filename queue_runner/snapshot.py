@@ -35,7 +35,6 @@ READ_EVERY = 300    # seconds: the snapshot reads usage itself no more often tha
 
 CLAUDE_KINDS = ('build', 'fix', 'decision', 'live')   # the Claude lane's jobs (gate.CLAUDE_KINDS)
 SOL_KINDS = ('review', 'merge')                       # the reviewing lane's
-SOL_MODEL = 'GPT-6.1 Sol'   # codex-sol.sh's model
 # A job whose `issue` is a PR (a live run's: its batch's newest).
 ON_PR = ('fix', 'review', 'merge', 'live')
 NO_STOP_NOW = {'available': False, 'note': "Stop now isn't built yet: stop after the job instead.",
@@ -99,8 +98,13 @@ class Facts:
     knob: Knob | None = Knob()                   # gate.json; None: unreadable
     # Each lane's stop (control.json, or gate.json's older pause), as read for this snapshot.
     switch: control.Switch = control.Switch()
+    # config.toml's `[jobs]` (issue #120): the build's model (the Claude lane's), whether
+    # reviews run as T3 threads ('claude', #76) or through the Codex adapter ('chatgpt'), the
+    # review's own model, and the model a review thread runs on (its own, else its fallback's).
     claude_model: str = 'claude-opus-5-5'
-    review_provider: str = 'chatgpt'   # config.toml's `[review] provider` (issue #76)
+    review_provider: str = 'chatgpt'
+    review_model: str = 'gpt-6.1-sol'
+    review_thread_model: str = 'claude-opus-5-5'
     # The gate's verdict or a limit's resume, as the Claude lane's last pass left it; and each
     # repo's own wait, when the gate held its job (#50: each repo runs its own Claude job).
     claude_wait: Wait | None = None
@@ -285,9 +289,22 @@ def _queue(facts: Facts, lane: str) -> tuple[list[dict], str]:
 
 
 def _model(model: str) -> str:
-    """claude-opus-5-5 as Stefan reads it: Opus 5.5."""
-    m = re.fullmatch(r'claude-([a-z]+)-(\d+)-(\d+)', model)
-    return f'{m[1].title()} {m[2]}.{m[3]}' if m else model
+    """claude-opus-5-5 as Stefan reads it: Opus 5.5; gpt-6.1-sol GPT-6.1 Sol."""
+    from .fallback import model_name
+    return model_name(model)
+
+
+def _lane_model(facts: 'Facts', id: str, job, claude: bool) -> str:
+    """The model a lane runs on: its job's own, as its start record names it (issue #120);
+    else the Claude lane's is the build's, a review thread's the review's (or its fallback's)
+    and Sol's the review's."""
+    if getattr(job, 'model', None):
+        return _model(job.model)
+    if id == 'claude':
+        return _model(facts.claude_model)
+    if claude or getattr(job, 'reviewer', None):
+        return _model(facts.review_thread_model)
+    return _model(facts.review_model)
 
 
 def _sentence(text: str) -> str:
@@ -340,8 +357,7 @@ def _lane(facts: Facts, id: str, job, wait: Wait | None, jobs=None) -> dict:
         'provider': 'claude' if claude else 'chatgpt',
         'name': 'Claude' if claude else 'ChatGPT',
         'does': 'builds and fixes' if id == 'claude' else 'reviews',
-        'model': _model(facts.claude_model) if claude or getattr(job, 'reviewer', None)
-        else SOL_MODEL,
+        'model': _lane_model(facts, id, job, claude),
         'state': state,
         'job': _job(facts, job) if job is not None else None,
         # Every job the lane runs now, oldest first: the Claude lane's one per repo (#50); `job`
@@ -719,15 +735,20 @@ class Snapshots:
             threads = dict(self._threads)
         runner = self.runner
         repos = list(self.config.repos)
+        from .fallback import chosen
+        review = self.config.job('review')
         return Facts(
             now=now, repos=repos, jobs=jobs, knob=knob,
             switch=switch,
-            claude_model=self.config.claude_model,
-            review_provider=self.config.review_provider,
+            claude_model=self.config.job('build').model,
+            review_provider='claude' if chosen(self.config) else 'chatgpt',
+            review_model=review.model,
+            review_thread_model=(review.model if chosen(self.config) or review.fallback is None
+                                 else review.fallback.model),
             claude_wait=runner.claude_wait if runner is not None else self._limit_wait(log, now),
             repo_waits=dict(runner.repo_waits) if runner is not None else {},
             # Sol's out-of-usage wait holds no review back while Claude reviews (issue #76).
-            sol_wait=None if self.config.review_provider == 'claude' else self._sol_wait(log, now),
+            sol_wait=None if chosen(self.config) else self._sol_wait(log, now),
             titles=dict(runner.titles) if runner is not None else {},
             threads=threads, runner=self.info, calls=self.calls.all(),
             claude_usage=self.claude.reading() if self.claude else None,

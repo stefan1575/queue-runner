@@ -1,44 +1,49 @@
-"""The Opus reviewer: while Sol is out of usage (the fallback, issue #69), or for every review when
-config.toml's `[review] provider` is "claude" (issue #76), the Sol lane has the review run as a T3
-thread on the Claude model (`[claude]` in config.toml: Opus 5.5) instead of by Sol, from the same
-brief, and posts it as it posts Sol's.
+"""A review as a T3 thread (issue #120; first the Opus fallback, #69, and #76): when config.toml's
+`[jobs.review]` names a provider other than Codex, every review runs as a T3 thread on its
+provider, model and effort; and while the review's own provider is out of usage, a review runs
+on its `fallback` (Stefan's config: Opus 5.5 high while Sol is out). Either way the thread
+reviews from the same brief Sol gets, and its reply is posted as Sol's is.
 
 It plays the Sol seam (`review(brief, reply, workdir, out, writable)`, as `sol.SolCli`), so the
 Reviewer builds the brief, reads the verdict from the sol-findings block and posts exactly as for
 Sol. The differences:
 
-- **The usage gate:** it's a Claude job, gated as kind `review` (`gate.FALLBACK_REVIEW`) beside
-  the Claude lane's jobs running (#50), and counted among them while it runs (`beside`, the
-  Runner); what it spent is recorded like any Claude job's, with `shared_with` the Claude lane's
-  jobs that ran meanwhile (PR #74's review 1, F1).
+- **The usage gate:** a thread on Claude is gated as kind `review` (`gate.FALLBACK_REVIEW`)
+  beside the Claude lane's jobs running (#50), and counted among them while it runs (`beside`,
+  the Runner); what it spent is recorded like any Claude job's, with `shared_with` the Claude
+  lane's jobs that ran meanwhile (PR #74's review 1, F1). A thread on another provider isn't
+  gated: the gate reads Claude's usage.
 - **Where it runs:** a T3 thread in the repo's project folder with no worktree (T3 can't start a
   thread in an existing folder, and the runner's checkout of H is where the dependencies are
   linked in), told to work in that checkout and change nothing in the project folder. It starts
-  as every Claude job does, its provider, model and effort named (`effort.claude_job`, #119),
-  and the effort its run used is read back.
-- **The label:** the comment, the `sol-review` status and the Review row name it and say why
-  ("Opus 5.5 high, fallback while Sol is out", or "Opus 5.5 high, set in config.toml"), with the
-  effort read back when it can be.
+  as every job does, its provider, model and effort named (#119), and the effort its run used
+  is read back. A run that stops on a usage limit (T3's run record, `limits.limit_stop`) is
+  that provider out of usage, as Sol's is (`sol.SolOutOfUsage`).
+- **The label:** the comment, the `sol-review` status and the Review row name the model and
+  say why ("Opus 5.5 high, fallback while Sol is out", or "Opus 5.5 high, set in config.toml"),
+  with the effort read back when it can be.
 """
 import os
 import re
 
-from .effort import claude_job
+from .config import CODEX
+from .effort import flags
 from .ledger import SolFailed
+from .sol import SolOutOfUsage
 from .t3 import T3Error, settle_quietly
 
-# The review job's `reviewer`, and why Opus reviewed: Sol was out of usage, or config.toml says
-# Claude reviews.
+# The review job's `reviewer`, and why a thread reviewed: the review's own provider was out of
+# usage (its fallback), or config.toml names a provider other than Codex for reviews.
 KIND = 'opus-fallback'
 SET = 'opus-config'
-WHY = {KIND: 'fallback while Sol is out', SET: 'set in config.toml'}
-# Who reviews, as the log, the work lists and the Inbox's story say it.
+WHY = {KIND: 'fallback while {primary} is out', SET: 'set in config.toml'}
+# Who reviewed an earlier job, as the work lists and the Inbox's story say it.
 WHO = {KIND: 'Opus (the fallback while Sol is out of usage)', SET: 'Opus (config.toml says so)'}
-OPUS_KINDS = tuple(WHO)   # a review job's `reviewer` when an Opus thread reviewed
+OPUS_KINDS = tuple(WHO)   # a review job's `reviewer` when a T3 thread reviewed
 
 
 def gate_label(repo: str, number: int) -> str:
-    """An Opus review as the usage gate and `shared_with` name it: `review queue-runner#67`."""
+    """A thread review as the usage gate and `shared_with` name it: `review queue-runner#67`."""
     return f'review {repo}#{number}'
 
 
@@ -64,27 +69,38 @@ class Alone:
 
 
 def chosen(config) -> bool:
-    """Whether config.toml has Claude review every PR (issue #76), not only while Sol is out."""
-    return config.review_provider == 'claude'
+    """Whether config.toml has every PR reviewed in a T3 thread (`[jobs.review]` on a provider
+    other than Codex, issue #120), not only while the review's provider is out of usage."""
+    return config.job('review').provider != CODEX
 
 
 def model_name(model: str) -> str:
-    """`claude-opus-5-5` as people say it: `Opus 5.5`."""
-    m = re.fullmatch(r'claude-([a-z]+)-(\d+)-(\d+)', model or '')
-    return f'{m[1].title()} {m[2]}.{m[3]}' if m else model
+    """A model as people say it: `claude-opus-5-5` is `Opus 5.5`, `gpt-6.1-sol` `GPT-6.1 Sol`;
+    any other as config.toml names it."""
+    if m := re.fullmatch(r'claude-([a-z]+)-(\d+)-(\d+)', model or ''):
+        return f'{m[1].title()} {m[2]}.{m[3]}'
+    if m := re.fullmatch(r'gpt-(\d[\d.]*)-([a-z]+)', model or ''):
+        return f'GPT-{m[1]} {m[2].title()}'
+    return model
 
 
-def label(model: str, effort: str, kind: str = KIND) -> str:
-    return f'{model_name(model)} {effort}, {WHY[kind]}'
+def reviewer_name(spec) -> str:
+    """Who a review's spec is, as the log and a fallback's label say it: the Codex adapter is
+    Sol (`sol.py`), a T3 thread its model."""
+    return 'Sol' if spec.provider == CODEX else model_name(spec.model)
+
+
+def label(model: str, effort: str, kind: str = KIND, primary: str = 'Sol') -> str:
+    return f'{model_name(model)} {effort}, {WHY[kind].format(primary=primary)}'
 
 
 def _slash(p: str) -> str:
     return str(p).replace('\\', '/')
 
 
-def _preamble(workdir: str, project: str, kind: str = KIND) -> str:
+def _preamble(workdir: str, project: str, kind: str = KIND, primary: str = 'Sol') -> str:
     wd = _slash(workdir)
-    why = ('Sol, the usual reviewer, is out of usage, so you review this PR in its place'
+    why = (f'{primary}, the usual reviewer, is out of usage, so you review this PR in its place'
            if kind == KIND else 'You review this PR in place of Sol, the usual reviewer')
     return (
         '## First: you review in Sol\'s place\n\n'
@@ -98,46 +114,55 @@ def _preamble(workdir: str, project: str, kind: str = KIND) -> str:
         'nobody is there to answer.\n\n')
 
 
-class OpusThread:
-    """One Opus review: the Sol seam over one T3 thread. `kind` is why Opus reviews (KIND: Sol is
-    out of usage; SET: config.toml says so). After `review`, `ran` says whether a thread ran,
-    `record` holds its end-record fields and `label` names the reviewer."""
+class ReviewThread:
+    """One review in a T3 thread: the Sol seam over one thread on `spec` (a JobSpec). `kind` is
+    why a thread reviews (KIND: the review's own provider, `primary`, is out of usage; SET:
+    config.toml says so). After `review`, `ran` says whether a thread ran, `record` holds its
+    end-record fields and `label` names the reviewer."""
 
-    def __init__(self, fallback: 'OpusFallback', repo, title: str, kind: str = KIND):
-        self.fallback, self.repo, self.title, self.kind = fallback, repo, title, kind
+    def __init__(self, reviews: 'ThreadReviews', repo, title: str, spec, kind: str = KIND,
+                 primary: str = 'Sol'):
+        self.reviews, self.repo, self.title, self.kind = reviews, repo, title, kind
+        self.spec, self.primary = spec, primary
         self.ran = False
         self.record: dict = {}
-        c = fallback.config
-        self.label = label(c.claude_model, c.claude_effort, kind)
+        self.label = label(spec.model, spec.effort, kind, primary)
 
     def review(self, brief: str, reply: str, workdir: str, out: str,
                writable: list[str] | tuple = ()) -> str:
-        """Opus's reply to `brief`, reviewing in `workdir`. Raises SolFailed for a thread that
-        didn't start or didn't end with a reply (failed, waiting, empty)."""
-        f, repo = self.fallback, self.repo
+        """The thread's reply to `brief`, reviewing in `workdir`. Raises SolOutOfUsage for a run
+        that stopped on a usage limit, SolFailed for a thread that didn't start or didn't end
+        with a reply (failed, waiting, empty)."""
+        f, repo = self.reviews, self.repo
         with open(brief, encoding='utf-8') as fh:
-            message = _preamble(workdir, repo.path, self.kind) + fh.read()
+            message = _preamble(workdir, repo.path, self.kind, self.primary) + fh.read()
         with open(os.path.join(os.path.dirname(reply), 'brief-opus.md'), 'w', encoding='utf-8',
                   newline='\n') as fh:
             fh.write(message)
-        flags = claude_job(f.config)   # its provider, model and effort named (#119)
-        try:
-            result = f.t3.start(repo.path, message, title=self.title, **flags)
+        try:   # its provider, model and effort named (#119)
+            result = f.t3.start(repo.path, message, title=self.title, **flags(self.spec))
         except T3Error as e:
             raise SolFailed(f"The {self.name}'s thread didn't run: {e}") from None
         self.ran = True
         self.record = {'thread_id': result.thread_id, 'run_id': result.run_id}
         if f.effort:
             self.record.update(f.effort.used(repo.name, f'review {repo.name} ({self.name})',
-                                             result.thread_id, result.run_id))
+                                             result.thread_id, result.run_id, self.spec.effort))
         if self.record.get('effort'):
-            self.label = label(f.config.claude_model, self.record['effort'], self.kind)
+            self.label = label(self.spec.model, self.record['effort'], self.kind, self.primary)
         with open(out, 'w', encoding='utf-8', newline='\n') as fh:
             fh.write(f'T3 thread {result.thread_id}, run {result.run_id}: exit '
                      f'{result.exit_code}, {result.status}\n{result.error or ""}\n')
         if result.exit_code == 2:
             raise SolFailed(f'The {self.name} thread {result.thread_id} stopped to ask a '
                             'question instead of reviewing.')
+        if result.exit_code == 1:
+            from .limits import limit_stop
+            stop = limit_stop(f.limits, result.thread_id, result.run_id,
+                              [result.error, result.reply])
+            if stop is not None:   # its provider is out of usage, as Sol's can be
+                raise SolOutOfUsage(stop.reset_at and stop.reset_at.astimezone(),
+                                    who=model_name(self.spec.model))
         if result.exit_code != 0:
             raise SolFailed(f'The {self.name} thread {result.thread_id} ended '
                             f'{result.status}: {result.error or "no error given"}')
@@ -151,28 +176,38 @@ class OpusThread:
 
     @property
     def name(self) -> str:
-        return 'Opus fallback' if self.kind == KIND else 'Opus review'
+        what = model_name(self.spec.model)
+        return f'{what} fallback' if self.kind == KIND else f'{what} review'
+
+    @property
+    def who(self) -> str:
+        """Who reviews, as the log says it: `Opus 5.5 (the fallback while Sol is out of usage)`."""
+        what = model_name(self.spec.model)
+        return (f'{what} (the fallback while {self.primary} is out of usage)'
+                if self.kind == KIND else f'{what} (config.toml says so)')
 
     def settle(self, name: str, say) -> None:
         """Settles the thread that ran, once the review's end is recorded, whatever its
         outcome (issue #77): nobody answers a review thread, so one that asked is done too. A
         failed settle is said and never raised (ticket 70). No thread ran: nothing."""
         if self.ran:
-            settle_quietly(self.fallback.t3, self.record.get('thread_id'), name, say)
+            settle_quietly(self.reviews.t3, self.record.get('thread_id'), name, say)
 
 
-class OpusFallback:
-    """What the Sol lane needs for the fallback: T3, the usage gate (None: every review starts,
-    as for the tests' Runner without one), the effort (None: nothing read back) and
-    `beside`, the Claude lane (`run.Runner`: its jobs running, and the review counted among them
-    while it runs; `Alone` without one)."""
+class ThreadReviews:
+    """What the Sol lane needs to review in T3 threads: T3, the usage gate (None: every review
+    starts, as for the tests' Runner without one), the effort (None: nothing read back), T3's
+    run records (`limits.T3Store`; None reads only what the thread said) and `beside`, the
+    Claude lane (`run.Runner`: its jobs running, and the review counted among them while it
+    runs; `Alone` without one)."""
 
-    def __init__(self, config, *, t3, gate=None, effort=None, beside=None):
+    def __init__(self, config, *, t3, gate=None, effort=None, beside=None, limits=None):
         self.config, self.t3, self.gate, self.effort = config, t3, gate, effort
+        self.limits = limits
         self.beside = beside or Alone()
 
     def check(self, label: str):
-        """The gate's verdict for the Opus review `label` now, beside the Claude lane's jobs
+        """The gate's verdict for the Claude review thread `label` now, beside the Claude lane's jobs
         running, or None with no gate (it starts). One let in counts among the Claude jobs
         running until `ended`: the Claude lane's gate counts it, and each side's spending is
         the other's `shared_with`."""
@@ -185,16 +220,11 @@ class OpusFallback:
         return verdict
 
     def ended(self, label: str) -> None:
-        """The Opus review `label` let in by `check` is over (posted, failed or never run)."""
+        """The review thread `label` let in by `check` is over (posted, failed or never run)."""
         self.beside.review_ended(label)
 
-    @property
-    def kind(self) -> str:
-        """Why Opus reviews now, if it does: config.toml says so (SET), else Sol is out (KIND)."""
-        return SET if chosen(self.config) else KIND
-
-    def thread(self, repo, title: str) -> OpusThread:
-        return OpusThread(self, repo, title, self.kind)
+    def thread(self, repo, title: str, spec, kind: str, primary: str) -> ReviewThread:
+        return ReviewThread(self, repo, title, spec, kind, primary)
 
     def thread_ended(self, job_id: str) -> None:
         """A dead runner's fallback review thread was seen to end (`Reviewer.settle`): the
@@ -204,7 +234,7 @@ class OpusFallback:
             self.gate.job_ended(job_id)
 
     def measured(self, jobs: list, verdict, label: str) -> None:
-        """What an Opus review that ran a thread cost, learned as kind `review`; one that ran
+        """What a Claude review thread cost, learned as kind `review`; one that ran
         beside a Claude lane job teaches nothing (`shared_with`, #50)."""
         if self.gate is not None and verdict is not None and verdict.usage is not None:
             from .gate import FALLBACK_REVIEW

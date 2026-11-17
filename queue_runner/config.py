@@ -1,7 +1,7 @@
 """Which repos the runner serves, and where it keeps its own state and logs."""
 import os
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 DEFAULT_CONFIG = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                               'config.toml')
@@ -35,15 +35,42 @@ class Repo:
         return self.merge == 'stefan'
 
 
+# The job kinds `[jobs]` names (issue #120): a conflict is a fix round's thread that merges the
+# base in, and an ask is an Inbox ask thread (ticket 35).
+KINDS = ('build', 'fix', 'conflict', 'decision', 'live', 'review', 'ask')
+# The T3 provider instances a job may run on, and the efforts each takes: Claude Code's levels,
+# and what the Codex CLI's `model_reasoning_effort` accepts (its enum, read from codex.exe
+# 2026-11-18).
+EFFORTS = {'claudeAgent': ('low', 'medium', 'high', 'xhigh', 'max'),
+           'codex': ('minimal', 'low', 'medium', 'high', 'xhigh', 'max')}
+CLAUDE = 'claudeAgent'   # the provider whose usage the gate reads (`gate.py`)
+CODEX = 'codex'          # a review on it runs through the Codex adapter (`sol.py`)
+
+
+@dataclass(frozen=True)
+class JobSpec:
+    """What a job kind runs on: a T3 provider instance, its model and effort, and what it runs
+    on instead while that provider is out of usage (None: it waits for the reset)."""
+    provider: str
+    model: str
+    effort: str
+    fallback: 'JobSpec | None' = None
+
+
+OPUS_HIGH = JobSpec(CLAUDE, 'claude-opus-5-5', 'high')
+# A config with no `[jobs]` table: Opus at high, and Sol reviewing at high with Opus at high
+# while Sol is out of usage (the runner's jobs before #120).
+DEFAULT_JOBS = {**{k: OPUS_HIGH for k in KINDS},
+                'review': JobSpec(CODEX, 'gpt-6.1-sol', 'high', fallback=OPUS_HIGH)}
+
+
 @dataclass(frozen=True)
 class Config:
     repos: list[Repo]  # in config.toml's order, which breaks a tie between repos' work (#50)
     state_dir: str
     log_dir: str
-    claude_provider: str = 'claudeAgent'     # T3 provider instance for Claude jobs
-    claude_model: str = 'claude-opus-5-5'
-    # The effort every Claude job runs at (ticket 39, `effort.py`): named in its T3 launch (#119).
-    claude_effort: str = 'high'
+    # Each job kind's provider, model and effort (issue #120, `[jobs]`): every one of KINDS.
+    jobs: dict = field(default_factory=lambda: dict(DEFAULT_JOBS))
     poll_seconds: int = 300                  # continuous mode: the pause after an idle pass
     runs_dir: str = ''        # a review's run folder: brief, inputs, reply, would-be comment
     checkouts_dir: str = ''   # Sol's detached checkout of the PR's head, removed after
@@ -54,10 +81,10 @@ class Config:
     # this date (GitHub's UTC time, `YYYY-MM-DD`), counts as its own for the fix lane. '' adopts
     # none.
     adopt_reviews_before: str = ''
-    # Who reviews every PR (issue #76): 'chatgpt' (Sol, through codex-sol.sh; the Opus fallback
-    # steps in only while Sol is out of usage, #69) or 'claude' (an Opus thread in T3 at
-    # [claude]'s model and effort, through the usage gate). `[review] provider` in config.toml.
-    review_provider: str = 'chatgpt'
+
+    def job(self, kind: str) -> JobSpec:
+        """What a `kind` job runs on (one of KINDS)."""
+        return self.jobs[kind]
 
 
 def set_stopped(config: Config, names) -> None:
@@ -97,25 +124,61 @@ def _merge(entry: dict) -> str:
     return merge
 
 
-EFFORTS = ('low', 'medium', 'high', 'xhigh', 'max')   # Claude Code's effort levels
+SPEC_KEYS = ('provider', 'model', 'effort')
+GONE = {'claude': '[jobs.default] (provider, model, effort)',
+        'review': '[jobs.review] (provider "codex" for Sol, "claudeAgent" for Claude, with its '
+                  'model and effort, and a fallback)'}
 
 
-def _effort(claude: dict) -> str:
-    effort = claude.get('effort', 'high')
-    if effort not in EFFORTS:
-        raise ValueError(f"[claude] effort must be one of {', '.join(EFFORTS)}, not {effort!r}")
-    return effort
+def _spec(name: str, raw, base: JobSpec, fallback: bool) -> JobSpec:
+    """`[jobs.<kind>]` (or its `fallback`) as `name` says it, each key missing taken from
+    `base`; checked: known keys, a known provider, an effort that provider takes."""
+    if not isinstance(raw, dict):
+        raise ValueError(f'{name} must be a table, not {raw!r}')
+    keys = SPEC_KEYS + (('fallback',) if fallback else ())
+    if unknown := sorted(set(raw) - set(keys)):
+        raise ValueError(f'{name}: unknown key {", ".join(unknown)} (it takes '
+                         f'{", ".join(keys)})')
+    provider = raw.get('provider', base.provider)
+    if provider not in EFFORTS:
+        raise ValueError(f'{name}: provider must be one of {", ".join(EFFORTS)}, '
+                         f'not {provider!r}')
+    effort = raw.get('effort', base.effort)
+    if effort not in EFFORTS[provider]:
+        raise ValueError(f'{name}: effort on {provider} must be one of '
+                         f'{", ".join(EFFORTS[provider])}, not {effort!r}')
+    return JobSpec(provider, str(raw.get('model', base.model)), effort)
 
 
-REVIEW_PROVIDERS = ('chatgpt', 'claude')
-
-
-def _review_provider(review: dict) -> str:
-    provider = review.get('provider', 'chatgpt')
-    if provider not in REVIEW_PROVIDERS:
-        raise ValueError(f"[review] provider must be one of {', '.join(REVIEW_PROVIDERS)}, "
-                         f"not {provider!r}")
-    return provider
+def _jobs(raw: dict) -> dict:
+    """Each of KINDS's JobSpec from `[jobs]`: a kind not named takes `[jobs.default]`'s, and
+    a key a kind leaves out is default's too. No `[jobs]` at all: DEFAULT_JOBS."""
+    for old, new in GONE.items():
+        if old in raw:
+            raise ValueError(f"config.toml's [{old}] is gone (issue #120): write {new} "
+                             'instead (docs/running.md, config.toml)')
+    if 'jobs' not in raw:
+        return dict(DEFAULT_JOBS)
+    table = raw['jobs']
+    if unknown := sorted(set(table) - set(KINDS) - {'default'}):
+        raise ValueError(f'[jobs.{unknown[0]}]: no such job kind (they are '
+                         f'{", ".join(KINDS)}, and default)')
+    default_raw = table.get('default', {})
+    default = _spec('jobs.default', default_raw, OPUS_HIGH, fallback=True)
+    jobs = {}
+    for kind in KINDS:
+        own = table.get(kind, {})
+        merged = {**default_raw, **own} if isinstance(own, dict) else own
+        spec = _spec(f'jobs.{kind}', merged, default, fallback=True)
+        if (back := merged.get('fallback')) is not None:
+            fb = _spec(f'jobs.{kind}.fallback', back, default, fallback=False)
+            if kind == 'review' and spec.provider != CODEX and fb.provider == CODEX:
+                raise ValueError('jobs.review.fallback: a review runs on codex only as its own '
+                                 'provider, through the Codex adapter; name a T3 provider '
+                                 'such as claudeAgent')
+            spec = JobSpec(spec.provider, spec.model, spec.effort, fallback=fb)
+        jobs[kind] = spec
+    return jobs
 
 
 def load_config(path: str = DEFAULT_CONFIG) -> Config:
@@ -128,19 +191,16 @@ def load_config(path: str = DEFAULT_CONFIG) -> Config:
                   live_functions=r.get('live_functions', 'supabase/functions'),
                   issues=_issues(r), merge=_merge(r))
              for r in raw.get('repos', [])]
-    claude, sol = raw.get('claude', {}), raw.get('sol', {})
+    jobs, sol = _jobs(raw), raw.get('sol', {})
     state_dir = _path(raw['state_dir'])
     home = os.path.dirname(state_dir)   # runs and checkouts sit beside the state folder
     from .sol import GIT_BASH, SOL_SCRIPT
     return Config(repos=repos, state_dir=state_dir, log_dir=_path(raw['log_dir']),
-                  claude_provider=claude.get('provider', 'claudeAgent'),
-                  claude_model=claude.get('model', 'claude-opus-5-5'),
-                  claude_effort=_effort(claude),
+                  jobs=jobs,
                   poll_seconds=int(raw.get('poll_seconds', 300)),
                   runs_dir=_path(raw.get('runs_dir') or os.path.join(home, 'runs')),
                   checkouts_dir=_path(raw.get('checkouts_dir') or os.path.join(home, 'checkouts')),
                   deps_dir=_path(raw.get('deps_dir') or os.path.join(home, 'deps')),
                   sol_script=_path(sol.get('script') or SOL_SCRIPT),
                   sol_bash=sol.get('bash') or GIT_BASH,
-                  adopt_reviews_before=str(raw.get('adopt_reviews_before') or ''),
-                  review_provider=_review_provider(raw.get('review', {})))
+                  adopt_reviews_before=str(raw.get('adopt_reviews_before') or ''))

@@ -19,8 +19,8 @@ import os
 from importlib import resources
 from string import Template
 
-from .config import Config, Repo, working
-from .fallback import OPUS_KINDS, WHO, chosen, gate_label
+from .config import CLAUDE, CODEX, Config, JobSpec, Repo, working
+from .fallback import KIND, OPUS_KINDS, SET, chosen, gate_label, model_name, reviewer_name
 from .github import Comment, PullRequest
 from .ledger import TAGS, OPEN, SolFailed, decide, next_round, norm, read_reviews, runner_post, \
     state
@@ -39,6 +39,25 @@ RESUME_AFTER = datetime.timedelta(minutes=10)    # after Sol's reset
 RETRY_UNKNOWN = datetime.timedelta(minutes=30)   # when Sol didn't say when
 # The job log's outcome for each of decide()'s.
 OUTCOMES = {'merge': 'clean', 'fix': 'blocking', 'stop': 'stop', 'approach-note': 'approach-note'}
+
+
+@dataclasses.dataclass(frozen=True)
+class By:
+    """Who reviews a PR (`Reviewer._who`): `how` 'sol' (the Codex adapter, `sol.SolCli`) or
+    'thread' (a T3 thread on `spec`, `fallback.ReviewThread`), with the gate's `verdict` (None:
+    no gate, or not gated), why a thread reviews (`kind`: fallback.KIND or SET), who the
+    review's own reviewer is (`primary`), and whether it counts among the Claude jobs running
+    until it ends (`counted`)."""
+    how: str
+    verdict: object = None
+    spec: JobSpec | None = None
+    kind: str | None = None
+    primary: str = 'Sol'
+    counted: bool = False
+
+
+SOL = By('sol')
+replace = dataclasses.replace
 
 
 def ran(sol) -> dict:
@@ -122,9 +141,10 @@ class Reviewer:
                  now=datetime.datetime.now, poster=None, merger=None, toaster=None, deps=None,
                  fallback=None, t3=None):
         self.config, self.github, self.git, self.sol, self.jobs = config, github, git, sol, jobs
-        # fallback.OpusFallback: who reviews while Sol is out of usage (issue #69), or every time
-        # config.toml says Claude reviews (issue #76); None has Sol review and waits for Sol's
-        # reset (the CLI's --review, the live checks, most tests), whatever config.toml says.
+        # fallback.ThreadReviews: a review in a T3 thread, while the review's own provider is
+        # out of usage (its fallback, #69) or every time config.toml names a provider other
+        # than Codex (#76, #120); None has Sol review and waits for Sol's reset (the CLI's
+        # --review, the live checks, most tests), whatever config.toml says.
         self.fallback = fallback
         self._said_gate: str | None = None
         # The review this Reviewer runs now (its job id), so the Claude lane can tell it from a
@@ -187,9 +207,12 @@ class Reviewer:
                 return IDLE, why
             if (who := self._who(gate_label(repo.name, pr.number))) is None:
                 if self._opus_always():
-                    return IDLE, f'the Opus review waits: {self._said_gate}'
-                return IDLE, (f'Sol is out of usage until {self.jobs.sol_resume_at()}'
-                              + (f', and the Opus fallback waits: {self._said_gate}'
+                    return IDLE, f'the review thread waits: {self._said_gate}'
+                spec = self.config.job('review')
+                at = self.jobs.out_until(spec.provider, self.now().astimezone())
+                return IDLE, (f'{reviewer_name(spec)} is out of usage until '
+                              f'{at.isoformat(timespec="seconds") if at else "its reset"}'
+                              + (f', and the fallback waits: {self._said_gate}'
                                  if self._said_gate else ''))
             return self.review(repo, pr, by=who), None
 
@@ -246,46 +269,70 @@ class Reviewer:
                 why = f'reading it failed ({type(e).__name__}: {e})'
             yield pr, why
 
+    def _out(self, spec, say: bool = True) -> bool:
+        """Whether the review's `spec` provider is out of usage now (a review on it, or a job,
+        met its limit and the reset hasn't passed: `JobLog.out_until`): said once per resume
+        time, with `say`."""
+        resume = self.jobs.out_until(spec.provider, self.now().astimezone())
+        if resume is None:
+            return False
+        at = resume.isoformat(timespec='seconds')
+        if say and self._said_paused != at:
+            back = spec.fallback if self.fallback is not None else None
+            self.say(f'{reviewer_name(spec)} is out of usage: no review on it starts before {at}'
+                     + (f'; reviews go to the {reviewer_name(back)} fallback meanwhile'
+                        + (', through the usage gate' if back.provider == CLAUDE else '')
+                        if back is not None else ''))
+            self._said_paused = at
+        return True
+
     def _paused(self) -> bool:
-        """Whether Sol is out of usage now (its newest review said so, and the reset it named
-        hasn't passed): said once per resume time."""
-        resume = self.jobs.sol_resume_at()
-        if resume and self.now().astimezone() < when(resume):
-            if self._said_paused != resume:
-                self.say(f'Sol is out of usage: no Sol review starts before {resume}'
-                         + ('; reviews go to the Opus fallback meanwhile, through the usage '
-                            'gate' if self.fallback else ''))
-                self._said_paused = resume
-            return True
-        return False
+        """Whether the review's own provider is out of usage now (`_out`)."""
+        return self._out(self.config.job('review'))
 
     def _opus_always(self) -> bool:
-        """config.toml has Claude review every PR (issue #76), and this Reviewer can start one."""
+        """config.toml has every PR reviewed in a T3 thread (issue #76, #120), and this Reviewer
+        can start one."""
         return self.fallback is not None and chosen(self.config)
 
     def _who(self, label: str):
-        """Who reviews now: Sol (('sol', None)), an Opus thread (('fallback', the gate's verdict,
-        or None with no gate)) when config.toml says Claude reviews or while Sol is out of usage,
-        or None: Sol is out and there's no fallback, or the usage gate holds the Opus review back
-        (said once, until that changes). An Opus review let in counts among the Claude jobs
-        running (`label`, `fallback.gate_label`) until `review` ends it."""
-        always = self._opus_always()
-        if not always and not self._paused():
-            self._said_gate = None
-            return 'sol', None
+        """Who reviews now (a By), from `[jobs.review]` (issue #120): its own spec, or its
+        fallback while its own provider is out of usage; a spec on Codex is Sol (the Codex
+        adapter, `self.sol`), any other a T3 thread. None: both are out (or there's no
+        fallback), or the usage gate holds a Claude thread back (said once, until that changes).
+        Without `fallback` (`--review`), Sol reviews whatever config.toml says, or nobody while
+        it's out. A Claude thread let in counts among the Claude jobs running (`label`,
+        `fallback.gate_label`) until `review` ends it."""
+        spec = self.config.job('review')
         if self.fallback is None:
-            return None
+            sol = spec if spec.provider == CODEX else replace(spec, provider=CODEX, fallback=None)
+            return None if self._out(sol) else SOL
+        kind = SET
+        primary = reviewer_name(spec)
+        if self._out(spec):
+            if spec.fallback is None or self._out(spec.fallback, say=False):
+                return None
+            spec, kind = spec.fallback, KIND
+        else:
+            self._said_paused = None
+        if spec.provider == CODEX:
+            self._said_gate = None
+            return SOL
+        if spec.provider != CLAUDE:   # the gate reads Claude's usage only
+            self._said_gate = None
+            return By('thread', None, spec, kind, primary)
         verdict = self.fallback.check(label)
         if verdict is not None and not verdict.go:
             if verdict.text != self._said_gate:
-                what = 'Opus review' if always else 'Opus fallback review'
+                what = (f'{model_name(spec.model)} review' if kind == SET
+                        else f'{model_name(spec.model)} fallback review')
                 self.say(f'{what} waits: {verdict.text}')
             self._said_gate = verdict.text
             return None
         self._said_gate = None
         if verdict is not None:
             self.say(f'Usage gate: {verdict.text}')
-        return 'fallback', verdict
+        return By('thread', verdict, spec, kind, primary, counted=True)
 
     def _note(self, repo: Repo, pr: PullRequest, why: str | None) -> None:
         """Says why a PR is left alone, once, not every pass."""
@@ -349,13 +396,13 @@ class Reviewer:
                      f"(docs/reviews.md, Sol runs tests). Kept; the next review tries again.")
         self._said_kept = kept
 
-    def review(self, repo: Repo, pr: PullRequest, by=('sol', None)) -> str:
-        """Reviews H by Sol, or with `by` ('fallback', the gate's verdict) by Opus in a T3
-        thread (`fallback.py`), which is posted the same way, naming its reviewer and why."""
+    def review(self, repo: Repo, pr: PullRequest, by: By = SOL) -> str:
+        """Reviews H by Sol, or with `by` a T3 thread (`fallback.py`), which is posted the same
+        way, naming its reviewer and why."""
         try:
             return self._started(repo, pr, by)
         finally:
-            if by[0] == 'fallback':   # no longer among the Claude jobs running (`_who`)
+            if by.counted:   # no longer among the Claude jobs running (`_who`)
                 self.fallback.ended(gate_label(repo.name, pr.number))
 
     def _started(self, repo: Repo, pr: PullRequest, by) -> str:
@@ -363,11 +410,17 @@ class Reviewer:
         self.titles[(repo.name, n)] = pr.title
         earlier = read_reviews(self.github.issue_comments(repo, n))
         rnd = next_round(earlier)
-        opus = by[0] == 'fallback'
-        sol = self.fallback.thread(repo, review_title(repo, n)) if opus else self.sol
+        opus = by.how == 'thread'
+        sol = (self.fallback.thread(repo, review_title(repo, n), by.spec, by.kind, by.primary)
+               if opus else self.sol)
+        # What it runs on (issue #120): the thread's spec, or the Codex adapter's model and
+        # effort (a test's fake Sol has none).
+        on = ({'provider': by.spec.provider, 'model': by.spec.model, 'effort': by.spec.effort}
+              if opus else {'provider': CODEX, 'model': getattr(self.sol, 'model', None),
+                            'effort': getattr(self.sol, 'effort', None)})
         job = self.jobs.started(kind='review', repo=repo.name, issue=n, branch=pr.branch,
                                 title=review_title(repo, n), sha=h, round=rnd,
-                                reviewer=sol.kind if opus else None)
+                                reviewer=sol.kind if opus else None, **on)
         self.live = job.id
         try:
             return self._review(repo, pr, by, job, earlier, rnd, opus, sol)
@@ -376,7 +429,7 @@ class Reviewer:
 
     def _review(self, repo, pr, by, job, earlier, rnd, opus, sol) -> str:
         n, h = pr.number, pr.head_sha
-        who = WHO[sol.kind] if opus else 'Sol'
+        who = sol.who if opus else 'Sol'
         run_dir = os.path.join(self.config.runs_dir,
                                f'{repo.name}-pr{n}-r{rnd}-{self.now():%Y%m%d-%H%M%S}')
         os.makedirs(run_dir, exist_ok=True)
@@ -415,7 +468,9 @@ class Reviewer:
             resume = (e.back + RESUME_AFTER) if e.back else self.now() + RETRY_UNKNOWN
             self.jobs.ended(job.id, exit_code=None, outcome=OUT_OF_USAGE, run_dir=run_dir,
                             error=str(e),
-                            resume_at=resume.astimezone().isoformat(timespec='seconds'))
+                            resume_at=resume.astimezone().isoformat(timespec='seconds'),
+                            **ran(sol))
+            self._settle(opus, sol, name)
             self.say(f'{name}: {e}; the Sol lane waits until {resume:%Y-%m-%d %H:%M}')
             return STARTED
         except Exception as e:   # SolFailed, or git or GitHub failing around it
@@ -429,7 +484,7 @@ class Reviewer:
         finally:
             self._said_moved(name, self.git.remove_checkout(repo.path, wt, ref))
             if opus and sol.ran:   # a thread ran: what it cost teaches the gate (as run.py's)
-                self.fallback.measured([job.id], by[1], gate_label(repo.name, n))
+                self.fallback.measured([job.id], by.verdict, gate_label(repo.name, n))
 
         _write(os.path.join(run_dir, 'comment.md'), d['body'])
         _write(os.path.join(run_dir, 'decision.json'), json.dumps({

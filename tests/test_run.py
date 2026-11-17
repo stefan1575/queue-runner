@@ -36,10 +36,6 @@ state_dir = "{self.dir}/state"
 log_dir = "{self.dir}/logs"
 poll_seconds = 60
 
-[claude]
-provider = "claudeAgent"
-model = "claude-opus-5-5"
-
 [[repos]]
 name = "first"
 github = "owner/first"

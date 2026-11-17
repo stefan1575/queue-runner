@@ -138,7 +138,7 @@ class DecisionTest(unittest.TestCase):
         self.noted()
         [start] = self.t3.starts
         self.assertEqual((start['title'], start['worktree'], start['model']),
-                         ('Queue runner decision: first#20', None, self.config.claude_model))
+                         ('Queue runner decision: first#20', None, self.config.job('decision').model))
         brief = start['message']
         self.assertIn("Sol's review 3 of PR #20's head `bbbbbbb` is still blocking", brief)
         self.assertIn('**F7**', brief)                         # the open finding, from the ledger

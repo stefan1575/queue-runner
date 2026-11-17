@@ -1,47 +1,15 @@
-"""Ticket 39 and issue #119: the effort the runner's Claude jobs run at. `[claude] effort` in
-config.toml; every job kind starting with its provider, model and effort named, whatever the T3
-project's default model is; and the effort read back for its end record (`effort.T3Files`, on a
-temp SQLite and transcript folder), through real jobs with T3 faked."""
+"""Ticket 39, issues #119 and #120: what the runner's jobs run on. Every job kind starts with its
+own provider, model and effort from config.toml's `[jobs]` named, whatever the T3 project's
+default model is; and the effort read back for its end record (`effort.T3Files`, on a temp
+SQLite and transcript folder), through real jobs with T3 faked. (`[jobs]` itself:
+test_jobs_config.)"""
 import json
 import os
 import sqlite3
 import tempfile
 import unittest
 
-from queue_runner.config import load_config
-
-
-def write_config(folder, claude='[claude]\nprovider = "claudeAgent"\nmodel = "claude-opus-5-5"\n'):
-    path = os.path.join(folder, 'config.toml')
-    d = folder.replace('\\', '/')
-    with open(path, 'w', encoding='utf-8') as f:
-        f.write(f'state_dir = "{d}/state"\nlog_dir = "{d}/logs"\n\n{claude}\n'
-                f'[[repos]]\nname = "first"\ngithub = "owner/first"\npath = "{d}/first"\n')
-    return path
-
-
-class ConfigTest(unittest.TestCase):
-    def setUp(self):
-        tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(tmp.cleanup)
-        self.dir = tmp.name
-
-    def test_effort_is_high_when_config_names_none(self):
-        self.assertEqual(load_config(write_config(self.dir)).claude_effort, 'high')
-
-    def test_effort_is_read_from_the_claude_table(self):
-        config = load_config(write_config(self.dir, '[claude]\nmodel = "claude-opus-5-5"\n'
-                                                    'effort = "xhigh"\n'))
-        self.assertEqual(config.claude_effort, 'xhigh')
-
-    def test_an_effort_claude_code_has_not_is_refused(self):
-        with self.assertRaisesRegex(ValueError, 'effort'):
-            load_config(write_config(self.dir, '[claude]\neffort = "ultrathink"\n'))
-
-    def test_the_served_config_runs_claude_jobs_at_medium(self):
-        # Stefan, 2026-11-16: "Opus 5.5 medium as worker" (fba6c8f).
-        from queue_runner.config import DEFAULT_CONFIG
-        self.assertEqual(load_config(DEFAULT_CONFIG).claude_effort, 'medium')
+from queue_runner.config import DEFAULT_JOBS, KINDS, JobSpec
 
 
 HIGH = {'instanceId': 'claudeAgent', 'model': 'claude-opus-5-5',
@@ -166,7 +134,16 @@ class FakeFiles:
         return self.efforts.get(thread_id)
 
 
-NAMED = ('claudeAgent', 'claude-opus-5-5', 'high')   # [claude]'s provider, model and effort
+NAMED = ('claudeAgent', 'claude-opus-5-5', 'high')   # the built-in jobs' provider, model, effort
+# Each kind on a model of its own (issue #120), so a start shows which kind's it named.
+PER_KIND = {**DEFAULT_JOBS, **{k: JobSpec('claudeAgent', f'claude-{k}-5-5', 'high')
+                               for k in KINDS if k != 'review'}}
+
+
+def of(kind):
+    """The provider, model and effort PER_KIND gives `kind`."""
+    spec = PER_KIND[kind]
+    return spec.provider, spec.model, spec.effort
 
 
 def named(start):
@@ -183,7 +160,8 @@ class RunnerHarness(unittest.TestCase):
         self.config = Config(repos=[self.repo], state_dir=os.path.join(self.dir, 'state'),
                              log_dir=os.path.join(self.dir, 'logs'),
                              runs_dir=os.path.join(self.dir, 'runs'),
-                             checkouts_dir=os.path.join(self.dir, 'checkouts'))
+                             checkouts_dir=os.path.join(self.dir, 'checkouts'),
+                             jobs=PER_KIND)
         self.said = []
 
     def effort(self, files):
@@ -222,14 +200,16 @@ class BuildTest(RunnerHarness):
         r = self.runner(FakeFiles(efforts={'mcp:t1': 'high'}))
         self.assertEqual(r.run_pass(), 'started')
         [start] = self.t3.starts
-        self.assertEqual(named(start), NAMED)
+        self.assertEqual(named(start), of('build'))
         [build] = self.jobs('build')
-        self.assertEqual(build.effort, 'high')
+        self.assertEqual((build.provider, build.model, build.effort),
+                         of('build'))   # the start record's, then read back
         self.assertEqual(self.told('effort'), [])
 
     def test_the_configs_effort_is_the_one_named(self):
         from dataclasses import replace
-        self.config = replace(self.config, claude_model='claude-fable-5-2', claude_effort='xhigh')
+        self.config = replace(self.config, jobs={
+            **PER_KIND, 'build': JobSpec('claudeAgent', 'claude-fable-5-2', 'xhigh')})
         self.runner(FakeFiles()).run_pass()
         self.assertEqual(named(self.t3.starts[0]), ('claudeAgent', 'claude-fable-5-2', 'xhigh'))
 
@@ -256,7 +236,7 @@ class BuildTest(RunnerHarness):
                         (0, 'completed', decision_reply('stop', question='Which one?')))
         r.run_pass()   # the build fails
         r.run_pass()   # a decision on it
-        self.assertEqual([named(s) for s in self.t3.starts], [NAMED] * 2)
+        self.assertEqual([named(s) for s in self.t3.starts], [of('build'), of('decision')])
         [decision] = self.jobs('decision')
         self.assertEqual(decision.effort, 'medium')
         [line] = self.told('ran at effort medium')
@@ -286,9 +266,9 @@ class BuildTest(RunnerHarness):
         self.r = Runner(self.config, github=FakeGitHubWithPulls(issues=[issue(4, 'Red', 'R')]),
                         t3=self.t3, git=FakeGit(), out=io.StringIO(), log_line=self.said.append)
         self.r.run_pass()
-        self.assertEqual(named(self.t3.starts[0]), NAMED)
+        self.assertEqual(named(self.t3.starts[0]), of('build'))
         [build] = self.jobs('build')
-        self.assertIsNone(build.effort)
+        self.assertEqual(build.effort, 'high')   # as started: nothing read back
         self.assertEqual(self.told('effort'), [])
 
 
@@ -315,7 +295,7 @@ class FixAndLiveTest(RunnerHarness):
         self.r.reviewer.review_pass()
         self.assertEqual(self.r.run_pass(), 'started')
         [start] = self.t3.starts
-        self.assertEqual(named(start), NAMED)
+        self.assertEqual(named(start), of('fix'))
         [fix] = self.jobs('fix')
         self.assertEqual((fix.outcome, fix.effort), ('pushed', 'high'))
 
@@ -325,6 +305,8 @@ class FixAndLiveTest(RunnerHarness):
         harness = tl.LiveHarness('setUp')
         harness.setUp()
         self.addCleanup(harness.doCleanups)
+        from dataclasses import replace
+        harness.config = replace(harness.config, jobs=PER_KIND)
         effort = self.effort(FakeFiles(efforts={'mcp:t1': 'xhigh'}))
         effort.config = harness.config
         effort.say = harness.said.append
@@ -348,7 +330,7 @@ class FixAndLiveTest(RunnerHarness):
         steps = live()
         steps.run(*steps.next())
         [start] = harness.t3.starts
-        self.assertEqual((*named(start), start['worktree']), (*NAMED, B))
+        self.assertEqual((*named(start), start['worktree']), (*of('live'), B))
         job = harness.jobs.live('first')[-1]
         self.assertEqual((job.outcome, job.effort), ('live', 'xhigh'))
         self.assertTrue(any('live first ran at effort xhigh, not high' in s

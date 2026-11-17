@@ -379,7 +379,7 @@ class AskThreads:
         failed = None
         try:
             # Started as every Claude job is: its provider, model and effort named (#119).
-            brief, flags = self.brief_for(o), self.decider.effort.job()
+            brief, flags = self.brief_for(o), self.decider.effort.job(KIND)
         except Exception as e:   # the brief couldn't be built
             failed = e
         if why := self._gone(o, before=True):
@@ -390,7 +390,8 @@ class AskThreads:
         job = self.jobs.started(kind=KIND, repo=repo.name, issue=n, branch=None,
                                 title=(title if on_stop else answer_title)(repo, n),
                                 sha=about.sha, about=about.id,
-                                question=QUESTION if on_stop else 'waiting', **extra)
+                                question=QUESTION if on_stop else 'waiting', **extra,
+                                **(flags if failed is None else {}))
         if failed is None:
             try:
                 # Titled "Decide: ..." (or "Answer: ...") from the start: it waits on Stefan

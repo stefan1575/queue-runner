@@ -145,7 +145,11 @@ class Job:
     prs: list = field(default_factory=list)       # live: the PRs merged in its batch
     cause: str | None = None       # a fix: `conflict` for a conflict round (ticket 15), else None
     resume: dict | None = None     # a job picking up an earlier one: in place or fresh, and why
-    effort: str | None = None      # a Claude job: the effort its run used, read back (ticket 39)
+    effort: str | None = None      # a T3 job: the effort it was started at, then the effort its
+                                   # run used, read back (ticket 39)
+    provider: str | None = None    # a job: the T3 provider it was started on (issue #120); an
+                                   # older one's is `job_provider`'s
+    model: str | None = None       # a job: the model it was started on (issue #120)
     reviewer: str | None = None    # a review: `opus-fallback` when Opus reviewed in Sol's place
     base: str | None = None        # a conflict round: the sha of origin/<base> it merged (#91)
     runs: list = field(default_factory=list)   # a rerun: [{id, attempt, url}], each failed
@@ -159,6 +163,17 @@ class Job:
 _END_FIELDS = ('thread_id', 'link', 'run_id', 'exit_code', 'status', 'outcome', 'commits', 'pr',
                'worktree', 'error', 'verdict', 'signals', 'run_dir', 'resume_at', 'head',
                'reason', 'answer', 'context', 'last_request', 'applied', 'prs', 'effort', 'runs')
+
+
+CLAUDE, CODEX = 'claudeAgent', 'codex'   # as config.py's
+
+
+def job_provider(job: Job) -> str:
+    """The provider a job ran on: its record's, else as before #120: a review by Sol
+    (no `reviewer`) ran on Codex, every other job on Claude."""
+    if job.provider:
+        return job.provider
+    return CODEX if job.kind == 'review' and not job.reviewer else CLAUDE
 
 
 class JobLog:
@@ -178,14 +193,17 @@ class JobLog:
                 question: str | None = None, head: str | None = None,
                 cause: str | None = None, resume: dict | None = None,
                 reviewer: str | None = None, base: str | None = None,
-                reason: str | None = None, runs: list | None = None) -> Job:
+                reason: str | None = None, runs: list | None = None,
+                provider: str | None = None, model: str | None = None,
+                effort: str | None = None) -> Job:
         at = _now()
         stamp = at[:19].replace('-', '').replace(':', '').replace('T', '-')
         job = Job(id=f'{stamp}-{kind}-{repo}-{issue}-{uuid.uuid4().hex[:6]}', kind=kind,
                   repo=repo, issue=issue, branch=branch, title=title, started_at=at, sha=sha,
                   round=round, stop=stop, thread_id=thread_id, about=about, question=question,
                   head=head, cause=cause, resume=resume, reviewer=reviewer,
-                  base=base, reason=reason, runs=list(runs or []))
+                  base=base, reason=reason, runs=list(runs or []), provider=provider,
+                  model=model, effort=effort)
         record = {'event': 'start', 'job': job.id, 'kind': kind, 'repo': repo, 'issue': issue,
                   'branch': branch, 'title': title, 'at': at}
         if sha:
@@ -193,7 +211,8 @@ class JobLog:
         for k, v in (('stop', stop), ('thread_id', thread_id), ('about', about),
                      ('question', question), ('head', head), ('cause', cause),
                      ('resume', resume), ('reviewer', reviewer), ('base', base),
-                     ('reason', reason), ('runs', runs)):
+                     ('reason', reason), ('runs', runs), ('provider', provider),
+                     ('model', model), ('effort', effort)):
             if v:
                 record[k] = v
         self._append(record)
@@ -223,7 +242,9 @@ class JobLog:
                           question=e.get('question'), head=e.get('head'),
                           cause=e.get('cause'), resume=e.get('resume'),
                           reviewer=e.get('reviewer'), base=e.get('base'),
-                          reason=e.get('reason'), runs=e.get('runs') or [])
+                          reason=e.get('reason'), runs=e.get('runs') or [],
+                          provider=e.get('provider'), model=e.get('model'),
+                          effort=e.get('effort'))
                 jobs[job.id] = job
                 if job.kind == 'build':
                     held[(job.repo, job.issue)] = True
@@ -365,10 +386,28 @@ class JobLog:
         """When Sol may review again, if Sol's newest ended review found it out of usage. The
         Opus fallback's reviews meanwhile (`reviewer`) aren't Sol's, so they don't end the wait
         (issue #69)."""
-        ended = [j for j in self.jobs() if j.kind == 'review' and not j.open and not j.reviewer]
+        return self.review_resume_at(CODEX)
+
+    def review_resume_at(self, provider: str) -> str | None:
+        """When a review on `provider` may run again, if the newest ended review on it found it
+        out of usage (issue #120). A review on another provider meanwhile (the fallback's)
+        doesn't end the wait."""
+        ended = [j for j in self.jobs() if j.kind == 'review' and not j.open
+                 and job_provider(j) == provider]
         # Stamps are to the second: a tie goes to the one written later.
         last = max(reversed(ended), key=lambda j: j.ended_at, default=None)
         return last.resume_at if last and last.outcome == OUT_OF_USAGE else None
+
+    def out_until(self, provider: str, now: datetime.datetime) -> datetime.datetime | None:
+        """Until when `provider` is out of usage, from what its jobs met (issue #120): a build
+        or fix it cut off by a usage limit and nobody picked up yet, or its newest review that
+        found it out, whichever resets later; None if it isn't out now (`now` aware)."""
+        at = [when(j.resume_at) for j in self.limited_jobs()
+              if j.resume_at and job_provider(j) == provider]
+        if review := self.review_resume_at(provider):
+            at.append(when(review))
+        ahead = [t for t in at if t > now]
+        return max(ahead, default=None)
 
     def held_issues(self, repo: str) -> set[int]:
         """Issues the build picker must leave alone: a build is open on them, or ended without

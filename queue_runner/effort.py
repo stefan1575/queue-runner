@@ -1,8 +1,8 @@
 """The effort a Claude job runs at (ticket 39; issue #119; docs/t3.md).
 
 Every job starts through T3's MCP launch with its provider, model and effort named
-(`claude_job`: `[claude]`'s values), whatever the T3 project's default model is: T3's CLI can't
-name an effort, so the runner no longer starts threads through it or leans on a project's
+(`Effort.job`: its kind's in config.toml's `[jobs]`, issue #120), whatever the T3 project's
+default model is: T3's CLI can't name an effort, so the runner no longer starts threads through it or leans on a project's
 default (the workaround before #119). The end record carries the effort the run used, read back
 from Claude Code's transcript (each assistant record's `effort`), else T3's run record.
 """
@@ -131,19 +131,26 @@ class T3Files:
                 or selection_effort(run.get('modelSelection')))
 
 
-def claude_job(config) -> dict:
-    """The provider, model and effort a Claude job starts with: `t3.start`'s and `t3.launch`'s
-    keywords (issue #119)."""
-    return {'provider': config.claude_provider, 'model': config.claude_model,
-            'effort': config.claude_effort}
+def flags(spec) -> dict:
+    """A JobSpec as `t3.start`'s and `t3.launch`'s keywords (issue #119): provider, model, effort."""
+    return {'provider': spec.provider, 'model': spec.model, 'effort': spec.effort}
+
+
+def asked(job) -> dict:
+    """The provider, model and effort a job was started on, from its start record (issue #120):
+    what its thread is launched with."""
+    return {'provider': job.provider, 'model': job.model, 'effort': job.effort}
 
 
 class Effort:
-    """What a repo's Claude job starts on, and what its end record says about the effort. With
-    no `files` (tests, the live checks), no effort is read back."""
+    """What a repo's job starts on, and what its end record says about the effort. With no
+    `files` (tests, the live checks), no effort is read back. `out(provider)` says whether a
+    provider is out of usage now (`state.JobLog.out_until`), so a kind with a fallback runs on
+    it meanwhile (issue #120); with none, no provider is."""
 
-    def __init__(self, config, files=None, say=None):
+    def __init__(self, config, files=None, say=None, out=None):
         self.config, self.files, self.say = config, files, say
+        self.out = out
         self._said_used: dict[str, str] = {}
 
     def _say(self, said: dict, repo: str, state, line: str | None) -> None:
@@ -156,19 +163,30 @@ class Effort:
             if self.say:
                 self.say(line)
 
-    def job(self) -> dict:
-        """The provider, model and effort every Claude job starts with (`claude_job`)."""
-        return claude_job(self.config)
+    def spec(self, kind: str):
+        """What a `kind` job runs on now (config.toml's `[jobs]`, issue #120): its own spec, or
+        its fallback while its own provider is out of usage; None while both are out (or it has
+        no fallback): it waits for the reset."""
+        spec = self.config.job(kind)
+        if self.out is None or not self.out(spec.provider):
+            return spec
+        back = spec.fallback
+        return back if back is not None and not self.out(back.provider) else None
+
+    def job(self, kind: str) -> dict:
+        """The provider, model and effort a `kind` job starts with (`flags`): its fallback's
+        while its own provider is out, else its own (a job chosen while the lane could still
+        start it)."""
+        return flags(self.spec(kind) or self.config.job(kind))
 
     def used(self, repo_name: str, name: str, thread_id: str | None,
-             run_id: str | None) -> dict:
+             run_id: str | None, want: str | None) -> dict:
         """The end record's `effort`, read back from the run, and a line said once per repo
-        when it isn't the config's. Empty with no files."""
+        when it isn't `want`, the effort it was started at. Empty with no files."""
         if self.files is None or not thread_id:
             return {}
-        want = self.config.claude_effort
         effort = self.files.run_effort(thread_id, run_id)
-        if effort == want:
+        if effort == want or want is None:
             line = None
         elif effort is None:
             line = (f"{repo_name}: {name}'s effort couldn't be read back from Claude Code's "

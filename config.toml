@@ -12,28 +12,29 @@ poll_seconds = 300   # continuous mode: the pause after a pass that started noth
 # the session that ran it.
 adopt_reviews_before = 2026-11-10
 
-# Claude jobs run as T3 threads on this provider instance and model, at this effort (ticket 39;
-# Stefan, 2026-11-15: "keep it at high by default", until his Claude Max plan ends; 2026-11-16:
-# "Opus 5.5 medium as worker"). T3's CLI has
-# no effort flag: a thread started with --model gets the model's default (medium for Opus 5.5).
-# So a repo's jobs start on its T3 project's default model instead, when that default is this
-# model at this effort (T3 Settings, the project, New threads, Model), and with --model, at
-# medium, when it isn't; the runner says which at start, and each end record has the effort the
-# run used, read back from Claude Code's transcript (docs/t3.md).
-[claude]
+# What each job kind runs on (issue #120): a T3 provider instance ("claudeAgent", "codex"), its
+# model and effort. The kinds are build, fix, conflict, decision, live, review and ask (an Inbox
+# ask thread); each takes [jobs.default]'s values unless it names its own. Any kind may have a
+# `fallback`, used while its own provider is out of usage; without one, the job waits for the
+# reset. A review on codex runs through scripts/codex-sol.sh (read-only, network off); every
+# other job, and a review on any other provider, starts through T3's MCP launch with its
+# provider, model and effort named (docs/t3.md). Each end record has the effort the run used,
+# read back. Stefan, 2026-11-16: "Opus 5.5 medium as worker"; later that day, with ChatGPT's
+# usage back: "turn on 6.1 Sol high now", Opus 5.5 high reviewing while Sol is out.
+[jobs.default]
 provider = "claudeAgent"
 model = "claude-opus-5-5"
 effort = "medium"
 
-# Sol reviews run through codex-sol.sh at effort high (a T3 thread can't be given an effort).
+[jobs.review]
+provider = "codex"
+model = "gpt-6.1-sol"
+effort = "high"
+fallback = { provider = "claudeAgent", model = "claude-opus-5-5", effort = "high" }  # while Sol is out of usage
+
+# The Codex adapter: Git's bash, which runs codex-sol.sh.
 [sol]
 bash = "C:/Program Files/Git/bin/bash.exe"
-# Who reviews every PR (issue #76): "claude" (an Opus thread in T3 at [claude]'s model and effort,
-# through the usage gate) or "chatgpt" (Sol, the default; Opus steps in only while Sol is out of
-# usage). Stefan, 2026-11-16: "Claude for now, until I say so, a full override"; later that day,
-# with ChatGPT's usage back: "turn on 6.1 Sol high now".
-[review]
-provider = "chatgpt"
 
 # First in this order (Stefan, 2026-11-15: "prioritize game backdrop full stop", its first
 # run under the dashboard). Stefan merges its PRs himself (2026-11-15: "no auto merge, just

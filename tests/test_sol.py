@@ -48,8 +48,8 @@ class SolCliTest(unittest.TestCase):
         self.assertEqual(self.review(run), 'The review.')
         [(cmd, out, timeout)] = run.calls
         self.assertEqual(cmd[:2], ['C:/Git/bin/bash.exe', '-c'])
-        self.assertEqual(cmd[3:8], ['C:/Users/me/codex-sol.sh', '--job', 'review', '--effort',
-                                    'high'])
+        self.assertEqual(cmd[3:10], ['C:/Users/me/codex-sol.sh', '--job', 'review', '--model',
+                                     'gpt-6.1-sol', '--effort', 'high'])
         self.assertEqual(cmd[-1], 'C:/wt/pr7')
         self.assertTrue(out.endswith('run.out'))
         self.assertEqual(timeout, 75 * 60)
@@ -64,9 +64,20 @@ class SolCliTest(unittest.TestCase):
                    r'C:\wt\pr7', os.path.join(self.dir, 'run.out'),
                    writable=[r'C:\Users\me\.queue-runner\deps'])
         [(cmd, _, _)] = run.calls
-        self.assertEqual(cmd[8:11], ['--write', '--writable-root',
+        self.assertEqual(cmd[10:13], ['--write', '--writable-root',
                                      'C:/Users/me/.queue-runner/deps'])
         self.assertEqual(cmd[-1], 'C:/wt/pr7')
+
+    def test_a_review_runs_at_the_model_and_effort_config_toml_gives_it(self):
+        # Issue #120: [jobs.review]'s model and effort, passed to codex-sol.sh.
+        run = FakeRun()
+        sol = SolCli(script='s.sh', bash='bash.exe', run=run, model='gpt-7-sol', effort='xhigh',
+                     sessions=os.path.join(self.dir, 'no-sessions'))
+        sol.review(os.path.join(self.dir, 'brief.md'), os.path.join(self.dir, 'reply.md'),
+                   r'C:\wt\pr7', os.path.join(self.dir, 'run.out'))
+        [(cmd, _, _)] = run.calls
+        self.assertEqual(cmd[3:10], ['s.sh', '--job', 'review', '--model', 'gpt-7-sol',
+                                     '--effort', 'xhigh'])
 
     def test_a_failed_run_is_a_failed_review(self):
         with self.assertRaises(SolFailed) as e:

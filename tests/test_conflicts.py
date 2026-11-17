@@ -86,7 +86,8 @@ class ConflictRoundTest(unittest.TestCase):
                          (H2, fix_branch(20, H2), 'Queue runner conflict: first#20'))
         c = self.config   # named, whatever T3's default model (#119)
         self.assertEqual((start['provider'], start['model'], start['effort']),
-                         (c.claude_provider, c.claude_model, c.claude_effort))
+                         tuple(vars(c.job('conflict'))[k] for k in
+                               ('provider', 'model', 'effort')))   # the conflict's (#120)
         brief = start['message']
         self.assertIn('Conflict round on PR #20 in owner/first: Red widget', brief)
         self.assertIn('git merge origin/main', brief)

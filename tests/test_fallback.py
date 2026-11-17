@@ -10,9 +10,9 @@ import os
 import tempfile
 import unittest
 
-from queue_runner.config import Config, Repo
+from queue_runner.config import DEFAULT_JOBS, Config, JobSpec, Repo
 from queue_runner.effort import Effort
-from queue_runner.fallback import KIND, SET, OpusFallback
+from queue_runner.fallback import KIND, SET, ThreadReviews
 from queue_runner.gate import Gate
 from queue_runner.github import Issue
 from queue_runner.merge import READY
@@ -74,7 +74,7 @@ class FallbackTest(unittest.TestCase):
         return Reviewer(self.config, github=self.gh, git=self.git, sol=self.sol, jobs=self.jobs,
                         say=self.said.append, now=lambda: now, toaster=toaster,
                         merger=None if merge else False,
-                        fallback=OpusFallback(self.config, t3=self.t3, gate=gate, effort=effort))
+                        fallback=ThreadReviews(self.config, t3=self.t3, gate=gate, effort=effort))
 
     def reviews(self):
         return [j for j in self.jobs.jobs() if j.kind == 'review' and j.issue == 20]
@@ -103,7 +103,7 @@ class FallbackTest(unittest.TestCase):
         [job] = self.reviews()
         self.assertEqual((job.reviewer, job.outcome, job.verdict, job.thread_id, job.run_id),
                          (KIND, 'blocking', 'blocking', 'mcp:t1', 'run:mcp:t1:1'))
-        self.assertTrue(any('Opus (the fallback while Sol is out of usage) reviews' in s
+        self.assertTrue(any('Opus 5.5 (the fallback while Sol is out of usage) reviews' in s
                             for s in self.said), self.said)
         self.assertEqual(self.t3.settles, ['mcp:t1'])   # its reply read: settled (ticket 70)
 
@@ -219,7 +219,7 @@ class FallbackTest(unittest.TestCase):
         self.assertEqual(r.review_pass(), 'idle')
         self.assertEqual(self.t3.starts, [])
         self.assertEqual(self.reviews(), [])
-        waits = [s for s in self.said if s.startswith('Opus fallback review waits:')]
+        waits = [s for s in self.said if s.startswith('Opus 5.5 fallback review waits:')]
         self.assertEqual(len(waits), 1, self.said)
         self.assertIn('the 5-hour window is 90% used and a review is expected to take 15%',
                       waits[0])
@@ -238,12 +238,12 @@ class FallbackTest(unittest.TestCase):
         from queue_runner import cli, control
         out = io.StringIO()
         cli._print_gate(self.gate(usage(10)), out, self.config)
-        self.assertIn('  review (Opus, while Sol is out): starts: review fits', out.getvalue())
+        self.assertIn('  review (Opus 5.5, while Sol is out): starts: review fits', out.getvalue())
         control.ask(self.config.state_dir, ['sol'], 'after-job',
                     now=NOW.astimezone().isoformat(timespec='seconds'))
         out = io.StringIO()
         cli._print_gate(self.gate(usage(10)), out, self.config)
-        self.assertIn('  review (Opus, while Sol is out): waits: the reviewing lane is stopped',
+        self.assertIn('  review (Opus 5.5, while Sol is out): waits: the reviewing lane is stopped',
                       out.getvalue())
         self.assertIn('  build: starts', out.getvalue())
 
@@ -308,8 +308,8 @@ class FallbackTest(unittest.TestCase):
 
 
 class ClaudeReviewsTest(unittest.TestCase):
-    """config.toml's `[review] provider = "claude"` (issue #76): Opus reviews every PR, through the
-    usage gate, whether or not Sol is out; "chatgpt" (the default) keeps Sol."""
+    """config.toml's `[jobs.review]` on claudeAgent (issue #76, #120): Opus reviews every PR,
+    through the usage gate, whether or not Sol is out; on codex (the default) Sol reviews."""
 
     SET_LABEL = 'Opus 5.5 high, set in config.toml'
 
@@ -319,7 +319,10 @@ class ClaudeReviewsTest(unittest.TestCase):
 
     def use(self, repo, provider='claude'):
         FallbackTest.use(self, repo)
-        self.config = dataclasses.replace(self.config, review_provider=provider)
+        review = (JobSpec('claudeAgent', 'claude-opus-5-5', 'high') if provider == 'claude'
+                  else DEFAULT_JOBS['review'])
+        self.config = dataclasses.replace(self.config, jobs={**self.config.jobs,
+                                                             'review': review})
 
     reviewer, reviews, posted, sol_out, gate = (
         FallbackTest.reviewer, FallbackTest.reviews, FallbackTest.posted, FallbackTest.sol_out,
@@ -335,7 +338,7 @@ class ClaudeReviewsTest(unittest.TestCase):
         self.assertNotIn('out of usage', first)
         [job] = self.reviews()
         self.assertEqual((job.reviewer, job.outcome), (SET, 'clean'))
-        self.assertTrue(any('Opus (config.toml says so) reviews' in s for s in self.said),
+        self.assertTrue(any('Opus 5.5 (config.toml says so) reviews' in s for s in self.said),
                         self.said)
 
     def test_the_comment_status_and_row_say_config_toml_chose_it(self):
@@ -363,14 +366,14 @@ class ClaudeReviewsTest(unittest.TestCase):
         self.assertEqual(r.review_pass(), 'idle')
         self.assertEqual(r.review_pass(), 'idle')
         self.assertEqual((self.t3.starts, self.sol.briefs), ([], []))
-        waits = [s for s in self.said if s.startswith('Opus review waits:')]
+        waits = [s for s in self.said if s.startswith('Opus 5.5 review waits:')]
         self.assertEqual(len(waits), 1, self.said)
 
     def test_review_one_says_the_gate_holds_it(self):
         r = self.reviewer((0, 'completed', reply()), gate=self.gate(usage(90)))
         result, why = r.review_one(self.repo, 20)
         self.assertEqual(result, 'idle')
-        self.assertTrue(why.startswith('the Opus review waits: '), why)
+        self.assertTrue(why.startswith('the review thread waits: '), why)
 
     def test_without_a_t3_thread_to_start_sol_reviews(self):
         # The CLI's --review and the live checks build no fallback: they run Sol by name.
@@ -390,7 +393,7 @@ class ClaudeReviewsTest(unittest.TestCase):
         from queue_runner import cli
         out = io.StringIO()
         cli._print_gate(self.gate(usage(10)), out, self.config)
-        self.assertIn('  review (Opus, set in config.toml): starts: review fits', out.getvalue())
+        self.assertIn('  review (Opus 5.5, set in config.toml): starts: review fits', out.getvalue())
 
     def test_the_snapshot_shows_claude_on_the_reviewing_lane(self):
         from queue_runner import snapshot
@@ -402,26 +405,6 @@ class ClaudeReviewsTest(unittest.TestCase):
         facts = snapshot.Facts(now=NOW.astimezone(), repos=[self.repo])
         lanes = {lane['id']: lane for lane in snapshot.build(facts)['lanes']}
         self.assertEqual(lanes['sol']['name'], 'ChatGPT')
-
-
-class ReviewProviderConfigTest(unittest.TestCase):
-    def load(self, text):
-        from queue_runner.config import load_config
-        with tempfile.TemporaryDirectory() as d:
-            path = os.path.join(d, 'config.toml')
-            with open(path, 'w', encoding='utf-8') as f:
-                f.write('state_dir = "s"\nlog_dir = "l"\n' + text)
-            return load_config(path)
-
-    def test_the_default_is_chatgpt(self):
-        self.assertEqual(self.load('').review_provider, 'chatgpt')
-
-    def test_claude(self):
-        self.assertEqual(self.load('[review]\nprovider = "claude"\n').review_provider, 'claude')
-
-    def test_anything_else_is_an_error_naming_the_key(self):
-        with self.assertRaisesRegex(ValueError, r'\[review\] provider must be one of'):
-            self.load('[review]\nprovider = "opus"\n')
 
 
 class FallbackFixRoundTest(unittest.TestCase):

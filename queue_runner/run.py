@@ -20,8 +20,9 @@ from dataclasses import dataclass, field, replace
 
 from . import control
 from .brief import build_brief
-from .config import Config, Repo, set_stopped, stopped, working
+from .config import CLAUDE, Config, Repo, set_stopped, stopped, working
 from .decisions import Decider
+from .effort import asked
 from .fix import Fixer, fix_branch, fix_title
 from .stops import CONFLICT
 from .fallback import OPUS_KINDS
@@ -64,6 +65,19 @@ def job_title(repo: Repo, issue: int) -> str:
     return f'Queue runner build: {repo.name}#{issue}'
 
 
+def spec_kind(kind: str, cause: str | None) -> str:
+    """A job's kind as config.toml's `[jobs]` names it (issue #120): a conflict round is a fix
+    job with cause `conflict`."""
+    return 'conflict' if kind == 'fix' and cause == CONFLICT else kind
+
+
+def _same_thread(old: Job) -> dict:
+    """A job continued in its earlier job's thread runs on what that thread was started on
+    (its model selection stays the thread's); an older record names none."""
+    from .state import job_provider
+    return {'provider': job_provider(old), 'model': old.model, 'effort': old.effort}
+
+
 def _exit_code(thread: Thread) -> int:
     """What `--wait` would have exited with, for a thread whose run has ended."""
     if thread.status == 'waiting' or thread.pending_requests:
@@ -86,13 +100,20 @@ class Start:
     """A repo's Claude job, chosen and not yet started: `kind` the gate's (None for a decision
     Stefan's own words answer, which starts no thread), `then` the kind of job a decision may
     continue in the same pass, `run` what runs it, `label` what the log calls it, and `usage`
-    the gate's read when it let the job in (what its cost is measured against)."""
+    the gate's read when it let the job in (what its cost is measured against). `job` is its
+    kind as config.toml's `[jobs]` names it, when that isn't `kind` (an ask, a conflict round,
+    a decision Stefan's words answer: issue #120)."""
     repo: str
     kind: str | None
     then: str | None
     run: object
     label: str
     usage: object = None
+    job: str | None = None
+
+    @property
+    def spec_kind(self) -> str:
+        return self.job or self.kind
 
 
 @dataclass(eq=False)
@@ -126,6 +147,8 @@ class Runner:
         from .effort import Effort
         self.effort = effort or Effort(config)
         self.now = now or (lambda: datetime.datetime.now(datetime.timezone.utc))
+        if self.effort.out is None:   # a kind's fallback runs while its provider is out (#120)
+            self.effort.out = self.out_of_usage
         self.gate = gate   # gate.Gate; None starts every Claude job (tests, the live checks)
         self.gate_until: datetime.datetime | None = None
         # What the gate last said, per repo (None: the account's usage limit), so it's said once.
@@ -161,11 +184,12 @@ class Runner:
         self.toaster = toaster or NoToaster()
         # While Sol is out of usage, the Sol lane's reviews run as Opus threads in T3, through
         # the same usage gate as the Claude lane's jobs (issue #69).
-        from .fallback import OpusFallback
+        from .fallback import ThreadReviews
         self.reviewer = Reviewer(config, github=github, git=git, sol=sol, jobs=self.jobs,
                                  say=self.say, toaster=self.toaster, deps=deps,
-                                 fallback=OpusFallback(config, t3=t3, gate=gate,
-                                                       effort=self.effort, beside=self),
+                                 fallback=ThreadReviews(config, t3=t3, gate=gate,
+                                                        effort=self.effort, beside=self,
+                                                        limits=limits),
                                  t3=t3) if sol is not None else None
         self.fixer = Fixer(config, github=github, git=git, jobs=self.jobs)
         stopper = Stopper(config, github=github, jobs=self.jobs, say=self.say,
@@ -278,7 +302,7 @@ class Runner:
         off = stopped(self.config)   # a stopped repo's limited job waits for its Resume (37)
         limited = [j for j in self.jobs.limited_jobs() if j.repo not in off]
         ahead = [j for j in limited if j.resume_at and self.now() < _when(j.resume_at)]
-        if ahead:
+        if ahead and not self._some_kind_runs():
             old = max(ahead, key=lambda j: _when(j.resume_at))
             at = _when(old.resume_at)
             self.gate_until = at
@@ -289,6 +313,9 @@ class Runner:
             self._last_gate = {None: text}
             return GATED
         self._last_gate.pop(None, None)
+        # A kind with a fallback runs on it meanwhile (issue #120); a repo whose job a limit
+        # cut off waits for that job's reset.
+        skip = set(skip) | {j.repo for j in ahead}
         switch = control.read(self.config.state_dir)
         found, live_waits = [], []
         for repo in working(self.config):
@@ -298,6 +325,7 @@ class Runner:
             live_waits.append(self.live.wait_until)
             if start is not None:
                 found.append(start)
+        found = [s for s in found if s.kind is None or self.effort.spec(s.spec_kind)]
         if not found:
             if not skip:
                 self.say('Nothing to start: no PR needs a fix round, and no repo has an '
@@ -309,16 +337,29 @@ class Runner:
         order = [r.name for r in self.config.repos]
         return sorted(found, key=lambda s: (self._waited(s.repo), order.index(s.repo)))
 
+    LANE_KINDS = ('build', 'fix', 'conflict', 'decision', 'live', 'ask')
+
+    def _some_kind_runs(self) -> bool:
+        """Whether any of this lane's kinds may start now: its provider isn't out of usage, or
+        its fallback's isn't (issue #120). None: the lane waits for the reset, as before."""
+        return any(self.effort.spec(k) is not None for k in self.LANE_KINDS)
+
+    def out_of_usage(self, provider: str) -> bool:
+        """Whether `provider` is out of usage now (`JobLog.out_until`): a job on it met its limit
+        and the reset hasn't passed."""
+        return self.jobs.out_until(provider, self.now()) is not None
+
     def _choose_in(self, repo: Repo, limited, switch):
         """This repo's Claude job now, as a Start, or None."""
         name, only = repo.name, (repo.name,)
         self.live.wait_until = None
         if mine := [j for j in limited if j.repo == name]:
             old = mine[0]
-            return Start(name, old.kind, None, lambda: self.recover(old), self._name(old))
+            return Start(name, old.kind, None, lambda: self.recover(old), self._name(old),
+                         job=spec_kind(old.kind, old.cause))
         if ask := self.asking.next(switch, only=only):   # Stefan's click (35)
             return Start(name, 'decision', None, lambda: self.asking.open(ask),
-                         f'ask {name}#{ask.number}')
+                         f'ask {name}#{ask.number}', job='ask')
         if answered := self.answers.next(repos=only):   # Stefan's reply on GitHub (71)
             old, text, marks = answered
             return Start(name, old.kind, None,
@@ -340,7 +381,8 @@ class Runner:
             return Start(name, 'live', None, lambda: self.live.run(*live), f'live {name}')
         if fix := self.next_fix(repos=only):
             return Start(name, 'fix', None, lambda: self.run_fix(*fix),
-                         f'fix {name}#{fix[1].number}')
+                         f'fix {name}#{fix[1].number}',
+                         job=spec_kind('fix', CONFLICT if fix[2] is None else None))
         if not repo.github or repo.local_issues:
             # No GitHub issues to pick from: a local-ticket repo (`tickets.py`) is only named by
             # --dry-run.
@@ -385,8 +427,9 @@ class Runner:
         running = self._running(busy)
         starts, waits = [], {}
         for start in chosen:
-            if start.kind is None or self.gate is None:
-                starts.append(start)
+            spec = self.effort.spec(start.spec_kind) if start.kind else None
+            if start.kind is None or self.gate is None or (spec and spec.provider != CLAUDE):
+                starts.append(start)   # the gate reads Claude's usage only (issue #120)
                 continue
             verdict = self.gate.check(start.kind, start.then, running=running)
             if not verdict.go:
@@ -435,7 +478,7 @@ class Runner:
         return [gate_label(j.repo, j.issue) for j in self.jobs.open_jobs()
                 if j.kind == 'review' and j.reviewer in OPUS_KINDS]
 
-    # --- the Sol lane's Opus review, beside this lane's jobs (`fallback.OpusFallback`) ------
+    # --- the Sol lane's Claude review thread, beside this lane's jobs (`fallback.py`) ------
 
     @property
     def gate_lock(self) -> threading.Lock:
@@ -733,7 +776,7 @@ class Runner:
         self.titles[(repo.name, n)] = build.issue.title
         self.git.fetch(repo.path, repo.base)
         job = self.jobs.started(kind='build', repo=repo.name, issue=n, branch=build.branch,
-                                title=job_title(repo, n))
+                                title=job_title(repo, n), **self.effort.job('build'))
         if self.git.has_branch(repo.path, build.branch):
             self.jobs.ended(job.id, exit_code=None, outcome='branch-exists',
                             error=f'A local branch {build.branch} is left from an earlier run.')
@@ -750,7 +793,7 @@ class Runner:
         it ended."""
         try:
             result = self.t3.start(repo.path, brief, title=job.title, worktree=base,
-                                   branch=branch, **self.effort.job())
+                                   branch=branch, **asked(job))
         except T3Error as e:
             try:
                 thread = self._find_thread(job)
@@ -788,7 +831,7 @@ class Runner:
         job = self.jobs.started(kind=old.kind, repo=old.repo, issue=old.issue, branch=old.branch,
                                 title=old.title, sha=old.sha, round=old.round,
                                 thread_id=old.thread_id, about=old.id, cause=old.cause,
-                                resume=choice.record(), base=old.base)
+                                resume=choice.record(), base=old.base, **_same_thread(old))
         if old.outcome == 'waiting':
             self.jobs.ended(old.id, exit_code=old.exit_code, outcome='continued',
                             **(marks or {}))
@@ -855,7 +898,8 @@ class Runner:
                          'the round records no base')
         job = self.jobs.started(kind='fix', repo=repo.name, issue=n, branch=pr.branch,
                                 title=fix_title(repo, n, cause), sha=h,
-                                round=review and review.round, cause=cause, base=base)
+                                round=review and review.round, cause=cause, base=base,
+                                **self.effort.job(spec_kind('fix', cause)))
         if self.git.has_branch(repo.path, work):
             self.jobs.ended(job.id, exit_code=None, outcome='branch-exists',
                             error=f'A local branch {work} is left from an earlier run.')
@@ -905,7 +949,8 @@ class Runner:
         self.jobs.ended(job.id, exit_code=exit_code, outcome=outcome, thread_id=thread_id,
                         link=link, run_id=run_id, status=status, commits=commits, pr=pr,
                         worktree=worktree, error=error, head=head, **(limit or {}),
-                        **self.effort.used(job.repo, self._name(job), thread_id, run_id))
+                        **self.effort.used(job.repo, self._name(job), thread_id, run_id,
+                                           job.effort))
         moved = (f', head {job.sha[:7]} -> {head[:7]}, {len(commits)} commits' if pushed else
                  f', head still {job.sha[:7]}' if head else ', head unknown')
         self.say(f'{self._name(job)} ended: {outcome} (exit {exit_code}{moved}) '
@@ -944,7 +989,8 @@ class Runner:
         self.jobs.ended(job.id, exit_code=exit_code, outcome=outcome, thread_id=thread_id,
                         link=link, run_id=run_id, status=status, commits=commits, pr=pr,
                         worktree=worktree, error=error, **(limit or {}),
-                        **self.effort.used(job.repo, self._name(job), thread_id, run_id))
+                        **self.effort.used(job.repo, self._name(job), thread_id, run_id,
+                                           job.effort))
         pr_note = f', PR #{pr["number"]}' if pr else ''
         self.say(f'{self._name(job)} ended: {outcome} (exit {exit_code}, {len(commits)} commits'
                  f'{pr_note}) {link or thread_id}')
@@ -1009,7 +1055,8 @@ class Runner:
         work = fix_branch(old.issue, old.sha) if old.kind == 'fix' else old.branch
         job = self.jobs.started(kind=old.kind, repo=old.repo, issue=old.issue, branch=old.branch,
                                 title=old.title, sha=old.sha, round=old.round, about=old.id,
-                                cause=old.cause, resume=choice.record(), base=old.base)
+                                cause=old.cause, resume=choice.record(), base=old.base,
+                                **self.effort.job(spec_kind(old.kind, old.cause)))
         after = 'after the usage limit' if direction is None else 'for the decision'
         try:
             brief = self._brief_again(repo, old)

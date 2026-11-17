@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Run Codex on GPT-6.1 Sol, read-only (or --write), from a brief file; succeed only on a fresh reply.
-#   codex-sol.sh [--job J] [--effort E] [--worker] [--act] [--write] [--writable-root DIR]...
+# Run Codex (GPT-6.1 Sol unless --model), read-only (or --write), from a brief file; succeed only on a fresh reply.
+#   codex-sol.sh [--job J] [--model M] [--effort E] [--worker] [--act] [--write] [--writable-root DIR]...
 #                [--resume SESSION] <brief.md> <reply.md> [workdir]
 # Jobs set the reasoning effort and web search. Agreed by Claude and Sol on 2026-10-14
 # (royal-bully-ops .scratch/sol-delegation): xhigh by default, never medium; code stays at
@@ -25,7 +25,8 @@
 # browser. Node is always on PATH: fnm's default (the runner starts at logon, without fnm's
 # per-shell PATH), ahead of whatever node PATH has.
 # --worker adds the sol-worker profile (~/.codex/sol-worker.config.toml): ClickUp MCP, read
-# tools only. --effort overrides the job's effort. --resume continues an earlier session with
+# tools only. --effort overrides the job's effort; --model the model, gpt-6.1-sol unless given (the
+# queue runner passes its config.toml's [jobs.review] model and effort, issue #120). --resume continues an earlier session with
 # the brief as the next message, so Sol keeps its context. The reply lands in <reply.md>;
 # Codex's log (model, effort, version, session, workdir) in <reply.md>.log. Exit 0 means the
 # reply exists and is non-empty, and prints the session id for --resume. A reply from a
@@ -38,7 +39,7 @@ set -u
 # Braces make bash parse the whole script before running, so editing it mid-run can't
 # change a run in progress (it did on 2026-10-14).
 {
-job=review; effort=; session=; profile=(); act=; write=; roots=()
+job=review; model=gpt-6.1-sol; effort=; session=; profile=(); act=; write=; roots=()
 while [ $# -gt 0 ]; do
   case $1 in
     --job) job=${2:?--job needs a value}; shift 2 ;;
@@ -46,6 +47,7 @@ while [ $# -gt 0 ]; do
     --write) write=1; shift ;;
     --writable-root) roots+=("$(cygpath -m "${2:?--writable-root needs a folder}")"); write=1; shift 2 ;;
     --effort) effort=${2:?--effort needs a value}; shift 2 ;;
+    --model) model=${2:?--model needs a value}; shift 2 ;;
     --worker) profile=(-p sol-worker); shift ;;
     --resume) session=${2:?--resume needs a session id}; shift 2 ;;
     --) shift; break ;;
@@ -163,7 +165,7 @@ if [ -n "$write" ]; then
 fi
 
 # Codex refuses to start outside a git repo unless told otherwise; read-only makes it safe.
-opts=(-m gpt-6.1-sol -c model_reasoning_effort=$effort -c "web_search=\"$web\""
+opts=(-m "$model" -c model_reasoning_effort=$effort -c "web_search=\"$web\""
       --skip-git-repo-check -o "$reply")
 prompt() { printf '%s\n\n' "$rules"; cat "$brief"; [ -z "$session" ] && printf '%s\n' "$contract"; }
 rm -f "$reply"
@@ -187,7 +189,7 @@ code=$?
 kill "$watchdog" 2>/dev/null
 
 if [ -s "$reply" ]; then
-  echo "codex-sol: reply written to $reply ($job, $effort)"
+  echo "codex-sol: reply written to $reply ($job, $model, $effort)"
   sid=$(grep -m1 '^session id:' "$reply.log" | cut -d' ' -f3)
   echo "codex-sol: session ${sid:-$session}"
   [ $code -eq 0 ] && exit 0

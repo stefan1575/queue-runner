@@ -1,9 +1,9 @@
-"""Sol as the runner sees it: one review through `scripts/codex-sol.sh`.
+"""Sol as the runner sees it: one review through `scripts/codex-sol.sh`, the Codex adapter.
 
-Not a T3 thread: a thread from `t3 thread start --provider codex --model gpt-6.1-sol` ran at
-effort low (checked 2026-11-09 in its rollout: `configuration_update` `reasoning.effort: "low"`),
-and T3's CLI has no effort flag. codex-sol.sh starts a fresh Codex session each time, at the
-effort it's given, with only the checkout and the dependency cache writable (ticket 16); Stefan's rule is high for every Sol run.
+A review whose `[jobs.review]` provider is Codex runs here, at its model and effort (issue #120),
+not as a T3 thread: codex-sol.sh starts a fresh Codex session each time with only the checkout
+and the dependency cache writable and the network off (ticket 16), which a T3 thread can't be
+held to.
 
 codex-sol.sh's watchdog ends the run once its caller is gone, and launched straight from Windows
 it has none, so it runs under a Git bash that waits for it (as `~/sol-pr-review.py` did).
@@ -23,7 +23,7 @@ SOL_SCRIPT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file
                           'codex-sol.sh').replace(os.sep, '/')
 # Git's bash by full path: 'bash' on PATH here is WSL's (System32\bash.exe).
 GIT_BASH = r'C:\Program Files\Git\bin\bash.exe'
-EFFORT = 'high'   # every Sol run is at high
+MODEL, EFFORT = 'gpt-6.1-sol', 'high'   # codex-sol.sh's own, when config.toml names none
 TIMEOUT_S = 75 * 60
 SESSIONS = os.path.join(HOME, '.codex', 'sessions')   # Codex's rollouts, YYYY/MM/DD/rollout-*.jsonl
 FULL = 99   # used percent at which a window counts as the one that ran out
@@ -53,11 +53,12 @@ class Limits:
 
 
 class SolOutOfUsage(Exception):
-    """Sol's plan hit its limit until `back` (None if Sol didn't say). Not a review: nothing counts."""
+    """The reviewer's plan hit its limit until `back` (None if it didn't say): Sol's, or a review
+    thread's provider (`fallback.ReviewThread`, named `who`). Not a review: nothing counts."""
 
-    def __init__(self, back: datetime.datetime | None):
-        super().__init__(f'Sol is out of usage until {back or "an unknown time"}')
-        self.back = back
+    def __init__(self, back: datetime.datetime | None, who: str = 'Sol'):
+        super().__init__(f'{who} is out of usage until {back or "an unknown time"}')
+        self.back, self.who = back, who
 
 
 def usage_back(text: str, now: datetime.datetime) -> datetime.datetime | None:
@@ -171,8 +172,9 @@ class SolCli:
 
     def __init__(self, script: str = SOL_SCRIPT, bash: str = GIT_BASH,
                  timeout_s: int = TIMEOUT_S, run=run_detached, now=datetime.datetime.now,
-                 sessions: str = SESSIONS):
+                 sessions: str = SESSIONS, model: str = MODEL, effort: str = EFFORT):
         self.script, self.bash, self.timeout_s = script, bash, timeout_s
+        self.model, self.effort = model, effort   # `[jobs.review]`'s (issue #120)
         self.sessions = sessions
         self._run, self._now = run, now
 
@@ -185,7 +187,8 @@ class SolCli:
         SolFailed for any other failed run."""
         roots = [a for d in writable for a in ('--writable-root', _slash(d))]
         cmd = [self.bash, '-c', 'bash "$0" "$@"; exit $?', _slash(self.script),
-               '--job', 'review', '--effort', EFFORT, '--write', *roots, _slash(brief),
+               '--job', 'review', '--model', self.model, '--effort', self.effort, '--write',
+               *roots, _slash(brief),
                _slash(reply), _slash(workdir)]
         try:
             code = self._run(cmd, out, self.timeout_s)

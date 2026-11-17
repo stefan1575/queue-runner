@@ -30,6 +30,7 @@ from dataclasses import dataclass, field
 from importlib import resources
 from string import Template
 
+from .effort import asked
 from .ledger import RUNNER_MARK, said_since
 from .state import NOT_STARTED, USAGE_LIMIT, Job, JobLog, when
 from .stops import number_of, positions, utc
@@ -386,7 +387,8 @@ class LiveSteps:
         """Starts the batch's thread in a T3 worktree at the target and records how it ended.
         'started', or 'idle' if T3 started no thread."""
         job = self.jobs.started(kind='live', repo=repo.name, issue=b.prs[-1], branch=repo.base,
-                                title=live_title(repo), sha=b.start, head=b.target)
+                                title=live_title(repo), sha=b.start, head=b.target,
+                                **self.effort.job('live'))
         name = f'live {repo.name}'
         # From the start record on, the Sol lane merges nothing in this repo (merge.why_not).
         # A merge that landed or began since the batch was read makes it stale: next pass.
@@ -412,8 +414,7 @@ class LiveSteps:
                  f'{len(b.pending)} migration(s) to apply')
         try:
             result = self.t3.start(repo.path, brief, title=job.title, worktree=b.target,
-                                   branch=live_branch(b.target, job.id),
-                                   **self.effort.job())
+                                   branch=live_branch(b.target, job.id), **asked(job))
         except T3Error as e:
             try:
                 thread = self.find_thread(job) if self.find_thread else None
@@ -474,7 +475,7 @@ class LiveSteps:
                         link=link, run_id=run_id, status=status, worktree=worktree,
                         applied=list(answer.applied), prs=list(b.prs),
                         reason=answer.text or None, error=error, **(limit or {}),
-                        **self.effort.used(repo.name, name, thread_id, run_id))
+                        **self.effort.used(repo.name, name, thread_id, run_id, job.effort))
         prs = ', '.join(f'#{n}' for n in b.prs)
         if outcome == LIVE:
             self.say(f'{name}: {prs} live at {b.target[:7]} ({len(answer.applied)} migration(s) '

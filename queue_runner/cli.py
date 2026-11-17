@@ -126,8 +126,7 @@ def _print_gate(gate, out, config) -> None:
         learned = ' (the cautious default)' if cost == CostBook.default(kind) else ''
         # The Opus review while Sol is out of usage (issue #69) runs in the reviewing lane.
         lane = 'sol' if kind == FALLBACK_REVIEW else 'claude'
-        name = (('review (Opus, set in config.toml)' if config.review_provider == 'claude'
-                 else 'review (Opus, while Sol is out)') if kind == FALLBACK_REVIEW else kind)
+        name = _review_gate_name(config) if kind == FALLBACK_REVIEW else kind
         if switch.holds(lane):
             print(f'  {name}: waits: the {control.NAMES[lane]} lane is stopped by Stefan',
                   file=out)
@@ -141,6 +140,18 @@ def _print_gate(gate, out, config) -> None:
         print(f'  {name}: {"starts" if v.go else "waits"}: {v.text}{learned}; '
               f'{_could_start(usage, kind, cost, knob, gate.clock(), running, len(free))} '
               'could start at once', file=out)
+
+
+def _review_gate_name(config) -> str:
+    """The gated review as the dry run names it: the review thread's model, and why it runs
+    (config.toml's `[jobs.review]`, issue #120)."""
+    from .fallback import chosen, model_name
+    review = config.job('review')
+    if chosen(config):
+        return f'review ({model_name(review.model)}, set in config.toml)'
+    back = review.fallback
+    return (f'review ({model_name(back.model)}, while Sol is out)' if back is not None
+            else 'review (no fallback while Sol is out)')
 
 
 def _could_start(usage, kind, cost, knob, now, running, free: int) -> int:
@@ -764,7 +775,10 @@ def main(argv=None, github=None, out=None, t3=None, git=None, sleep=None,
     if sol is None:
         from .deps import Deps
         from .sol import SolCli
-        sol = SolCli(script=config.sol_script, bash=config.sol_bash)
+        codex = config.job('review')   # the Codex adapter's model and effort (issue #120)
+        sol = (SolCli(script=config.sol_script, bash=config.sol_bash, model=codex.model,
+                      effort=codex.effort) if codex.provider == 'codex' else
+               SolCli(script=config.sol_script, bash=config.sol_bash))
         deps = Deps(config.deps_dir)
     if toaster is None:
         from .toast import WindowsToaster

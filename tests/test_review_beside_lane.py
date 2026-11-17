@@ -33,7 +33,8 @@ class ReviewBesideLaneTest(Harness):
     def setUp(self):
         super().setUp()
         with open(self.config, 'a', encoding='utf-8') as f:
-            f.write('\n[review]\nprovider = "claude"\n')
+            f.write('\n[jobs.review]\nprovider = "claudeAgent"\nmodel = "claude-opus-5-5"\n'
+                    'effort = "high"\n')
         self.gh.by_repo['second'] = []   # one build, first#4, unless a test says otherwise
 
     def runner(self, t3, usage=ROOM):
@@ -86,7 +87,7 @@ class ReviewBesideLaneTest(Harness):
             self.assertFalse(verdict.go)
             self.assertIn('the Claude job running (build first#4)', verdict.text)
             self.assertIsNone(runner.reviewer._who('review second#12'))
-            self.assertTrue(any(line.startswith('Opus review waits: review would fit alone, but '
+            self.assertTrue(any(line.startswith('Opus 5.5 review waits: review would fit alone, but '
                                                 'the Claude job running (build first#4)')
                                 for line in self.lines), self.lines)
         finally:
