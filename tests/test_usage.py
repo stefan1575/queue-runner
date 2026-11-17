@@ -7,7 +7,7 @@ import unittest
 
 from datetime import timedelta
 
-from queue_runner.usage import CachedUsage, OAuthUsage, UsageError, parse
+from queue_runner.usage import CachedUsage, OAuthUsage, Plan, UsageError, parse, plan_change
 from tests.fakes import StubEndpoint
 
 FIXTURE = os.path.join(os.path.dirname(__file__), 'fixtures', 'usage', 'oauth-usage.json')
@@ -114,6 +114,46 @@ class LoginTest(unittest.TestCase):
                     OSError('boom'))).read()
             self.assertNotIn('sk-secret-123', str(e.exception))
             self.assertIn('expired', str(e.exception))
+
+
+class PlanTest(unittest.TestCase):
+    """Claude's plan, read from the login file's `subscriptionType` and `rateLimitTier` only
+    (issue #118): a fake credentials file in a temp folder, never the real one."""
+
+    def creds(self, **oauth):
+        d = tempfile.TemporaryDirectory()
+        self.addCleanup(d.cleanup)
+        with open(os.path.join(d.name, '.credentials.json'), 'w', encoding='utf-8') as f:
+            json.dump({'claudeAiOauth': {'accessToken': 'sk-secret-123', **oauth}}, f)
+        return d.name
+
+    def test_the_plan_is_the_subscription_and_its_tier_and_never_the_token(self):
+        d = self.creds(subscriptionType='max', rateLimitTier='default_claude_max_20x')
+        plan = OAuthUsage(config_dir=d).plan()
+        self.assertEqual(plan, Plan('max', 'default_claude_max_20x'))
+        self.assertEqual(plan.record(), {'subscriptionType': 'max',
+                                         'rateLimitTier': 'default_claude_max_20x'})
+        self.assertEqual(Plan.from_record(plan.record()), plan)
+        self.assertEqual((str(plan), plan.title), ('max', 'Max 20x'))
+        self.assertNotIn('sk-secret', repr(plan) + json.dumps(plan.record()))
+
+    def test_a_plan_with_no_size_in_its_tier_is_its_subscription(self):
+        plan = OAuthUsage(config_dir=self.creds(subscriptionType='pro',
+                                                rateLimitTier='default_claude_ai')).plan()
+        self.assertEqual(plan.title, 'Pro')
+
+    def test_no_login_or_no_plan_in_it_reads_as_none(self):
+        empty = tempfile.TemporaryDirectory()
+        self.addCleanup(empty.cleanup)
+        self.assertIsNone(OAuthUsage(config_dir=empty.name).plan())
+        self.assertIsNone(OAuthUsage(config_dir=self.creds()).plan())
+
+    def test_a_change_of_size_names_the_tiers(self):
+        five, twenty = Plan('max', 'default_claude_max_5x'), Plan('max', 'default_claude_max_20x')
+        self.assertEqual(plan_change(Plan('pro', 'default_claude_ai'), twenty), 'pro (was max)')
+        self.assertEqual(plan_change(five, twenty),
+                         'max (default_claude_max_5x) (was max (default_claude_max_20x))')
+        self.assertEqual(plan_change(five, None), 'max (was not read)')
 
 
 class Clock:

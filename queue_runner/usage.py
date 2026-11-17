@@ -189,6 +189,10 @@ class OAuthUsage:
                         ' (any Claude Code session refreshes it)')
         return token, note
 
+    def plan(self) -> 'Plan | None':
+        """The login's plan (`read_plan`); None when it can't be read."""
+        return read_plan(self.credentials)
+
     def read(self) -> Usage:
         token, note = self._login()
         request = urllib.request.Request(URL, headers={**HEADERS,
@@ -223,6 +227,55 @@ class Reading:
         call beside a recent good reading isn't: the reading stands, as in T3."""
         return self.error is not None and lasted(self.since, now) and (
             self.value is None or self.at is None or self.login or now - self.at > STALE_AFTER)
+
+
+@dataclass(frozen=True)
+class Plan:
+    """Claude's plan (issue #118): the login file's `subscriptionType` (`pro`, `max`) and
+    `rateLimitTier` (`default_claude_max_20x`), the two fields Claude Code keeps beside the
+    token. Learned costs are percents of a plan's windows, so they count only on their plan."""
+    subscription: str | None
+    tier: str | None
+
+    def __str__(self) -> str:
+        return self.subscription or self.tier or 'unknown'
+
+    @property
+    def title(self) -> str:
+        """For the Usage card: `Max 20x`, `Pro`."""
+        size = re.search(r'_(\d+x)$', self.tier or '')
+        return str(self).title() + (f' {size.group(1)}' if size and self.subscription else '')
+
+    def record(self) -> dict:
+        return {'subscriptionType': self.subscription, 'rateLimitTier': self.tier}
+
+    @classmethod
+    def from_record(cls, rec) -> 'Plan | None':
+        if not isinstance(rec, dict):
+            return None
+        return cls(rec.get('subscriptionType'), rec.get('rateLimitTier'))
+
+
+def plan_change(now: Plan | None, was: Plan | None) -> str:
+    """`pro (was max)`; by their tiers too when the subscription is the same."""
+    def name(p, tier):
+        return 'not read' if p is None else f'{p} ({p.tier})' if tier and p.tier else str(p)
+    tier = now is not None and was is not None and str(now) == str(was)
+    return f'{name(now, tier)} (was {name(was, tier)})'
+
+
+def read_plan(credentials: str) -> Plan | None:
+    """The plan in a Claude login file, or None when it can't be read or names none. Only the
+    two plan fields are kept: the token is never copied out of the parsed file."""
+    try:
+        with open(credentials, encoding='utf-8') as f:
+            oauth = json.load(f).get('claudeAiOauth') or {}
+        sub, tier = oauth.get('subscriptionType'), oauth.get('rateLimitTier')
+    except (OSError, ValueError, AttributeError):
+        return None
+    sub = sub if isinstance(sub, str) and sub.strip() else None
+    tier = tier if isinstance(tier, str) and tier.strip() else None
+    return Plan(sub, tier) if sub or tier else None
 
 
 def _first_line(e: BaseException) -> str:
@@ -298,6 +351,12 @@ class CachedUsage:
         self._called, self._good, self._error, self._since = now, (value, now), None, None
         if self.on_call:
             self.on_call(True, None)
+
+    def plan(self) -> 'Plan | None':
+        """The endpoint's login plan (issue #118), read from its login file, asking no call; None
+        for an endpoint that has none to give (a test's fake)."""
+        read = getattr(self.endpoint, 'plan', None)
+        return read() if read else None
 
     def reading(self) -> Reading | None:
         """The cached reading, asking nothing; None before any attempt."""
