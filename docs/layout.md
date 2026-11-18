@@ -92,3 +92,6 @@ What each module and script is for.
 - `scripts/make_shortcut.py`: makes the logon shortcuts, the runner's and the dashboard's
   (`--startup` copies both into the Startup folder); `scripts/live_wake.py`: the wake task's
   live check; `scripts/live_restart.py`: a restart onto broken code, toasted.
+- `app/`: the TypeScript rebuild (spec #68), apart from `queue_runner/`: `src/t3/` (T3's seams,
+  sign-in, MCP and WebSocket), `src/github.ts`, `src/projects.ts`, `src/app.ts` (the command
+  line), `test/` (on `test/fake-t3.ts`) and `live/` (its live checks). `docs/app.md`.

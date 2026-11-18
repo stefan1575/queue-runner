@@ -24,6 +24,7 @@ checks (`docs/running.md`, Live check).
 
 ```
 python3 -m unittest
+pnpm --dir app typecheck; pnpm --dir app test   # the TypeScript app (docs/app.md)
 ```
 
 Standard library only. Tests never touch the network, GitHub, T3, Codex, the Task Scheduler or
@@ -34,4 +35,4 @@ it up (`TemporaryDirectory` with `addCleanup`; `tests/test_no_temp_leftovers.py`
 ## Where to look
 
 `docs/` has one file per area (flow, running, usage, claude-lane, reviews, stops, t3, dashboard,
-tests, layout). Read the one a task touches before changing it.
+tests, layout, app). `app/` is the TypeScript rebuild (#68); its rules are `docs/app.md`. Read the one a task touches before changing it.
