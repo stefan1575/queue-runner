@@ -96,7 +96,8 @@ def build(name: str = DEFAULT, base: datetime | None = None, control: dict | Non
             # `doing`: the Claude job running in it (as a lane's `job`), and `wait`: why none
             # starts in it now (#50; both filled in by `_doing`, below). `icon`: its favicon as a
             # data: URL, or null (the page draws its first two letters).
-            {"name": LD, "github": GH[LD], "icon": LD_ICON, "merge": "stefan", "stopped": None},
+            {"name": LD, "github": GH[LD], "icon": None,  # PROTOTYPE (rail): the made-up favicon read as a bug
+             "merge": "stefan", "stopped": None},
             {"name": QR, "github": GH[QR], "icon": None, "merge": "runner", "stopped": None},
             {"name": GB, "github": GH[GB], "icon": None, "merge": "stefan", "stopped": None},
         ],
@@ -247,7 +248,7 @@ def build(name: str = DEFAULT, base: datetime | None = None, control: dict | Non
                  "gates": False, "note": "The runner doesn't use Fable."},
             ]},
             {"id": "sol", "provider": "chatgpt", "name": "ChatGPT", "plan": "Plus", "read_at": ago(9), "error": None,
-             "resets": None, "next_read_at": None, "retrying": None, "windows": [
+             "resets": {"available": 2}, "next_read_at": None, "retrying": None, "windows": [
                 {"id": "five_hour", "label": "Session", "used": 26, "resets_at": ahead(94), "gates": True},
                 {"id": "week", "label": "Weekly", "used": 6, "resets_at": ahead(60 * 152.9), "gates": True},
             ]},
