@@ -1945,7 +1945,8 @@ function railRepos() {
     const jobs = here.map(([, j]) => `${kind(j.kind)[0]} ${j.ref}`).join(" · ");
     const work = here.map(([l, j]) => `${l.name}: ${kind(j.kind)[0].toLowerCase()} ${j.ref}${j.title ? " " + j.title : ""}, ${ago(j.started_at)} in`).join(". ");
     const [line, hover] = pending ? [a.stop ? "Asked to stop" : "Asked to resume", "The runner hasn't read it yet"]
-      : r.stopped ? [`Stopped${r.stopped.at ? ` since ${when(r.stopped.at)}` : ""}`, work ? `It finishes what runs: ${work}` : ""]
+      : r.stopped ? [`Stopped${r.stopped.at ? ` since ${when(r.stopped.at)}` : ""}`,
+        [r.stopped.at ? `Stopped since ${stamp(r.stopped.at)}` : "", work ? `It finishes what runs: ${work}` : ""].filter(Boolean).join(". ")]
       : jobs ? [jobs, work]
       : r.wait ? [`Waiting: ${r.wait.reason.replace(/\.$/, "")}`, r.wait.reason]
       : ["Idle", ""];

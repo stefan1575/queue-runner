@@ -142,6 +142,18 @@ class RailTest(unittest.TestCase):
         line, hover = self.repos("repo-stopped")[sample.LD]
         self.assertTrue(line.startswith("Stopped since "), line)
         self.assertIn("building #212", hover)   # the job it still finishes, on hover
+        self.assertIn(self.run_js({}, f"stamp({json.dumps(next(r for r in sample.build('repo-stopped')['repos'] if r['name'] == sample.LD)['stopped']['at'])})"), hover)
+
+    def test_a_stopped_repo_with_nothing_running_has_its_full_time_on_hover(self):
+        # PR #147 review 1, F2: the short "Stopped since 12:15pm" had no title when no job ran
+        snap = sample.build("repo-stopped")
+        snap["lanes"] = [dict(l, jobs=[], job=None) for l in snap.get("lanes", [])]
+        at = next(r for r in snap["repos"] if r["name"] == sample.LD)["stopped"]["at"]
+        html = self.run_js(snap, "railRepos()")
+        line, hover = {n: (unescape(l), unescape(h)) for n, h, l in
+                       re.findall(r'<p class="nm">([\w-]+)</p><p class="doing"(?: title="([^"]*)")?>(.*?)</p>', html)}[sample.LD]
+        self.assertTrue(line.startswith("Stopped since "), line)
+        self.assertEqual(hover, "Stopped since " + self.run_js({}, f"stamp({json.dumps(at)})"))
         html = self.run_js(sample.build("side-by-side"), "railRepos()")
         self.assertNotIn("merge", html)
 
