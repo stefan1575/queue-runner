@@ -24,8 +24,21 @@ describe('no test reaches the real settings', () => {
     ["a .t3 folder", "const db = 'C:/Users/someone/.t3/userdata/state.sqlite';"],
     ["config.toml", "readFileSync(join(root, 'config.toml'), 'utf8');"],
     ["the app's real settings path", "import { SETTINGS_PATH } from '../src/settings.ts';"],
+    // #173 F2: a call or an access split over lines is still the same call.
+    ["T3's address with no file given, over two lines", "const address = runtimeAddress(\n);"],
+    ["T3's real CLI, over three lines", "const cli = t3Cli(\n  // the default\n);"],
+    ["T3's real CLI with only a comment in it", "const cli = t3Cli(/* real one */);"],
+    ["HOME over two lines", "const home = process.env\n  .HOME;"],
+    ["HOME by key", "const home = process.env['HOME'];"],
+    ["HOME destructured", "const { HOME } = process.env;"],
   ])('finds a test that reads %s', (_, source) => {
     expect(realSettingsReads(source)).not.toEqual([]);
+  });
+
+  it('reports a call over several lines at the line it starts on', () => {
+    expect(realSettingsReads("const a = 1;\nconst cli = t3Cli(\n);")).toEqual([
+      "2: T3's real files (pass a path of the test's own): const cli = t3Cli(",
+    ]);
   });
 
   it('passes a test that builds its own settings', () => {
@@ -34,6 +47,10 @@ describe('no test reaches the real settings', () => {
       "const address = runtimeAddress(join(dir, 'server-runtime.json'));",
       "const cli = t3Cli(join(dir, 't3.cmd'));",
       "// comments may name homedir() and T3_HOME",
+      "/* a block comment over lines may name",
+      "   runtimeAddress() and USERPROFILE */",
+      "const url = 'https://example.invalid/'; // a trailing comment: t3Cli()",
+      "const env = { ...process.env, PATH: dir }; const HOMEPAGE = 1;",
     ].join('\n');
     expect(realSettingsReads(source)).toEqual([]);
   });
