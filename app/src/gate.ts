@@ -22,8 +22,9 @@ export type RunningJob = { id: string; account: string; cost: Cost };
 export type Hold =
   /** No room in a window: it waits for the reset. */
   | { why: 'window'; kind: JobKind; window: string; used: number; need: number; at: string | null }
-  /** It fits only into your share: it waits for the release. */
-  | { why: 'share'; kind: JobKind; window: string; kept: number; need: number; at: string }
+  /** It fits only into your share: it waits for the release, at no known time when T3 gives no
+   *  reset (the share then keeps, `heldPercent`). */
+  | { why: 'share'; kind: JobKind; window: string; kept: number; need: number; at: string | null }
   /** It fits alone but not beside the jobs running there: it waits for one to end. */
   | { why: 'running'; kind: JobKind; window: string; running: number; need: number; jobs: string[] }
   /** No reading to decide on: it waits for T3's next one. */
@@ -73,7 +74,8 @@ export function checkJob(i: GateInput): Verdict {
     if (used + need <= 100 - kept) {
       holds.push({ until: null, hold: { why: 'running', kind: job.kind, window, running: others, need, jobs: beside.filter((r) => r.cost[w.id]).map((r) => r.id) } });
     } else if (kept > 0 && used + need <= 100) {
-      holds.push({ until: releaseAt(share, w.resetsAt), hold: { why: 'share', kind: job.kind, window, kept, need, at: releaseAt(share, w.resetsAt)!.toISOString() } });
+      const until = releaseAt(share, w.resetsAt);
+      holds.push({ until, hold: { why: 'share', kind: job.kind, window, kept, need, at: until?.toISOString() ?? null } });
     } else {
       const until = w.resetsAt ? new Date(Date.parse(w.resetsAt) + AFTER_RESET_MS) : null;
       holds.push({ until, hold: { why: 'window', kind: job.kind, window, used, need, at: w.resetsAt } });
@@ -97,6 +99,6 @@ export function holdText(h: Hold, when: (d: Date) => string): string {
   }
   const needs = `this ${h.kind} needs about ${pct(h.need)}`;
   if (h.why === 'window') return h.at ? `${h.window} resets at ${when(new Date(h.at))}; ${needs}` : `${h.window} is ${pct(h.used)} used; ${needs}`;
-  if (h.why === 'share') return `${pct(h.kept)} of ${h.window} is kept for you until ${when(new Date(h.at))}; ${needs}`;
+  if (h.why === 'share') return `${pct(h.kept)} of ${h.window} is kept for you${h.at ? ` until ${when(new Date(h.at))}` : ', and T3 gives no time it resets'}; ${needs}`;
   return `${h.window} would fit this ${h.kind} alone, but the jobs running there (${h.jobs.join(', ')}) are expected to take ${pct(h.running)}`;
 }

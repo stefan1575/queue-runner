@@ -5,7 +5,7 @@ import { checkJob, holdText, type GateInput } from '../src/gate.ts';
 import type { ProviderUsage, UsageWindow } from '../src/usage.ts';
 
 const NOW = new Date('2026-11-19T12:00:00Z');
-const win = (id: string, kind: UsageWindow['kind'], used: number, resetsAt: string, label = kind === 'session' ? 'Session' : 'Weekly'): UsageWindow =>
+const win = (id: string, kind: UsageWindow['kind'], used: number, resetsAt: string | null, label = kind === 'session' ? 'Session' : 'Weekly'): UsageWindow =>
   ({ id, kind, label, usedPercent: used, resetsAt, minutes: kind === 'session' ? 300 : 10080 });
 const claude = (five: number, week: number, extra: UsageWindow[] = []): ProviderUsage => ({
   provider: 'claudeAgent', driver: 'claudeAgent', account: 'claudeAgent:w1', label: 'Claude', name: 'Claude',
@@ -58,6 +58,20 @@ describe('the usage gate', () => {
     const full = checkJob(input(claude(10, 90), { shares }));
     expect(full).toMatchObject({ fits: false, hold: { why: 'window' } });
     if (!full.fits) expect(full.until?.toISOString()).toBe('2026-11-23T11:02:00.000Z');
+  });
+
+  test('a share of a week T3 gives no reset for holds with no release time, and says so', () => {
+    const week = win('secondary', 'weekly', 93, null);
+    const codex: ProviderUsage = { ...claude(0, 0), provider: 'codex', driver: 'codex', account: 'codex:w2', label: 'Codex', name: 'Codex', windows: [week] };
+    const review = { id: 'review a#2', kind: 'review' as const, choice: { provider: 'codex', model: 'gpt-5.5', effort: 'high' } };
+    const shares = { 'codex/secondary': { percent: 5, releaseHours: 24 } };
+    const v = checkJob(input(codex, { job: review, model: { id: 'gpt-5.5' }, shares }));
+    expect(v).toMatchObject({ fits: false, until: null, hold: { why: 'share', kept: 5, at: null } });
+    if (!v.fits) expect(holdText(v.hold, fmt)).toBe("5% of Codex's week is kept for you, and T3 gives no time it resets; this review needs about 4%");
+    // beside a 5-hour window held to its reset, that reset is the time the job waits for
+    const both = checkJob(input({ ...codex, windows: [win('primary', 'session', 99, '2026-11-19T14:20:00Z'), week] }, { job: review, model: { id: 'gpt-5.5' }, shares }));
+    expect(both).toMatchObject({ fits: false, hold: { why: 'window' } });
+    if (!both.fits) expect(both.until?.toISOString()).toBe('2026-11-19T14:22:00.000Z');
   });
 
   test("a window for another family of models doesn't hold this one", () => {
