@@ -617,7 +617,9 @@ is killed is code -1 with Node's reason in stderr, never a gh exit code (so is t
   verdict was read from the ledger, the comment names its reviewer, nothing was posted and no
   `sol-review` set, the thread ran on the asked model and was settled, and the checkout is gone.
   **Run 2026-11-19** on `claudeReviewer` Haiku 5.5 at low: all ok, sandbox #4 reviewed blocking in
-  about 30 seconds (F1, the loop bound, shown by running the function).
+  about 30 seconds (F1, the loop bound, shown by running the function). **Run again 2026-11-19**
+  with `--pr 5` after review 1's fixes, same model: all ok, blocking; with no flags it printed its
+  usage and did nothing.
 - `app/live/usage.ts` (`pnpm --dir app live:usage [-- --minutes N]`): acts on no project. It
   subscribes to T3's server config and prints each connected provider's windows as the app reads
   them, then each `providerStatuses` event that changes one, for N minutes (5 by default). **Run
