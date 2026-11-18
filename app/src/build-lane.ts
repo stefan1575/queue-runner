@@ -64,6 +64,9 @@ export const servedRepos = (list: Repo[] | null): BuildRepo[] =>
 
 export const jobTitle = (repo: BuildRepo, issue: number) => `Queue runner build: ${repo.title}#${issue}`;
 
+/** Asked again after every wait: a repo switched off meanwhile gets no gate verdict, no launch. */
+const isServed = (repos: BuildRepo[], repo: BuildRepo) => repos.some((r) => r.id === repo.id);
+
 const join = (folder: string, name: string) => `${folder.replace(/[\\/]+$/, '')}/${name}`;
 
 export class BuildLane {
@@ -155,6 +158,7 @@ export class BuildLane {
         continue;
       }
       if (!ticket) continue;
+      if (!isServed(this.d.repos(), repo)) continue; // switched off while GitHub was read
       const holdId = `build:${repo.github}#${ticket.issue.number}`;
       const verdict = this.d.gate.pick(holdId, 'build');
       if (!verdict.fits) {
@@ -212,10 +216,12 @@ export class BuildLane {
         branch: ticket.branch, base: ticket.base, user: await this.d.user(),
         agentsFile: this.d.exists(join(repo.folder, 'AGENTS.md')) ? 'AGENTS.md' : this.d.exists(join(repo.folder, 'CLAUDE.md')) ? 'CLAUDE.md' : null,
       });
+      // nothing is awaited from here to the launch call, so a repo served now is served at launch
+      if (!isServed(this.d.repos(), repo)) return await notStarted('not-started', `${repo.title} is no longer served`);
       this.d.say(`Starting ${job.title} on ${ticket.branch} from ${ticket.base}`);
       launched = await launchJob(this.d.mcp, this.d.jobs(), catalog, {
         kind: 'build', projectId: repo.id, title: job.title, brief,
-        worktree: { baseRef: ticket.base, branch: ticket.branch }, onFallback: letIn.onFallback,
+        worktree: { baseRef: ticket.base, branch: ticket.branch }, onFallback: letIn.onFallback, choice: letIn.choice,
       });
     } catch (e) {
       return await notStarted('not-started', (e as Error).message);

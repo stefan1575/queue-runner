@@ -19,6 +19,9 @@ export type Job = {
   worktree?: { baseRef: string; branch: string };
   /** Run on the kind's fallback (its own provider is out of usage). */
   onFallback?: boolean;
+  /** Run on this model, as the usage gate let the job in on it: Settings isn't read again, so a
+   *  change made since can't move the job onto a model the gate never checked. */
+  choice?: ModelChoice;
 };
 
 export type Launched = { threadId: string; runId: string | null; link: string | null; choice: ModelChoice };
@@ -33,8 +36,8 @@ export function modelSelection(choice: ModelChoice, catalog: Catalog) {
 }
 
 export async function launchJob(mcp: Pick<T3Mcp, 'call'>, jobs: Jobs, catalog: Catalog, job: Job): Promise<Launched> {
-  const models = kindModels(jobs, job.kind, catalog);
-  const choice = job.onFallback ? models.fallback : models.choice;
+  const models = job.choice ? null : kindModels(jobs, job.kind, catalog);
+  const choice = job.choice ?? (job.onFallback ? models!.fallback : models!.choice);
   if (!choice) {
     throw new JobError(job.onFallback ? `${job.kind} has no fallback T3 can run` : 'T3 has no provider connected');
   }

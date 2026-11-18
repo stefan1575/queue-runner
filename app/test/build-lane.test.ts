@@ -25,6 +25,7 @@ import { FakeT3 } from './fake-t3.ts';
 const snapshot = JSON.parse(await readFile(new URL('./fixtures/server-config.json', import.meta.url), 'utf8'));
 const catalog = catalogFromConfig(snapshot.config);
 const BUILD: ModelChoice = { provider: 'claudeAgent', model: 'claude-opus-5-5', effort: 'high' };
+const SOL: ModelChoice = { provider: 'codex', model: 'gpt-6.2-sol', effort: 'high' };
 const APP: BuildRepo = { id: 'p-app', title: 'app', folder: 'C:/code/app', github: 'owner/app' };
 const LIB: BuildRepo = { id: 'p-lib', title: 'lib', folder: 'C:/code/lib', github: 'owner/lib' };
 
@@ -34,14 +35,18 @@ const issue = (number: number, part: Partial<Issue> = {}): Issue =>
 class FakeGit implements Git {
   calls: string[] = [];
   leftover = new Set<string>();
-  async fetch(folder: string, base: string) { this.calls.push(`fetch ${folder} ${base}`); }
+  /** While set, a fetch waits on it (one under way). */
+  slow: Promise<void> | null = null;
+  async fetch(folder: string, base: string) { this.calls.push(`fetch ${folder} ${base}`); await this.slow; }
   async hasBranch(folder: string, branch: string) { this.calls.push(`hasBranch ${folder} ${branch}`); return this.leftover.has(branch); }
 }
 
-/** A gate with room for every job, recording what the lane tells it. */
+/** A gate with room for every job, recording what the lane tells it. It lets jobs in on
+ *  `admits`, its own model unless said otherwise. */
 class RoomyGate {
   calls: string[] = [];
-  pick(id: string) { this.calls.push(`pick ${id}`); return { fits: true as const, choice: BUILD, onFallback: false, cost: { five_hour: 10 } }; }
+  admits: { choice: ModelChoice; onFallback: boolean } = { choice: BUILD, onFallback: false };
+  pick(id: string) { this.calls.push(`pick ${id}`); return { fits: true as const, ...this.admits, cost: { five_hour: 10 } }; }
   check() { return { fits: true as const, cost: { five_hour: 10 } }; }
   started(job: { id: string }) { this.calls.push(`started ${job.id}`); }
   finished(id: string) { this.calls.push(`finished ${id}`); }
@@ -132,6 +137,77 @@ describe('picking and launching', () => {
     await makeLane().pass();
     expect(gh.reads).toEqual(['readyIssues owner/app']);
     expect(t3.launches.map((l) => l.projectId)).toEqual(['p-app']);
+  });
+
+  test('a repo switched off while its build fetches is not launched: the job is not-started and the gate drops it', async () => {
+    gh.ready['owner/app'] = [issue(5)];
+    let fetched!: () => void;
+    git.slow = new Promise((r) => { fetched = r; });
+    const gate = new RoomyGate();
+    makeLane({ gate: gate as any });
+    void lane.pass();
+    await until(() => git.calls.length > 0);
+    served = [];
+    fetched();
+    await lane.idle();
+    expect(t3.launches).toEqual([]);
+    expect(log.jobs()[0]!.end).toMatchObject({ outcome: 'not-started', error: expect.stringMatching(/no longer served/) });
+    expect(log.heldIssues('p-app')).toEqual(new Set());
+    expect(gate.calls.at(-1)).toMatch(/^dropped /);
+  });
+
+  test('a repo switched off while the brief is written (the user name read) is not launched either', async () => {
+    gh.ready['owner/app'] = [issue(5)];
+    let named!: (name: string) => void;
+    makeLane({ user: () => new Promise((r) => { named = r; }) });
+    void lane.pass();
+    await until(() => named !== undefined);
+    served = [];
+    named('Robin');
+    await lane.idle();
+    expect(t3.launches).toEqual([]);
+    expect(log.jobs()[0]!.end?.outcome).toBe('not-started');
+  });
+
+  test('a repo switched off while GitHub is read for its ticket is never let in by the gate', async () => {
+    gh.ready['owner/app'] = [issue(5)];
+    const gate = new RoomyGate();
+    const read = gh.defaultBranch.bind(gh);
+    gh.defaultBranch = async (repo: string) => { served = []; return read(repo); };
+    await makeLane({ gate: gate as any }).pass();
+    expect(gate.calls).toEqual([]);
+    expect(log.jobs()).toEqual([]);
+  });
+
+  test('the launch runs on the model the gate let the job in on, though Settings changed it meanwhile', async () => {
+    gh.ready['owner/app'] = [issue(5)];
+    let fetched!: () => void;
+    git.slow = new Promise((r) => { fetched = r; });
+    makeLane();
+    void lane.pass();
+    await until(() => git.calls.length > 0);
+    jobs = { ...jobs, build: { own: SOL, fallback: null } };
+    fetched();
+    await until(() => t3.launches.length === 1);
+    expect(t3.launches[0].modelSelection).toMatchObject({ instanceId: 'claudeAgent', model: 'claude-opus-5-5' });
+    expect(log.jobs()[0]!.choice).toEqual(BUILD);
+  });
+
+  test("a job let in on its kind's fallback runs on that fallback, though Settings dropped the fallback meanwhile", async () => {
+    gh.ready['owner/app'] = [issue(5)];
+    jobs = { ...jobs, build: { own: BUILD, fallback: SOL } };
+    const gate = new RoomyGate();
+    gate.admits = { choice: SOL, onFallback: true };
+    let fetched!: () => void;
+    git.slow = new Promise((r) => { fetched = r; });
+    makeLane({ gate: gate as any });
+    void lane.pass();
+    await until(() => git.calls.length > 0);
+    jobs = { ...jobs, build: { own: BUILD, fallback: null } };
+    fetched();
+    await until(() => t3.launches.length === 1);
+    expect(t3.launches[0].modelSelection).toMatchObject({ instanceId: 'codex', model: 'gpt-6.2-sol' });
+    expect(log.jobs()[0]).toMatchObject({ choice: SOL, onFallback: true });
   });
 
   test('no ticket: nothing launched', async () => {
