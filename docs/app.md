@@ -37,6 +37,10 @@ CI runs both on Windows (`.github/workflows/tests.yml`, job `app`), beside the P
 - **T3 and GitHub only.** No reads of T3's database or settings, of Claude's or Codex's files,
   of `~/.claude` or `~/.codex`. No personal scripts. `gh` for GitHub. Starting T3's CLI is
   allowed only for signing in (pairing codes, and listing and revoking the app's own sessions).
+  **The one exception:** T3's Time format, `timestampFormat` in T3's
+  `~/.t3/userdata/client-settings.json`, which T3's server doesn't serve (The desktop app, The
+  clock). The app reads that one setting, never writes the file, and watches it. The exception
+  goes once T3's server serves client settings.
 - **Seams, faked in tests:** T3 (MCP and WebSocket; `src/t3/seams.ts`: HTTP, the socket, the
   CLI, the address), GitHub (`src/github.ts`), and the platform (Windows: tray, notifications,
   start at logon, wake). Tests never touch the network, T3, GitHub or the Task Scheduler
@@ -91,12 +95,16 @@ Code both sides use (`display.ts`, `settings-search.ts`) touches no Node.
   The state folder's location is the only thing in a machine file, `machine.json` in Electron's
   userData (`%APPDATA%\Queue runner`); a first start writes `%APPDATA%\Queue runner\state`
   there.
-- **The clock** shows T3's Time format through `TimeFormatSource` (`src/desktop/view.ts`). T3's
-  Time format (`timestampFormat`: System default, 12-hour, 24-hour) is a setting of T3's own
-  window, kept in `~/.t3/userdata/client-settings.json`; T3's server doesn't hold it
-  (`subscribeServerConfig`'s `settings` has no such key, checked live 2026-11-18 against T3
-  0.1.9, and no WebSocket method serves client settings). Until Stefan settles how the app gets
-  it (#150), the source is T3's default, System default.
+- **The clock** follows T3's Time format (`timestampFormat`: System default, 12-hour, 24-hour;
+  #68 story 36). It is a setting of T3's own window, kept in `~/.t3/userdata/client-settings.json`
+  (`T3CODE_HOME` moves it); T3's server doesn't hold it (`subscribeServerConfig`'s `settings` has
+  no such key, checked live 2026-11-18 against T3 0.1.9, and no WebSocket method serves client
+  settings). So, as Stefan settled on #150, the app reads it there: the one exception to "No
+  reads of T3's database or settings" (Rules). `src/t3/time-format.ts` reads only that key, never
+  writes the file, and polls it (`fs.watchFile`, every 500 ms: it sees a file that's missing or
+  replaced by a rename), telling the window when the format changes. A file that's missing or
+  unreadable, or has no such key or a value T3 doesn't offer, is System default. It goes once
+  T3's server serves client settings. The app has no Time format setting of its own.
 
 ### Screenshots
 

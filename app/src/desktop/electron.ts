@@ -15,7 +15,8 @@ import { SettingsStore } from '../settings.ts';
 import { stateFolder } from '../state-folder.ts';
 import { CHANNELS } from './bridge.ts';
 import { startDesktop, type Shell } from './shell.ts';
-import { RunnerView, type TimeFormatSource } from './view.ts';
+import { T3TimeFormat } from '../t3/time-format.ts';
+import { RunnerView } from './view.ts';
 
 const here = dirname(fileURLToPath(import.meta.url)); // desktop-dist/
 const assets = join(here, '..', 'desktop');
@@ -26,11 +27,6 @@ const shootTo = shootAt > 0 ? process.argv[shootAt + 1] : undefined;
 // the logon entry.
 const shootData = shootTo ? mkdtempSync(join(tmpdir(), 'queue-runner-shoot-')) : null;
 if (shootData) app.setPath('userData', shootData);
-
-// T3's Time format is a setting of T3's own window (client-settings.json), which T3's server
-// doesn't hand to clients and the app may not read (docs/app.md, Rules). Until #150's question
-// is settled the clock is T3's default, "System default".
-const timeFormat: TimeFormatSource = { current: () => 'locale', onChange: () => () => {} };
 
 function openWindow(show: boolean): BrowserWindow {
   const win = new BrowserWindow({
@@ -52,7 +48,8 @@ async function main() {
   await app.whenReady();
   const userData = app.getPath('userData');
   const settings = await SettingsStore.open(stateFolder(join(userData, 'machine.json'), join(userData, 'state')));
-  const view = await RunnerView.start(settings, new GhGitHub(), timeFormat);
+  // The clock follows T3's Time format, read from T3's client settings (docs/app.md, The desktop app).
+  const view = await RunnerView.start(settings, new GhGitHub(), await T3TimeFormat.start());
 
   ipcMain.handle(CHANNELS.view, () => view.get());
   ipcMain.handle(CHANNELS.set, (_e, patch) => view.set(patch));
