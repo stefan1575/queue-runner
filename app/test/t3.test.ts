@@ -115,6 +115,16 @@ describe('the WebSocket API', () => {
     expect((await client.first('subscribeServerConfig')).type).toBe('snapshot');
   });
 
+  it("answers a method that isn't a stream with the value of T3's Exit", async () => {
+    t3.wsMethods['orchestration.getThreadProjection'] = (p) => ({ thread: { id: p.threadId } });
+    expect(await ws().request('orchestration.getThreadProjection', { threadId: 't1' })).toEqual({ thread: { id: 't1' } });
+    expect(t3.frames.at(-1)).toEqual({ _tag: 'Request', id: '1', tag: 'orchestration.getThreadProjection', payload: { threadId: 't1' }, headers: [] });
+  });
+
+  it("fails a method T3 ends with a Failure", async () => {
+    await expect(ws().request('orchestration.noSuchMethod')).rejects.toThrow(/T3 ended orchestration.noSuchMethod/);
+  });
+
   it('fails when T3 keeps refusing the socket', async () => {
     t3.connect = (_url, _h, on) => {
       queueMicrotask(() => on.closed(false, 'refused'));

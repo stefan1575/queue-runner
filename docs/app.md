@@ -3,8 +3,9 @@
 The TypeScript rebuild of the runner (spec #68), in `app/`: one package, TypeScript on Node 24,
 pnpm, Vitest. It grows ticket by ticket beside the Python runner (`queue_runner/`), which keeps
 serving Stefan's repos until the cutover ticket. So far it signs in to T3 and lists the repos it
-could serve (#149), and opens as a desktop window that keeps running in the tray, with Settings
-(#150; The desktop app, below).
+could serve (#149), opens as a desktop window that keeps running in the tray, with Settings
+(#150; The desktop app, below), and knows which model does each kind of job and launches it
+(#152; Job models, below).
 
 ## Run it
 
@@ -12,6 +13,7 @@ could serve (#149), and opens as a desktop window that keeps running in the tray
 pnpm --dir app install
 pnpm --dir app start -- --list    # every T3 project, its folder and GitHub remote; changes nothing
 pnpm --dir app live:sign-in       # the live sign-in check (Live checks, below)
+pnpm --dir app live:launch        # the live launch check, sandbox only (Live checks, below)
 pnpm --dir app desktop            # builds and opens the desktop app (The desktop app, below)
 ```
 
@@ -63,7 +65,9 @@ the settings tickets export as `SETTINGS_PATH` (`test/real-settings.ts` lists th
 - **Port, don't redesign.** Today's runner and its docs (`docs/flow.md`, `docs/claude-lane.md`,
   `docs/reviews.md`, `docs/stops.md`, `docs/usage.md`, `docs/dashboard.md`) are the behaviour to
   port, with #68's changes on top. A rule you'd change is a comment on #68, not a quiet change.
-- **No model or vendor name in code.** Models come from settings (#121's rule). The GitHub-facing
+- **No model or vendor name in code.** Models come from T3 and the settings (#121's rule);
+  `test/no-model-names.test.ts` fails on one in `src`, `renderer/src` or `live`, comments
+  included (tests and their fixtures may name them). The GitHub-facing
   names (`sol-review` status, `sol-findings` ledger, `<!-- sol-finding -->` marks) stay as they
   are, because open PRs in served repos read them across the cutover.
 - **The briefs stay self-contained:** no skill names, no slash commands, nothing outside the repo
@@ -119,10 +123,48 @@ Code both sides use (`display.ts`, `settings-search.ts`) touches no Node. The wi
 ### Screenshots
 
 `pnpm --dir app desktop:shoot <absolute dir>` renders the real window on a fresh state in a temp
-folder (never the real state, lock or logon entry): `window`, `settings-name`,
-`settings-display`, `settings-machine` and `settings-search` (a typo, "windos"), each
-`-light.png` and `-dark.png`, at 1440x900. The page's address opens Settings for it:
+folder (never the real state, lock or logon entry), on the sample T3 catalog
+(`test/fixtures/server-config.json`, never the real T3): `window`, `settings-name`,
+`settings-models` (a new install), `settings-models-chosen` (the sample choices in
+`test/fixtures/shoot-jobs.json`), `settings-display`, `settings-machine` and `settings-search` (a
+typo, "windos"), each `-light.png` and `-dark.png`, at 1440x900. The page's address opens Settings for it:
 `#settings=<page>` or `#q=<search>`.
+
+## Job models
+
+Which model does each kind of job (#152: #120's shape on #36's page, as the 2026-11-17 triage on
+#68 settled). `src/jobs.ts` (shared with the window), `src/t3/catalog.ts`, `src/launch.ts`.
+
+- **Kinds:** build, fix, conflict, decision, review, ask (#68 drops `live`). The `jobs` setting is
+  `{default, <kind>: {own, fallback}}`, each a `{provider, model, effort}` (provider is T3's
+  `instanceId`; effort null for a model with none) or null. Default gives every kind its model
+  unless the kind has its own; a kind's fallback is for while its own provider is out of usage
+  (which one a job runs on is the usage gate's call, #153); without one the job waits.
+- **The choices are T3's**, from `subscribeServerConfig`'s `providers` (`src/t3/catalog-source.ts`
+  keeps them, following `providerStatuses` and `settingsUpdated`; a stream that ends keeps the
+  last answer, says why and is asked again in 30 s). Connected is `enabled` and `status: ready`.
+  Each provider has `models` (`slug`, `name`, `isDefault`) and each model its options
+  (`capabilities.optionDescriptors`); its effort is the select option whose id names an effort
+  (`effort`, `reasoningEffort`: the driver's own id) or else the one labelled Reasoning, its
+  default the option marked `isDefault`. Seen live 2026-11-19 (T3 0.1.9, three connected, eight
+  disabled); `test/fixtures/server-config.json` is that answer trimmed, auth details dropped.
+- **T3's default** is T3's `defaultModelSelection` when that's connected, else the first
+  connected provider's default model at its default effort. A new install's Default follows it
+  (null), and the page nudges until a choice or **Keep this** pins it (#36).
+- **What a job runs on:** a choice T3 can't run (its provider not connected, its model not
+  listed) falls to the next one up: the kind's own, Default, T3's default. So with one provider
+  connected every kind runs on it, and the page offers only it (#68 story 19). An effort the
+  model doesn't offer is the model's default.
+- **Launching** (`launchJob`): `t3_thread_launch` with `{projectId, title, message, runtimeMode:
+  full-access, modelSelection: {instanceId, model, options: [{id: <the model's effort option>,
+  value}]}, workspaceStrategy?: {type: worktree, baseRef, branch}}`, on the kind's model or,
+  asked, its fallback (docs/t3.md: Codex ignores `effort`, so the id matters).
+- **The page** (Settings, Models): Default, then one row per kind, each "Follows Default" until
+  set (an undo goes back), with its fallback under its model. The three dropdowns are fixed
+  widths, so changing a provider moves nothing (#36). Models carries a blue count in the page
+  list while Default follows T3's. Stefan's values (Opus 5.5 at medium for every kind, review on
+  Sol at high with Opus 5.5 at high as its fallback, as `config.toml` has them) are set at the
+  cutover, not in code.
 
 ## Signing in
 
@@ -204,6 +246,10 @@ is a T3Error with its `code: message`. Projects: `t3_project_list {cursor, limit
   live): `keybindingsUpdated`, `providerStatuses {providers}`, `settingsUpdated {settings}`,
   `environmentThemesUpdated {themes}` and `usageLimitSourcesUpdated {sources}`, each `{version:
   1, type, payload}`.
+- **A method that answers once** (not a stream) sends no Chunk: its answer is the Exit's
+  `exit.value` (`T3Ws.request`). `orchestration.getThreadProjection {threadId}` (scope
+  `orchestration:read`) answers `{thread, runs, ...}`; each run keeps its `modelSelection`, effort
+  included, which MCP's `t3_thread_read` doesn't show (checked live 2026-11-19).
 
 ## GitHub
 
@@ -232,3 +278,12 @@ is killed is code -1 with Node's reason in stderr, never a gh exit code (so is t
   **Run 2026-11-18, twice:** all ok; 10 projects, 6 on GitHub, gh failed for none; the runner
   client (session `d92c0baf`) settled thread `mcp:9a2c1fad` after both app starts with no new
   sign-in.
+- `app/live/launch.ts` (`pnpm --dir app live:launch [-- --run <instance>:<model>]`): the
+  "queue-runner sandbox" project only (it refuses to run without exactly one). One tiny thread per
+  driver (the first connected provider for each effort option id, its default model), each at an
+  effort that isn't the model's default, launched through `launchJob` in the project's folder;
+  it reads the effort back from the run's `modelSelection` (`orchestration.getThreadProjection`)
+  and archives the thread. **Run 2026-11-19:** Claude's Opus 5.5 and Haiku 5.5 completed with
+  `effort: low` on their runs; Codex's `gpt-6-astra` run carried `reasoningEffort: low` but failed
+  on ChatGPT's usage limit, so a completed Codex run is owed (the Python check ran one at
+  `reasoningEffort: high` on 2026-11-17, docs/t3.md).

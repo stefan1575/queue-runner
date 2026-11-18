@@ -16,10 +16,17 @@ export class FakeT3 {
   sessions: Session[] = [];
   projects: FakeProject[] = [];
   serverConfig: any = { version: 1, type: 'snapshot', config: { environment: { label: 'Fake', serverVersion: '0.1.9' } } };
+  /** Every `t3_thread_launch` a client made: its arguments, as T3 got them. */
+  launches: any[] = [];
+  /** WebSocket methods that answer once, by tag: the value T3's Exit carries. Any other
+   *  method but subscribeServerConfig ends in a Failure. */
+  wsMethods: Record<string, (payload: any) => unknown> = {};
   /** Every frame a client sent on a WebSocket. */
   frames: any[] = [];
   /** How many sign-ins finished, per subject. */
   signIns: Record<string, number> = {};
+  private configStreams = new Set<(v: any) => void>();
+  private closers = new Set<() => void>();
   private pairings = new Map<string, string[]>();
   private clients = new Map<string, string>(); // client id -> its name
   private codes = new Map<string, { challenge: string; label: string }>();
@@ -31,6 +38,17 @@ export class FakeT3 {
   addSession(subject: string, label: string): Session {
     const s = this.newSession(subject, label, []);
     return s;
+  }
+
+  /** A later `subscribeServerConfig` event (`{version: 1, type, payload}`), sent to every open stream. */
+  pushConfig(type: string, payload: unknown) {
+    for (const s of this.configStreams) s({ version: 1, type, payload });
+  }
+
+  /** T3 stops: every open WebSocket closes. */
+  dropSockets() {
+    for (const c of this.closers) c();
+    this.closers.clear();
   }
 
   /** T3 forgets every token it gave the app (a restart, say): the next use is refused. */
@@ -128,6 +146,13 @@ export class FakeT3 {
           const data = `data: ${JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { structuredContent: { projects, nextCursor: next } } })}\n\n`;
           return { status: 200, headers: { 'content-type': 'text/event-stream' }, text: data };
         }
+        if (msg.method === 'tools/call' && msg.params.name === 't3_thread_launch') {
+          const args = msg.params.arguments;
+          this.launches.push(args);
+          const n = this.launches.length;
+          const result = { threadId: `thread-${n}`, runId: `run-${n}`, link: `t3://thread/thread-${n}`, projectId: args.projectId, modelSelection: args.modelSelection, status: 'running' };
+          return json(200, { jsonrpc: '2.0', id: msg.id, result: { structuredContent: result } });
+        }
         return json(200, { jsonrpc: '2.0', id: msg.id, result: { isError: true, content: [{ text: '{"code":"unknown","message":"no such tool"}' }] } });
       }
     }
@@ -143,17 +168,29 @@ export class FakeT3 {
       || u.searchParams.get('orchestrationProtocol') !== '2' || !s || s.subject === 'mcp-client';
     let open = !refused;
     queueMicrotask(() => (refused ? on.closed(false, 'refused') : on.open()));
+    const mine: ((v: any) => void)[] = [];
+    const forget = () => { for (const m of mine) this.configStreams.delete(m); };
+    const drop = () => { if (open) { open = false; forget(); on.closed(true, 'T3 stopped'); } };
+    if (!refused) this.closers.add(drop);
     return {
       send: (text) => {
         const msg = JSON.parse(text);
         this.frames.push(msg);
         if (msg._tag === 'Request' && msg.tag === 'subscribeServerConfig') {
-          queueMicrotask(() => open && on.message(JSON.stringify({ _tag: 'Chunk', requestId: msg.id, values: [this.serverConfig] })));
+          const sub = (v: any) => { if (open) on.message(JSON.stringify({ _tag: 'Chunk', requestId: msg.id, values: [v] })); };
+          this.configStreams.add(sub);
+          mine.push(sub);
+          queueMicrotask(() => sub(this.serverConfig));
+        } else if (msg._tag === 'Request') {
+          const method = this.wsMethods[msg.tag];
+          const exit = method ? { _tag: 'Success', value: method(msg.payload) } : { _tag: 'Failure', cause: { _tag: 'Die', defect: `no method ${msg.tag}` } };
+          queueMicrotask(() => open && on.message(JSON.stringify({ _tag: 'Exit', requestId: msg.id, exit })));
         }
       },
       close: () => {
         if (!open) return;
         open = false;
+        forget();
         queueMicrotask(() => on.closed(true, ''));
       },
     };

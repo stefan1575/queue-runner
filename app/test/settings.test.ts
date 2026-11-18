@@ -4,6 +4,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, test } from 'vitest';
+import { DEFAULT_JOBS } from '../src/jobs.ts';
 import { DEFAULT_SETTINGS, SettingsError, SettingsStore } from '../src/settings.ts';
 import { stateFolder } from '../src/state-folder.ts';
 
@@ -45,7 +46,7 @@ describe('the settings', () => {
   test('a new install has the defaults', async () => {
     const store = await SettingsStore.open(await temp());
     expect(store.get()).toEqual(DEFAULT_SETTINGS);
-    expect(DEFAULT_SETTINGS).toEqual({ name: null, dateStyle: 'month-first', startWithWindows: true });
+    expect(DEFAULT_SETTINGS).toEqual({ name: null, dateStyle: 'month-first', startWithWindows: true, jobs: DEFAULT_JOBS });
   });
 
   test('a change is saved at once and survives a restart', async () => {
@@ -55,7 +56,7 @@ describe('the settings', () => {
     await store.set({ dateStyle: 'iso' });
     await store.set({ startWithWindows: false });
     const again = await SettingsStore.open(folder);
-    expect(again.get()).toEqual({ name: 'Ana', dateStyle: 'iso', startWithWindows: false });
+    expect(again.get()).toEqual({ ...DEFAULT_SETTINGS, name: 'Ana', dateStyle: 'iso', startWithWindows: false });
   });
 
   test('each change is told to the listeners', async () => {
@@ -108,9 +109,22 @@ describe('the settings', () => {
     const folder = await temp();
     const store = await SettingsStore.open(folder);
     await Promise.all([store.set({ name: 'Ana' }), store.set({ dateStyle: 'iso' }), store.set({ startWithWindows: false })]);
-    const all = { name: 'Ana', dateStyle: 'iso', startWithWindows: false };
+    const all = { ...DEFAULT_SETTINGS, name: 'Ana', dateStyle: 'iso', startWithWindows: false };
     expect(store.get()).toEqual(all);
     expect((await SettingsStore.open(folder)).get()).toEqual(all);
+  });
+
+  // A new install follows T3's default for every kind; a choice is kept from then on (#152).
+  test("each kind's model is saved and survives a restart, and a malformed one is refused", async () => {
+    const folder = await temp();
+    const store = await SettingsStore.open(folder);
+    expect(store.get().jobs.default).toBeNull();
+    const pick = { provider: 'p', model: 'm', effort: 'e' };
+    const jobs = { ...DEFAULT_JOBS, default: pick, review: { own: { ...pick, effort: 'f' }, fallback: pick } };
+    await store.set({ jobs });
+    expect((await SettingsStore.open(folder)).get().jobs).toEqual(jobs);
+    await expect(store.set({ jobs: { ...jobs, default: { provider: 'p' } } } as any)).rejects.toThrow(SettingsError);
+    expect((await SettingsStore.open(folder)).get().jobs).toEqual(jobs);
   });
 
   test('a file with a bad value keeps the rest and defaults that one', async () => {

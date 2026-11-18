@@ -35,7 +35,7 @@ export class T3Ws {
 
   /** Subscribes to a stream method; `onValue` gets each value T3 sends. A socket that never
    *  opens (T3 refused the token, or moved) is tried once more on a new sign-in. */
-  subscribe(tag: string, payload: object, onValue: (value: any) => void): Subscription {
+  subscribe(tag: string, payload: object, onValue: (value: any) => void, onExit?: (value: unknown) => void): Subscription {
     let socket: Socket | null = null;
     let closing = false;
     const done = new Promise<void>((resolve, reject) => {
@@ -73,6 +73,7 @@ export class T3Ws {
               return;
             }
             if (msg._tag === 'Exit' && msg.requestId === id) {
+              if (msg.exit?._tag === 'Success' && !closing) onExit?.(msg.exit.value);
               return msg.exit?._tag === 'Success'
                 ? end()
                 : end(new T3Error(`T3 ended ${tag}: ${JSON.stringify(msg.exit?.cause ?? msg.exit).slice(0, 300)}`));
@@ -100,6 +101,14 @@ export class T3Ws {
       close: () => { closing = true; socket?.close(); },
       done,
     };
+  }
+
+  /** A method that answers once (not a stream): the value of T3's Exit. */
+  async request(tag: string, payload: object = {}): Promise<any> {
+    let got: unknown;
+    const sub = this.subscribe(tag, payload, () => {}, (v) => { got = v; });
+    await sub.done;
+    return got;
   }
 
   /** The stream's first value, then the subscription closed. */

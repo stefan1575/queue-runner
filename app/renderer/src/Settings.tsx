@@ -3,20 +3,22 @@
 // on the left with Search and "/" on top, a "Settings / Page" header, one page at a time, each
 // setting a row in a bordered card (a medium title over a smaller grey line, the control on the
 // right). A change saves the moment it's made; there's no Save button.
-import { CalendarClock, Check, Monitor, Search, User, X, type LucideIcon } from 'lucide-react';
+import { CalendarClock, Check, Cpu, Monitor, Search, User, X, type LucideIcon } from 'lucide-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { View } from '../../src/desktop/view.ts';
 import { DATE_STYLES, clock, formatDate, isTwelveHour, TIME_FORMATS, type DateStyle } from '../../src/display.ts';
 import type { SettingsPatch } from '../../src/settings.ts';
-import { PAGES, searchSettings, settingEntries, type PageId, type SettingId } from '../../src/settings-search.ts';
+import { JOB_KINDS, type JobKind } from '../../src/jobs.ts';
+import { PAGES, searchSettings, settingEntries, wantsChoice, type PageId, type SettingId } from '../../src/settings-search.ts';
 import type { Open } from './App.tsx';
 import { cn } from './cn.ts';
 import { NameField, Pick, Toggle } from './controls.tsx';
+import { defaultRow, kindRow } from './Models.tsx';
 import { runner, useNow } from './runner.ts';
 
-const ICONS: Record<PageId, LucideIcon> = { name: User, display: CalendarClock, machine: Monitor };
+const ICONS: Record<PageId, LucideIcon> = { name: User, models: Cpu, display: CalendarClock, machine: Monitor };
 
-function Row({ title, desc, children }: { title: ReactNode; desc?: ReactNode; children?: ReactNode }) {
+function Row({ title, desc, children, below }: { title: ReactNode; desc?: ReactNode; children?: ReactNode; below?: ReactNode }) {
   return (
     <div className="px-5 py-3.5">
       <div className="flex flex-wrap items-center justify-between gap-x-8 gap-y-2.5 lg:flex-nowrap">
@@ -26,6 +28,7 @@ function Row({ title, desc, children }: { title: ReactNode; desc?: ReactNode; ch
         </div>
         {children && <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">{children}</div>}
       </div>
+      {below}
     </div>
   );
 }
@@ -71,6 +74,7 @@ export function Settings({ view, open, onOpen, onClose }: { view: View; open: No
     return () => removeEventListener('keydown', onKey);
   }, [onClose]);
 
+  const wants = wantsChoice(view);
   const rows: Record<SettingId, ReactNode> = {
     name: (
       <Row title="Your name" desc={account
@@ -79,6 +83,8 @@ export function Settings({ view, open, onOpen, onClose }: { view: View; open: No
         <NameField value={s.name} fallback={account?.name ?? account?.login ?? null} onSave={(name) => save({ name })} />
       </Row>
     ),
+    'job-default': defaultRow(view, save, Row),
+    ...(Object.fromEntries(JOB_KINDS.map((k) => [`job-${k.id}`, kindRow(k.id, view, save, Row)])) as Record<`job-${JobKind}`, ReactNode>),
     date: (
       <Row title="Date style" desc={<>How dates are written across the app. In tight spots: {formatDate(now, s.dateStyle, tf, true)}.</>}>
         <Pick<DateStyle> className="w-[380px]" label="Date style" value={s.dateStyle}
@@ -116,13 +122,14 @@ export function Settings({ view, open, onOpen, onClose }: { view: View; open: No
           <nav aria-label="Settings pages" className="flex-1 space-y-0.5 overflow-y-auto px-2.5 pb-3">
             {PAGES.map((p) => {
               const Icon = ICONS[p.id];
-              const count = hits.filter((h) => h.page === p.id).length, on = !q && p.id === page.id;
+              const count = hits.filter((h) => h.page === p.id).length, on = !q && p.id === page.id, want = !q ? wants[p.id] : undefined;
               return (
                 <button key={p.id} type="button" aria-current={on ? 'page' : undefined} title={p.label} onClick={() => onOpen({ page: p.id, query: '' })}
                   className={cn('flex h-[38px] w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-[16px] font-medium max-md:justify-center max-md:px-0', on ? 'bg-sunk text-ink' : 'text-mute hover:bg-sunk/70 hover:text-ink', q && !count && 'opacity-40')}>
                   <Icon className="size-[18px] shrink-0 opacity-80" />
                   <span className="flex-1 max-md:hidden">{p.label}</span>
                   {q && count > 0 && <span className="text-[13.5px] tabular-nums max-md:hidden">{count}</span>}
+                  {want ? <span className="rounded-full bg-you px-1.5 text-[12.5px] font-semibold leading-5 text-white tabular-nums max-md:hidden" title="Wants a choice">{want}</span> : null}
                 </button>
               );
             })}
