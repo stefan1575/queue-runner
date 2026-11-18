@@ -9,6 +9,10 @@ needs an agent. The flow's rules are `docs/flow.md`.
 what changed and why. The runner serves this repo too: it reviews and merges its own PRs and
 restarts on its new code once main moves (`docs/running.md`, Serving itself).
 
+**It is being rebuilt in TypeScript** (spec #68, tickets #149 to #166). New behaviour goes in the
+rebuild. The Python runner gets only the fixes that keep it serving until the cutover (#165), and
+a Python feature ticket is closed in favour of its rebuild ticket.
+
 ## Run it
 
 ```
