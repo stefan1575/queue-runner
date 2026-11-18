@@ -646,7 +646,9 @@ class Reviewer:
                      "finding's ID, gives the reason, and attaches the evidence (the test that "
                      "wouldn't fail). You get one reply on each: accept it, or keep it open and "
                      "say in your review what it misses. Repeat nothing already posted: an open "
-                     "finding's status covers it, so don't list it again in `findings`. If a "
+                     "finding's status covers it, so don't list it again in `findings`. An open "
+                     'finding about screenshots alone takes its `screenshots` kind (check 5) in '
+                     'its `earlier` entry too, whenever you can tell or it has changed. If a '
                      'finding that was closed comes back, list it in `findings` with its old ID. '
                      "Give a new finding an ID not used before (used so far: " + used + ').\n'
                      f'8. **Classes raised so far:** {named}.\n')

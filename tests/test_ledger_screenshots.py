@@ -96,6 +96,39 @@ class ScreenshotRoundsTest(unittest.TestCase):
                          ['missing', 'missing', 'owed', '', '', ''])
 
 
+class EarlierClassificationTest(unittest.TestCase):
+    """Sol classifies a finding it already raised in the block's `earlier` list, since it must
+    not list an open finding again in `findings` (templates/review.md, review.py's brief)."""
+
+    def test_a_missing_finding_found_owed_later_stops_for_stefan(self):
+        comments = history([(shot('F1'), 'open')])
+        d = decide_on(comments, reply(earlier=[{'id': 'F1', 'status': 'open',
+                                                'screenshots': 'owed'}]))
+        self.assertEqual(d['outcome'], 'stop')
+        self.assertEqual([s['signal'] for s in d['signals']], ['screenshots-owed'])
+
+    def test_a_legacy_screenshot_finding_classified_missing_at_review_4_gets_a_fix_round(self):
+        legacy = {k: v for k, v in shot('F9').items() if k != 'screenshots'}
+        comments = history([(CODE, 'open')], [(CODE, 'fixed')],
+                           [(CODE, 'fixed'), (legacy, 'open')])
+        d = decide_on(comments, reply(earlier=[{'id': 'F9', 'status': 'open',
+                                                'screenshots': 'missing'}]))
+        self.assertEqual((d['outcome'], d['signals']), ('fix', []))
+
+    def test_an_owed_reason_that_no_longer_holds_turns_missing_and_the_ledger_keeps_it(self):
+        comments = history([(shot('F1', kind='owed'), 'open')])
+        d = decide_on(comments, reply(earlier=[{'id': 'F1', 'status': 'open',
+                                                'screenshots': 'missing'}]))
+        self.assertEqual((d['outcome'], d['signals']), ('fix', []))
+        [r] = read_reviews([comment(d['body'])])
+        self.assertEqual(r['findings'][0]['screenshots'], 'missing')
+
+    def test_an_earlier_entry_without_screenshots_keeps_the_kind(self):
+        comments = history([(shot('F1', kind='owed'), 'open')])
+        d = decide_on(comments, reply(earlier=[{'id': 'F1', 'status': 'open'}]))
+        self.assertEqual([s['signal'] for s in d['signals']], ['screenshots-owed'])
+
+
 class EscalationTest(unittest.TestCase):
     """The fix lane reads the same routing from the ledgers alone (`ledger.escalation`)."""
 

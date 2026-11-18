@@ -268,15 +268,18 @@ def parse_findings(reply: str) -> tuple[list[dict], str]:
     return found, FENCE.sub('', reply).strip()
 
 
-def parse_earlier(reply: str) -> dict[str, str]:
-    """The status Sol gave each earlier finding, from the block's "earlier" list: {id: status}."""
+def parse_earlier(reply: str) -> tuple[dict[str, str], dict[str, str]]:
+    """What Sol said of each earlier finding, from the block's "earlier" list: the status it gave
+    each ({id: status}) and, for those it gave one, its `screenshots` kind ({id: shot_kind()}).
+    Sol must not list an open finding again in `findings`, so this is where it says one is about
+    screenshots (an older one raised before the field existed) or that a missing one is owed."""
     data = _block(reply)
     items = data.get('earlier') if isinstance(data, dict) else None
     if items is None:
-        return {}
+        return {}, {}
     if not isinstance(items, list) or not all(isinstance(e, dict) for e in items):
         raise SolFailed("Sol's sol-findings block has an \"earlier\" that isn't a list of objects.")
-    given = {}
+    given, shots = {}, {}
     for i, e in enumerate(items, 1):
         fid = _text(e.get('id'))
         s = re.sub(r'[\s_]+', '-', _text(e.get('status')).lower())
@@ -289,7 +292,9 @@ def parse_earlier(reply: str) -> dict[str, str]:
         if fid in given:
             raise SolFailed(f'Earlier finding {fid} has two statuses.')
         given[fid] = s
-    return given
+        if 'screenshots' in e:
+            shots[fid] = shot_kind(e['screenshots'])
+    return given, shots
 
 
 def _root(p: str) -> str:
@@ -374,7 +379,7 @@ def decide(repo: str, n: int, sha: str, rnd: int, earlier: list[dict], has_revie
     the comment's heading and byline and the status say so. An unreadable reply raises
     SolFailed."""
     found, prose = parse_findings(reply)
-    given = parse_earlier(reply)
+    given, shots = parse_earlier(reply)
     notes = []
     last = earlier[-1]['sha'] if earlier else None
     if gone:
@@ -449,6 +454,8 @@ def decide(repo: str, n: int, sha: str, rnd: int, earlier: list[dict], has_revie
                 q['status'] = given[p['id']]
                 if q['status'] not in OPEN:
                     q['closed'] = rnd
+            if p['id'] in shots:
+                q['screenshots'] = shots[p['id']]
             rows.append(q)
         now.append(q)
     now += [f for f in found if f['id'] not in before]

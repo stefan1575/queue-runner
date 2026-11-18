@@ -63,8 +63,10 @@ The review loop's rules are `docs/flow.md`, The review loop; leads-dashboard's
    every blocking review from 3 comes to Stefan, unless only on screenshots a fix round can
    take, for up to `SHOT_ROUNDS` such reviews in a row: `ledger.route`), `merge` (clean), `fix`.
    A finding about screenshots alone carries `screenshots` (`missing` or `owed`,
-   `templates/review.md` check 5); a new one in an earlier screenshot class is no repeated
-   class, since it names no cause in the code. An Important
+   `templates/review.md` check 5), from its `findings` entry when new and from its `earlier`
+   entry when Sol raised it before (one entry without the field keeps the kind it had); a new
+   one in an earlier screenshot class is no repeated class, since it names no cause in the
+   code. An Important
    finding without file, line and a scenario (or a cost and rule) counts as a nit; nits past five
    are dropped and named. No readable block: `failed`.
 7. **Write.** `comment.md` (heading, Sol's prose with links made GitHub-relative, findings

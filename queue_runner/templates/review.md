@@ -20,6 +20,8 @@ Review independently (the only files you change are tests you add to show a prob
    alone `"screenshots": "owed"` when the PR's reason holds that only Stefan can reach that state
    (a UAC prompt, an elevated app), and `"screenshots": "missing"` otherwise (absent, wrong, or an
    owed reason that doesn't hold): a fix round shoots missing ones, and owed ones go to Stefan.
+   For a finding you raised in an earlier review, give it in that finding's `earlier` entry
+   (`{"id": "F3", "status": "open", "screenshots": "owed"}`).
    Leave `screenshots` out of every other finding, including one where the screenshots show a
    defect in the code.
 $again$guide
