@@ -27,6 +27,17 @@ no tokens. Every fixed step is the script's; an agent is started only for work t
   `needs-info` stop for Stefan. There's no resident orchestrator thread.
 - **One Claude job and one review job at a time.**
 
+## Labels
+
+The runner reads and applies only these, and creates the first three in a repo it serves
+(`docs/app.md`, Served):
+
+- `ready-for-agent`: the ticket is fully specified; the runner may pick and build it.
+- `needs-info`: a stop waiting on Stefan, one issue per PR (`docs/stops.md`).
+- `ready-to-merge`: a clean PR, ready to merge.
+- `needs-triage`: a Pre-existing review finding filed as its own issue, for Stefan to sort
+  (`docs/reviews.md`).
+
 ## Briefs are built, not kept
 
 - **No handoff files.** For each job the runner fills a brief template (`queue_runner/templates/`)
