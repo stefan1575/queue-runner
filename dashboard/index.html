@@ -1204,12 +1204,12 @@ body.q-dragging .q12:not(.v-b) .er { background: var(--surface); }
 .r14 .card-head { gap: 10px; }
 .r14 .card-head h2 { font: 600 17px/1.2 var(--display); }
 .r14 .card-head .hi { width: 18px; height: 18px; color: var(--mute); }
-/* A bar is a trough: an empty one reads as empty, and a used-up one as used up (red rim). */
-.rb { display: block; position: relative; overflow: hidden; height: 6px; border-radius: 99px; background: var(--sunk); box-shadow: inset 0 0 0 1px var(--line); }
+/* A bar: the share left over a plain track. Empty is just the track, the same size as every other. */
+.rb { display: block; position: relative; overflow: hidden; height: 6px; border-radius: 99px; background: var(--btn-line); }
 .rb .fill { position: absolute; inset: 0 auto 0 0; background: var(--ink-2); border-radius: 99px; }
 .rb .kept { position: absolute; inset: 0 auto 0 0; background: var(--you); opacity: .6; border-radius: 99px; }
 .rb.near .fill { background: var(--run); }
-.rb.out { background: var(--bad-wash); box-shadow: inset 0 0 0 1px var(--bad-line); }
+/* Take 16: a used-up window is the same bar, just empty: no red, so every bar reads the same size. */
 .rb.t1 { height: 8px; } .rb.t2 { height: 5px; } .rb.t3 { height: 4px; }
 .pct { font-weight: 400; color: var(--ink); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .pct small { font-size: 12.5px; color: var(--mute); font-weight: 400; }
@@ -2756,14 +2756,13 @@ function when(iso) {
   return `${d.toLocaleDateString("en-US", { month: "long", day: "numeric" })} ${wd} ${t12(d)}`;
 }
 const whenEl = (iso, pre) => `<time datetime="${esc(iso)}" title="${esc(stamp(iso))}">${pre}${esc(when(iso))}</time>`;
-// Take 15: each card's icon is a glyph inside the same ring. Take 14's looked different sizes
-// because each filled its square differently: the folder was a closed shape across nearly all of
-// it, the gauge an open arc over its top two thirds, the pulse a thin line. Sharing one outline
-// (a 18px circle) makes them the same size whatever is inside.
+// Take 16: each card's icon is drawn in lines only, none a closed shape, each across the full
+// 24px square, so none looks bigger than the others (take 14's folder was a closed shape that filled
+// its square, beside an open arc and a thin line). Usage a gauge, Repositories a branch, Health a pulse.
 const HEAD_ICON = {
-  usage: svg('<circle cx="12" cy="12" r="9"/><path d="M7.8 15.2a4.6 4.6 0 0 1 8.4-3.4"/><path d="m12 15 2.6-3.1"/>'),
-  repos: svg('<circle cx="12" cy="12" r="9"/><path d="M7.6 10a1 1 0 0 1 1-1h2.1l1.1 1.2h3.6a1 1 0 0 1 1 1v3.6a1 1 0 0 1-1 1H8.6a1 1 0 0 1-1-1Z"/>'),
-  health: svg('<circle cx="12" cy="12" r="9"/><path d="M6.8 12.4h2.4l1.4-2.8 2.8 5.2 1.4-2.4h2.4"/>'),
+  usage: svg('<path d="m12 14 4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/>'),
+  repos: svg('<path d="M6 3v12"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/>'),
+  health: svg('<path d="M22 12h-2.5a2 2 0 0 0-1.9 1.5l-2.4 8.3a.3.3 0 0 1-.5 0L9.2 2.2a.3.3 0 0 0-.5 0L6.4 10.5A2 2 0 0 1 4.5 12H2"/>'),
 };
 const head14 = (id, title, extra = "") => `<header class="card-head">${HEAD_ICON[id].replace('class="i"', 'class="i hi"')}<h2>${title}</h2>${extra}</header>`;
 function lw(w) {
