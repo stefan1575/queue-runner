@@ -7,7 +7,9 @@ import { execFile } from 'node:child_process';
 export class GitError extends Error {}
 
 export interface Git {
-  /** Fetches `origin/<base>`, so the worktree starts from GitHub's newest. */
+  /** Fetches `origin/<base>`, so the worktree starts from GitHub's newest. The refspec is named,
+   *  so `refs/remotes/origin/<base>` is written whatever the clone's own refspec fetches (a
+   *  single-branch clone of another branch writes only FETCH_HEAD otherwise). */
   fetch(folder: string, base: string): Promise<void>;
   /** Whether a local branch of this name exists. */
   hasBranch(folder: string, branch: string): Promise<boolean>;
@@ -32,7 +34,7 @@ export class GitCli implements Git {
   }
 
   async fetch(folder: string, base: string): Promise<void> {
-    const { code, stderr } = await this.run(['fetch', '--quiet', 'origin', base], folder);
+    const { code, stderr } = await this.run(['fetch', '--quiet', 'origin', `+refs/heads/${base}:refs/remotes/origin/${base}`], folder);
     if (code !== 0) throw new GitError(`git fetch origin ${base} failed (${code}) in ${folder}: ${firstLine(stderr)}`);
   }
 
