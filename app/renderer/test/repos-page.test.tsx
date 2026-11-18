@@ -16,10 +16,13 @@ Element.prototype.scrollTo ??= () => {};
 const served: Repo = { id: 'p1', title: 'sandbox', folder: 'C:/sandbox', github: 'ana/sandbox', checking: false, served: true, merge: 'runner', isNew: false };
 const fresh: Repo = { id: 'p2', title: 'blog', folder: 'C:/blog', github: 'ana/blog', checking: false, served: false, merge: 'me', isNew: true };
 const bare: Repo = { id: 'p3', title: 'notes', folder: 'C:/notes', github: null, checking: false, served: false, merge: 'me', isNew: false };
+const unread: Repo = { id: 'p4', title: 'wiki', folder: 'C:/wiki', github: null, remoteError: 'gh repo view failed (4): not signed in', checking: false, served: false, merge: 'me', isNew: false };
 const view: View = {
   settings: { ...DEFAULT_SETTINGS }, account: { login: 'ana-gh', name: 'Ana GH' }, timeFormat: 'locale',
-  repos: [served, fresh, bare], reposError: null,
+  repos: [served, fresh, bare, unread], reposError: null,
 };
+/** What was asked past the read of every remote the page asks for as it opens. */
+const acted = () => asked.filter((a) => a.do !== 'check');
 
 let root: Root;
 let host: HTMLElement;
@@ -58,10 +61,19 @@ describe('the Repositories page', () => {
     expect(button('Serve blog').disabled).toBe(false);
   });
 
+  test("opening the page reads every remote again, and one gh couldn't read can be switched on to try again", async () => {
+    open();
+    expect(asked).toEqual([{ do: 'check' }]);
+    expect(host.textContent).toContain("GitHub couldn't be read: gh repo view failed (4): not signed in");
+    expect(button('Serve wiki').disabled).toBe(false);
+    await click(button('Serve wiki'));
+    expect(acted()).toEqual([{ do: 'serve', id: 'p4', on: true }]);
+  });
+
   test('switching one on asks the runner', async () => {
     open();
     await click(button('Serve blog'));
-    expect(asked).toEqual([{ do: 'serve', id: 'p2', on: true }]);
+    expect(acted()).toEqual([{ do: 'serve', id: 'p2', on: true }]);
   });
 
   test("who merges can't be chosen for a repo that isn't served", () => {
@@ -73,10 +85,10 @@ describe('the Repositories page', () => {
   test('removing asks first, then removes', async () => {
     open();
     await click(button('Remove sandbox'));
-    expect(asked).toEqual([]);
+    expect(acted()).toEqual([]);
     expect(document.querySelector('[role="alertdialog"]')?.textContent).toContain('C:/sandbox and everything on GitHub (ana/sandbox) stay as they are');
     await click(byText('Remove'));
-    expect(asked).toEqual([{ do: 'remove', id: 'p1', withThreads: false }]);
+    expect(acted()).toEqual([{ do: 'remove', id: 'p1', withThreads: false }]);
     expect(document.querySelector('[role="alertdialog"]')).toBeNull();
   });
 
@@ -87,7 +99,7 @@ describe('the Repositories page', () => {
     await click(byText('Remove'));
     expect(document.querySelector('[role="alertdialog"]')?.textContent).toContain('still has threads in T3');
     await click(byText('Remove with its threads'));
-    expect(asked).toEqual([{ do: 'remove', id: 'p1', withThreads: false }, { do: 'remove', id: 'p1', withThreads: true }]);
+    expect(acted()).toEqual([{ do: 'remove', id: 'p1', withThreads: false }, { do: 'remove', id: 'p1', withThreads: true }]);
   });
 
   test('a New repo is marked and counted, and looked at once the page goes away', () => {
@@ -95,13 +107,13 @@ describe('the Repositories page', () => {
     expect(host.textContent).toContain('New from T3');
     expect(document.querySelector('[title="1 new from T3"]')).not.toBeNull();
     act(() => root.render(<></>));
-    expect(asked).toEqual([{ do: 'seen', ids: ['p2'] }]);
+    expect(acted()).toEqual([{ do: 'seen', ids: ['p2'] }]);
   });
 
   test('adding opens the folder picker through the runner', async () => {
     answer = () => ({ added: 'C:/new' });
     open();
     await click(byText('Add folder'));
-    expect(asked).toEqual([{ do: 'add' }]);
+    expect(acted()).toEqual([{ do: 'add' }]);
   });
 });

@@ -1,5 +1,5 @@
 // Settings / Repositories (#151), as #36's prototype lays it out: one row per T3 project, its name
-// with a "New" or "No GitHub remote" mark, its GitHub repo and folder under it, then who merges,
+// with a "New" or "No GitHub remote" mark (each folder's remote read again as the page opens), its GitHub repo and folder under it, then who merges,
 // Served, and Remove. "Add folder" in the header opens Windows' folder dialog. Removing asks
 // first, and asks again when T3 says the project still has threads.
 import { FolderPlus, LoaderCircle, Trash2, TriangleAlert } from 'lucide-react';
@@ -78,9 +78,9 @@ export function RepoRow({ repo: r, onDone }: { repo: Repo; onDone: Done }) {
           <Pick<Merger> className="w-[172px]" label={`Who merges ${r.title}`} value={r.merge} disabled={!r.served || busy}
             options={[{ id: 'me', label: 'I merge' }, { id: 'runner', label: 'Runner merges' }]}
             onChange={(merge) => act({ do: 'merge', id: r.id, merge })} />
-          <span className="grid w-[60px] place-items-center" title={r.served ? 'Served' : r.github ? 'Not served' : "Can't be served"}>
+          <span className="grid w-[60px] place-items-center" title={r.served ? 'Served' : r.github ? 'Not served' : r.remoteError ? 'Not served: switching on reads GitHub again' : "Can't be served"}>
             {busy ? <LoaderCircle className="size-5 animate-spin text-mute" aria-label="Working" />
-              : <Toggle label={`Serve ${r.title}`} checked={r.served} disabled={!r.github} onChange={(on) => act({ do: 'serve', id: r.id, on })} />}
+              : <Toggle label={`Serve ${r.title}`} checked={r.served} disabled={r.checking || (!r.github && !r.remoteError)} onChange={(on) => act({ do: 'serve', id: r.id, on })} />}
           </span>
           <button type="button" onClick={() => setRemoving(true)} aria-label={`Remove ${r.title}`} title="Remove"
             className="grid size-9 place-items-center rounded-lg text-faint hover:bg-sunk hover:text-ink"><Trash2 className="size-4" /></button>
@@ -139,8 +139,13 @@ function RemoveDialog({ repo: r, onClose, onDone }: { repo: Repo; onClose: () =>
 export function ReposPage({ view, onDone }: { view: View; onDone: Done }) {
   const shown = useRef(new Set<string>());
   for (const r of view.repos ?? []) if (r.isNew) shown.current.add(r.id);
-  useEffect(() => () => {
-    if (shown.current.size) void ask({ do: 'seen', ids: [...shown.current] });
+  useEffect(() => {
+    // each folder's GitHub remote is read again as the page opens: one gained, lost or that gh
+    // couldn't read before shows as it is now
+    void ask({ do: 'check' });
+    return () => {
+      if (shown.current.size) void ask({ do: 'seen', ids: [...shown.current] });
+    };
   }, []);
   if (!view.repos) {
     return <p className="px-1 text-[15px] text-mute">{view.reposError ? <>T3 Code isn't answering, so its projects can't be listed: {view.reposError}</> : "Reading T3 Code's projects…"}</p>;

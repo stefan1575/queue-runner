@@ -148,8 +148,12 @@ two served repos, one New and one with no GitHub remote), which reaches neither 
   are never touched. T3 0.1.9 refuses a project with threads ("The project is not empty;
   force=true is required to delete it") and `force: true` deletes its threads, so the app never
   forces at first: the dialog asks again, naming that the threads go too, and only then forces.
-- **Served** needs a GitHub remote, read again when it's switched on: a project without one says
-  "No GitHub remote" and its switch is off and disabled. Switching on first lists the repo's
+- **Served** needs a GitHub remote. Each folder's remote is read again on every T3 event, as
+  the Repositories page opens, and when it's switched on, so no answer (gh failing or no remote)
+  is kept for good; the last one known stays on show while it's read again. A project without
+  one says "No GitHub remote" and its switch is off and disabled; one gh couldn't read says why
+  and its switch stays usable, since switching on reads it again. A served repo whose remote
+  can't be read shows as not served without losing its choice. Switching on first lists the repo's
   labels (`gh label list`) and creates whichever of `ready-for-agent`, `needs-info` and
   `ready-to-merge` is missing (`gh label create`; one made meanwhile is left as it is). gh
   failing leaves it off and the page says why. Switching off and who merges touch GitHub not at

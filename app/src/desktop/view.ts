@@ -25,6 +25,8 @@ export type RepoAction =
   | { do: 'serve'; id: string; on: boolean }
   | { do: 'merge'; id: string; merge: Merger }
   | { do: 'seen'; ids: string[] }
+  /** Read every project's GitHub remote again, as the Repositories page opens. */
+  | { do: 'check' }
   | { do: 'add' }
   | { do: 'remove'; id: string; withThreads?: boolean };
 
@@ -41,6 +43,7 @@ export interface RepoSource {
   setServed(id: string, on: boolean): Promise<void>;
   setMerge(id: string, merge: Merger): Promise<void>;
   seen(ids: string[]): Promise<void>;
+  check(): Promise<void>;
   add(): Promise<string | null>;
   remove(id: string, withThreads?: boolean): Promise<void>;
 }
@@ -109,6 +112,7 @@ export class RunnerView {
         case 'serve': await r.setServed(action.id, action.on); return {};
         case 'merge': await r.setMerge(action.id, action.merge); return {};
         case 'seen': await r.seen(action.ids); return {};
+        case 'check': await r.check(); return {};
         case 'add': return { added: await r.add() };
         case 'remove': await r.remove(action.id, action.withThreads === true); return {};
       }

@@ -46,6 +46,7 @@ class FakeRepos implements RepoSource {
   setServed(id: string, on: boolean) { return this.ask('serve', id, on); }
   setMerge(id: string, merge: string) { return this.ask('merge', id, merge); }
   seen(ids: string[]) { return this.ask('seen', ids); }
+  check() { return this.ask('check'); }
   async add() { await this.ask('add'); return 'C:/blog'; }
   remove(id: string, withThreads?: boolean) { return this.ask('remove', id, withThreads); }
 }
@@ -135,7 +136,8 @@ describe('repositories in the view', () => {
     expect(await view.repo({ do: 'serve', id: 'p1', on: true })).toEqual({});
     expect(await view.repo({ do: 'merge', id: 'p1', merge: 'runner' })).toEqual({});
     expect(await view.repo({ do: 'seen', ids: ['p1'] })).toEqual({});
-    expect(repos.asked).toEqual([['add'], ['serve', 'p1', true], ['merge', 'p1', 'runner'], ['seen', ['p1']]]);
+    expect(await view.repo({ do: 'check' })).toEqual({});
+    expect(repos.asked).toEqual([['add'], ['serve', 'p1', true], ['merge', 'p1', 'runner'], ['seen', ['p1']], ['check']]);
     repos.refuse = new RepoError('sandbox has no GitHub remote');
     expect(await view.repo({ do: 'serve', id: 'p1', on: true })).toEqual({ error: 'sandbox has no GitHub remote' });
     repos.refuse = new NotEmpty('sandbox still has threads in T3.');

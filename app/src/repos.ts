@@ -44,6 +44,7 @@ const OFF: RepoChoice = { served: false, merge: 'me', seen: true };
 const same = (a: string, b: string) => a.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase() === b.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
 
 type Remote = { github: string | null; error?: string } | 'checking';
+type Read = { github: string | null; error?: string };
 
 export class Repositories {
   private feed: ProjectFeed;
@@ -52,6 +53,8 @@ export class Repositories {
   private mcp: Pick<T3Mcp, 'call'>;
   private pickFolder: () => Promise<string | null>;
   private remotes = new Map<string, Remote>();
+  /** Each folder's latest read: an older one finishing after it is dropped. */
+  private reads = new Map<string, Promise<Read>>();
   /** Folders added here, whose projects aren't New when T3 tells of them. */
   private addedHere: string[] = [];
   private listeners = new Set<() => void>();
@@ -98,6 +101,12 @@ export class Repositories {
   onChange(listener: () => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
+  }
+
+  /** Reads every project's GitHub remote again (the window asks as the Repositories page
+   *  opens): a remote gained, lost, or that gh couldn't read before shows as it is now. */
+  async check(): Promise<void> {
+    await Promise.all((this.feed.current() ?? []).map((p) => this.readRemote(p.folder)));
   }
 
   /** Switches a repo on or off. On needs a GitHub remote, read again now, and creates the
@@ -172,8 +181,9 @@ export class Repositories {
   }
 
   /** Keeps the saved choices in step with T3's projects (a new one arrives off, and New unless
-   *  added here or seen on a new install; a removed one's choices go), and reads new folders'
-   *  remotes. */
+   *  added here or seen on a new install; a removed one's choices go), and reads every folder's
+   *  remote again: what was read before, gh failing or no remote included, is never kept as
+   *  the answer for good. */
   private sync() {
     const projects = this.feed.current();
     this.tell();
@@ -199,23 +209,33 @@ export class Repositories {
         this.addedHere = this.addedHere.filter((f) => !projects.some((p) => same(f, p.folder)));
       }, () => {});
     }
-    for (const p of projects) {
-      if (!this.remotes.has(p.folder)) void this.readRemote(p.folder);
-    }
+    for (const p of projects) void this.readRemote(p.folder).catch(() => {});
   }
 
-  private async readRemote(folder: string): Promise<{ github: string | null; error?: string }> {
+  /** Reads a folder's remote. What was known before stays on show while it's read again; only a
+   *  folder never read shows as checking. The latest read wins. */
+  private readRemote(folder: string): Promise<Read> {
     if (!this.remotes.has(folder)) this.remotes.set(folder, 'checking');
-    let got: { github: string | null; error?: string };
-    try {
-      got = { github: (await this.github.remoteOf(folder))?.nameWithOwner ?? null };
-    } catch (e) {
-      if (!(e instanceof GitHubError)) throw e;
-      got = { github: null, error: e.message };
-    }
-    this.remotes.set(folder, got);
-    this.tell();
-    return got;
+    const read = (async (): Promise<Read> => {
+      try {
+        return { github: (await this.github.remoteOf(folder))?.nameWithOwner ?? null };
+      } catch (e) {
+        if (!(e instanceof GitHubError)) throw e;
+        return { github: null, error: e.message };
+      }
+    })();
+    this.reads.set(folder, read);
+    return read.then((got) => {
+      if (this.reads.get(folder) === read) {
+        this.reads.delete(folder);
+        this.remotes.set(folder, got);
+        this.tell();
+      }
+      return got;
+    }, (e) => {
+      if (this.reads.get(folder) === read) this.reads.delete(folder);
+      throw e;
+    });
   }
 
   private tell() {

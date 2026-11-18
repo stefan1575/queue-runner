@@ -20,7 +20,12 @@ class FakeGitHub implements GitHub, GitHubLabels {
   labels: Record<string, string[]> = {};
   created: { repo: string; label: Label }[] = [];
   failLabels = false;
+  /** gh failing on remotes, as when it isn't signed in. */
+  failRemotes = false;
+  remoteReads = 0;
   async remoteOf(folder: string) {
+    this.remoteReads++;
+    if (this.failRemotes) throw new GitHubError('gh repo view failed (4): not signed in');
     const r = this.remotes[folder];
     return r ? { nameWithOwner: r, url: `https://github.com/${r}` } : null;
   }
@@ -190,6 +195,53 @@ describe('served', () => {
     const { repos } = await start();
     await expect(repos.setServed('p1', true)).rejects.toThrow(/gh label list failed/);
     expect(row(repos, 'p1')?.served).toBe(false);
+  });
+});
+
+describe('a GitHub remote read again', () => {
+  test("gh failing at the start doesn't stick: the next T3 event reads it again, and a served repo is served once it can be read", async () => {
+    const state = join(dir, 'state');
+    const first = await start(state);
+    await first.repos.setServed('p1', true);
+    stops.forEach((s) => s());
+    stops = [];
+    github.failRemotes = true;
+    const { repos } = await start(state);
+    expect(row(repos, 'p1')).toMatchObject({ github: null, served: false, remoteError: expect.stringMatching(/not signed in/) });
+    github.failRemotes = false;
+    t3.addProject({ id: 'p3', title: 'blog', workspaceRoot: 'C:/blog' });
+    await vi.waitFor(() => expect(row(repos, 'p1')).toMatchObject({ github: 'ana/sandbox', served: true }));
+    expect(row(repos, 'p1')?.remoteError).toBeUndefined();
+  });
+
+  test('a folder that gains a GitHub remote after the start shows it once the remotes are checked again', async () => {
+    const { repos } = await start();
+    expect(row(repos, 'p2')?.github).toBeNull();
+    github.remotes['C:/notes'] = 'ana/notes';
+    await repos.check();
+    expect(row(repos, 'p2')).toMatchObject({ github: 'ana/notes', checking: false });
+    await repos.setServed('p2', true);
+    expect(row(repos, 'p2')?.served).toBe(true);
+  });
+
+  test('a remote that goes is gone after the next check, and the repo shows as not served', async () => {
+    const { repos } = await start();
+    await repos.setServed('p1', true);
+    delete github.remotes['C:/sandbox'];
+    await repos.check();
+    expect(row(repos, 'p1')).toMatchObject({ github: null, served: false });
+  });
+
+  test('reading again keeps what was last known on show, rather than going back to checking', async () => {
+    const { repos } = await start();
+    const waiting: (() => void)[] = [];
+    const read = github.remoteOf.bind(github);
+    github.remoteOf = async (folder) => { await new Promise<void>((r) => waiting.push(r)); return read(folder); };
+    const checked = repos.check();
+    expect(row(repos, 'p1')).toMatchObject({ github: 'ana/sandbox', checking: false });
+    await vi.waitFor(() => expect(waiting.length).toBe(2));
+    waiting.forEach((r) => r());
+    await checked;
   });
 });
 
