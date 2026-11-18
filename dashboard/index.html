@@ -15,7 +15,7 @@
     it builds first, is it up. The column between them is centred in the space they leave.
   - Three pages do three jobs. Overview is the first glance. Inbox is what waits on you. Queue is
     the work.
-  - PROTOTYPE, with sample data only (#30, take 18): the Queue as the lanes on top, one card
+  - PROTOTYPE, with sample data only (#30, take 19): the Queue as the lanes on top, one card
     split down the middle (what Claude and ChatGPT run now, then each one's queue, which opens and
     closes and is remembered; open, a window three rows tall that scrolls, so the card never
     grows), and the efforts below in four tabs, a line under the head saying what each is for.
@@ -30,7 +30,8 @@
     take 13's step 3: done, moving, and what waits on you. The right-hand rail is not this
     prototype's: it's take 12's here, and settled on its own branch, prototype/rail (#141).
     Take 18: the lanes two cards again, the page 1480px, quieter bars, and a drag where you hold
-    the whole box inside its list. Take 17 is earlier/take-17.html.
+    the whole box inside its list. Take 19: the held box follows the pointer anywhere, and where
+    it lands is its shadow, the rows sliding aside. Take 18 is earlier/take-18.html.
   - The Overview only summarises, in three cards read top to bottom: what's on your plate (the
     Inbox in counts by kind, and the ask that's first in line), what's running (a line per lane,
     with its Stop button and the one thing it takes up next), and what's next (a bar per
@@ -1335,6 +1336,10 @@ body.q-dragging .can-drop { outline: none; }
 .drop-line { position: fixed; top: 0; left: 0; height: 3px; border-radius: 2px; background: var(--you); z-index: 95; pointer-events: none;
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--you) 25%, transparent); }
 .drop-line[hidden] { display: none; }
+/* ---------------------------------------------------------------- take 19 (PROTOTYPE, #30) */
+/* The held box's place is its shadow: a soft blue slot the size of the box, where it will land. */
+.or.held { background: color-mix(in srgb, var(--you) 7%, transparent); border: 1.5px dashed color-mix(in srgb, var(--you) 45%, var(--line)); }
+.drop-line { display: none; }
 </style>
 </head>
 <body>
@@ -2481,74 +2486,86 @@ function bringUp(id) {
 }
 const clearMarks = () => document.querySelectorAll(".drop-before, .drop-after").forEach((el) => el.classList.remove("drop-before", "drop-after"));
 // Take 18: the page's own drag, not the browser's, so there is no "not allowed" sign and no
-// one-line picture of the name. You hold the whole box (an effort with the efforts inside it):
-// it lifts and follows the pointer up and down, inside its own list, never out of it. Its place
-// stays as an empty slot, so nothing under it moves, and a line shows where it will land. Let go
-// and it settles into its new place; let go where nothing changes, or press Escape, and it
-// glides back to where it was.
+// one-line picture of the name. You hold the whole box (an effort with the efforts inside it).
+// Take 19: it follows the pointer anywhere, in and out of the list. Where it would land is its
+// shadow: the empty slot moves there and the rows between slide aside, so the list keeps its
+// height and nothing else on the page moves. Let go anywhere and it lands in the shadow, inside
+// its own list; press Escape and it glides back to where it was.
 const LIFT_AFTER = 4;   // px the pointer moves before a press becomes a drag, so a click stays a click
 let press = null;       // { el, x, y } between pointerdown and the drag starting
-let lift = null;        // { el, ghost, list, dy, x, h, y, top, target, raf }
-function liftTarget(cy) {
-  // Where the held box would land: before the first sibling whose middle is below its middle.
-  const sibs = [...lift.list.children].filter((x) => x.dataset && x.dataset.drag && x !== lift.el);
-  if (!sibs.length) return null;
-  let t = null;
-  for (const x of sibs) { const r = x.getBoundingClientRect(); if (cy < r.top + r.height / 2) { t = { el: x, before: true }; break; } }
-  if (!t) t = { el: sibs[sibs.length - 1], before: false };
-  // Landing next to itself changes nothing, so it shows no line.
-  if (t.before && t.el === lift.el.nextElementSibling) return null;
-  if (!t.before && t.el === lift.el.previousElementSibling) return null;
-  return t;
+let lift = null;        // { el, ghost, list, home, dx, dy, h, x, y, raf }
+const dragSibs = () => [...lift.list.children].filter((x) => x.dataset && x.dataset.drag && x !== lift.el);
+// Slide rows to where they now sit (FLIP): each starts from where it was and eases into place.
+function slide(change) {
+  const rows = dragSibs(), was = new Map(rows.map((x) => [x, x.getBoundingClientRect().top]));
+  change();
+  for (const x of rows) {
+    const d = was.get(x) - x.getBoundingClientRect().top;
+    if (!d) continue;
+    x.style.transition = "none";
+    x.style.transform = `translateY(${d}px)`;
+    x.getBoundingClientRect();
+    x.style.transition = "transform .18s cubic-bezier(.2, .8, .2, 1)";
+    x.style.transform = "";
+  }
 }
-function liftAt(clientY) {
-  // Its top follows the pointer, kept inside its list (a little give at either end).
-  const lr = lift.list.getBoundingClientRect();
-  const top = Math.min(Math.max(clientY - lift.dy, lr.top - 10), lr.bottom - lift.h + 10);
-  lift.top = top;
-  lift.ghost.style.transform = `translate(${lift.x}px, ${top}px) scale(1.012)`;
-  lift.target = liftTarget(top + lift.h / 2);
-  // The landing line is drawn over the held box, so it shows even where the box covers the gap.
-  if (!lift.target) { lift.line.hidden = true; return; }
-  const tr = lift.target.el.getBoundingClientRect(), gap = lift.list === lift.target.el.parentElement && lift.list.classList.contains("or-list") ? 4 : 0;
-  lift.line.hidden = false;
-  lift.line.style.transform = `translate(${lr.left + 6}px, ${(lift.target.before ? tr.top - gap : tr.bottom + gap) - 1.5}px)`;
-  lift.line.style.width = `${lr.width - 12}px`;
+// Which slot the held box is over, by its middle against the other rows' middles as they'd sit
+// without it. That never depends on where the shadow is now, so it can't flicker between two.
+function shadowAt(cy) {
+  const lr = lift.list.getBoundingClientRect(), gap = parseFloat(getComputedStyle(lift.list).rowGap) || 0;
+  let y = lr.top, at = 0;
+  for (const x of dragSibs()) {
+    const h = x.offsetHeight;
+    if (cy > y + h / 2) at++;
+    y += h + gap;
+  }
+  const sibs = dragSibs(), next = sibs[at] || null;
+  if (lift.el.nextElementSibling === next || (next === null && !lift.el.nextElementSibling)) return;
+  slide(() => lift.list.insertBefore(lift.el, next));
+}
+function liftAt(x, y) {
+  lift.x = x; lift.y = y;
+  const top = y - lift.dy;
+  lift.ghost.style.transform = `translate(${x - lift.dx}px, ${top}px) scale(1.015)`;
+  shadowAt(top + lift.h / 2);
 }
 function liftStart(e) {
   const el = press.el, r = el.getBoundingClientRect();
   const ghost = el.cloneNode(true);
   ghost.removeAttribute("data-drag"); ghost.removeAttribute("tabindex"); ghost.removeAttribute("id");
-  ghost.classList.add("or-lift"); ghost.classList.remove("flash");
+  ghost.classList.add("or-lift"); ghost.classList.remove("flash", "held");
   ghost.style.width = `${r.width}px`;
   el.closest(".qv").appendChild(ghost);
-  const line = document.createElement("div");
-  line.className = "drop-line"; line.hidden = true;
-  document.body.appendChild(line);
-  lift = { el, ghost, line, list: el.parentElement, dy: press.y - r.top, x: r.left, h: r.height, y: e.clientY, top: r.top, target: null, raf: 0 };
+  lift = { el, ghost, list: el.parentElement, home: el.nextElementSibling, dx: press.x - r.left, dy: press.y - r.top, h: r.height, x: e.clientX, y: e.clientY, raf: 0 };
   press = null;
   dragging = { id: el.dataset.drag, parent: el.dataset.parent };
   el.classList.add("held");
   document.body.classList.add("q-dragging");
   getSelection().removeAllRanges();
-  liftAt(e.clientY);
+  liftAt(e.clientX, e.clientY);
   const edge = () => {   // near the window's top or bottom edge, the page scrolls on its own
     if (!lift) return;
     const v = lift.y < 80 ? -Math.ceil((80 - lift.y) / 6) : lift.y > innerHeight - 80 ? Math.ceil((lift.y - innerHeight + 80) / 6) : 0;
-    if (v) { scrollBy(0, v); liftAt(lift.y); }
+    if (v) { scrollBy(0, v); liftAt(lift.x, lift.y); }
     lift.raf = requestAnimationFrame(edge);
   };
   lift.raf = requestAnimationFrame(edge);
 }
 function liftEnd(cancel) {
-  const l = lift; lift = null;
+  const l = lift;
   cancelAnimationFrame(l.raf);
-  l.line.remove();
-  const t = cancel ? null : l.target, id = dragging.id, parent = dragging.parent;
+  if (cancel) slide(() => l.list.insertBefore(l.el, l.home));
+  lift = null;
+  // Where the shadow sits is the move: before the row after it, or after the row before it.
+  const id = dragging.id, parent = dragging.parent;
+  const after = l.el.nextElementSibling, before = l.el.previousElementSibling;
+  const moved = !cancel && after !== l.home;
   dragging = null;
   document.body.classList.remove("q-dragging");
-  if (t) { moveTo(id, parent, t.el.dataset.drag, t.before); draw(); }
-  // Settle: the box glides into its place (the new one, or back to the old), then is let go.
+  for (const x of l.list.children) { x.style.transition = ""; x.style.transform = ""; }
+  if (moved) { if (after) moveTo(id, parent, after.dataset.drag, true); else moveTo(id, parent, before.dataset.drag, false); }
+  draw();
+  // Settle: the box glides into its place, then is let go.
   const home = [...document.querySelectorAll(".qv:not([inert]) [data-drag]")].find((x) => x.dataset.drag === id) || l.el;
   home.classList.add("held");
   if (!l.ghost.isConnected) home.closest(".qv").appendChild(l.ghost);   // a redraw took it with the old rows
@@ -2572,8 +2589,7 @@ document.addEventListener("pointermove", (e) => {
   if (press && !lift && Math.hypot(e.clientX - press.x, e.clientY - press.y) >= LIFT_AFTER) liftStart(e);
   if (!lift) return;
   e.preventDefault();
-  lift.y = e.clientY;
-  liftAt(e.clientY);
+  liftAt(e.clientX, e.clientY);
 });
 document.addEventListener("pointerup", () => { press = null; if (lift) liftEnd(false); });
 document.addEventListener("pointercancel", () => { press = null; if (lift) liftEnd(true); });
