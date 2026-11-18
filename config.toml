@@ -1,5 +1,6 @@
-# The repos the queue runner serves (leads-dashboard left on 2026-11-19: Stefan works it by hand,
-# "I'll do it manually for now unless otherwise stated"). Each gets its own Claude job at once, as the usage gate allows
+# The repos the queue runner serves (leads-dashboard left on 2026-11-19, its PRs piled up and
+# conflicting, and came back the same day as a train, #179: "run sequentially and pause for
+# conflicts ... make it a train"). Each gets its own Claude job at once, as the usage gate allows
 # (#50); when it has room for only one more, this order breaks a tie.
 # State and logs live outside every served repo.
 state_dir = "~/.queue-runner/state"
@@ -50,6 +51,22 @@ github = "stefan1575/game-backdrop"
 path = "~/Code/Personal/game-backdrop"
 base = "main"
 merge = "stefan"
+
+# A train (#179; docs/flow.md, The train): one PR at a time, lowest number first; no build while
+# one is open or its last merge's live steps aren't done; a stop on the front PR pauses the repo.
+[[repos]]
+name = "leads-dashboard"
+github = "RoyalBullyAgency-RBA/leads-dashboard"
+path = "~/Code/Work/leads-dashboard"
+base = "main"
+review_table = true   # the runner's own output: each review adds a row to the PR body's `## Review` table
+# Live steps after merges (ticket 11): one Claude thread per batch follows this doc (the Lovable
+# connector's deploy_project, query_database per migration, npm run check:live-schema).
+live_doc = "docs/agents/lovable-cloud.md"
+# The runner merges its clean PRs and runs their live steps (Stefan, 2026-11-18: "fully
+# autonomous in this repo as well").
+merge = "runner"
+train = true
 
 # The runner's own repo (ticket 14, Stefan 2026-11-10): served like any other, and it merges its
 # own PRs. After main moves, the runner updates its checkout and restarts on the new code.
