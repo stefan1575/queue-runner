@@ -38,11 +38,16 @@
     state, always (no switch); an effort lists only what waits on you, the rest behind Show; ready
     is ready-for-agent and blocked names its blocker. Take 24, settled: the rest is "N hidden" in
     italics and an underlined Show. Take 23 is earlier/take-23.html.
-  - The Overview only summarises, in three cards read top to bottom: what's on your plate (the
-    Inbox in counts by kind, and the ask that's first in line), what's running (a line per lane,
-    with its Stop button and the one thing it takes up next), and what's next (a bar per
-    feature, the first three in build order). Each card opens its page. Its one grammar is the
-    cell: an ask is a cell, a ticket is a cell, and a row of cells is a bar.
+  - PROTOTYPE, with sample data only (#29, take 25): the Overview answers "what's on my plate" at
+    a glance, for the repository picked in the sidebar or all of them, four ways switched with
+    ?variant=a|b|c|d (the pill at the bottom left, or the arrow keys): A, the plate first (what
+    waits on you in three columns: Inbox asks, ready-for-human, needs-triage; then a bar per
+    effort); B, a table by effort (a bar in four parts: done, the runner's, yours, blocked; and
+    what it waits on); C, a roadmap track (a track per repo, efforts in build order, the one the
+    runner builds next lit); D, written out (On your plate, Next, Stuck, Left). It repeats nothing
+    the Queue or the Inbox shows in detail: an effort opens the Queue at it, an ask the Inbox, a
+    ticket its issue. ?theme=light|dark holds a theme. Take 9's three cards are overviewTake9()
+    and earlier/take-24.html.
   - A feature's bar has a cell per ticket, left to right: done (done means live), merged but not
     live, in a PR, building, waiting on you, ready, blocked. Colour is the state's family and a
     hatched cell is the earlier step in it: green hatched is merged and not live, amber hatched
@@ -81,7 +86,7 @@
   color-scheme: dark;
 }
 @media (prefers-color-scheme: light) {
-  :root {
+  :root:not([data-theme="dark"]) {
     --page: #f4f5f7; --side: #eceef1; --surface: #ffffff; --raised: #ffffff; --sunk: #eff1f4;
     --line: #d9dde3; --line-soft: #e8ebef; --btn-line: #c2c8d1; --hover: rgba(15, 20, 30, .055);
     --ink: #13161b; --ink-2: #343a44; --mute: #59616d; --dim: #68707d;
@@ -92,6 +97,18 @@
     --float: 0 20px 44px -18px rgba(20, 23, 28, .3), 0 2px 6px rgba(20, 23, 28, .08);
     color-scheme: light;
   }
+}
+/* PROTOTYPE (#29, take 25): ?theme=light or ?theme=dark holds one, so both can be judged side by side. */
+:root[data-theme="light"] {
+    --page: #f4f5f7; --side: #eceef1; --surface: #ffffff; --raised: #ffffff; --sunk: #eff1f4;
+    --line: #d9dde3; --line-soft: #e8ebef; --btn-line: #c2c8d1; --hover: rgba(15, 20, 30, .055);
+    --ink: #13161b; --ink-2: #343a44; --mute: #59616d; --dim: #68707d;
+    --you: #1f55d0; --you-ink: #ffffff; --you-wash: #e9f0fd; --you-line: #b4c9f4;
+    --run: #8a5a00; --run-wash: #fbf0d6; --run-fill: #e0a021;
+    --ok: #197646; --bad: #b9322a; --bad-wash: #fceae8; --bad-line: #efb9b4;
+    --claude: #c15f3c; --openai: #13161b;
+    --float: 0 20px 44px -18px rgba(20, 23, 28, .3), 0 2px 6px rgba(20, 23, 28, .08);
+    color-scheme: light;
 }
 
 * { box-sizing: border-box; }
@@ -1396,6 +1413,171 @@ body.q-dragging .can-drop { outline: none; }
 .pg-done em { font-style: italic; color: var(--mute); }
 .pg-done .pg-show { color: var(--ink-2); text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; margin-left: 8px; }
 .pg-done:hover .pg-show { color: var(--ink); }
+/* ---------------------------------------------------------------- overview, take 25 (PROTOTYPE, #29) */
+/* Four variants of "what's on my plate", ?variant=a|b|c|d. Shared: links into the Queue, the Inbox
+   and GitHub, and the head of a card. Blue is yours, amber is the runner working, green is done. */
+.ov25 { display: grid; gap: 16px; }
+.ov25 .ov-head { border-radius: 14px 14px 0 0; }
+.ov-hint { color: var(--mute); }
+.ov-to { margin-left: auto; display: inline-flex; align-items: center; gap: 2px; color: var(--mute); text-decoration: none; white-space: nowrap; }
+.ov-to + .ov-to { margin-left: 14px; }
+.ov-to .i { width: 16px; height: 16px; }
+.ov-to:hover { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
+.ov-t { font-weight: 600; color: var(--ink); text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 3px; white-space: nowrap; }
+.ov-t:hover { text-decoration-color: currentColor; }
+.ov-t.you { color: var(--you); text-decoration-color: var(--you-line); }
+.ov-e { font-weight: 600; color: var(--ink); text-decoration: none; }
+.ov-e:hover { text-decoration: underline; text-underline-offset: 3px; }
+.ov-in-repo { color: var(--dim); }
+.ov-repo { display: flex; align-items: center; gap: 8px; font: 600 15px/1.2 var(--sans); color: var(--ink-2); }
+.ov-calm2 { display: flex; align-items: center; gap: 12px; padding: 16px 20px; margin: 0; }
+.ov-calm2 > .i { width: 26px; height: 26px; color: var(--ok); stroke-width: 1.6; flex: none; }
+.ov-calm2 b { font-weight: 600; }
+.ov-calm2 span { color: var(--mute); }
+.ov-calm2 span b { color: var(--ink); }
+
+/* ---- A, the plate first: a blue card of what waits on you in three columns, then a bar per effort */
+.ova-plate.has { background: var(--you-wash); border-color: var(--you-line); }
+.ova-head { padding: 18px 22px 4px; }
+.ova-head h2 { font: 600 30px/1.1 var(--display); letter-spacing: -0.015em; }
+.ova-head p { margin-top: 6px; color: var(--ink-2); }
+.ova-cols { display: grid; grid-template-columns: 1.25fr 1fr 1fr; gap: 14px; padding: 14px 18px 18px; }
+.ova-col { background: var(--surface); border: 1px solid var(--you-line); border-radius: 12px; padding: 12px 6px 10px; min-width: 0; display: flex; flex-direction: column; }
+.ova-col h3 { display: flex; align-items: center; gap: 8px; padding: 0 10px; font: 600 15px/1.2 var(--sans); color: var(--you); }
+.ova-col:nth-child(n+2) h3 { font: 600 14px/1.2 var(--mono); }
+.ova-c { margin-left: auto; min-width: 24px; height: 22px; padding: 0 7px; border-radius: 11px; background: var(--you); color: var(--you-ink); font: 700 13px/22px var(--sans); text-align: center; }
+.ova-sub { padding: 2px 10px 8px; color: var(--mute); font-size: 14px; }
+.ova-col ol { display: grid; }
+.ova-row { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; column-gap: 8px; align-items: start; padding: 7px 10px; border-radius: 8px; text-decoration: none; color: var(--you); }
+.ova-row:hover { background: var(--hover); }
+.ova-row.tk { grid-template-columns: 38px minmax(0, 1fr); }
+.ova-row > .i { width: 18px; height: 18px; margin-top: 2px; }
+.ova-n { font: 600 13px/22px var(--mono); color: var(--mute); }
+.ova-what { min-width: 0; }
+.ova-what b { display: block; font-weight: 600; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ova-what span { display: block; font-size: 14px; color: var(--mute); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ova-age { color: var(--mute); font-size: 14px; white-space: nowrap; line-height: 22px; }
+.ova-none { padding: 4px 10px; color: var(--dim); }
+.ova-col .ov-to { margin: auto 10px 0 auto; padding-top: 8px; font-size: 14px; }
+.ova-effs .ova-repo { padding: 12px 20px 14px; }
+.ova-effs .ova-repo + .ova-repo { border-top: 1px solid var(--line-soft); }
+.ova-effs .ov-repo { margin-bottom: 6px; }
+.ova-eff { display: grid; grid-template-columns: 200px minmax(0, 1fr) 56px 236px; column-gap: 16px; align-items: center; min-height: 36px; }
+.ova-eff .ov-e { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ova-eff.noeff .ov-e { color: var(--mute); font-weight: 500; }
+.ova-bar .fbar { height: 12px; }
+.ova-done { color: var(--mute); text-align: right; font-size: 14px; white-space: nowrap; }
+.ova-mine { display: flex; gap: 6px; flex-wrap: wrap; }
+.ova-pill { height: 22px; padding: 0 8px; border-radius: 11px; background: var(--you-wash); border: 1px solid var(--you-line); color: var(--you); font: 600 13px/20px var(--sans); white-space: nowrap; }
+.ova-held { height: 22px; padding: 0 8px; border-radius: 11px; border: 1px dashed var(--btn-line); color: var(--mute); font: 600 13px/20px var(--sans); }
+.ova-nx { height: 22px; padding: 0 8px; border-radius: 11px; background: var(--run-wash); color: var(--run); font: 600 13px/22px var(--sans); white-space: nowrap; }
+.ova-fin { display: flex; align-items: center; gap: 8px; margin-top: 8px; color: var(--mute); font-size: 14px; }
+.ova-fin .i { width: 16px; height: 16px; color: var(--ok); }
+
+/* ---- B, a table by effort */
+.ovb .ov-head { flex-wrap: wrap; }
+.ov-key { display: inline-flex; gap: 14px; margin-left: 10px; color: var(--mute); font-size: 14px; }
+.ov-key span { display: inline-flex; align-items: center; gap: 6px; }
+.ov-key .pt { width: 14px; height: 10px; border-radius: 3px; }
+.ovb-sum { padding: 12px 20px; border-bottom: 1px solid var(--line-soft); color: var(--ink-2); }
+.ovb-sum b { color: var(--you); font-weight: 600; }
+.ovb-sum .link { color: var(--you); }
+.ovb-t { width: 100%; border-collapse: collapse; }
+.ovb-t thead th { text-align: left; font-size: 13px; font-weight: 600; color: var(--mute); padding: 10px 12px 6px; border-bottom: 1px solid var(--line-soft); }
+.ovb-t thead th:first-child, .ovb-t tbody th { padding-left: 20px; }
+.ovb-t td, .ovb-t tbody th { padding: 9px 12px; border-bottom: 1px solid var(--line-soft); vertical-align: middle; text-align: left; font-weight: 400; }
+.ovb-t tr > :last-child { padding-right: 20px; }
+.ovb-t tbody tr:last-child > * { border-bottom: 0; }
+.ovb-t tr.sub > * { padding-top: 5px; padding-bottom: 7px; }
+.ovb-t tr.sub .ov-e { font-weight: 500; color: var(--ink-2); }
+.ovb-name { display: flex; align-items: center; gap: 8px; padding-left: calc(var(--d) * 20px); white-space: nowrap; }
+tr.sub .ovb-name::before { content: ""; width: 10px; height: 10px; margin-left: -16px; margin-right: -2px; border-left: 1.5px solid var(--line); border-bottom: 1.5px solid var(--line); border-bottom-left-radius: 4px; transform: translateY(-4px); }
+.ovb-nx { height: 20px; padding: 0 7px; border-radius: 10px; background: var(--run-wash); color: var(--run); font: 600 12.5px/20px var(--sans); }
+.ovb-n { white-space: nowrap; width: 70px; }
+.ovb-n b { font-weight: 700; }
+.ovb-bar { width: 34%; min-width: 200px; }
+.ovb-wo { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 14px; }
+td.ovb-wo { display: table-cell; }
+.wo { display: inline; margin-right: 14px; color: var(--ink-2); }
+.wo b { font-weight: 600; margin-right: 3px; }
+.wo .ov-t + .ov-t { margin-left: 5px; }
+.wo.you b { color: var(--you); }
+.wo.run b { color: var(--run); }
+.wo.held b, .wo.next b { color: var(--mute); }
+.ov-parts { display: flex; gap: 2px; height: 20px; border-radius: 6px; overflow: hidden; }
+.pt { display: block; min-width: 20px; font: 700 12px/20px var(--sans); text-align: center; font-style: normal; }
+.pt.done { background: var(--ok); color: var(--page); }
+.pt.runner { background: var(--run-fill); color: #241a00; }
+.pt.yours { background: var(--you); color: var(--you-ink); }
+.pt.blocked { background: var(--line); color: var(--ink-2); }
+.ovb-repo th { padding: 14px 20px 6px !important; background: var(--sunk); border-bottom: 1px solid var(--line-soft); }
+.ovb-t tr.fin td { color: var(--mute); font-size: 14px; padding-left: 20px; }
+.ovb-t tr.fin .i { width: 15px; height: 15px; color: var(--ok); margin-right: 6px; vertical-align: -2px; }
+
+/* ---- C, a roadmap track: a line per repo, a stop per effort, the next one lit */
+.ovc-top { display: flex; align-items: center; gap: 12px; }
+.ovc-top .ov-calm2 { padding: 0; }
+.ovc-plate { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.ovc-chip { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border-radius: 15px; background: var(--you-wash); border: 1px solid var(--you-line); color: var(--you); text-decoration: none; font-weight: 500; white-space: nowrap; }
+.ovc-chip b { font-weight: 700; }
+a.ovc-chip:hover { border-color: var(--you); }
+.ovc-plate-say { color: var(--mute); margin-left: 4px; }
+.ovc-head { display: flex; align-items: center; gap: 12px; padding: 14px 20px 0; }
+.ovc-say { margin-left: auto; color: var(--mute); }
+.ovc-say b { color: var(--ink); font-weight: 600; }
+.ovc-scroll { overflow-x: auto; scrollbar-width: thin; padding: 0 20px 18px; }
+.ovc-track { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(168px, 1fr); position: relative; padding-top: 44px; }
+.ovc-track::before { content: ""; position: absolute; left: 10px; right: 10px; top: 54px; height: 3px; border-radius: 2px; background: var(--line); }
+.ovc-stop { position: relative; padding-right: 12px; min-width: 0; }
+.ovc-dot { position: relative; z-index: 1; display: grid; place-items: center; width: 23px; height: 23px; border-radius: 50%; background: var(--surface); border: 3px solid var(--btn-line); }
+.ovc-stop.s-fin .ovc-dot { background: var(--ok); border-color: var(--ok); color: var(--page); }
+.ovc-stop.s-fin .ovc-dot .i { width: 14px; height: 14px; stroke-width: 3; }
+.ovc-stop.s-yours .ovc-dot { border-color: var(--you); }
+.ovc-stop.s-held .ovc-dot { border-style: dashed; }
+.ovc-stop.noeff .ovc-dot { border-style: dotted; }
+.ovc-stop.s-lit .ovc-dot { width: 31px; height: 31px; margin: -4px 0 0 -4px; border-color: var(--run-fill); background: var(--run-wash); box-shadow: 0 0 0 6px color-mix(in srgb, var(--run-fill) 22%, transparent); }
+.ovc-stop.s-lit .ovc-dot i { width: 11px; height: 11px; border-radius: 50%; background: var(--run-fill); }
+.ovc-lit { position: absolute; top: -36px; left: -4px; height: 22px; padding: 0 9px; border-radius: 11px; background: var(--run-fill); color: #241a00; font: 700 13px/22px var(--sans); }
+.ovc-card { margin-top: 12px; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.ovc-stop.s-lit .ovc-card { margin: 12px 8px 0 -10px; padding: 10px 12px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--raised); box-shadow: var(--float); }
+.ovc-card .ov-e { font: 600 16px/1.25 var(--display); }
+.ovc-stop.noeff .ov-e { color: var(--mute); font-weight: 500; }
+.ovc-n { color: var(--mute); font-size: 14px; }
+.ovc-mini .fbar { height: 8px; gap: 2px; }
+.ovc-mini .fbar .sg { min-width: 3px; }
+.ovc-subs { display: grid; gap: 1px; font-size: 14px; }
+.ovc-subs .ov-e { font: 500 14px/1.3 var(--sans); color: var(--ink-2); }
+.ovc-subs i { font-style: normal; color: var(--dim); }
+.ovc-why { font-size: 14px; color: var(--mute); }
+.ovc-why.run { color: var(--run); }
+.ovc-why.run .ov-t { color: var(--run); text-decoration-color: currentColor; }
+.ovc-you { font-size: 14px; color: var(--you); }
+.ovc-you em { font-style: normal; color: var(--you); }
+.ovc-fin { font-weight: 600; color: var(--ok); }
+.ovc-finname { color: var(--mute); font-size: 14px; }
+.ovc-empty { color: var(--dim); padding-top: 4px; }
+
+/* ---- D, written out: the answer a thread would give, as a letter */
+.ovd { padding: 8px 0 14px; }
+.ovd-head { display: flex; align-items: center; gap: 4px; padding: 12px 28px 6px; color: var(--mute); }
+.ovd-head p { margin-right: auto; }
+.ovd-p { display: grid; grid-template-columns: 132px minmax(0, 1fr); column-gap: 24px; padding: 14px 28px; }
+.ovd-p + .ovd-p { border-top: 1px solid var(--line-soft); }
+.ovd-p h2 { font: 600 14px/1.9 var(--sans); color: var(--mute); text-transform: none; }
+.ovd-p:first-of-type h2 { color: var(--you); }
+.ovd-p p { font: 400 22px/1.5 var(--serif); color: var(--ink); max-width: 46em; text-wrap: pretty; }
+.ovd-p .ov-t, .ovd-p .ov-e { font-family: var(--sans); font-size: 18px; }
+.ovd-p .ov-e { text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 3px; }
+.ovd-q { color: var(--mute); }
+
+@media (max-width: 1000px) {
+  .ova-cols { grid-template-columns: minmax(0, 1fr); }
+  .ova-eff { grid-template-columns: minmax(0, 1fr) 64px; row-gap: 4px; }
+  .ova-bar { grid-column: 1 / -1; grid-row: 2; }
+  .ova-mine { grid-column: 1 / -1; }
+  .ovd-p { grid-template-columns: minmax(0, 1fr); }
+  .ovd-p p { font-size: 19px; }
+}
 </style>
 </head>
 <body>
@@ -1463,8 +1645,12 @@ let fault = null;    // why the snapshot couldn't be read: "server", "missing", 
 let faultStart = ""; // with "missing": how to start the runner, as the server says it
 const PAGES = [["overview", "Overview"], ["inbox", "Inbox"], ["queue", "Queue"], ["activity", "Activity"], ["usage", "Usage"], ["settings", "Settings"]];
 const UNBUILT = [];   // pages still as they were before the split
-// PROTOTYPE (#30, take 14): the lanes on the Queue page, two ways, ?variant=a|b
-const VARIANTS = [["a", "Lanes as two cards"], ["b", "Lanes in one card"]];
+// PROTOTYPE (#29, take 25): the Overview, four ways, ?variant=a|b|c|d. (The Queue's lanes were
+// switched the same way until take 16.)
+const VARIANTS = [["a", "The plate first"], ["b", "A table by effort"], ["c", "A roadmap track"], ["d", "Written out"]];
+// PROTOTYPE (#29, take 25): ?theme=light|dark holds a theme, whatever the system's.
+const theme = ["light", "dark"].includes(new URLSearchParams(location.search).get("theme")) ? new URLSearchParams(location.search).get("theme") : "";
+if (theme) document.documentElement.dataset.theme = theme;
 const sampleName = new URLSearchParams(location.search).get("sample");
 const ui = { page: "overview", repo: "", view: "list", pr: null, ask: null, hold: null, sel: null, pop: null, nav: false, rail: false,
   variant: "a", feature: "", open: [], qview: "", qeffort: "" };   // qview, qeffort: the Queue (take 12)   // the Queue: which arrangement, the feature it's narrowed to (A), the features unfolded (B)
@@ -1482,7 +1668,7 @@ function readAddress() {
   ui.view = (q.get("view") || recall("view")) === "pyramid" ? "pyramid" : "list";
   const m = /^(.+):(\d+)$/.exec(q.get("pr") || "");
   ui.pr = m ? { repo: m[1], n: Number(m[2]) } : null;
-  const v = (q.get("variant") || recall("variant") || "").toLowerCase();
+  const v = (q.get("variant") || recall("ovariant") || "").toLowerCase();
   ui.variant = VARIANTS.some((x) => x[0] === v) ? v : "a";
   ui.feature = q.get("feature") || "";
 }
@@ -1491,12 +1677,13 @@ function href(over = {}) {
   const q = new URLSearchParams();
   if (s.sample) q.set("sample", s.sample);
   if (s.page !== "overview") q.set("page", s.page);
-  if (s.page === "queue") q.set("variant", s.variant);
+  if (s.page === "overview") q.set("variant", s.variant);
   if (s.page === "queue" && s.variant === "a" && s.feature) q.set("feature", s.feature);
   if (s.page === "inbox" && s.ask) q.set("ask", s.ask);
   if (s.repo) q.set("repo", s.repo);
   if (s.view === "pyramid") q.set("view", "pyramid");
   if (s.pr) q.set("pr", `${s.pr.repo}:${s.pr.n}`);
+  if (theme) q.set("theme", theme);
   const t = q.toString();
   return location.pathname + (t ? "?" + t : "");
 }
@@ -1862,7 +2049,7 @@ function letter(a) {
 // ------------------------------------------------------------------ overview
 // The first glance, in three cards read top to bottom: what's on your plate, what's running,
 // what's next. Each only summarises, and opens its page.
-function overview() { return `<div class="ov">${plate()}${running()}${progress()}</div>`; }
+function overviewTake9() { return `<div class="ov">${plate()}${running()}${progress()}</div>`; }   // take 9, superseded by take 25 below
 const goto = (page, ask) => `href="${esc(href({ page, pr: null, ...(ask ? { ask: ask.id } : {}) }))}" data-act="page" data-page="${page}"${ask ? ` data-ask="${esc(ask.id)}"` : ""}`;
 
 // ---- on your plate: the Inbox in counts by kind, how long the oldest has waited, and the ask
@@ -2043,6 +2230,292 @@ function progress() {
   return `<section class="card" aria-label="Progress"><a class="ov-head" ${goto("queue")}>${ICON.queue}<h2>Progress</h2><span class="to">Open the Queue${ICON.right}</span></a>
     ${rows ? `<ol aria-label="Features with open work, in build order">${rows}</ol>` : `<p class="empty">No feature has open work${ui.repo ? ` in ${esc(ui.repo)}` : ""}.</p>`}
     <div class="ov-foot">${rows ? `<p class="ov-legend" aria-label="What a cell's fill means">${SEGMENTS.map(([cls, label]) => `<span><i class="sg ${cls}"></i>${label}</span>`).join("")}</p>` : ""}${rest ? `<p class="${rows ? "ov-rest" : ""}"><a class="link" ${goto("queue")}>${rest[0].toUpperCase() + rest.slice(1)}.</a></p>` : ""}</div></section>`;
+}
+
+// ------------------------------------------------------------------ overview, take 25
+// PROTOTYPE (#29, take 25), on sample data: "what's on my plate", at a glance, for the repository
+// picked in the sidebar or for all of them, four ways, switched with ?variant=a|b|c|d (the pill at
+// the bottom left, or the left and right arrow keys):
+//   A, the plate first: what waits on you (Inbox asks, ready-for-human, needs-triage), then a bar
+//      per effort.
+//   B, a table by effort: a row per effort, a bar in four parts (done, the runner's, yours,
+//      blocked), and what it waits on.
+//   C, a roadmap track: a track per repo, its efforts in build order left to right, the one the
+//      runner builds next lit.
+//   D, written out: the answer a thread would give, in four or five sentences.
+// It repeats nothing the Queue or the Inbox shows in detail: an effort opens the Queue at it, an
+// ask opens the Inbox at it, a ticket opens its issue. Not on it (#34): usage, "since you were
+// away", the lanes and whether the runner is fine (the rail says both).
+const MINE = new Set(["you", "ready-for-human", "needs-triage"]);   // what waits on you (#107)
+const ofAll = (repo) => (ui.repo ? "" : ` <span class="ov-in-repo">${esc(repo)}</span>`);
+const refIn = (i, from) => (i.repo === from || !from ? `#${i.n}` : `${i.repo}#${i.n}`);
+function issueUrl(i) {
+  if (i.url) return i.url;
+  const r = (snap.repos || []).find((x) => x.name === i.repo);
+  return r && r.github ? `${r.github}/issues/${i.n}` : "";
+}
+// A ticket, linked where it's acted on: its ask in the Inbox when it has one, else its issue.
+function tLink(i, text, from) {
+  const ask = i.state === "you" ? askFor(i) : null, t = text ?? refIn(i, from);
+  if (ask) return `<a class="ov-t you" ${goto("inbox", ask)}>${esc(t)}</a>`;
+  const u = issueUrl(i);
+  return u ? `<a class="ov-t" href="${esc(u)}" target="_blank" rel="noreferrer">${esc(t)}</a>` : `<span class="ov-t">${esc(t)}</span>`;
+}
+// An effort, linked to the Queue with it open.
+const eLink = (n, text, cls = "") => `<a class="ov-e ${cls}" href="${esc(href({ page: "queue", pr: null }))}" data-act="ov-effort" data-id="${esc(n.id)}" data-parent="${esc(n.parent || "")}">${text ?? esc(n.title)}</a>`;
+const toQueue = (label = "Open the Queue") => `<a class="ov-to" ${goto("queue")}>${label}${ICON.right}</a>`;
+const toInbox = (label = "Open the Inbox") => `<a class="ov-to" ${goto("inbox")}>${label}${ICON.right}</a>`;
+
+// What waits on you: the Inbox's open asks, then the tickets only you move.
+function plateOf(W) {
+  const asks = snap.asks === null ? null : (snap.asks || []).filter((a) => W.repos.includes(a.repo) && !snoozedUntil(a));
+  const rank = new Map(W.allRepos.map((r, x) => [r, x]));
+  const byOrder = (a, b) => rank.get(a.repo) - rank.get(b.repo) || (W.pos.get(key(a)) ?? 999) - (W.pos.get(key(b)) ?? 999);
+  const its = (snap.issues || []).filter((i) => W.repos.includes(i.repo));
+  const build = its.filter((i) => i.state === "ready-for-human").sort(byOrder);
+  const triage = its.filter((i) => i.state === "needs-triage").sort(byOrder);
+  return { asks, build, triage, n: (asks || []).length + build.length + triage.length };
+}
+// A ticket's part of an effort's bar, in four (B): done, the runner's (moving, in line, merged
+// and going live), yours, blocked (by a ticket, by its effort, or its repo stopped).
+const PARTS = [["done", "Done"], ["runner", "The runner's"], ["yours", "Yours"], ["blocked", "Blocked"]];
+function partOf(i, W) {
+  if (i.state === "done") return "done";
+  if (MINE.has(i.state)) return "yours";
+  if (i.state === "blocked" || i.state === "not-ready") return "blocked";
+  if (i.state === "ready" && (W.blockersOf(i).length || repoOff(i.repo))) return "blocked";
+  return "runner";
+}
+// A repo's efforts: those with open work in build order (the efforts inside one under it), the
+// tickets with no effort, and the finished ones.
+function effortsOf(W, r) {
+  const root = W.nodes.get(`repo:${r}`), nodes = root.order.map((k) => W.nodes.get(k));
+  return {
+    open: nodes.filter((n) => n.t === "effort"),
+    loose: nodes.filter((n) => n.t === "ticket").map((n) => n.i),
+    done: root.closed.map((k) => W.nodes.get(k)).filter((n) => n.t === "effort"),
+  };
+}
+const subsOf = (n, W) => n.order.map((k) => W.nodes.get(k)).filter((c) => c.t === "effort");
+// Where an effort stands, as the four variants read it.
+function factsOf(n, W, loose) {
+  const its = loose || W.tickets(n.id);
+  const parts = { done: 0, runner: 0, yours: 0, blocked: 0 };
+  its.forEach((i) => parts[partOf(i, W)]++);
+  const open = its.filter((i) => i.state !== "done");
+  const yours = its.filter((i) => MINE.has(i.state)).sort((a, b) => (W.pos.get(key(a)) ?? 999) - (W.pos.get(key(b)) ?? 999));
+  const building = its.find((i) => i.state === "building");
+  const inPr = its.find((i) => ["review", "fixing", "fixing-itself"].includes(i.state));
+  const queued = its.filter((i) => W.qpos.get(key(i))).sort((a, b) => W.qpos.get(key(a)) - W.qpos.get(key(b)))[0];
+  const above = loose ? [] : [n, ...W.ancestors(n.id).map((a) => W.nodes.get(a))].filter((e) => e && e.t === "effort");
+  const held = above.flatMap((e) => e.blocked_by || []).map((b) => (W.outside.has(b) ? { ...W.outside.get(b), outside: true } : W.byKey.get(b))).filter((b) => b && (b.outside || isOpen(b)));
+  return { its, parts, open, yours, building, inPr, queued, held, total: its.length, done: parts.done };
+}
+// The four-part bar (B): each part as wide as its share, its count inside.
+function partsBar(f, label) {
+  const said = PARTS.filter(([k]) => f.parts[k]).map(([k, name]) => `${f.parts[k]} ${name.toLowerCase()}`).join(", ");
+  return `<span class="ov-parts" role="img" aria-label="${esc(label)}: ${esc(said)}">${PARTS.filter(([k]) => f.parts[k]).map(([k, name]) =>
+    `<i class="pt ${k}" style="flex-grow:${f.parts[k]}" title="${f.parts[k]} ${esc(name.toLowerCase())}">${f.parts[k]}</i>`).join("")}</span>`;
+}
+const partsKey = () => `<span class="ov-key">${PARTS.map(([k, name]) => `<span><i class="pt ${k}"></i>${name}</span>`).join("")}</span>`;
+// What an effort waits on, in short pieces: you (each ticket linked), what holds it, the runner.
+function waitsOnOf(n, f, W, r) {
+  const out = [];
+  if (f.yours.length) out.push(`<span class="wo you"><b>You</b> ${f.yours.map((i) => tLink(i, undefined, r)).join(" ")}</span>`);
+  if (f.held.length) {
+    const b = f.held[0], root = b.outside ? b : rootOf(b, W);
+    out.push(`<span class="wo held"><b>Held</b> by ${b.outside ? tLink(b, `${b.repo}#${b.n}`) : tLink(b, undefined, r)}${heldSay(root) && root !== b ? `, behind ${tLink(root, undefined, r)}` : ""}${heldSay(root) ? `, which ${esc(heldSay(root))}` : ""}</span>`);
+  }
+  if (f.building) out.push(`<span class="wo run"><b>Claude</b> building ${tLink(f.building, undefined, r)}</span>`);
+  else if (f.inPr && !f.held.length) out.push(`<span class="wo run"><b>${esc(stateOf(f.inPr)[0])}</b> ${tLink(f.inPr, undefined, r)}</span>`);
+  if (f.queued && !f.building && f.queued !== f.inPr) out.push(`<span class="wo next"><b>Next</b> ${tLink(f.queued, undefined, r)}${W.qpos.get(key(f.queued)) > 1 ? `, ${nth(W.qpos.get(key(f.queued)))} in line` : ""}</span>`);
+  if (!out.length && f.open.length) {
+    const b = f.its.find((i) => i.state === "blocked");
+    out.push(`<span class="wo">${b ? esc(whyOf(b, W)) : "Nothing moves it yet"}</span>`);
+  }
+  return out.join("");
+}
+// The effort the runner builds next in a repo: its current build's, else its first build in line.
+function nextEffort(W, r) {
+  const q = W.queues.get(r), job = q.doing && q.doing.kind === "build" ? q.doing : q.jobs.find((j) => j.kind === "build");
+  if (!job) return null;
+  const i = job.key ? W.byKey.get(job.key) : (snap.issues || []).find((x) => x.repo === r && `#${x.n}` === job.ref);
+  return i ? { top: W.nodes.get(W.top(key(i))), i, now: job === q.doing } : null;
+}
+const repoHeadOv = (r) => `<h3 class="ov-repo">${repoLogo(r)}<span>${esc(r)}</span>${offTag(r)}</h3>`;
+function plateCalm(p) {
+  if (p.asks === null) return `<p class="ov-calm2">${ICON.done}<span><b>${NOT_READ[0]}</b> ${NOT_READ[1]}</span></p>`;
+  return `<p class="ov-calm2">${ICON.done}<span><b>Nothing waits on you${ui.repo ? ` in ${esc(ui.repo)}` : ""}.</b> The runner carries on by itself.</span></p>`;
+}
+
+function overview() {
+  const W = work();
+  const v = { a: ovPlate, b: ovTable, c: ovTrack, d: ovWritten }[ui.variant] || ovPlate;
+  return `<div class="ov25 ov-${ui.variant}">${v(W)}</div>${protoBar()}`;
+}
+
+// ---- A, the plate first
+function ovPlate(W) {
+  const p = plateOf(W);
+  const askRow = (a) => `<li><a class="ova-row" ${goto("inbox", a)}>${KIND_ICON[a.kind] || ""}<span class="ova-what"><b>${esc(a.subject)}</b><span>${esc(askWords(a)[0])} · ${esc(a.ref)}${ofAll(a.repo)}</span></span><span class="ova-age" title="Waiting since ${esc(stamp(a.since))}">${esc(ago(a.since))}</span></a></li>`;
+  const tRow = (i) => { const u = issueUrl(i); return `<li><a class="ova-row tk" href="${esc(u)}" target="_blank" rel="noreferrer"><span class="ova-n">#${i.n}</span><span class="ova-what"><b>${esc(i.title)}</b><span>${esc(nameOf(W.nodes.get(W.nodes.get(key(i)).parent)) === i.repo ? "No effort" : nameOf(W.nodes.get(W.nodes.get(key(i)).parent)))}${ofAll(i.repo)}</span></span></a></li>`; };
+  const col = (title, sub, list, row, to) => `<div class="ova-col"><h3>${title}<span class="ova-c">${list.length}</span></h3><p class="ova-sub">${sub}</p>
+    ${list.length ? `<ol>${list.map(row).join("")}</ol>` : `<p class="ova-none">None.</p>`}${to || ""}</div>`;
+  const plate = !p.n ? `<section class="card ova-plate">${plateCalm(p)}</section>`
+    : `<section class="card ova-plate has" aria-label="On your plate"><header class="ova-head"><h2>${plural(p.n, "thing waits", "things wait")} on you</h2>
+        <p>${[p.asks && p.asks.length ? `${p.asks.length} in the Inbox` : "", p.build.length ? `${p.build.length} to build yourself` : "", p.triage.length ? `${p.triage.length} to triage` : ""].filter(Boolean).join(" · ")}</p></header>
+      <div class="ova-cols">
+        ${col("Inbox", "The runner asked", p.asks || [], askRow, toInbox())}
+        ${col("ready-for-human", "Yours to build", p.build, tRow)}
+        ${col("needs-triage", "Yours to decide what it becomes", p.triage, tRow)}
+      </div></section>`;
+  const effortRow = (n, f, nx) => `<li class="ova-eff${nx ? " nx" : ""}">${eLink(n)}
+      <span class="ova-bar">${ticketBar(n.title, [...f.its].sort((a, b) => segmentOf(a) - segmentOf(b) || a.n - b.n))}</span>
+      <span class="ova-done" title="Done means live">${f.done} of ${f.total}</span>
+      <span class="ova-mine">${f.yours.length ? `<span class="ova-pill">${plural(f.yours.length, "waits on you", "wait on you")}</span>` : ""}${f.held.length ? `<span class="ova-held">Held</span>` : ""}${nx ? `<span class="ova-nx">${nx.now ? "Building now" : "Builds next"}</span>` : ""}</span></li>`;
+  const repos = W.repos.map((r) => {
+    const E = effortsOf(W, r), nx = nextEffort(W, r);
+    const rows = E.open.map((n) => effortRow(n, factsOf(n, W), nx && nx.top && nx.top.id === n.id ? nx : null)).join("");
+    const loose = E.loose.length ? `<li class="ova-eff noeff"><a class="ov-e" ${goto("queue")}>No effort</a><span class="ova-bar">${ticketBar("No effort", [...E.loose].sort((a, b) => segmentOf(a) - segmentOf(b) || a.n - b.n))}</span><span class="ova-done">${E.loose.filter((i) => i.state !== "done").length} open</span><span class="ova-mine">${(() => { const m = E.loose.filter((i) => MINE.has(i.state)).length; const nl = nx && nx.top && nx.top.t === "ticket"; return `${m ? `<span class="ova-pill">${plural(m, "waits on you", "wait on you")}</span>` : ""}${nl ? `<span class="ova-nx">${nx.now ? "Building now" : "Builds next"}</span>` : ""}`; })()}</span></li>` : "";
+    const fin = E.done.length ? `<p class="ova-fin">${ICON.done}Finished: ${E.done.map((n) => esc(n.title)).join(", ")}</p>` : "";
+    return `<div class="ova-repo">${W.repos.length > 1 ? repoHeadOv(r) : ""}${rows || loose ? `<ol>${rows}${loose}</ol>` : `<p class="ova-none">Nothing open.</p>`}${fin}</div>`;
+  }).join("");
+  return `${plate}<section class="card ova-effs" aria-label="Efforts"><header class="ov-head">${ICON.queue}<h2>Efforts</h2><span class="ov-hint">In build order</span>${toQueue()}</header>${repos}</section>`;
+}
+
+// ---- B, a table by effort
+function ovTable(W) {
+  const p = plateOf(W);
+  const row = (n, f, depth, r, nx) => `<tr class="${depth ? "sub" : ""}${nx ? " nx" : ""}">
+      <th scope="row"><span class="ovb-name" style="--d:${depth}">${n.t === "loose" ? `<a class="ov-e" ${goto("queue")}>No effort</a>` : eLink(n)}${nx ? `<span class="ovb-nx">${nx.now ? "Building now" : "Next"}</span>` : ""}</span></th>
+      <td class="ovb-n">${n.t === "loose" ? `<span class="mute">${f.open.length} open</span>` : `<b>${f.done}</b><span class="mute"> / ${f.total}</span>`}</td>
+      <td class="ovb-bar">${partsBar(f, n.title || "No effort")}</td>
+      <td class="ovb-wo">${waitsOnOf(n, f, W, r) || `<span class="mute">Nothing</span>`}</td></tr>`;
+  const body = W.repos.map((r) => {
+    const E = effortsOf(W, r), nx = nextEffort(W, r);
+    const rows = E.open.map((n) => {
+      const isNx = nx && nx.top && nx.top.id === n.id ? nx : null;
+      return row(n, factsOf(n, W), 0, r, isNx) + subsOf(n, W).map((s) => row(s, factsOf(s, W), 1, r, null)).join("");
+    }).join("");
+    const loose = E.loose.length ? row({ t: "loose", title: "No effort" }, factsOf(null, W, E.loose), 0, r, nx && nx.top && nx.top.t === "ticket" ? nx : null) : "";
+    const fin = E.done.length ? `<tr class="fin"><td colspan="4">${ICON.done}Finished: ${E.done.map((n) => esc(n.title)).join(", ")}</td></tr>` : "";
+    return `${W.repos.length > 1 ? `<tr class="ovb-repo"><th colspan="4" scope="rowgroup">${repoHeadOv(r)}</th></tr>` : ""}${rows}${loose}${fin}`;
+  }).join("");
+  const sum = !p.n ? plateCalm(p)
+    : `<p class="ovb-sum"><b>${plural(p.n, "thing waits", "things wait")} on you:</b> ${[p.asks && p.asks.length ? `<a class="link" ${goto("inbox")}>${p.asks.length} in the Inbox</a>` : "", p.build.length ? `${p.build.length} ready-for-human` : "", p.triage.length ? `${p.triage.length} needs-triage` : ""].filter(Boolean).join(", ")}. Each is under its effort's <i>Waits on</i>.</p>`;
+  return `<section class="card ovb" aria-label="Efforts"><header class="ov-head">${ICON.queue}<h2>Efforts</h2>${partsKey()}${toQueue()}</header>
+    ${sum}
+    <table class="ovb-t"><thead><tr><th scope="col">Effort</th><th scope="col" title="Done means live">Done</th><th scope="col">Its tickets</th><th scope="col">Waits on</th></tr></thead>
+    <tbody>${body}</tbody></table></section>`;
+}
+
+// ---- C, a roadmap track
+function ovTrack(W) {
+  const p = plateOf(W);
+  const plate = !p.n ? "" : `<p class="ovc-plate">${[
+    p.asks && p.asks.length ? `<a class="ovc-chip" ${goto("inbox")}><b>${p.asks.length}</b> in the Inbox</a>` : "",
+    p.build.length ? `<span class="ovc-chip"><b>${p.build.length}</b> ready-for-human</span>` : "",
+    p.triage.length ? `<span class="ovc-chip"><b>${p.triage.length}</b> needs-triage</span>` : ""].join("")}<span class="ovc-plate-say">wait on you, each marked on its effort below.</span></p>`;
+  const stop = (n, f, r, nx, cls = "") => {
+    const lit = !!nx, held = f.held.length > 0;
+    const state = lit ? "s-lit" : held ? "s-held" : f.yours.length && !f.parts.runner ? "s-yours" : "";
+    const subs = n.t === "effort" ? subsOf(n, W) : [];
+    const line = lit ? `<span class="ovc-why run">${nx.now ? "Building" : "Builds next:"} ${tLink(nx.i, undefined, r)}</span>`
+      : held ? `<span class="ovc-why">Held by ${f.held[0].outside ? esc(`${f.held[0].repo}#${f.held[0].n}`) : tLink(f.held[0], undefined, r)}</span>`
+      : f.building ? `<span class="ovc-why run">Building ${tLink(f.building, undefined, r)}</span>`
+      : f.inPr ? `<span class="ovc-why run">${esc(stateOf(f.inPr)[0])} ${tLink(f.inPr, undefined, r)}</span>` : "";
+    return `<li class="ovc-stop ${state} ${cls}">
+      <span class="ovc-dot" aria-hidden="true">${lit ? `<i></i>` : ""}</span>
+      ${lit ? `<span class="ovc-lit">Next</span>` : ""}
+      <div class="ovc-card">${n.t === "loose" ? `<a class="ov-e" ${goto("queue")}>No effort</a>` : eLink(n)}
+        <span class="ovc-n">${n.t === "loose" ? `${f.open.length} open` : `${f.done} of ${f.total} done`}</span>
+        <span class="ovc-mini">${ticketBar(n.title || "No effort", [...f.its].sort((a, b) => segmentOf(a) - segmentOf(b) || a.n - b.n))}</span>
+        ${subs.length ? `<span class="ovc-subs">${subs.map((s) => { const sf = factsOf(s, W); return `<span>${eLink(s)} <i>${sf.done}/${sf.total}</i></span>`; }).join("")}</span>` : ""}
+        ${line}
+        ${f.yours.length ? `<span class="ovc-you">${f.yours.map((i) => tLink(i, undefined, r)).join(" ")} <em>${f.yours.length === 1 ? "waits" : "wait"} on you</em></span>` : ""}
+      </div></li>`;
+  };
+  const tracks = W.repos.map((r) => {
+    const E = effortsOf(W, r), nx = nextEffort(W, r);
+    const fin = E.done.length ? `<li class="ovc-stop s-fin"><span class="ovc-dot" aria-hidden="true">${ICON.check}</span><div class="ovc-card"><span class="ovc-fin">Finished</span>${E.done.map((n) => `<span class="ovc-finname">${esc(n.title)}</span>`).join("")}</div></li>` : "";
+    const stops = E.open.map((n) => stop(n, factsOf(n, W), r, nx && nx.top && nx.top.id === n.id ? nx : null)).join("");
+    const loose = E.loose.length ? stop({ t: "loose", title: "No effort" }, factsOf(null, W, E.loose), r, nx && nx.top && nx.top.t === "ticket" ? nx : null, "noeff") : "";
+    const say = nx ? `${nx.now ? "Building" : "Next"}: <b>${esc(nx.top.t === "ticket" ? "No effort" : nx.top.title)}</b>` : repoOff(r) ? "Stopped" : "Nothing ready to build";
+    return `<section class="card ovc-repo" aria-label="${esc(r)}"><header class="ovc-head">${repoHeadOv(r)}<span class="ovc-say">${say}</span></header>
+      <div class="ovc-scroll"><ol class="ovc-track">${fin}${stops}${loose}${!fin && !stops && !loose ? `<li class="ovc-empty">Nothing open.</li>` : ""}</ol></div></section>`;
+  }).join("");
+  return `<div class="ovc-top">${plate || plateCalm(p)}${toQueue()}</div>${tracks}`;
+}
+
+// ---- D, written out
+function ovWritten(W) {
+  const p = plateOf(W), many = W.repos.length > 1;
+  const inR = (r) => (many ? ` in ${esc(r)}` : "");
+  const list = (xs) => (xs.length < 2 ? xs.join("") : `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}`);
+  const words = ["no", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"];
+  const say = (n, one, more) => `${words[n] || n} ${n === 1 ? one : more}`;
+  const parts = [];
+
+  // On your plate
+  if (p.asks === null) parts.push(["On your plate", `The runner hasn't read the Inbox yet, so what waits on you isn't known.`]);
+  else if (!p.n) parts.push(["On your plate", `Nothing${ui.repo ? ` in ${esc(ui.repo)}` : ""}. The runner carries on by itself.`]);
+  else {
+    const ASKSAY = { decision: (a) => `a decision on ${a.ref}`, merge: (a) => `${a.ref} to merge`, stuck: (a) => `${a.ref}, which is stuck`, broken: (a) => `${a.ref}, which broke` };
+    const s = [];
+    if (p.asks.length) s.push(`${say(p.asks.length, "ask", "asks")} in the Inbox: ${list(p.asks.map((a) => `<a class="ov-t you" ${goto("inbox", a)}>${esc((ASKSAY[a.kind] || ((x) => x.ref))(a))}</a> <span class="ovd-q">(${esc(a.subject)}${many ? `, ${esc(a.repo)}` : ""})</span>`))}`);
+    if (p.build.length) s.push(`${say(p.build.length, "ticket is", "tickets are")} yours to build, ${list(p.build.map((i) => `${tLink(i, `#${i.n}`)} <span class="ovd-q">(${esc(i.title)}${many ? `, ${esc(i.repo)}` : ""})</span>`))}`);
+    if (p.triage.length) s.push(`${say(p.triage.length, "waits", "wait")} for you to triage: ${list(p.triage.map((i) => tLink(i, many ? `${i.repo}#${i.n}` : `#${i.n}`)))}`);
+    const first = s.shift();
+    parts.push(["On your plate", `${first[0].toUpperCase() + first.slice(1)}.${s.length ? ` ${s.map((x) => x[0].toUpperCase() + x.slice(1)).join(". ")}.` : ""}`]);
+  }
+
+  // Next
+  const nexts = W.repos.map((r) => {
+    const q = W.queues.get(r), nx = nextEffort(W, r);
+    if (repoOff(r)) return `${esc(r)} is stopped`;
+    const FIRST = { fix: "a fix round on", conflict: "a conflict round on", decision: "a decision on", live: "the live steps for", review: "a review of", merge: "a merge of" };
+    const j0 = q.jobs[0] && q.jobs[0].kind !== "build" ? `${esc(FIRST[q.jobs[0].kind] || q.jobs[0].kind)} ${esc(q.jobs[0].ref)}` : "";
+    const at = many ? `in ${esc(r)}, ` : "";
+    if (!nx) return `${at}nothing is ready to build${j0 ? ` after ${j0}` : ""}`;
+    const where = nx.top.t === "ticket" ? "with no effort" : `in ${eLink(nx.top)}`;
+    const it = `${tLink(nx.i)} <span class="ovd-q">${esc(nx.i.title)}</span> ${where}`;
+    return nx.now ? `${at}Claude is building ${it}` : j0 ? `${at}${j0} goes first, then ${it}` : `${at}${it} is built next`;
+  });
+  parts.push(["Next", `${many ? nexts.map((x) => x[0].toUpperCase() + x.slice(1)).join(". ") : nexts[0][0].toUpperCase() + nexts[0].slice(1)}.`]);
+
+  // Stuck: the blocked tickets grouped by the root that won't move without you, or outside.
+  const roots = new Map();
+  for (const r of W.repos) for (const i of W.tickets(`repo:${r}`)) {
+    if (i.state !== "blocked" && !(i.state === "ready" && W.blockersOf(i).length)) continue;
+    const bs = W.blockersOf(i).map(({ b }) => (W.outside.has(b) ? { ...W.outside.get(b), outside: true } : rootOf(W.byKey.get(b), W)));
+    const root = bs.find((x) => heldSay(x));
+    if (!root) continue;
+    const k = root.outside ? root.key : key(root);
+    roots.set(k, { root, its: [...((roots.get(k) || {}).its || []), i] });
+  }
+  const stuckFix = W.repos.flatMap((r) => W.tickets(`repo:${r}`)).filter((i) => i.state === "fixing-itself");
+  const st = [...roots.values()].sort((a, b) => b.its.length - a.its.length).slice(0, 4).map(({ root, its }) => {
+    const who = root.outside ? `${esc(root.repo)}#${root.n}` : tLink(root, many ? `${root.repo}#${root.n}` : `#${root.n}`);
+    return `${say(its.length, "ticket waits", "tickets wait")} on ${who}, which ${esc(heldSay(root))}`;
+  });
+  const more = roots.size > 4 ? ` ${say(roots.size - 4, "more chain is", "more chains are")[0].toUpperCase() + say(roots.size - 4, "more chain is", "more chains are").slice(1)} on the Queue.` : "";
+  const fix = stuckFix.length ? ` The runner is fixing itself on ${list(stuckFix.map((i) => tLink(i, many ? `${i.repo}#${i.n}` : `#${i.n}`)))}.` : "";
+  parts.push(["Stuck", st.length ? `${st.map((x) => x[0].toUpperCase() + x.slice(1)).join(". ")}.${more}${fix}` : `Nothing waits on you or outside the runner.${fix}`]);
+
+  // What's left: each effort's tickets to go, nearest first.
+  const effs = W.repos.flatMap((r) => effortsOf(W, r).open.map((n) => ({ n, f: factsOf(n, W), r })));
+  if (effs.length) {
+    const byLeft = [...effs].sort((a, b) => a.f.open.length - b.f.open.length);
+    const near = byLeft[0], rest = byLeft.slice(1, 3), others = byLeft.slice(3);
+    const nm = (x) => `${eLink(x.n)}${many && !ui.repo ? `<span class="ovd-q"> (${esc(x.r)})</span>` : ""}`;
+    const doneE = W.repos.flatMap((r) => effortsOf(W, r).done);
+    parts.push(["Left", `${nm(near)} is closest to usable, ${say(near.f.open.length, "ticket", "tickets")} to go${near.f.yours.length ? `, ${say(near.f.yours.length, "of them yours", "of them yours")}` : ""}.${rest.length ? ` Then ${list(rest.map((x) => `${nm(x)} with ${x.f.open.length}`))}.` : ""}${others.length ? ` ${say(others.length, "other has", "others have")[0].toUpperCase() + say(others.length, "other has", "others have").slice(1)} ${others[0].f.open.length === others[others.length - 1].f.open.length ? others[0].f.open.length : `${others[0].f.open.length} to ${others[others.length - 1].f.open.length}`} to go.` : ""}${doneE.length ? ` ${list(doneE.map((n) => esc(n.title)))} ${doneE.length === 1 ? "is" : "are"} finished.` : ""}`]);
+  }
+
+  return `<article class="card ovd" aria-label="Where things stand">
+    <header class="ovd-head"><p>${ui.repo ? esc(ui.repo) : "All repositories"}, as of ${esc(hm(snap.written_at))}</p>${toInbox("Inbox")}${toQueue("Queue")}</header>
+    ${parts.map(([label, text]) => `<section class="ovd-p"><h2>${label}</h2><p>${text}</p></section>`).join("")}
+  </article>`;
 }
 
 // ------------------------------------------------------------------ the work, as every page reads it
@@ -2731,12 +3204,20 @@ document.addEventListener("keydown", (e) => {
 });
 
 // ---- the switcher between the three. Sample data only, so it can never reach the real page.
-// Take 16: nothing left to switch (the lanes are one card, Stefan's pick).
-function protoBar() { return ""; }
+// Take 16: nothing left to switch on the Queue (the lanes are one card, Stefan's pick).
+// Take 25: the Overview's four.
+function protoBar() {
+  if (!snap.sample || ui.page !== "overview") return "";
+  const [k, name] = VARIANTS.find((v) => v[0] === ui.variant);
+  return `<div class="proto" role="group" aria-label="Prototype: the Overview, four ways" title="Prototype: the Overview four ways. Left and right arrow keys">
+    <button data-act="variant" data-by="-1" aria-label="Previous variant" title="Left arrow key">${ICON.left}</button>
+    <span class="proto-name"><b>${k.toUpperCase()}</b>${esc(name)}</span>
+    <button data-act="variant" data-by="1" aria-label="Next variant" title="Right arrow key">${ICON.right}</button></div>`;
+}
 function turnVariant(by) {
   const at = VARIANTS.findIndex((v) => v[0] === ui.variant);
   ui.variant = VARIANTS[(at + by + VARIANTS.length) % VARIANTS.length][0];
-  remember("variant", ui.variant);
+  remember("ovariant", ui.variant);
   ui.sel = null; ui.pop = null;
 }
 
@@ -3136,6 +3617,16 @@ document.addEventListener("click", (e) => {
     case "feature": ui.feature = ui.feature === d.id ? "" : d.id; ui.sel = null; scrollTo(0, 0); break;   // the Queue, A
     case "open": ui.open = ui.open.includes(d.id) ? ui.open.filter((x) => x !== d.id) : [...ui.open, d.id]; break;   // the Queue, B
     case "variant": turnVariant(Number(d.by)); break;   // PROTOTYPE
+    case "ov-effort": {   // PROTOTYPE (#29, take 25): an effort opens the Queue's Progress at it
+      if (e.ctrlKey || e.metaKey || e.shiftKey) return;
+      e.preventDefault();
+      ui.page = "queue"; ui.qview = "progress"; ui.pop = null;
+      for (const id of [d.parent, d.id]) if (id && !id.startsWith("repo:") && !qOpen.has(id)) toggleOpen(id);
+      address(true); draw();
+      const el = [...document.querySelectorAll(".pg-name")].find((x) => x.dataset.id === d.id);
+      if (el) el.scrollIntoView({ block: "center" }); else scrollTo(0, 0);
+      return;
+    }
     case "q-lane": if (qShut.has(d.lane)) qShut.delete(d.lane); else qShut.add(d.lane); remember("qshut", JSON.stringify([...qShut])); break;   // take 15
     case "q-open": toggleOpen(d.id); break;   // PROTOTYPE (#30, take 12)
     case "q-view": ui.qview = d.view; remember("qview", d.view); break;
@@ -3200,9 +3691,9 @@ document.addEventListener("keydown", (e) => {
 document.addEventListener("change", (e) => {
   if (e.target.dataset && e.target.dataset.change === "q-effort") { ui.qeffort = e.target.value; draw(); }
 });
-// PROTOTYPE: on the Queue the left and right arrow keys turn to the next arrangement.
+// PROTOTYPE: on the Overview the left and right arrow keys turn to the next arrangement.
 document.addEventListener("keydown", (e) => {
-  if (ui.page !== "queue" || !snap || !snap.sample || ui.pr || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (ui.page !== "overview" || !snap || !snap.sample || ui.pr || e.ctrlKey || e.metaKey || e.altKey) return;
   if (e.target.closest?.("input, textarea, select, [contenteditable]")) return;
   const turn = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
   if (!turn) return;
