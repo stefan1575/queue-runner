@@ -1,12 +1,13 @@
 // The one launch for every kind of job (#152): a full-access T3 thread through T3's MCP
-// (`t3_thread_launch`, docs/t3.md) on the kind's provider instance, model and effort, as
-// Settings gives them (`src/jobs.ts`). The effort goes under the option id T3 gave for that
-// model, which is its driver's own (docs/app.md, Job models). Which of a kind's two models a job
-// runs on (its own or, while that provider is out of usage, its fallback) is the caller's to say.
-import { kindModels, model, type Catalog, type JobKind, type Jobs, type ModelChoice } from './jobs.ts';
+// (`t3_thread_launch`, docs/t3.md) on a provider instance, model and effort. The effort goes under
+// the option id T3 gave for that model, which is its driver's own (docs/app.md, Job models).
+// **The launch runs on the choice it's given**, the one the usage gate let in (its own model or
+// its fallback, `src/usage-gate.ts`), never on the settings read again: a setting changed between
+// the gate's answer and the launch would put the job on a model nobody let in.
+import { model, usable, type Catalog, type JobKind, type ModelChoice } from './jobs.ts';
 import type { T3Mcp } from './t3/mcp.ts';
 
-/** Nothing to launch on: no provider connected, or a fallback asked of a kind that has none. */
+/** Nothing to launch on: the choice's provider or model isn't one T3 runs now. */
 export class JobError extends Error {}
 
 export type Job = {
@@ -17,8 +18,8 @@ export type Job = {
   brief: string;
   /** A new worktree T3 makes from `baseRef` on a new branch; without one, the project's folder. */
   worktree?: { baseRef: string; branch: string };
-  /** Run on the kind's fallback (its own provider is out of usage). */
-  onFallback?: boolean;
+  /** What it runs on: the choice the gate let in. */
+  choice: ModelChoice;
 };
 
 export type Launched = { threadId: string; runId: string | null; link: string | null; choice: ModelChoice };
@@ -32,11 +33,11 @@ export function modelSelection(choice: ModelChoice, catalog: Catalog) {
   };
 }
 
-export async function launchJob(mcp: Pick<T3Mcp, 'call'>, jobs: Jobs, catalog: Catalog, job: Job): Promise<Launched> {
-  const models = kindModels(jobs, job.kind, catalog);
-  const choice = job.onFallback ? models.fallback : models.choice;
-  if (!choice) {
-    throw new JobError(job.onFallback ? `${job.kind} has no fallback T3 can run` : 'T3 has no provider connected');
+export async function launchJob(mcp: Pick<T3Mcp, 'call'>, catalog: Catalog, job: Job): Promise<Launched> {
+  const choice = usable(job.choice, catalog);
+  // never another model in its place: a choice T3 can't run now launches nothing
+  if (!choice || choice.effort !== job.choice.effort) {
+    throw new JobError(`T3 can't run ${job.choice.provider} ${job.choice.model}${job.choice.effort ? ` at ${job.choice.effort}` : ''} now`);
   }
   const launched = await mcp.call('t3_thread_launch', {
     projectId: job.projectId, title: job.title, message: job.brief, runtimeMode: 'full-access',

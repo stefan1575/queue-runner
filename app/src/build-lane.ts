@@ -213,9 +213,9 @@ export class BuildLane {
         agentsFile: this.d.exists(join(repo.folder, 'AGENTS.md')) ? 'AGENTS.md' : this.d.exists(join(repo.folder, 'CLAUDE.md')) ? 'CLAUDE.md' : null,
       });
       this.d.say(`Starting ${job.title} on ${ticket.branch} from ${ticket.base}`);
-      launched = await launchJob(this.d.mcp, this.d.jobs(), catalog, {
+      launched = await launchJob(this.d.mcp, catalog, {
         kind: 'build', projectId: repo.id, title: job.title, brief,
-        worktree: { baseRef: ticket.base, branch: ticket.branch }, onFallback: letIn.onFallback,
+        worktree: { baseRef: ticket.base, branch: ticket.branch }, choice: letIn.choice,
       });
     } catch (e) {
       return await notStarted('not-started', (e as Error).message);

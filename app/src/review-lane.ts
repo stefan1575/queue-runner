@@ -243,17 +243,20 @@ export class ReviewLane {
     this.holdSaid = null;
     this.d.gate.forget(id);
     const fit = v as Extract<typeof v, { fits: true }>;
-    this.track(this.review(repo, pr, fit));
+    // named now, from the settings the gate read: the review runs and is named as it was let in
+    const reviewer = reviewerName(catalog!, this.d.jobs(), fit.choice, fit.onFallback);
+    this.track(this.review(repo, pr, { ...fit, reviewer }));
     return true;
   }
 
-  /** One review of H, start to end. The live check calls it directly. */
-  async review(repo: BuildRepo, pr: ReviewPull, letIn: { choice: ModelChoice; onFallback: boolean; cost: Record<string, number> }): Promise<Job> {
+  /** One review of H, start to end, on the choice let in and under the name it was let in as
+   *  (`reviewerName`): the settings aren't read again. The live check calls it directly. */
+  async review(repo: BuildRepo, pr: ReviewPull, letIn: { choice: ModelChoice; onFallback: boolean; cost: Record<string, number>; reviewer: string }): Promise<Job> {
     const github = repo.github!;
     const n = pr.number;
     const h = pr.headSha;
     const catalog = this.d.catalog()!;
-    const reviewer = reviewerName(catalog, this.d.jobs(), letIn.choice, letIn.onFallback);
+    const reviewer = letIn.reviewer;
     const earlier = readReviews(await this.d.github.issueComments(github, n));
     const round = nextRound(earlier);
     const title = reviewTitle(repo, n);
@@ -294,7 +297,7 @@ export class ReviewLane {
         });
         await write('brief.md', brief);
         this.d.say(`${name}: ${reviewer} reviews ${h.slice(0, 7)} (review ${round}) in ${runDir}`);
-        const launched = await launchJob(this.d.mcp, this.d.jobs(), catalog, { kind: 'review', projectId: repo.id, title, brief, onFallback: letIn.onFallback });
+        const launched = await launchJob(this.d.mcp, catalog, { kind: 'review', projectId: repo.id, title, brief, choice: letIn.choice });
         const thread = { threadId: launched.threadId, runId: launched.runId, link: launched.link };
         ran_.thread = thread;
         await this.d.log.thread(job.id, thread);

@@ -20,7 +20,7 @@ import { JobLog } from '../src/job-log.ts';
 import { DEFAULT_JOBS, model, type Catalog, type ModelChoice } from '../src/jobs.ts';
 import { Deps } from '../src/review/deps.ts';
 import { DryRunPoster } from '../src/review/post.ts';
-import { ReviewLane } from '../src/review-lane.ts';
+import { ReviewLane, reviewerName } from '../src/review-lane.ts';
 import { catalogFromConfig } from '../src/t3/catalog.ts';
 import { T3Mcp } from '../src/t3/mcp.ts';
 import { fetchHttp, nodeConnect, runtimeAddress, t3Cli } from '../src/t3/real.ts';
@@ -81,16 +81,17 @@ try {
   const log = await JobLog.open(join(state, 'jobs.jsonl'));
   const said: string[] = [];
   const noGate = { pick: () => { throw new Error('not asked'); }, check: () => ({ fits: true as const, cost: {} }), started() {}, finished() {}, dropped() {}, forget() {} };
+  const jobs = { ...DEFAULT_JOBS, review: { own: choice, fallback: null } };
   const lane = new ReviewLane({
     repos: () => [], github, git: new GitCli(), deps: new Deps(join(state, 'deps')), mcp, ws, gate: noGate as any,
-    catalog: () => catalog, jobs: () => ({ ...DEFAULT_JOBS, review: { own: choice, fallback: null } }),
+    catalog: () => catalog, jobs: () => jobs,
     user: async () => 'the live check', log, stateDir: state, poster: new DryRunPoster((l) => said.push(l)),
     say: (l) => { said.push(l); console.log(`  ${l}`); },
   });
   const repo = { id: project.id, title: 'queue-runner-sandbox', folder: clone, github: GITHUB };
   console.log(`Adoption would say: ${(await lane.whyNot(repo, pr)) ?? 'review it'}`);
   console.log(`Reviewing ${GITHUB}#${n} at ${pr.headSha.slice(0, 7)} on ${choice.provider} ${choice.model} at ${choice.effort}`);
-  const job = await lane.review(repo, pr, { choice, onFallback: false, cost: {} });
+  const job = await lane.review(repo, pr, { choice, onFallback: false, cost: {}, reviewer: reviewerName(catalog, jobs, choice, false) });
   console.log(JSON.stringify(job, null, 2));
 
   const outcome = job.end?.outcome ?? 'none';

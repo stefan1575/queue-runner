@@ -1,10 +1,11 @@
-// One launch for every kind of job (#152): a full-access T3 thread on the kind's provider
-// instance, model and effort, the effort under the option id T3 gave for that model.
+// One launch for every kind of job (#152): a full-access T3 thread on the provider instance, model
+// and effort it's given (the one the gate let in), the effort under the option id T3 gave for that
+// model. It never resolves the settings again.
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
-import { DEFAULT_JOBS, JOB_KINDS, type Jobs } from '../src/jobs.ts';
+import { DEFAULT_JOBS, JOB_KINDS, kindModels, type Jobs } from '../src/jobs.ts';
 import { JobError, launchJob } from '../src/launch.ts';
 import { catalogFromConfig } from '../src/t3/catalog.ts';
 import { T3Mcp } from '../src/t3/mcp.ts';
@@ -33,10 +34,10 @@ const last = (p: typeof a) => {
 const job = { projectId: 'p1', title: 'Build #7', brief: 'Build issue #7.' };
 
 describe('launching a job', () => {
-  test("a kind with no settings of its own launches on Default's; one with its own on those", async () => {
+  test("each kind launches on the choice it's given: the kind's own, else Default's, as kindModels resolves them", async () => {
     const def = last(b), own = last(a);
     const jobs: Jobs = { ...DEFAULT_JOBS, default: { provider: def.provider, model: def.model, effort: def.effort }, review: { own: { provider: own.provider, model: own.model, effort: own.effort }, fallback: null } };
-    for (const k of JOB_KINDS) await launchJob(mcp, jobs, catalog, { ...job, kind: k.id });
+    for (const k of JOB_KINDS) await launchJob(mcp, catalog, { ...job, kind: k.id, choice: kindModels(jobs, k.id, catalog).choice! });
     const sel = (x: typeof def) => ({ instanceId: x.provider, model: x.model, options: [{ id: x.option, value: x.effort }] });
     expect(t3.launches.map((l) => l.modelSelection)).toEqual(JOB_KINDS.map((k) => (k.id === 'review' ? sel(own) : sel(def))));
     expect(t3.launches[0]).toEqual({ projectId: 'p1', title: 'Build #7', message: 'Build issue #7.', runtimeMode: 'full-access', modelSelection: sel(def) });
@@ -46,13 +47,13 @@ describe('launching a job', () => {
     const x = last(a), y = last(b);
     expect(x.option).not.toBe(y.option);
     for (const c of [x, y]) {
-      await launchJob(mcp, { ...DEFAULT_JOBS, default: { provider: c.provider, model: c.model, effort: c.effort } }, catalog, { ...job, kind: 'build' });
+      await launchJob(mcp, catalog, { ...job, kind: 'build', choice: { provider: c.provider, model: c.model, effort: c.effort } });
     }
     expect(t3.launches.map((l) => l.modelSelection.options)).toEqual([[{ id: x.option, value: x.effort }], [{ id: y.option, value: y.effort }]]);
   });
 
-  test("a new install launches on T3's default", async () => {
-    await launchJob(mcp, DEFAULT_JOBS, catalog, { ...job, kind: 'fix' });
+  test("a new install's kinds launch on T3's default", async () => {
+    await launchJob(mcp, catalog, { ...job, kind: 'fix', choice: kindModels(DEFAULT_JOBS, 'fix', catalog).choice! });
     const d = catalog.t3Default!;
     expect(t3.launches[0].modelSelection.instanceId).toBe(d.provider);
     expect(t3.launches[0].modelSelection.model).toBe(d.model);
@@ -62,30 +63,29 @@ describe('launching a job', () => {
   test('a model with no effort to choose launches with no options', async () => {
     const p = catalog.providers.find((x) => x.models.some((m) => !m.efforts.length))!;
     const m = p.models.find((x) => !x.efforts.length)!;
-    await launchJob(mcp, { ...DEFAULT_JOBS, default: { provider: p.id, model: m.id, effort: null } }, catalog, { ...job, kind: 'ask' });
+    await launchJob(mcp, catalog, { ...job, kind: 'ask', choice: { provider: p.id, model: m.id, effort: null } });
     expect(t3.launches[0].modelSelection).toEqual({ instanceId: p.id, model: m.id, options: [] });
   });
 
   test('a worktree is made by T3 from its base ref', async () => {
-    await launchJob(mcp, DEFAULT_JOBS, catalog, { ...job, kind: 'build', worktree: { baseRef: 'origin/main', branch: 'claude/x-7' } });
+    await launchJob(mcp, catalog, { ...job, kind: 'build', choice: catalog.t3Default!, worktree: { baseRef: 'origin/main', branch: 'claude/x-7' } });
     expect(t3.launches[0].workspaceStrategy).toEqual({ type: 'worktree', baseRef: 'origin/main', branch: 'claude/x-7' });
   });
 
-  test("on its fallback, a kind launches on the fallback's model", async () => {
+  test("a kind's fallback, given, is what launches", async () => {
     const f = last(a);
     const jobs: Jobs = { ...DEFAULT_JOBS, review: { own: null, fallback: { provider: f.provider, model: f.model, effort: f.effort } } };
-    const got = await launchJob(mcp, jobs, catalog, { ...job, kind: 'review', onFallback: true });
+    const got = await launchJob(mcp, catalog, { ...job, kind: 'review', choice: kindModels(jobs, 'review', catalog).fallback! });
     expect(t3.launches[0].modelSelection).toEqual({ instanceId: f.provider, model: f.model, options: [{ id: f.option, value: f.effort }] });
     expect(got).toMatchObject({ threadId: 'thread-1', runId: 'run-1', choice: { provider: f.provider, model: f.model, effort: f.effort } });
   });
 
-  test('a kind with no fallback, asked for one, launches nothing', async () => {
-    await expect(launchJob(mcp, DEFAULT_JOBS, catalog, { ...job, kind: 'review', onFallback: true })).rejects.toThrow(JobError);
-    expect(t3.launches).toEqual([]);
-  });
-
-  test('with nothing connected, nothing launches', async () => {
-    await expect(launchJob(mcp, DEFAULT_JOBS, { providers: [], t3Default: null }, { ...job, kind: 'build' })).rejects.toThrow(/no provider/);
+  test("a choice T3 can't run now launches nothing, never another model in its place", async () => {
+    const x = last(a);
+    await expect(launchJob(mcp, catalog, { ...job, kind: 'review', choice: { provider: 'gone', model: x.model, effort: x.effort } })).rejects.toThrow(JobError);
+    await expect(launchJob(mcp, catalog, { ...job, kind: 'review', choice: { provider: x.provider, model: 'gone', effort: x.effort } })).rejects.toThrow(JobError);
+    await expect(launchJob(mcp, catalog, { ...job, kind: 'review', choice: { provider: x.provider, model: x.model, effort: 'gone' } })).rejects.toThrow(JobError);
+    await expect(launchJob(mcp, { providers: [], t3Default: null }, { ...job, kind: 'build', choice: { provider: x.provider, model: x.model, effort: x.effort } })).rejects.toThrow(/can't run/);
     expect(t3.launches).toEqual([]);
   });
 });

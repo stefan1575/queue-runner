@@ -268,6 +268,32 @@ describe('a review', () => {
     expect(lines.at(-1)).toMatch(/waits: the review would run on Claude, the instance builds run on/);
   });
 
+  test('a setting changed after the gate let the review in leaves it on the model let in, under its name', async () => {
+    const checkout = git.checkout.bind(git);
+    git.checkout = async (folder, ref, d) => { jobs = { ...jobs, review: { own: BUILD, fallback: null } }; await checkout(folder, ref, d); };
+    makeLane();
+    const passed = lane.pass();
+    await answer(1, reply([]));
+    await passed;
+    await lane.idle();
+    expect(t3.launches).toHaveLength(1);
+    expect(t3.launches[0].modelSelection).toMatchObject({ instanceId: 'codex', model: 'gpt-6.2-sol' });
+    expect(log.jobs().at(-1)).toMatchObject({ choice: REVIEW, reviewer: 'GPT-6.2-Sol High' });
+  });
+
+  test("the fallback's name is the one it was let in under, though the settings change after", async () => {
+    const gate = new RoomyGate();
+    gate.pick = () => ({ fits: true as const, choice: FALLBACK, onFallback: true, cost: { five_hour: 15 } });
+    const checkout = git.checkout.bind(git);
+    git.checkout = async (folder, ref, d) => { jobs = { ...jobs, review: { own: FALLBACK, fallback: null } }; await checkout(folder, ref, d); };
+    makeLane({ gate });
+    const passed = lane.pass();
+    await answer(1, reply([]));
+    await passed;
+    await lane.idle();
+    expect(log.jobs().at(-1)).toMatchObject({ reviewer: 'Claude Opus 5.5 High, fallback while Codex is out of usage' });
+  });
+
   test('a dry run posts nothing', async () => {
     makeLane({ poster: new DryRunPoster((l) => lines.push(l)) });
     const passed = lane.pass();

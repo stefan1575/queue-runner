@@ -239,8 +239,10 @@ Which model does each kind of job (#152: #120's shape on #36's page, as the 2026
   model doesn't offer is the model's default.
 - **Launching** (`launchJob`): `t3_thread_launch` with `{projectId, title, message, runtimeMode:
   full-access, modelSelection: {instanceId, model, options: [{id: <the model's effort option>,
-  value}]}, workspaceStrategy?: {type: worktree, baseRef, branch}}`, on the kind's model or,
-  asked, its fallback (docs/t3.md: Codex ignores `effort`, so the id matters).
+  value}]}, workspaceStrategy?: {type: worktree, baseRef, branch}}`, on the choice the usage gate
+  let in (the kind's model or its fallback), never the settings read again: a setting changed
+  after the gate answered can't move the job. A choice T3 can't run by then launches nothing
+  (docs/t3.md: Codex ignores `effort`, so the id matters).
 - **The page** (Settings, Models): Default, then one row per kind, each "Follows Default" until
   set (an undo goes back), with its fallback under its model. The three dropdowns are fixed
   widths, so changing a provider moves nothing (#36). Models carries a blue count in the page

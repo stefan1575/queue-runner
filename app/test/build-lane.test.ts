@@ -119,6 +119,15 @@ describe('picking and launching', () => {
     expect(lane.running()).toEqual(['p-app']);
   });
 
+  test('a setting changed after the gate let the build in leaves it on the model let in', async () => {
+    gh.ready['owner/app'] = [issue(11)];
+    const other = { provider: 'codex', model: 'gpt-6.2-sol', effort: 'high' };
+    git.fetch = async () => { jobs = { ...jobs, build: { own: other, fallback: null } }; };
+    await makeLane().pass();
+    expect(t3.launches[0].modelSelection).toMatchObject({ instanceId: 'claudeAgent', model: 'claude-opus-5-5' });
+    expect(log.jobs()[0]!.choice).toEqual(BUILD);
+  });
+
   test("an unserved repo's tickets are never picked", async () => {
     gh.ready['owner/app'] = [issue(1)];
     gh.ready['owner/lib'] = [issue(2)];
