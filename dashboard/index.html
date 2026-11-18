@@ -25,9 +25,8 @@
     state at a glance? Four steps, from one tone (done or not) up to every state. In all of them
     an open effort reads like the live page's feature card (what's left in a sentence, a row per
     ticket), and a ticket with no effort is a lighter row of its own (take 12's variant A).
-    The rail: no Details link, the plan and its resets beside each provider, "N% of the week is
-    kept for you", Fable's week set like Weekly, a mark per repository, and the runner listed
-    under Local in a Health card. Take 12 is earlier/take-12.html.
+    The right-hand rail is not this prototype's: it's take 12's here, and prototyped on its own
+    branch, prototype/rail. Take 12 is earlier/take-12.html.
   - The Overview only summarises, in three cards read top to bottom: what's on your plate (the
     Inbox in counts by kind, and the ask that's first in line), what's running (a line per lane,
     with its Stop button and the one thing it takes up next), and what's next (a bar per
@@ -1106,18 +1105,7 @@ button.er-name:hover { text-decoration: underline; text-underline-offset: 3px; }
 .plan2-note { font-size: 13.5px; color: var(--mute); margin-top: 8px; }
 
 /* ---------------------------------------------------------------- take 13 (PROTOTYPE, #30) */
-/* The rail: its three titles a step above what's under them, none with a mark of its own. */
-.rail .card-head h2 { font-size: 19px; }
-.rail .card-head .refresh { margin-left: auto; }
-.mrow2 { grid-template-columns: 112px minmax(0, 1fr) max-content; row-gap: 1px; }
-.m-pct small { font-size: 12.5px; font-weight: 400; color: var(--mute); }
-.m-when { grid-column: 1 / -1; }
-.plan2-note { color: var(--ink-2); font-size: 14px; }
-.order .rlogo { text-transform: uppercase; }
-.health .card-pad { padding-top: 14px; }
-.health .h-groups { margin-top: 0; font-size: 15px; row-gap: 10px; }
-.h-runner small { font-size: 13.5px; color: var(--mute); margin-left: -2px; }
-.rail .health.down { border-color: var(--bad-line); background: var(--bad-wash); }
+/* The Queue page only. The rail is prototyped on its own branch (prototype/rail). */
 
 /* A lane's queue opens and closes. */
 .ln-more { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; }
@@ -2552,46 +2540,41 @@ const planFull = (p) => `<div class="plan">
 // a row per window, its name, a thin bar and the bold figure, with when it resets small under the
 // name. A model's own week (Fable's) is a line under Weekly, not a window of its own; it says its
 // reset only when that isn't Weekly's.
-function meterRow(w, when) {
+function meterRow(w, sub, week) {
   const known = typeof w.used === "number", left = known ? Math.max(0, Math.min(100, Math.round(100 - w.used))) : null;
   const cls = known && left <= 0 ? " full" : known && left <= 15 ? " near" : "";
   const kept = known && w.reserve > 0 ? Math.min(w.reserve, left) : 0;
-  return `<div class="mrow2${cls}" title="${esc([w.note, w.resets_at ? `Resets ${stamp(w.resets_at)}` : ""].filter(Boolean).join(". "))}">
-    <span class="m-label">${esc(w.label)}</span>
+  const same = sub && week && w.resets_at && week.resets_at && Math.abs(ms(w.resets_at) - ms(week.resets_at)) < 90e3;
+  const label = sub ? w.label.replace(/^Weekly,?\s*/, "") : w.label;
+  const when = !w.resets_at ? (sub ? "" : "not started") : same ? "" : `resets ${clock(w.resets_at)}`;
+  return `<div class="mrow2${sub ? " sub" : ""}${cls}" title="${esc([w.note, w.resets_at ? `Resets ${stamp(w.resets_at)}` : ""].filter(Boolean).join(". "))}">
+    <span class="m-label">${esc(label)}${when ? `<span class="m-when">${esc(when)}</span>` : ""}</span>
     <span class="m-bar" role="img" aria-label="${esc(w.label)}: ${known ? left + "% left" : "unknown"}">${known ? `<i class="fill" style="width:${left}%"></i>` : ""}${kept > 0 ? `<i class="kept" style="width:${kept}%"></i>` : ""}</span>
-    <span class="m-pct">${known ? `${left}%<small> left</small>` : "?"}</span>${when ? `<span class="m-when">${esc(when)}</span>` : ""}</div>`;
+    <span class="m-pct">${known ? left + "%" : "?"}</span></div>`;
 }
-// Take 13 (Stefan, 2026-11-18): beside the provider, its plan, the resets it has left (only when
-// it has some) and when it was read. A model's own week (Fable's) is a row set like Weekly; the
-// two share one "resets" line under them while they reset together, and each has its own if not.
 function planCard(p) {
-  const ws = p.windows || [], said = (w) => (w.resets_at ? `resets ${clock(w.resets_at)}` : "not started");
-  const weeks = ws.filter((w) => w.id === "week" || w.id.startsWith("week_"));
-  const together = weeks.length > 1 && weeks.every((w) => w.resets_at && Math.abs(ms(w.resets_at) - ms(weeks[0].resets_at)) < 90e3);
-  const rows = ws.map((w) => meterRow(w, together && weeks.includes(w) ? (w === weeks[weeks.length - 1] ? said(w) : "") : said(w))).join("");
+  const ws = p.windows || [], week = ws.find((w) => w.id === "week");
+  const rows = ws.map((w) => meterRow(w, w.id.startsWith("week_"), week)).join("");
   const kept = ws.find((w) => w.reserve);
-  const about = [p.plan ? esc(p.plan) : "", resetsLeft(p).replace(/, $/, ""), p.read_at ? `<span title="${esc(stamp(p.read_at))}">read ${esc(hm(p.read_at))}</span>` : "not read yet"].filter(Boolean).join(", ");
   return `<div class="plan2">
-    <p class="plan2-name">${who(p.provider, p.name)}<span class="read">${about}</span></p>
+    <p class="plan2-name">${who(p.provider, p.name)}<span class="read">${p.plan ? esc(p.plan) + " · " : ""}${p.resets && p.resets.available > 0 ? `${plural(p.resets.available, "reset", "resets")} · ` : ""}${p.read_at ? `<span title="${esc(stamp(p.read_at))}">read ${esc(hm(p.read_at))}</span>` : "not read yet"}</span></p>
     ${p.error ? `<p class="plan-note bad">${esc(p.error)}</p>` : ""}${rows}
-    ${kept ? `<p class="plan2-note"${kept.reserve_opens_at ? ` title="It opens to the runner ${esc(stamp(kept.reserve_opens_at))}"` : ""}>${kept.reserve}% of the week is kept for you.</p>` : ""}</div>`;
+    ${kept ? `<p class="plan2-note">Your ${kept.reserve}% of the week${kept.reserve_opens_at ? ` opens to the runner ${esc(clock(kept.reserve_opens_at))}` : " is kept for you"}.</p>` : ""}</div>`;
 }
 
 // Is it up, and is everything it leans on up. One line while all is well.
 // Sources are grouped the way Stefan sorts them: the providers, what runs on this PC, what's outside.
 const SOURCE_GROUPS = [["provider", "Providers"], ["local", "Local"], ["external", "External"]];
-// Take 13: the runner is one of the things on this PC, so it's a row under Local with since when,
-// not a headline of its own; the card is named for what it answers.
 function status() {
   const down = frozen(), all = snap.sources || [], bad = all.filter((x) => !x.ok);
   const known = SOURCE_GROUPS.map((g) => g[0]);
+  const groups = [...SOURCE_GROUPS, ["", "Other"]].map(([id, label]) => [label, all.filter((x) => (known.includes(x.group) ? x.group : "") === id)]).filter((g) => g[1].length);
   const one = (x) => `<span class="${x.ok || down ? "" : "no"}" title="${esc(x.name)}: ${esc(retrying(x) ? reconnecting(x) : x.note || "")}"><i class="dot ${dotOf(x, down)}"></i>${esc(x.short || x.name)}</span>`;
-  const since = down ? snap.written_at : (snap.runner || {}).started_at;
-  const runner = `<span class="h-runner${down ? " no" : ""}"${since ? ` title="${down ? "Silent" : "Running"} since ${esc(stamp(since))}"` : ""}><i class="dot ${down ? "bad" : "ok"}"></i>Queue runner<small>${down ? "silent" : "running"}${since ? ` since ${esc(clock(since))}` : ""}</small></span>`;
-  const groups = [...SOURCE_GROUPS, ["", "Other"]].map(([id, label]) => [label, (id === "local" ? [runner] : []).concat(all.filter((x) => (known.includes(x.group) ? x.group : "") === id).map(one))]).filter((g) => g[1].length);
-  return `<section class="card health${down ? " down" : ""}"><header class="card-head"><h2>Health</h2></header>
-    <div class="card-pad"><div class="h-groups">${groups.map(([label, xs]) => `<span class="h-label">${label}</span><span class="h-row">${xs.join("")}</span>`).join("")}</div>
-    ${!down && bad.length ? `<p class="h-bad">${bad.map((x) => `${esc(x.name)}: ${esc(x.note)}`).join(". ")}</p>` : ""}</div></section>`;
+  return `<a class="card status${down ? " down" : ""}" href="${esc(href({ page: "settings", pr: null }))}" data-act="page" data-page="settings" title="Connections are in Settings">
+    <span class="h-top"><i class="dot ${down ? "bad" : "ok"}"></i><b>${down ? "Runner silent" : "Runner running"}</b></span>
+    ${(down ? snap.written_at : (snap.runner || {}).started_at) ? `<span class="h-when">since ${esc(stamp(down ? snap.written_at : snap.runner.started_at))}</span>` : ""}
+    <span class="h-groups">${groups.map(([label, xs]) => `<span class="h-label">${label}</span><span class="h-row">${xs.map(one).join("")}</span>`).join("")}</span>
+    ${!down && bad.length ? `<span class="h-bad">${bad.map((x) => `${esc(x.name)}: ${esc(x.note)}`).join(". ")}</span>` : ""}</a>`;
 }
 
 // Each repository's Stop or Resume (ticket 37), in the order the runner takes them up. The page
@@ -2610,7 +2593,7 @@ function repoRows() {
     const btn = stale ? "" : off
       ? `<button class="btn sm icon solid" data-act="repostop" data-repo="${esc(name)}" data-how="" aria-label="Resume ${esc(name)}" title="Resume: both lanes take up its work again">${ICON.play}</button>`
       : `<button class="btn sm icon" data-act="repostop" data-repo="${esc(name)}" data-how="after-job" aria-label="Stop ${esc(name)}" title="Stop: a job running on it finishes; then neither lane takes up its work">${ICON.pause}</button>`;
-    return `<li${r.stopped ? ' class="off"' : ""}>${repoLogo(name)}<span class="name">${esc(name)}<span>${esc(sub)}</span></span>${btn}</li>`;
+    return `<li${r.stopped ? ' class="off"' : ""}><span class="name">${esc(name)}<span>${esc(sub)}</span></span>${btn}</li>`;
   }).join("");
   return `<ul class="order">${rows}</ul>`;
 }
@@ -2643,7 +2626,7 @@ function rail() {
   clearTimeout(refreshPoll);
   if (refreshPending()) refreshPoll = setTimeout(load, 2000);
   const notes = refreshNotes().map((n) => `<p class="plan-note${n.bad ? " bad" : ""}" style="margin:0 0 14px">${esc(n.text)}</p>`).join("");
-  const usage = `<section class="card usage2"><header class="card-head"><h2>Usage</h2>${refreshButton()}</header>
+  const usage = `<section class="card usage2"><header class="card-head"><span class="u-icon">${ICON.usage}</span><h2>Usage</h2><a class="details" href="${esc(href({ page: "usage", pr: null }))}" data-act="page" data-page="usage">Details</a>${refreshButton()}</header>
     <div class="card-pad">${notes}${(snap.usage || []).map((p) => plan(p, false)).join("")}</div></section>`;
   const repos = `<section class="card"><header class="card-head"><h2>Repositories</h2></header><div class="card-pad" style="padding-top:8px">${repoRows()}</div></section>`;
   return (ui.page === "usage" ? "" : usage) + repos + status();
