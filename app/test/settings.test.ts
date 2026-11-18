@@ -45,7 +45,7 @@ describe('the settings', () => {
   test('a new install has the defaults', async () => {
     const store = await SettingsStore.open(await temp());
     expect(store.get()).toEqual(DEFAULT_SETTINGS);
-    expect(DEFAULT_SETTINGS).toEqual({ name: null, dateStyle: 'month-first', startWithWindows: true });
+    expect(DEFAULT_SETTINGS).toEqual({ name: null, dateStyle: 'month-first', startWithWindows: true, repos: null });
   });
 
   test('a change is saved at once and survives a restart', async () => {
@@ -55,7 +55,7 @@ describe('the settings', () => {
     await store.set({ dateStyle: 'iso' });
     await store.set({ startWithWindows: false });
     const again = await SettingsStore.open(folder);
-    expect(again.get()).toEqual({ name: 'Ana', dateStyle: 'iso', startWithWindows: false });
+    expect(again.get()).toEqual({ ...DEFAULT_SETTINGS, name: 'Ana', dateStyle: 'iso', startWithWindows: false });
   });
 
   test('each change is told to the listeners', async () => {
@@ -108,7 +108,7 @@ describe('the settings', () => {
     const folder = await temp();
     const store = await SettingsStore.open(folder);
     await Promise.all([store.set({ name: 'Ana' }), store.set({ dateStyle: 'iso' }), store.set({ startWithWindows: false })]);
-    const all = { name: 'Ana', dateStyle: 'iso', startWithWindows: false };
+    const all = { ...DEFAULT_SETTINGS, name: 'Ana', dateStyle: 'iso', startWithWindows: false };
     expect(store.get()).toEqual(all);
     expect((await SettingsStore.open(folder)).get()).toEqual(all);
   });
@@ -117,5 +117,19 @@ describe('the settings', () => {
     const folder = await temp();
     await writeFile(join(folder, 'settings.json'), JSON.stringify({ name: 'Ana', dateStyle: 'sideways' }));
     expect((await SettingsStore.open(folder)).get()).toEqual({ ...DEFAULT_SETTINGS, name: 'Ana' });
+  });
+
+  // Each repo's choices (#151), by T3 project id: whether it's served, who merges, and whether
+  // its "New" mark has been seen. A change made from what's saved when its turn comes.
+  test("a repo's choices survive a restart, and a bad entry is dropped alone", async () => {
+    const folder = await temp();
+    const store = await SettingsStore.open(folder);
+    await store.update((s) => ({ repos: { ...s.repos, p1: { served: true, merge: 'runner', seen: true } } }));
+    await store.update((s) => ({ repos: { ...s.repos, p2: { served: false, merge: 'me', seen: false } } }));
+    expect((await SettingsStore.open(folder)).get().repos).toEqual({
+      p1: { served: true, merge: 'runner', seen: true }, p2: { served: false, merge: 'me', seen: false },
+    });
+    await writeFile(join(folder, 'settings.json'), JSON.stringify({ repos: { p1: { served: true, merge: 'runner', seen: true }, p2: { merge: 'sideways' } } }));
+    expect((await SettingsStore.open(folder)).get().repos).toEqual({ p1: { served: true, merge: 'runner', seen: true } });
   });
 });
