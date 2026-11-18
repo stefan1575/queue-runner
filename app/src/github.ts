@@ -186,10 +186,20 @@ export class GhGitHub implements GitHub, GitHubAccount, GitHubLabels, GitHubWork
     }
   }
 
+  /** Every page of a paged REST answer, as GitHub sent each one. */
+  private async pages(endpoint: string): Promise<any[]> {
+    const pages = await this.api(['--paginate', '--slurp', endpoint], endpoint);
+    return Array.isArray(pages) ? pages : [];
+  }
+
   /** Every item of a paged REST list. */
   private async all(endpoint: string): Promise<any[]> {
-    const pages = await this.api(['--paginate', '--slurp', endpoint], endpoint);
-    return (Array.isArray(pages) ? pages : []).flat();
+    return (await this.pages(endpoint)).flat();
+  }
+
+  /** Every item under `key` of a paged REST answer whose pages are objects (`{check_runs: [...]}`). */
+  private async allOf(endpoint: string, key: string): Promise<any[]> {
+    return (await this.pages(endpoint)).flatMap((p) => (Array.isArray(p?.[key]) ? p[key] : []));
   }
 
   async readyIssues(repo: string): Promise<Issue[]> {
@@ -262,11 +272,12 @@ export class GhGitHub implements GitHub, GitHubAccount, GitHubLabels, GitHubWork
   }
 
   async checks(repo: string, sha: string) {
-    const runs = await this.api([`repos/${repo}/commits/${sha}/check-runs?per_page=100`], `${repo} check runs`);
-    const status = await this.api([`repos/${repo}/commits/${sha}/status`], `${repo} statuses`);
+    // every page of both: a check that failed past the first page still fails the gate
+    const runs = await this.allOf(`repos/${repo}/commits/${sha}/check-runs?per_page=100`, 'check_runs');
+    const statuses = await this.allOf(`repos/${repo}/commits/${sha}/status?per_page=100`, 'statuses');
     const seen: [string, string][] = [
-      ...(runs?.check_runs ?? []).map((r: any): [string, string] => [r.name, r.status === 'completed' ? String(r.conclusion) : 'pending']),
-      ...(status?.statuses ?? []).filter((s: any) => s.context !== REVIEW_STATUS).map((s: any): [string, string] => [s.context, s.state]),
+      ...runs.map((r: any): [string, string] => [r.name, r.status === 'completed' ? String(r.conclusion) : 'pending']),
+      ...statuses.filter((s: any) => s.context !== REVIEW_STATUS).map((s: any): [string, string] => [s.context, s.state]),
     ];
     const failed = seen.filter(([, s]) => !PASSED.has(s) && s !== 'pending').map(([n]) => n);
     const pending = seen.filter(([, s]) => s === 'pending').map(([n]) => n);

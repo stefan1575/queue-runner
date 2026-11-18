@@ -86,14 +86,43 @@ describe('gh', () => {
     expect(JSON.parse(runs[0]!.input!)).toEqual({ body });
   });
 
+  // gh --paginate --slurp answers every page, each one GitHub's object for that page
+  const paged = (answers: Record<string, unknown[]>): Gh => async (args) => {
+    const key = args.find((a) => a.startsWith('repos/'))!;
+    if (!args.includes('--paginate') || !args.includes('--slurp')) return { code: 0, stdout: JSON.stringify(answers[key]![0]), stderr: '' };
+    return { code: 0, stdout: JSON.stringify(answers[key]), stderr: '' };
+  };
+  const ok = (name: string) => ({ name, status: 'completed', conclusion: 'success' });
+
   test('checks leave sol-review out, and wait on any still running', async () => {
-    const answers: Record<string, unknown> = {
-      'repos/o/a/commits/h/check-runs?per_page=100': { check_runs: [{ name: 'tests', status: 'completed', conclusion: 'success' }] },
-      'repos/o/a/commits/h/status': { statuses: [{ context: 'sol-review', state: 'failure' }, { context: 'lint', state: 'pending' }] },
+    const answers: Record<string, unknown[]> = {
+      'repos/o/a/commits/h/check-runs?per_page=100': [{ check_runs: [ok('tests')] }],
+      'repos/o/a/commits/h/status?per_page=100': [{ statuses: [{ context: 'sol-review', state: 'failure' }, { context: 'lint', state: 'pending' }] }],
     };
-    const gh: Gh = async (args) => ({ code: 0, stdout: JSON.stringify(answers[args[1]!]), stderr: '' });
-    expect(await new GhGitHub(gh).checks('o/a', 'h')).toEqual({ state: 'pending', pending: ['lint'], failed: [] });
-    answers['repos/o/a/commits/h/status'] = { statuses: [{ context: 'sol-review', state: 'failure' }] };
-    expect(await new GhGitHub(gh).checks('o/a', 'h')).toEqual({ state: 'passed', pending: [], failed: [] });
+    expect(await new GhGitHub(paged(answers)).checks('o/a', 'h')).toEqual({ state: 'pending', pending: ['lint'], failed: [] });
+    answers['repos/o/a/commits/h/status?per_page=100'] = [{ statuses: [{ context: 'sol-review', state: 'failure' }] }];
+    expect(await new GhGitHub(paged(answers)).checks('o/a', 'h')).toEqual({ state: 'passed', pending: [], failed: [] });
+  });
+
+  test('a check run that failed on a later page fails the checks', async () => {
+    const answers: Record<string, unknown[]> = {
+      'repos/o/a/commits/h/check-runs?per_page=100': [
+        { check_runs: Array.from({ length: 100 }, (_, i) => ok(`job ${i}`)) },
+        { check_runs: [{ name: 'deploy', status: 'completed', conclusion: 'failure' }] },
+      ],
+      'repos/o/a/commits/h/status?per_page=100': [{ statuses: [] }],
+    };
+    expect(await new GhGitHub(paged(answers)).checks('o/a', 'h')).toEqual({ state: 'failed', pending: [], failed: ['deploy'] });
+  });
+
+  test('a status still pending on a later page holds the checks', async () => {
+    const answers: Record<string, unknown[]> = {
+      'repos/o/a/commits/h/check-runs?per_page=100': [{ check_runs: [ok('tests')] }],
+      'repos/o/a/commits/h/status?per_page=100': [
+        { statuses: Array.from({ length: 100 }, (_, i) => ({ context: `ci ${i}`, state: 'success' })) },
+        { statuses: [{ context: 'e2e', state: 'pending' }] },
+      ],
+    };
+    expect(await new GhGitHub(paged(answers)).checks('o/a', 'h')).toEqual({ state: 'pending', pending: ['e2e'], failed: [] });
   });
 });
