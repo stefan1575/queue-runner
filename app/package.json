@@ -1,13 +1,18 @@
 {
   "name": "queue-runner-app",
+  "productName": "Queue runner",
   "private": true,
   "type": "module",
+  "main": "desktop-dist/main.mjs",
   "engines": {
     "node": ">=24"
   },
   "scripts": {
     "start": "node src/main.ts",
-    "typecheck": "tsc --noEmit",
+    "desktop": "pnpm desktop:build && electron .",
+    "desktop:build": "vite build --config renderer/vite.config.ts --logLevel warn && esbuild src/desktop/electron.ts --bundle --platform=node --format=esm --external:electron --outfile=desktop-dist/main.mjs --log-level=warning && esbuild src/desktop/preload.ts --bundle --platform=node --format=cjs --external:electron --outfile=desktop-dist/preload.cjs --log-level=warning",
+    "desktop:shoot": "pnpm desktop:build && electron . --shoot",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p renderer",
     "test": "vitest run",
     "live:sign-in": "node live/sign-in.ts"
   },

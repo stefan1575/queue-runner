@@ -1,0 +1,84 @@
+@import "tailwindcss";
+
+/* The prototype's look (#36's layout prototype), until Stefan decides whether the whole app takes
+   T3 Code's type and colours (#36, open). Colour is state, never decoration:
+     blue = needs you   amber = working   red = broken   green = healthy or done   grey = idle */
+
+@theme {
+  --font-sans: "Atkinson Hyperlegible Next", ui-sans-serif, system-ui, "Segoe UI", sans-serif;
+  --font-mono: "Atkinson Hyperlegible Mono", ui-monospace, monospace;
+
+  --color-page: var(--c-page);
+  --color-side: var(--c-side);
+  --color-surface: var(--c-surface);
+  --color-sunk: var(--c-sunk);
+  --color-ink: var(--c-ink);
+  --color-ink-2: var(--c-ink-2);
+  --color-mute: var(--c-mute);
+  --color-faint: var(--c-faint);
+  --color-line: var(--c-line);
+  --color-line-2: var(--c-line-2);
+  --color-on: var(--c-on, var(--c-ink)); /* a switch that is on */
+  --color-you: var(--c-you);
+  --color-you-soft: var(--c-you-soft);
+  --color-you-line: var(--c-you-line);
+  --color-ok: var(--c-ok);
+  --color-bad: var(--c-bad);
+}
+
+:root {
+  --c-page: #f4f5f7; --c-side: #eaecf0; --c-surface: #ffffff; --c-sunk: #eef0f3;
+  --c-ink: #14171c; --c-ink-2: #353b45; --c-mute: #5f6773; --c-faint: #939aa5;
+  --c-line: #dcdfe5; --c-line-2: #eaecf0;
+  --c-you: #2259d6; --c-you-soft: #e6eefc; --c-you-line: #b9cdf5;
+  --c-ok: #1d7f4c; --c-bad: #c0352b;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --c-page: #121418; --c-side: #0c0d10; --c-surface: #1a1d22; --c-sunk: #22262d;
+    --c-ink: #eceef2; --c-ink-2: #c6cad2; --c-mute: #969ca7; --c-faint: #687079;
+    --c-line: #2b3038; --c-line-2: #23272e;
+    --c-you: #7aa7ff; --c-you-soft: #1b2843; --c-you-line: #2f4675;
+    --c-ok: #55cf8c; --c-bad: #ff7d70;
+    color-scheme: dark;
+  }
+}
+
+html, body, #root { height: 100%; }
+body {
+  margin: 0;
+  background: var(--c-page);
+  color: var(--c-ink);
+  font-family: var(--font-sans);
+  font-size: 16px;
+  line-height: 1.45;
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* In the base layer so a utility (outline-none on a search box) can override it. */
+@layer base {
+  :focus-visible { outline: 2px solid var(--c-you); outline-offset: 2px; border-radius: 4px; }
+}
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+
+/* Settings, as the prototype settled it: T3 Code's own look (read from T3 Code 0.1.9's
+   stylesheet: zinc greys, true black in dark, a blue primary, Inter), a skin over the tokens
+   above, on while Settings is open (it adds the class to <html>). */
+html.t3-skin {
+  --c-page: #fcfcfc; --c-side: #fafafa; --c-surface: #ffffff; --c-sunk: #f4f4f5;
+  --c-ink: #18181b; --c-ink-2: #3f3f46; --c-mute: #71717a; --c-faint: #a1a1aa;
+  --c-line: #d4d4d8; --c-line-2: #e4e4e7;
+  --c-on: oklch(48.8% 0.217 264);
+  --c-you: oklch(48.8% 0.217 264); --c-you-soft: #eef2ff; --c-you-line: #c7d2fe;
+}
+@media (prefers-color-scheme: dark) {
+  html.t3-skin {
+    --c-page: #0a0a0a; --c-side: #0a0a0a; --c-surface: #101011; --c-sunk: #191a1d;
+    --c-ink: #f1f3f7; --c-ink-2: #d4d4d8; --c-mute: #a3a3a3; --c-faint: #737373;
+    --c-line: #ffffff2e; --c-line-2: #ffffff14;
+    --c-on: oklch(57.1% 0.21 264);
+    --c-you: oklch(72% 0.15 264); --c-you-soft: #172033; --c-you-line: #24345c;
+  }
+}
+html.t3-skin body { font-family: "Inter Variable", Inter, "Segoe UI", system-ui, sans-serif; }
