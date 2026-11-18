@@ -22,6 +22,8 @@ export class FakeT3 {
   frames: any[] = [];
   /** How many sign-ins finished, per subject. */
   signIns: Record<string, number> = {};
+  private configStreams = new Set<(v: any) => void>();
+  private closers = new Set<() => void>();
   private pairings = new Map<string, string[]>();
   private clients = new Map<string, string>(); // client id -> its name
   private codes = new Map<string, { challenge: string; label: string }>();
@@ -33,6 +35,17 @@ export class FakeT3 {
   addSession(subject: string, label: string): Session {
     const s = this.newSession(subject, label, []);
     return s;
+  }
+
+  /** A later `subscribeServerConfig` event (`{version: 1, type, payload}`), sent to every open stream. */
+  pushConfig(type: string, payload: unknown) {
+    for (const s of this.configStreams) s({ version: 1, type, payload });
+  }
+
+  /** T3 stops: every open WebSocket closes. */
+  dropSockets() {
+    for (const c of this.closers) c();
+    this.closers.clear();
   }
 
   /** T3 forgets every token it gave the app (a restart, say): the next use is refused. */
@@ -152,17 +165,25 @@ export class FakeT3 {
       || u.searchParams.get('orchestrationProtocol') !== '2' || !s || s.subject === 'mcp-client';
     let open = !refused;
     queueMicrotask(() => (refused ? on.closed(false, 'refused') : on.open()));
+    const mine: ((v: any) => void)[] = [];
+    const forget = () => { for (const m of mine) this.configStreams.delete(m); };
+    const drop = () => { if (open) { open = false; forget(); on.closed(true, 'T3 stopped'); } };
+    if (!refused) this.closers.add(drop);
     return {
       send: (text) => {
         const msg = JSON.parse(text);
         this.frames.push(msg);
         if (msg._tag === 'Request' && msg.tag === 'subscribeServerConfig') {
-          queueMicrotask(() => open && on.message(JSON.stringify({ _tag: 'Chunk', requestId: msg.id, values: [this.serverConfig] })));
+          const sub = (v: any) => { if (open) on.message(JSON.stringify({ _tag: 'Chunk', requestId: msg.id, values: [v] })); };
+          this.configStreams.add(sub);
+          mine.push(sub);
+          queueMicrotask(() => sub(this.serverConfig));
         }
       },
       close: () => {
         if (!open) return;
         open = false;
+        forget();
         queueMicrotask(() => on.closed(true, ''));
       },
     };
