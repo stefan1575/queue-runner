@@ -16,6 +16,8 @@ export class FakeT3 {
   sessions: Session[] = [];
   projects: FakeProject[] = [];
   serverConfig: any = { version: 1, type: 'snapshot', config: { environment: { label: 'Fake', serverVersion: '0.1.9' } } };
+  /** Every `t3_thread_launch` a client made: its arguments, as T3 got them. */
+  launches: any[] = [];
   /** Every frame a client sent on a WebSocket. */
   frames: any[] = [];
   /** How many sign-ins finished, per subject. */
@@ -127,6 +129,13 @@ export class FakeT3 {
           const next = cursor + limit < this.projects.length ? cursor + limit : null;
           const data = `data: ${JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { structuredContent: { projects, nextCursor: next } } })}\n\n`;
           return { status: 200, headers: { 'content-type': 'text/event-stream' }, text: data };
+        }
+        if (msg.method === 'tools/call' && msg.params.name === 't3_thread_launch') {
+          const args = msg.params.arguments;
+          this.launches.push(args);
+          const n = this.launches.length;
+          const result = { threadId: `thread-${n}`, runId: `run-${n}`, link: `t3://thread/thread-${n}`, projectId: args.projectId, modelSelection: args.modelSelection, status: 'running' };
+          return json(200, { jsonrpc: '2.0', id: msg.id, result: { structuredContent: result } });
         }
         return json(200, { jsonrpc: '2.0', id: msg.id, result: { isError: true, content: [{ text: '{"code":"unknown","message":"no such tool"}' }] } });
       }
