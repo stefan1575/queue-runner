@@ -399,9 +399,10 @@ every open PR in a served repo without a review on its newest commit gets one, w
   `post.py`): the verdict from the reply's last `sol-findings` block; clean means no Important
   finding open. Then each new Pre-existing finding filed once as a `needs-triage` issue, the
   comment (its visible ledger and hidden marker), `sol-review` on H only, and a row in the PR body's
-  `## Review` table, on every repo (#36). Each names who reviewed: the model and effort as T3
-  labels them, and on the fallback `, fallback while <provider> is out of usage`
-  (`reviewerName`). gh writes send their JSON on stdin (`--input -`). Only the comment failing
+  `## Review` table, on every repo (#36): Step (the comment's link), Reviewer, Time, Commit,
+  Verdict. A table today's runner wrote (no Reviewer column) gets the column, its rows blank in
+  it. The comment and the Reviewer cell name who reviewed: the model and effort as T3 labels
+  them, and on the fallback `, fallback while <provider> is out of usage` (`reviewerName`). gh writes send their JSON on stdin (`--input -`). Only the comment failing
   fails the review. The run folder keeps `brief.md`, `reply.md`, `comment.md`, `decision.json`.
 - **The job log:** kind `review`, `issue` the PR, with `sha`, `round` and `reviewer`; its end
   `clean`, `blocking`, `stop`, `approach-note` (with `verdict`, `signals`, `link`), `failed`,

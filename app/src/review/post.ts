@@ -3,7 +3,7 @@
 // new Pre-existing finding filed once as a `needs-triage` issue (an open issue that already holds
 // it is linked instead), the review comment with those links and its ledger, the `sol-review`
 // status on H (the commit reviewed, never a newer one), then a row in the PR body's `## Review`
-// table, on every repo (#36), naming who reviewed. The comment is the review's record: if it
+// table, on every repo (#36), its Reviewer column naming who reviewed. The comment is the review's record: if it
 // can't be posted the review failed and nothing counts. Anything after it that fails is said and
 // left; the review stands.
 import { cell, OPEN, where, withIssues, type Decision, type Finding } from './ledger.ts';
@@ -11,7 +11,10 @@ import { cell, OPEN, where, withIssues, type Decision, type Finding } from './le
 export const TRIAGE = 'needs-triage';
 export const STATUS_CONTEXT = 'sol-review';
 const OUTCOMES = { stop: 'stopped for the user', 'approach-note': 'approach note for the user', merge: 'to merge', fix: 'back to fix' } as const;
-const TABLE_HEAD = '| Step | Time (UTC) | Commit | Verdict |';
+const TABLE_HEAD = '| Step | Reviewer | Time (UTC) | Commit | Verdict |';
+const TABLE_RULE = '|---|---|---|---|---|';
+/** Today's runner's table, before the Reviewer column: a PR it reviewed keeps its rows. */
+const OLD_HEAD = '| Step | Time (UTC) | Commit | Verdict |';
 
 /** The review comment couldn't be posted: nothing is on the PR, so the review failed. */
 export class PostFailed extends Error {}
@@ -73,7 +76,20 @@ export function reviewRow(d: Decision, url: string, at: Date): string {
     const got = ids(ok);
     if (got) parts.push(`${label}: ${got}`);
   }
-  return `| [${cell(`Review ${rnd}, ${d.reviewer}`)}](${url}) | ${utc(at)} | \`${d.sha.slice(0, 7)}\` | ${cell(parts.join('; '))} |`;
+  return `| [Review ${rnd}](${url}) | ${cell(d.reviewer)} | ${utc(at)} | \`${d.sha.slice(0, 7)}\` | ${cell(parts.join('; '))} |`;
+}
+
+/** Today's runner's table given the Reviewer column, in place: its head and rule, and a blank
+ *  cell after each row's Step (the first pipe that isn't escaped after the opening one). */
+function withReviewerColumn(lines: string[], rows: number[]) {
+  for (const [k, j] of rows.entries()) {
+    if (k === 0) lines[j] = TABLE_HEAD;
+    else if (k === 1 && /^\|(\s*:?-+:?\s*\|)+\s*$/.test(lines[j]!)) lines[j] = TABLE_RULE;
+    else {
+      const m = /^\|(?:[^|\\]|\\.)*\|/.exec(lines[j]!);
+      if (m) lines[j] = `${m[0]}  |${lines[j]!.slice(m[0].length)}`;
+    }
+  }
 }
 
 /** The PR body with `row` appended to its `## Review` table. A section without a table gets one;
@@ -82,7 +98,7 @@ export function withReviewRow(body: string, row: string): string {
   const lines = (body ?? '').replace(/\r\n/g, '\n').replace(/\n+$/, '').split('\n');
   const head = (pat: RegExp) => { const i = lines.findIndex((l) => pat.test(l)); return i < 0 ? null : i; };
   const end = (i: number) => { for (let j = i + 1; j < lines.length; j++) if (/^#{1,2}\s/.test(lines[j]!)) return j; return lines.length; };
-  const table = [TABLE_HEAD, '|---|---|---|---|', row];
+  const table = [TABLE_HEAD, TABLE_RULE, row];
   const put = (at: number, floor: number, add: string[]) => {
     let s = at;
     while (s > floor && !lines[s - 1]!.trim()) s--;
@@ -92,6 +108,7 @@ export function withReviewRow(body: string, row: string): string {
   if (r !== null) {
     const rows: number[] = [];
     for (let j = r + 1; j < end(r); j++) if (lines[j]!.startsWith('|')) rows.push(j);
+    if (rows.length && lines[rows[0]!]!.trim() === OLD_HEAD) withReviewerColumn(lines, rows);
     if (rows.length && lines[rows[0]!]!.trim() === TABLE_HEAD) lines.splice(rows.at(-1)! + 1, 0, row);
     else if (rows.length) lines.splice(rows.at(-1)! + 1, 0, '', ...table);
     else put(end(r), r + 1, table);

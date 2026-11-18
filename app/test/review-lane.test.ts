@@ -154,7 +154,7 @@ describe('a review', () => {
     const read = readReviews(gh.comments['owner/app#4']!);
     expect(read).toMatchObject([{ round: 1, verdict: 'blocking', sha: H, findings: [{ id: 'F1', status: 'open' }] }]);
     expect(gh.posted.filter((p) => p.what === 'status')).toEqual([expect.objectContaining({ sha: H, context: 'sol-review', state: 'failure' })]);
-    expect(gh.bodies['owner/app#4']).toContain(`| [Review 1, GPT-6.2-Sol High](${comment.url}) |`);
+    expect(gh.bodies['owner/app#4']).toContain(`| [Review 1](${comment.url}) | GPT-6.2-Sol High |`);
 
     const job = log.jobs().at(-1)!;
     expect(job).toMatchObject({ kind: 'review', issue: 4, sha: H, round: 1, threadId: 'thread-1', end: { outcome: 'blocking', verdict: 'blocking', link: comment.url } });
@@ -313,7 +313,7 @@ describe('the fallback', () => {
     const comment = gh.posted.find((p) => p.what === 'comment')!;
     expect(comment.body).toMatch(new RegExp(`^## Sol review 1 · Clean · ${who.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\n`));
     expect(gh.posted.find((p) => p.what === 'status')!.description).toBe(`${who}: Clean: no Important finding, 0 nits`.slice(0, 140));
-    expect(gh.bodies['owner/app#4']).toContain(`| [Review 1, ${who}](${comment.url}) |`);
+    expect(gh.bodies['owner/app#4']).toContain(`| [Review 1](${comment.url}) | ${who} |`);
     expect(log.jobs().at(-1)).toMatchObject({ onFallback: true, end: { outcome: 'clean' } });
     expect(gate.runningJobs()).toEqual([]);
   });

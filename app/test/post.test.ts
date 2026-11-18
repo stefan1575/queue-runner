@@ -27,7 +27,7 @@ describe('GitHubPoster', () => {
     expect(comment!.body).toContain(`F1 → [#101](${issue!.url})`);
     expect(readReviews([{ author: 'me', createdAt: '1', body: comment!.body }])[0]!.findings[0]).toMatchObject({ issue: issue!.url });
     expect(status).toMatchObject({ sha: SHA, context: 'sol-review', state: 'success', url });
-    expect(body!.body).toContain(`## Evidence\n\ny\n\n## Review\n\n_Rows from the review loop, one per review; each links its comment._\n\n| Step | Time (UTC) | Commit | Verdict |\n|---|---|---|---|\n| [Review 1, Model X high](${url}) | 2026-11-19 12:34 | \`abcdef1\` | **Clean**, to merge; filed as follow-ups: F1 |\n\n## Merge Danger`);
+    expect(body!.body).toContain(`## Evidence\n\ny\n\n## Review\n\n_Rows from the review loop, one per review; each links its comment._\n\n| Step | Reviewer | Time (UTC) | Commit | Verdict |\n|---|---|---|---|---|\n| [Review 1](${url}) | Model X high | 2026-11-19 12:34 | \`abcdef1\` | **Clean**, to merge; filed as follow-ups: F1 |\n\n## Merge Danger`);
   });
 
   test('a finding open as an issue already is linked, not filed again', async () => {
@@ -63,13 +63,29 @@ describe('the Review table', () => {
   const row = reviewRow(d([], 'Model Y medium, fallback while Prov A is out of usage'), 'https://u', AT);
   test('a body without the section gets it at the end; one with the table gets a row', () => {
     const once = withReviewRow('Some text', row);
-    expect(once).toBe(`Some text\n\n## Review\n\n_Rows from the review loop, one per review; each links its comment._\n\n| Step | Time (UTC) | Commit | Verdict |\n|---|---|---|---|\n${row}\n`);
+    expect(once).toBe(`Some text\n\n## Review\n\n_Rows from the review loop, one per review; each links its comment._\n\n| Step | Reviewer | Time (UTC) | Commit | Verdict |\n|---|---|---|---|---|\n${row}\n`);
     expect(withReviewRow(once, 'ROW2')).toBe(once.replace(`${row}\n`, `${row}\nROW2\n`));
-    expect(row).toContain('[Review 1, Model Y medium, fallback while Prov A is out of usage](https://u)');
+  });
+
+  // a row's cells, split on the pipes that aren't escaped
+  const cells = (r: string) => r.split(/(?<!\\)\|/).slice(1, -1).map((c) => c.trim());
+
+  test('the reviewer has a column of its own; the Step cell is only the link', () => {
+    expect(cells(row).slice(0, 4)).toEqual(['[Review 1](https://u)', 'Model Y medium, fallback while Prov A is out of usage', '2026-11-19 12:34', '`abcdef1`']);
+    expect(cells(row)).toHaveLength(5);
+  });
+
+  test('a reviewer with a pipe in its name stays in its own cell', () => {
+    expect(cells(reviewRow(d([], 'Model | Z'), 'https://u', AT)).slice(0, 2)).toEqual(['[Review 1](https://u)', 'Model \\| Z']);
+  });
+
+  test("today's runner's table gets the Reviewer column, its own rows blank in it", () => {
+    const old = '## Review\n\n| Step | Time (UTC) | Commit | Verdict |\n|---|---|---|---|\n| [Review 1](https://a) | 2026-11-18 10:00 | `1234567` | **Blocking** \\| odd |\n';
+    expect(withReviewRow(old, row)).toBe(`## Review\n\n| Step | Reviewer | Time (UTC) | Commit | Verdict |\n|---|---|---|---|---|\n| [Review 1](https://a) |  | 2026-11-18 10:00 | \`1234567\` | **Blocking** \\| odd |\n${row}\n`);
   });
 
   test('a hand-written table keeps its rows; ours starts below it', () => {
-    expect(withReviewRow('## Review\n\n| A | B |\n|---|---|\n| 1 | 2 |\n', 'R')).toContain('| 1 | 2 |\n\n| Step | Time (UTC) | Commit | Verdict |\n|---|---|---|---|\nR\n');
+    expect(withReviewRow('## Review\n\n| A | B |\n|---|---|\n| 1 | 2 |\n', 'R')).toContain('| 1 | 2 |\n\n| Step | Reviewer | Time (UTC) | Commit | Verdict |\n|---|---|---|---|---|\nR\n');
   });
 });
 
