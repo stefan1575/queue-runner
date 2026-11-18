@@ -15,16 +15,17 @@
     it builds first, is it up. The column between them is centred in the space they leave.
   - Three pages do three jobs. Overview is the first glance. Inbox is what waits on you. Queue is
     the work.
-  - PROTOTYPE, with sample data only (#30, take 14): the Queue as the lanes on top (what Claude
-    and ChatGPT run now, then their whole queue in a window three rows tall that scrolls, so a
-    card never grows), and the efforts below in four tabs. Progress is for reading: each effort as
+  - PROTOTYPE, with sample data only (#30, take 15): take 14 with room to breathe (the Queue
+    page as wide as the Inbox, more space in every row), and a lane's queue that opens and closes
+    again, remembered. Take 14: the lanes on top (what Claude and ChatGPT run now, then their
+    whole queue in a window three rows tall that scrolls, so a card never grows), and the efforts below in four tabs. Progress is for reading: each effort as
     the live page's feature card (its bar, what's left in a sentence), opened and closed like a
     dropdown. Order is for moving: a line per effort that never folds or unfolds, the only place
     you drag. Board and Graph as before. The card is as tall as its tallest tab, so switching tabs
     never moves the page. Colour is take 13's step 3: done, moving, and what waits on you. The
     pill at the foot of the sidebar switches the lanes: A, two cards; B, one card split down the
     middle, as the live page has it. The right-hand rail is not this prototype's: it's take 12's
-    here, and prototyped on its own branch, prototype/rail. Take 13 is earlier/take-13.html.
+    here, and prototyped on its own branch, prototype/rail. Take 14 is earlier/take-14.html.
   - The Overview only summarises, in three cards read top to bottom: what's on your plate (the
     Inbox in counts by kind, and the ask that's first in line), what's running (a line per lane,
     with its Stop button and the one thing it takes up next), and what's next (a bar per
@@ -1199,6 +1200,56 @@ button.er-name:hover { text-decoration: underline; text-underline-offset: 3px; }
 .or-hint { margin: 10px 4px 0; font-size: 13.5px; color: var(--dim); }
 .drag-chip { position: fixed; top: -200px; left: 0; max-width: 360px; padding: 8px 14px; border-radius: 9px; background: var(--ink); color: var(--page); font: 600 15px/1.3 var(--sans); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
+/* ---------------------------------------------------------------- take 15 (PROTOTYPE, #30) */
+/* Room to breathe. The Queue page is as wide as the window lets it be, up to a point. */
+body.page-queue .top-col, body.page-queue main { max-width: 1480px; }
+.q12 { gap: 20px; }
+.q12-now { gap: 20px; }
+
+/* The lanes: taller, and the head one line. The name, what the lane does, how long, and Stop all
+   sit on the same line of text, so their middles line up; what it does and how long are one size. */
+.ln, .ln.on, .q12-now.one .ln, .q12-now.one .ln.on { padding: 20px 24px 20px; gap: 16px; }
+.ln-head { align-items: center; gap: 12px; min-height: 36px; }
+.ln-head .who { font-size: 18px; }
+/* One line-height ratio for every text in the head: centred on one line, big and small text then
+   share a midpoint (take 14 mixed 1.2 and the body's, so the small text sat higher). */
+.ln-head .who, .ln-does, .ln-for, .ln-for.run { line-height: 1.2; }
+.ln-does, .ln-for, .ln-for.run { font-size: 15px; font-weight: 400; color: var(--mute); }
+.ln-for { gap: 7px; }
+.ln-doing { gap: 4px; }
+.ln-now { font-size: 16.5px; }
+.ln-now .ln-meta { margin-top: 3px; }
+/* Its queue opens and closes from the line over it, and stays as you left it. Open, it's a
+   window three rows tall; each row has room around it and a line between. */
+.ln-q { gap: 6px; padding-top: 14px; }
+.ln-qhead { all: unset; display: inline-flex; align-items: center; gap: 8px; justify-self: start; padding: 2px 6px 2px 2px; margin-left: -2px; border-radius: 6px; font-size: 14px; color: var(--mute); cursor: pointer; }
+.ln-qhead:hover { color: var(--ink); background: var(--hover); }
+.ln-qhead:focus-visible { outline: 2px solid var(--you); outline-offset: 2px; }
+.ln-qhead .i { width: 16px; height: 16px; transition: transform .15s; }
+.ln-qhead[aria-expanded="true"] .i { transform: rotate(90deg); }
+.ln-q .ln-then { height: 198px; }
+.ln-q .ln-then li { height: 66px; column-gap: 12px; }
+.ln-q .ln-then li + li { border-top: 1px solid var(--line-soft); }
+.ln-q .ln-then .ln-j { font-size: 16px; }
+.ln-q .ln-then .ln-why { margin-top: 3px; }
+.ln-q .ln-none { height: 198px; }
+
+/* The efforts: more room around and between the rows. */
+.q12-head { padding: 12px 20px 12px 24px; min-height: 64px; }
+.q12-sec { padding: 20px 24px 24px; }
+.pg-list { gap: 12px; }
+.pg-head { padding: 16px 20px 16px 12px; row-gap: 10px; }
+.pg-body { padding: 0 20px 16px 66px; }
+.or-list { gap: 8px; }
+.or-kids { gap: 8px; margin: 8px 0 0 50px; }
+.or-row { height: 54px; padding: 0 18px 0 10px; column-gap: 12px; grid-template-columns: 16px 22px minmax(0, 1fr) 180px 90px; }
+.or-kids .or-row { height: 48px; grid-template-columns: 16px 0 minmax(0, 1fr) 160px 90px; }
+.kboard { gap: 16px; padding: 20px 24px 24px; }
+.kcol { padding: 12px; }
+.kcol h3 { margin: 2px 4px 12px; }
+.kcol ol { gap: 10px; }
+.kc { padding: 12px 13px; gap: 7px; }
+
 /* Colour (take 13's step 3, Stefan's pick): done, moving, and what waits on you. No hatching:
    merged or building is moving; ready and blocked are just not started. */
 .q12 .sg.merged, .q12 .sg.building, .q12 .sg.pr { background: var(--run-fill); box-shadow: none; }
@@ -2093,6 +2144,8 @@ const qOpen = new Set((() => { try { return JSON.parse(recall("qopen") || "[]");
 { const q = new URLSearchParams(location.search); if (q.get("qopen")) q.get("qopen").split(",").forEach((id) => qOpen.add(id)); if (q.get("qview")) ui.qview = q.get("qview"); }
 function toggleOpen(id) { if (qOpen.has(id)) qOpen.delete(id); else qOpen.add(id); remember("qopen", JSON.stringify([...qOpen])); }
 const qMore = new Set();   // board columns shown whole
+// Take 15: the lanes whose queue is closed, remembered.
+const qShut = new Set((() => { try { return JSON.parse(recall("qshut") || "[]"); } catch { return []; } })());
 
 function queue() {
   if (!QVIEWS.some((v) => v[0] === ui.qview)) ui.qview = QVIEWS.some((v) => v[0] === recall("qview")) ? recall("qview") : "progress";
@@ -2119,13 +2172,13 @@ function qNow(W) {
 // Take 14: a lane's whole queue sits in a window three rows tall that scrolls, so the card is the
 // same size whatever it holds. `note` is the line over it; `none`, what it says when it's empty.
 function laneCard(l, doing, then, note, none) {
-  const { how, moving } = laneSays(l);
+  const { how, moving } = laneSays(l), shut = qShut.has(l.id);
   return `<article class="ln${moving ? " on" : ""}" aria-label="${esc(l.name)}">
     <header class="ln-head">${who(l.provider, l.name)}<span class="ln-does">${esc(l.does || "")}</span>
       <span class="ln-for${moving ? " run" : ""}">${moving ? `<i class="dot run"></i>` : ""}${how}</span><span class="ln-stop">${stopButton(l)}</span></header>
     <div class="ln-doing">${doing}</div>
-    <div class="ln-q"><p class="ln-qhead">${note.map((x) => `<span>${x}</span>`).join("")}</p>
-      ${then.length ? `<ol class="ln-then" tabindex="0" aria-label="What ${esc(l.name)} takes up next">${then.join("")}</ol>` : `<p class="ln-none">${none || `Nothing waits for it${ui.repo ? ` in ${esc(ui.repo)}` : ""}.`}</p>`}</div></article>`;
+    <div class="ln-q${shut ? " shut" : ""}"><button class="ln-qhead" data-act="q-lane" data-lane="${esc(l.id)}" aria-expanded="${!shut}" title="${shut ? "Show" : "Hide"} what ${esc(l.name)} takes up next">${ICON.right}${note.map((x) => `<span>${x}</span>`).join("")}</button>
+      ${shut ? "" : then.length ? `<ol class="ln-then" tabindex="0" aria-label="What ${esc(l.name)} takes up next">${then.join("")}</ol>` : `<p class="ln-none">${none || `Nothing waits for it${ui.repo ? ` in ${esc(ui.repo)}` : ""}.`}</p>`}</div></article>`;
 }
 const thenRow = (x, label, title, why, repo) => `<li><span class="qn">${x}</span><span class="ln-j"><b>${esc(label)}</b> ${esc(title)}${repo ? ` <span class="ln-repo">${esc(repo)}</span>` : ""}</span><span class="ln-why">${esc(why || "")}</span></li>`;
 function doingLine(j) {
@@ -2723,6 +2776,7 @@ function draw() {
   document.body.classList.toggle("nav-open", ui.nav);
   document.body.classList.toggle("rail-open", ui.rail);
   document.body.classList.toggle("page-inbox", ui.page === "inbox");
+  document.body.classList.toggle("page-queue", ui.page === "queue");   // take 15: wider
   if (snap && ui.repo && !(snap.repos || []).some((r) => r.name === ui.repo)) ui.repo = "";
   put("side", side());
   put("top", topBar());
@@ -2812,6 +2866,7 @@ document.addEventListener("click", (e) => {
     case "feature": ui.feature = ui.feature === d.id ? "" : d.id; ui.sel = null; scrollTo(0, 0); break;   // the Queue, A
     case "open": ui.open = ui.open.includes(d.id) ? ui.open.filter((x) => x !== d.id) : [...ui.open, d.id]; break;   // the Queue, B
     case "variant": turnVariant(Number(d.by)); break;   // PROTOTYPE
+    case "q-lane": if (qShut.has(d.lane)) qShut.delete(d.lane); else qShut.add(d.lane); remember("qshut", JSON.stringify([...qShut])); break;   // take 15
     case "q-open": toggleOpen(d.id); break;   // PROTOTYPE (#30, take 12)
     case "q-view": ui.qview = d.view; remember("qview", d.view); break;
     case "q-more": if (qMore.has(d.col)) qMore.delete(d.col); else qMore.add(d.col); break;
