@@ -42,8 +42,10 @@ export function t3Cli(path = T3_CLI): Cli {
     return new Promise((resolve) => {
       execFile('cmd.exe', ['/d', '/s', '/c', `"${line}"`], { windowsVerbatimArguments: true, timeout: 60_000 },
         (error, stdout, stderr) => {
-          const code = error ? (typeof error.code === 'number' ? error.code : 1) : 0;
-          resolve({ code, stdout: String(stdout), stderr: String(stderr || (error && !stderr ? error.message : '')) });
+          // a t3 that can't start or is killed has no exit code: -1, never a t3 exit code
+          const code = error ? (typeof error.code === 'number' ? error.code : -1) : 0;
+          const why = error && typeof error.code !== 'number' ? `${error.message}\n` : '';
+          resolve({ code, stdout: String(stdout), stderr: why + String(stderr) });
         });
     });
   };

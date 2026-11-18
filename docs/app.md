@@ -139,8 +139,14 @@ is a T3Error with its `code: message`. Projects: `t3_project_list {cursor, limit
 ## GitHub
 
 `src/github.ts`: `gh repo view --json nameWithOwner,url` run in the project's folder (gh reads
-its git remotes). One gh finds no GitHub repo for (not a git folder, a remote elsewhere such as
-the sandbox's local `origin.git`, or a folder that's gone) is `no GitHub remote`.
+its git remotes). Only a folder that's gone, or one of gh's three exit-1 answers for a folder with
+no GitHub repo (`not a git repository`, `none of the git remotes configured for this repository
+point to a known GitHub host` such as the sandbox's local `origin.git`, `no git remotes found`;
+gh 2.x, seen live 2026-11-18), is `no GitHub remote`. Any other gh failure (exit 4 when not
+signed in, `HTTP 401: Bad credentials`, offline, gh not installed, a repo gh can't see) is a
+`GitHubError` with gh's exit code and first stderr line: `--list` prints `gh failed: ...` for
+that project and exits 1. The gh seam keeps the exit code and stderr; a gh that can't start or
+is killed is code -1 with Node's reason in stderr, never a gh exit code (so is the `t3` CLI's).
 
 ## Live checks
 

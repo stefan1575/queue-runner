@@ -65,13 +65,14 @@ describe('GitHub through gh', () => {
     const seen: any[] = [];
     const gh = new GhGitHub(async (args, cwd) => {
       seen.push({ args, cwd });
-      return { code: 0, stdout: '{"nameWithOwner":"o/r","url":"https://github.com/o/r"}' };
-    });
+      return { code: 0, stdout: '{"nameWithOwner":"o/r","url":"https://github.com/o/r"}', stderr: '' };
+    }, () => true);
     expect(await gh.remoteOf('C:/a')).toEqual({ nameWithOwner: 'o/r', url: 'https://github.com/o/r' });
     expect(seen).toEqual([{ args: ['repo', 'view', '--json', 'nameWithOwner,url'], cwd: 'C:/a' }]);
   });
 
   it('a folder gh finds no repo for has no remote', async () => {
-    expect(await new GhGitHub(async () => ({ code: 1, stdout: '' })).remoteOf('C:/x')).toBeNull();
+    const gh = new GhGitHub(async () => ({ code: 1, stdout: '', stderr: 'no git remotes found\n' }), () => true);
+    expect(await gh.remoteOf('C:/x')).toBeNull();
   });
 });

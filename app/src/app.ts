@@ -1,4 +1,5 @@
 // The command line: `--list` prints every T3 project with its GitHub remote and changes nothing.
+// It exits 1 when gh failed for any project (each such project says what gh said).
 import type { GitHub } from './github.ts';
 import { formatProjects, listProjects } from './projects.ts';
 import type { T3Mcp } from './t3/mcp.ts';
@@ -22,5 +23,6 @@ export async function run(argv: string[], doors: Doors, out: (s: string) => void
   const env = config?.config?.environment;
   out(`T3 ${env?.serverVersion ?? '?'} on ${env?.label ?? '?'}\n\n`);
   out(formatProjects(projects));
-  return 0;
+  // a project gh couldn't answer for is a failed list, not one with no remote
+  return projects.some((p) => p.failure) ? 1 : 0;
 }
