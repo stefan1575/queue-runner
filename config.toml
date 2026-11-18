@@ -59,10 +59,9 @@ review_table = true   # docs/agents/review-loop.md: each review adds a row to th
 # Live steps after merges (ticket 11): one Claude thread per batch follows this doc (the Lovable
 # connector's deploy_project, query_database per migration, npm run check:live-schema).
 live_doc = "docs/agents/lovable-cloud.md"
-# Stefan merges its PRs himself (ticket 17, 2026-11-10): a PR clean on its head with its checks
-# passed gets the `ready-for-stefan` label and a toast, once per head; his merge is noticed on the
-# next pass and its live steps follow. `merge = "runner"` (the default) has the runner merge.
-merge = "stefan"
+# The runner merges its clean PRs and runs their live steps (Stefan, 2026-11-18: "fully
+# autonomous in this repo as well"; it was `merge = "stefan"` from ticket 17, 2026-11-10).
+merge = "runner"
 
 # The runner's own repo (ticket 14, Stefan 2026-11-10): served like any other, and it merges its
 # own PRs. After main moves, the runner updates its checkout and restarts on the new code.
