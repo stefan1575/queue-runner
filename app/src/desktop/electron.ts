@@ -123,6 +123,8 @@ async function shoot(dir: string, settings: SettingsStore) {
     nativeTheme.themeSource = theme;
     for (const [name, hash, withChoices] of states) {
       await settings.set({ jobs: withChoices ? chosen : DEFAULT_JOBS });
+      // The same address again would keep the page (and the view it holds): load it fresh.
+      await win.loadURL('about:blank');
       const p = page(hash);
       await win.loadFile(p.file, { hash: p.hash });
       await win.webContents.executeJavaScript('document.fonts.ready.then(() => new Promise((r) => setTimeout(r, 400)))');

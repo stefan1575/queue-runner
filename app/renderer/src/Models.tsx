@@ -72,7 +72,12 @@ export function defaultRow(view: View, save: Props['save'], Row: RowFn): ReactNo
           <button type="button" onClick={() => set(d.choice!)} className="h-8 rounded-md bg-on px-2.5 font-medium text-white">Keep this</button>
         </div>
       )}>
-      {c && d?.choice && <ModelPicks label="Default" value={d.choice} catalog={c} onChange={set} />}
+      {c && d?.choice && (
+        // the kinds' undo slot, empty, so Default's dropdowns line up with theirs
+        <span className="inline-flex items-center gap-1">
+          <ModelPicks label="Default" value={d.choice} catalog={c} onChange={set} /><span className="size-9 shrink-0" />
+        </span>
+      )}
     </Row>
   );
 }
