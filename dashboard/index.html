@@ -1211,7 +1211,7 @@ body.q-dragging .q12:not(.v-b) .er { background: var(--surface); }
 .rb.near .fill { background: var(--run); }
 .rb.out { background: var(--bad-wash); box-shadow: inset 0 0 0 1px var(--bad-line); }
 .rb.t1 { height: 8px; } .rb.t2 { height: 5px; } .rb.t3 { height: 4px; }
-.pct { font-weight: 500; color: var(--ink); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.pct { font-weight: 400; color: var(--ink); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .pct small { font-size: 12.5px; color: var(--mute); font-weight: 400; }
 .pct.near { color: var(--run); } .pct.out { color: var(--bad); }
 .r-when { font-size: 12.5px; color: var(--dim); }
@@ -1266,6 +1266,7 @@ body.q-dragging .q12:not(.v-b) .er { background: var(--surface); }
 .repo14 .doing { display: flex; align-items: center; gap: 7px; font-size: 13.5px; color: var(--ink-2); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .repo14 .doing .mark { width: 14px; height: 14px; }
 .repo14 .doing.claude .mark { color: var(--claude); } .repo14 .doing.chatgpt .mark { color: var(--openai); }
+.repo14 .doing span { font-weight: 400; }
 .repo14 .doing .for { color: var(--dim); }
 .repo14 .idle { font-size: 13.5px; color: var(--mute); margin-top: 2px; }
 .repo14 .btn { margin-top: 1px; }
@@ -1275,6 +1276,11 @@ body.q-dragging .q12:not(.v-b) .er { background: var(--surface); }
 .h14 .h-row { display: flex; flex-wrap: wrap; gap: 4px 16px; color: var(--ink-2); }
 .h14 .h-row span { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
 .h14 .h-row .no { color: var(--bad); }
+/* Take 15: every window the same row. */
+.eq-row { display: grid; grid-template-columns: 112px minmax(0, 1fr) max-content; align-items: center; column-gap: 14px; row-gap: 2px; padding: 6px 0; }
+.eq-row .lbl { color: var(--ink-2); line-height: 1.25; }
+.eq-row .r-when { grid-column: 1 / -1; }
+.r14 .card-head .hi { width: 20px; height: 20px; stroke-width: 1.6; }
 .proto.railp { left: auto; right: 12px; bottom: 14px; width: auto; }
 .proto.railp .proto-name { min-width: 150px; }
 .proto.railp .tog { width: auto; border-radius: 999px; padding: 0 12px; font: 600 13px var(--sans); }
@@ -2750,12 +2756,16 @@ function when(iso) {
   return `${d.toLocaleDateString("en-US", { month: "long", day: "numeric" })} ${wd} ${t12(d)}`;
 }
 const whenEl = (iso, pre) => `<time datetime="${esc(iso)}" title="${esc(stamp(iso))}">${pre}${esc(when(iso))}</time>`;
+// Take 15: each card's icon is a glyph inside the same ring. Take 14's looked different sizes
+// because each filled its square differently: the folder was a closed shape across nearly all of
+// it, the gauge an open arc over its top two thirds, the pulse a thin line. Sharing one outline
+// (a 18px circle) makes them the same size whatever is inside.
 const HEAD_ICON = {
-  usage: ICON.usage,
-  repos: svg('<path d="M3.5 6.5a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2v-11Z"/>'),
-  health: svg('<path d="M3 12h4l3-7 4 14 3-7h4"/>'),
+  usage: svg('<circle cx="12" cy="12" r="9"/><path d="M7.8 15.2a4.6 4.6 0 0 1 8.4-3.4"/><path d="m12 15 2.6-3.1"/>'),
+  repos: svg('<circle cx="12" cy="12" r="9"/><path d="M7.6 10a1 1 0 0 1 1-1h2.1l1.1 1.2h3.6a1 1 0 0 1 1 1v3.6a1 1 0 0 1-1 1H8.6a1 1 0 0 1-1-1Z"/>'),
+  health: svg('<circle cx="12" cy="12" r="9"/><path d="M6.8 12.4h2.4l1.4-2.8 2.8 5.2 1.4-2.4h2.4"/>'),
 };
-const head14 = (id, title, extra = "") => `<header class="card-head">${ui.heads ? HEAD_ICON[id].replace('class="i"', 'class="i hi"') : ""}<h2>${title}</h2>${extra}</header>`;
+const head14 = (id, title, extra = "") => `<header class="card-head">${HEAD_ICON[id].replace('class="i"', 'class="i hi"')}<h2>${title}</h2>${extra}</header>`;
 function lw(w) {
   const known = typeof w.used === "number", left = known ? Math.max(0, Math.min(100, Math.round(100 - w.used))) : null;
   const tone = !known ? "" : left <= 0 ? "out" : left <= 15 ? "near" : "";
@@ -2846,18 +2856,20 @@ function health14() {
   return `<section class="card">${head14("health", "Health")}<div class="card-pad"><div class="h14">${groups.map(([label, xs]) => `<span class="h-label">${label}</span><span class="h-row">${xs.join("")}</span>`).join("")}</div>
     ${!down && bad.length ? `<p class="h-bad">${bad.map((x) => `${esc(x.name)}: ${esc(x.note)}`).join(". ")}</p>` : ""}</div></section>`;
 }
+// Take 15 (Stefan, 2026-11-18: "the session, the weekly, and the weekly fable should have the same
+// size and the same amount of spacing"): every window is the same row, its name, its bar and what's
+// left, and under the name when it resets, each its own, even where two reset together.
+function usageEq(p) {
+  const rows = (p.windows || []).map((w) => `<div class="eq-row"><span class="lbl">${esc(w.label)}</span>${bar14(w, 0)}${pct14(w)}<span class="r-when">${resets14(w)}</span></div>`).join("");
+  return `<div class="p14"><p class="p-head">${who(p.provider, p.name)}<span class="p-meta">${meta14(p)}</span></p>
+    ${p.error ? `<p class="plan-note bad">${esc(p.error)}</p>` : ""}${rows}${keptNote(p, "the ")}</div>`;
+}
 function rail14(notes) {
   const plans = snap.usage || [];
-  const body = ui.rv === "c" ? usageC(plans) : plans.map(ui.rv === "b" ? usageB : usageA).join("");
+  const body = plans.map(usageEq).join("");
   const usage = `<section class="card">${head14("usage", "Usage", `<span style="margin-left:auto"></span>${refreshButton()}`)}<div class="card-pad">${notes}${body}</div></section>`;
   const repos = `<section class="card">${head14("repos", "Repositories")}<div class="card-pad" style="padding-top:6px;padding-bottom:10px">${repos14()}</div></section>`;
-  const [k, name] = RAILS.find((x) => x[0] === ui.rv);
-  const bar = `<div class="proto railp" role="group" aria-label="Prototype: the rail">
-    <button data-act="railv" data-by="-1" aria-label="Previous rail">${ICON.left}</button>
-    <span class="proto-name"><b>${k.toUpperCase()}</b>${esc(name)}</span>
-    <button data-act="railv" data-by="1" aria-label="Next rail">${ICON.right}</button>
-    <button class="tog" data-act="heads" aria-pressed="${ui.heads}">Icons ${ui.heads ? "on" : "off"}</button></div>`;
-  return `<div class="r14" style="display:grid;gap:16px">${ui.page === "usage" ? "" : usage}${repos}${health14()}</div>${bar}`;
+  return `<div class="r14" style="display:grid;gap:16px">${ui.page === "usage" ? "" : usage}${repos}${health14()}</div>`;
 }
 
 
