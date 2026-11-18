@@ -134,6 +134,13 @@ export class UsageGate {
     void this.measure();
   }
 
+  /** A job let in that never reached a thread (T3 refused it, a leftover branch): it stops
+   *  counting and, having spent nothing, teaches nothing. */
+  dropped(id: string) {
+    if (!this.running.delete(id)) return;
+    for (const other of this.running.values()) other.beside.delete(id);
+  }
+
   /** The jobs counted as running, by id. */
   runningJobs(): string[] {
     return [...this.running.keys()];
