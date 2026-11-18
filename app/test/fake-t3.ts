@@ -9,13 +9,21 @@ type Session = {
   token: string; scopes: string[]; revoked: boolean;
 };
 
-export type FakeProject = { id: string; title: string; workspaceRoot: string };
+export type FakeProject = { id: string; title: string; workspaceRoot: string; archivedAt?: string | null };
+
+type ShellStream = { send(item: unknown): void; end(): void; ended: boolean };
 
 export class FakeT3 {
   port = 3773;
   sessions: Session[] = [];
   projects: FakeProject[] = [];
   serverConfig: any = { version: 1, type: 'snapshot', config: { environment: { label: 'Fake', serverVersion: '0.1.9' } } };
+  /** How many threads each project has: T3 won't delete a project with threads unless forced. */
+  threads: Record<string, number> = {};
+  /** Every MCP tool call, with its arguments. */
+  toolCalls: { tool: string; args: any }[] = [];
+  /** The open `subscribeShell` streams. */
+  private shells: ShellStream[] = [];
   /** Every `t3_thread_launch` a client made: its arguments, as T3 got them. */
   launches: any[] = [];
   /** WebSocket methods that answer once, by tag: the value T3's Exit carries. Any other
@@ -68,6 +76,75 @@ export class FakeT3 {
     };
     this.sessions.push(s);
     return s;
+  }
+
+  /** A project added in T3 itself (its own Add project): told to every shell stream. */
+  addProject(p: FakeProject) {
+    this.projects.push(p);
+    this.tell({ kind: 'project.updated', sequence: ++this.n, project: { ...p, scripts: [] } });
+  }
+
+  /** A project removed in T3 itself. */
+  removeProject(id: string) {
+    this.projects = this.projects.filter((p) => p.id !== id);
+    this.tell({ kind: 'project.removed', sequence: ++this.n, projectId: id });
+  }
+
+  /** A project archived (`archived: true`) or brought back in T3. */
+  archiveProject(id: string, archived: boolean) {
+    const p = this.projects.find((x) => x.id === id)!;
+    p.archivedAt = archived ? '2026-11-19T00:00:00.000Z' : null;
+    this.tell({ kind: 'project.updated', sequence: ++this.n, project: { ...p, scripts: [] } });
+  }
+
+  /** T3 says every shell stream must start again from a snapshot. */
+  requireSnapshot() {
+    this.tell({ kind: 'snapshot-required' });
+  }
+
+  /** T3 ends every shell stream (a restart, say). */
+  endShells() {
+    for (const s of this.shells) s.end();
+    this.shells = [];
+  }
+
+  /** How many shell streams are open. */
+  get shellCount() { return this.shells.length; }
+
+  private tell(item: unknown) {
+    for (const s of this.shells) s.send(item);
+  }
+
+  private tool(name: string, args: any): { result?: unknown; failure?: { code: string; message: string } } {
+    this.toolCalls.push({ tool: name, args });
+    if (name === 't3_project_list') {
+      const { cursor, limit } = args;
+      const next = cursor + limit < this.projects.length ? cursor + limit : null;
+      return { result: { projects: this.projects.slice(cursor, cursor + limit), nextCursor: next } };
+    }
+    if (name === 't3_thread_launch') {
+      this.launches.push(args);
+      const n = this.launches.length;
+      return { result: { threadId: `thread-${n}`, runId: `run-${n}`, link: `t3://thread/thread-${n}`, projectId: args.projectId, modelSelection: args.modelSelection, status: 'running' } };
+    }
+    if (name === 't3_project_create') {
+      if (this.projects.some((p) => p.workspaceRoot === args.workspaceRoot)) {
+        return { failure: { code: 'invalid_request', message: 'The workspace is already registered to a project.' } };
+      }
+      const p = { id: `project-${++this.n}`, title: args.title, workspaceRoot: args.workspaceRoot };
+      this.addProject(p);
+      return { result: { project: p } };
+    }
+    if (name === 't3_project_delete') {
+      if (!this.projects.some((p) => p.id === args.projectId)) return { failure: { code: 'invalid_request', message: 'The project was not found.' } };
+      if ((this.threads[args.projectId] ?? 0) > 0 && args.force !== true) {
+        return { failure: { code: 'invalid_request', message: 'The project is not empty; force=true is required to delete it.' } };
+      }
+      delete this.threads[args.projectId];
+      this.removeProject(args.projectId);
+      return { result: { projectId: args.projectId } };
+    }
+    return { failure: { code: 'unknown', message: 'no such tool' } };
   }
 
   private session(token: string | undefined) {
@@ -139,21 +216,11 @@ export class FakeT3 {
         const msg = JSON.parse(request.body ?? '{}');
         if (msg.method === 'initialize') return json(200, { jsonrpc: '2.0', id: msg.id, result: {} }, { 'mcp-session-id': 'mcp-1' });
         if (msg.id === undefined) return { status: 202, headers: {}, text: '' };
-        if (msg.method === 'tools/call' && msg.params.name === 't3_project_list') {
-          const { cursor, limit } = msg.params.arguments;
-          const projects = this.projects.slice(cursor, cursor + limit);
-          const next = cursor + limit < this.projects.length ? cursor + limit : null;
-          const data = `data: ${JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { structuredContent: { projects, nextCursor: next } } })}\n\n`;
-          return { status: 200, headers: { 'content-type': 'text/event-stream' }, text: data };
-        }
-        if (msg.method === 'tools/call' && msg.params.name === 't3_thread_launch') {
-          const args = msg.params.arguments;
-          this.launches.push(args);
-          const n = this.launches.length;
-          const result = { threadId: `thread-${n}`, runId: `run-${n}`, link: `t3://thread/thread-${n}`, projectId: args.projectId, modelSelection: args.modelSelection, status: 'running' };
-          return json(200, { jsonrpc: '2.0', id: msg.id, result: { structuredContent: result } });
-        }
-        return json(200, { jsonrpc: '2.0', id: msg.id, result: { isError: true, content: [{ text: '{"code":"unknown","message":"no such tool"}' }] } });
+        if (msg.method !== 'tools/call') return json(200, { jsonrpc: '2.0', id: msg.id, error: { message: 'unknown method' } });
+        const done = this.tool(msg.params.name, msg.params.arguments);
+        if (done.failure) return json(200, { jsonrpc: '2.0', id: msg.id, result: { isError: true, content: [{ text: JSON.stringify(done.failure) }] } });
+        const data = `data: ${JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { structuredContent: done.result } })}\n\n`;
+        return { status: 200, headers: { 'content-type': 'text/event-stream' }, text: data };
       }
     }
     return json(404, { error: 'not found' });
@@ -167,6 +234,7 @@ export class FakeT3 {
     const refused = Number(u.port) !== this.port || u.pathname !== '/ws'
       || u.searchParams.get('orchestrationProtocol') !== '2' || !s || s.subject === 'mcp-client';
     let open = !refused;
+    let shell: ShellStream | null = null;
     queueMicrotask(() => (refused ? on.closed(false, 'refused') : on.open()));
     const mine: ((v: any) => void)[] = [];
     const forget = () => { for (const m of mine) this.configStreams.delete(m); };
@@ -181,16 +249,36 @@ export class FakeT3 {
           this.configStreams.add(sub);
           mine.push(sub);
           queueMicrotask(() => sub(this.serverConfig));
-        } else if (msg._tag === 'Request') {
+        } else if (msg._tag === 'Request' && msg.tag !== 'orchestration.subscribeShell') {
           const method = this.wsMethods[msg.tag];
           const exit = method ? { _tag: 'Success', value: method(msg.payload) } : { _tag: 'Failure', cause: { _tag: 'Die', defect: `no method ${msg.tag}` } };
           queueMicrotask(() => open && on.message(JSON.stringify({ _tag: 'Exit', requestId: msg.id, exit })));
+        }
+        if (msg._tag === 'Request' && msg.tag === 'orchestration.subscribeShell') {
+          // T3's shell stream: a snapshot of every project (and threads, which the app ignores),
+          // then each change as it happens (docs/app.md, The WebSocket API).
+          const stream: ShellStream = {
+            ended: false,
+            end: () => {
+              stream.ended = true;
+              if (!open) return;
+              open = false;
+              queueMicrotask(() => on.closed(true, 'T3 stopped'));
+            },
+            send: (item) => queueMicrotask(() => open && !stream.ended && on.message(JSON.stringify({ _tag: 'Chunk', requestId: msg.id, values: [item] }))),
+          };
+          shell = stream;
+          this.shells.push(stream);
+          stream.send({ kind: 'snapshot', snapshot: { schemaVersion: 2, snapshotSequence: this.n, projects: this.projects.map((p) => ({ ...p, scripts: [] })), threads: [{ id: 't1' }], archivedThreads: [] } });
+          stream.send({ kind: 'synchronized' });
+          stream.send({ kind: 'thread.updated', sequence: this.n, location: 'active', thread: { id: 't1' } });
         }
       },
       close: () => {
         if (!open) return;
         open = false;
         forget();
+        if (shell) this.shells = this.shells.filter((x) => x !== shell);
         queueMicrotask(() => on.closed(true, ''));
       },
     };

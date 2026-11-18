@@ -36,7 +36,7 @@ afterEach(() => {
 });
 
 const view = (shares = {}, u = usage): View => ({
-  settings: { ...DEFAULT_SETTINGS, shares }, account: null, timeFormat: '24-hour', catalog: catalogFromConfig(config), usage: u,
+  settings: { ...DEFAULT_SETTINGS, shares }, account: null, timeFormat: '24-hour', catalog: catalogFromConfig(config), usage: u, repos: [], reposError: null,
 });
 const show = (v: View) => act(() => root.render(<Settings view={v} open={{ page: 'share', query: '' }} onOpen={() => {}} onClose={() => {}} />));
 const field = (label: string) => {

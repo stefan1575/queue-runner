@@ -1,15 +1,16 @@
 // The sidebar, as #36's prototype has it: the repo switcher on top, and a footer row where T3 Code
 // has its own: Settings and Usage on the left, Update on the right. Usage stays greyed until #35
-// settles its page, Update until updates are specced. No repository is served yet (the
-// Repositories ticket), so the switcher has only "All repositories".
+// settles its page, Update until updates are specced. The switcher lists the served repositories
+// (Settings / Repositories); picking one waits for the pages that show a repo's work.
 import * as Popover from '@radix-ui/react-popover';
-import { Check, ChevronsUpDown, CircleArrowUp, Gauge, Layers, Settings } from 'lucide-react';
+import { Check, ChevronsUpDown, CircleArrowUp, FolderGit2, Gauge, Layers, Settings } from 'lucide-react';
+import type { Repo } from '../../src/repos.ts';
 import { cn } from './cn.ts';
 
-export function Sidebar({ onSettings, settingsOpen }: { onSettings: () => void; settingsOpen: boolean }) {
+export function Sidebar({ onSettings, settingsOpen, repos }: { onSettings: () => void; settingsOpen: boolean; repos: Repo[] | null }) {
   return (
     <div className="flex h-full flex-col">
-      <div className="p-3"><RepoSwitcher /></div>
+      <div className="p-3"><RepoSwitcher served={(repos ?? []).filter((r) => r.served)} /></div>
       <div className="flex-1" />
       <div className="flex items-center gap-1 border-t border-line px-3 py-2">
         <button type="button" onClick={onSettings} aria-label="Settings" title="Settings" aria-expanded={settingsOpen}
@@ -27,7 +28,7 @@ export function Sidebar({ onSettings, settingsOpen }: { onSettings: () => void; 
   );
 }
 
-function RepoSwitcher() {
+function RepoSwitcher({ served }: { served: Repo[] }) {
   return (
     <Popover.Root>
       <Popover.Trigger aria-label="Repository: All repositories"
@@ -35,7 +36,7 @@ function RepoSwitcher() {
         <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-ink text-page"><Layers className="size-[18px]" /></span>
         <span className="min-w-0 flex-1 leading-tight">
           <span className="block truncate text-[16px] font-semibold">All repositories</span>
-          <span className="block truncate text-[14px] text-mute">0 served</span>
+          <span className="block truncate text-[14px] text-mute">{served.length} served</span>
         </span>
         <ChevronsUpDown className="size-4 shrink-0 text-faint" />
       </Popover.Trigger>
@@ -46,7 +47,14 @@ function RepoSwitcher() {
             <span className="flex-1 text-[16px] font-medium">All repositories</span>
             <Check className="size-4 text-ink" />
           </div>
-          <p className="px-2 pb-1 pt-2.5 text-[14.5px] text-mute">No repository is served yet. The ones the runner serves show here, in priority order.</p>
+          {served.length === 0
+            ? <p className="px-2 pb-1 pt-2.5 text-[14.5px] text-mute">No repository is served yet. Switch them on in Settings → Repositories, and they show here.</p>
+            : served.map((r) => (
+              <div key={r.id} className="flex items-center gap-2.5 px-2 py-1.5" title={r.github ?? r.folder}>
+                <span className="flex size-6 items-center justify-center rounded-md bg-sunk text-ink-2"><FolderGit2 className="size-3.5" /></span>
+                <span className="min-w-0 flex-1 truncate text-[16px]">{r.title}</span>
+              </div>
+            ))}
         </Popover.Content>
       </Popover.Portal>
     </Popover.Root>

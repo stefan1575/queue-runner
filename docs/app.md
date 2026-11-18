@@ -4,9 +4,10 @@ The TypeScript rebuild of the runner (spec #68), in `app/`: one package, TypeScr
 pnpm, Vitest. It grows ticket by ticket beside the Python runner (`queue_runner/`), which keeps
 serving Stefan's repos until the cutover ticket. So far it signs in to T3 and lists the repos it
 could serve (#149), opens as a desktop window that keeps running in the tray, with Settings
-(#150; The desktop app, below), knows which model does each kind of job and launches it
-(#152; Job models, below), and gates every job on its provider's usage, keeping your share of
-each week (#153; Usage, below).
+(#150; The desktop app, below), keeps its repositories in step with T3's projects (#151;
+Repositories, below), knows which model does each kind of job and launches it (#152; Job
+models, below), and gates every job on its provider's usage, keeping your share of each week
+(#153; Usage, below).
 
 ## Run it
 
@@ -106,7 +107,8 @@ Code both sides use (`display.ts`, `settings-search.ts`) touches no Node. The wi
   setting, its current value and a typo (`src/settings-search.ts`).
 - **Settings** are `settings.json` in the state folder (`src/settings.ts`): Name (null follows
   the `gh` account: `gh api user`, its name, else its login), the date style (default
-  `month-first`, "November 16, 2026 Monday") and Start with Windows (on). Each change is checked,
+  `month-first`, "November 16, 2026 Monday"), Start with Windows (on) and each repo's choices
+  (`repos`; Repositories, below). Each change is checked,
   saved at once (written aside and renamed over) and sent to the window; there's no Save button.
   The state folder's location is the only thing in a machine file, `machine.json` in Electron's
   userData (`%APPDATA%\Queue runner`); a first start writes `%APPDATA%\Queue runner\state`
@@ -127,13 +129,48 @@ Code both sides use (`display.ts`, `settings-search.ts`) touches no Node. The wi
 `pnpm --dir app desktop:shoot <absolute dir>` renders the real window on a fresh state in a temp
 folder (never the real state, lock or logon entry), on the sample T3 catalog
 (`test/fixtures/server-config.json`, never the real T3): `window`, `settings-name`,
-`settings-models` (a new install), `settings-models-chosen` (the sample choices in
+`settings-repos`, `settings-models` (a new install), `settings-models-chosen` (the sample choices in
 `test/fixtures/shoot-jobs.json`), `settings-share` (a new install) and `settings-share-kept` (the
 sample share in `test/fixtures/shoot-shares.json`), on the fixture's usage moved so T3 read it a
 minute before the shoot, with one sample provider T3 reads no usage for
 (`shoot-unread-provider.json`, its row Coming soon), `settings-display`, `settings-machine` and `settings-search` (a
 typo, "windos"), each `-light.png` and `-dark.png`, at 1440x900. The page's address opens Settings for it:
-`#settings=<page>` or `#q=<search>`.
+`#settings=<page>` or `#q=<search>`. Repositories is shot from a sample (`src/desktop/sample.ts`:
+two served repos, one New and one with no GitHub remote), which reaches neither T3 nor GitHub.
+
+## Repositories
+
+`src/repos.ts` (#151; #68 stories 21 to 23 and 25), Settings / Repositories in the window
+(`renderer/src/Repos.tsx`). The runner's repos are T3's projects, kept in step both ways:
+
+- **From T3:** `src/t3/project-feed.ts` keeps T3's projects from `orchestration.subscribeShell`
+  (The WebSocket API, below), never by polling. A stream that ends or fails keeps the last list,
+  says why on the page, and opens again after 5 seconds; its new snapshot replaces the list.
+- **Each repo's choices** are `repos` in `settings.json`, by T3 project id: `served`, `merge`
+  (`runner` or `me`, default `me`) and `seen`. A project new from T3 arrives off with a "New"
+  mark (`seen: false`), counted in blue on the page, until the page has shown it and gone away.
+  `repos` is null until T3's projects are first seen: that first sight is a new install, where
+  nothing is marked New. A project removed in T3 loses its choices. The window changes them only
+  through `runner:repo` (`RepoAction`), never as a plain setting.
+- **Adding** opens Windows' folder dialog (Electron's) and calls `t3_project_create {title: the
+  folder's name, workspaceRoot}`. The project arrives through T3's events, off and not New. T3
+  refuses a folder that's already a project, and the page says so.
+- **Removing** asks first and calls `t3_project_delete {projectId}` only: the folder and GitHub
+  are never touched. T3 0.1.9 refuses a project with threads ("The project is not empty;
+  force=true is required to delete it") and `force: true` deletes its threads, so the app never
+  forces at first: the dialog asks again, naming that the threads go too, and only then forces.
+- **Served** needs a GitHub remote. Each folder's remote is read again on every T3 event, as
+  the Repositories page opens, and when it's switched on, so no answer (gh failing or no remote)
+  is kept for good; the last one known stays on show while it's read again. A project without
+  one says "No GitHub remote" and its switch is off and disabled; one gh couldn't read says why
+  and its switch stays usable, since switching on reads it again. A served repo whose remote
+  can't be read shows as not served without losing its choice. Switching on first lists the repo's
+  labels (`gh label list`) and creates whichever of `ready-for-agent`, `needs-info` and
+  `ready-to-merge` is missing (`gh label create`; one made meanwhile is left as it is). gh
+  failing leaves it off and the page says why. Switching off and who merges touch GitHub not at
+  all. Until the cutover only the sandboxes are ever switched on (Rules).
+- **Not settings:** the base branch is GitHub's default branch, and the folder is the T3
+  project's.
 
 ## Job models
 
@@ -289,6 +326,16 @@ is a T3Error with its `code: message`. Projects: `t3_project_list {cursor, limit
   `{"_tag":"Ack","requestId":"1"}` before T3 sends the next; it ends with
   `{"_tag":"Exit","requestId","exit":{"_tag":"Success"|"Failure",...}}`. A `Ping` is answered
   `Pong`; a `Defect` or `ClientProtocolError` fails the call.
+- **`orchestration.subscribeShell`** (scope `orchestration:read`; the bare `subscribeShell` dies
+  with "Unknown request tag"). Seen live 2026-11-19 against T3 0.1.9: a whole snapshot `{kind:
+  "snapshot", snapshot: {projects, threads, archivedThreads, ...}}` (10 projects, 697 threads,
+  1.6 MB in all), then a partial one naming `resolvedRepositoryIdentityRoots` (only those
+  projects, no threads), then `thread.updated` items. From T3's schema: `project.updated
+  {project}`, `project.removed {projectId}`, `thread.updated`, `thread.removed`, and
+  `synchronized`/`snapshot-required` markers. A project has `id`, `title`, `workspaceRoot`,
+  `repositoryIdentity`, `archivedAt`, `scripts` and more. The app (`src/t3/project-feed.ts`)
+  opens the stream again at once on `snapshot-required`, so its whole snapshot replaces what was
+  missed, and leaves out a project whose `archivedAt` is set, as T3 hides it.
 - **`subscribeServerConfig`** (scope `orchestration:read`). Its payload's flags are all optional
   (`environmentThemes`, `usageLimitSources`, `usageLimitsCommand`, `workspaceSnapshotsOnDemand`,
   `providerCatalogsOnDemand`). With `{}` T3 sent one Chunk of 726,605 bytes with one value,

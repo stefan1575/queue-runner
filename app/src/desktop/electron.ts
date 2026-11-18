@@ -5,7 +5,7 @@
 //   --shoot <dir>   renders the window and each Settings page, light and dark, into <dir> as
 //                   PNGs, on a fresh state in a temp folder with the sample T3 catalog and usage
 //                   in test/fixtures, and quits (docs/app.md, Screenshots)
-import { app, BrowserWindow, ipcMain, nativeTheme } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, nativeTheme } from 'electron';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -13,13 +13,17 @@ import { fileURLToPath } from 'node:url';
 import { GhGitHub } from '../github.ts';
 import { windowsPlatform } from '../platform/windows.ts';
 import { checkJobs, DEFAULT_JOBS } from '../jobs.ts';
+import { Repositories } from '../repos.ts';
 import { checkShares } from '../shares.ts';
 import { usageFromProviders } from '../usage.ts';
 import { SettingsStore } from '../settings.ts';
 import { catalogFromConfig } from '../t3/catalog.ts';
 import { fixedCatalog, T3Catalog } from '../t3/catalog-source.ts';
+import { T3Mcp } from '../t3/mcp.ts';
+import { T3ProjectFeed } from '../t3/project-feed.ts';
 import { fetchHttp, nodeConnect, runtimeAddress, t3Cli } from '../t3/real.ts';
 import { T3Ws } from '../t3/ws.ts';
+import { sampleRepos } from './sample.ts';
 import { stateFolder } from '../state-folder.ts';
 import { CHANNELS } from './bridge.ts';
 import { startDesktop, type Shell } from './shell.ts';
@@ -58,19 +62,37 @@ async function main() {
   await app.whenReady();
   const userData = app.getPath('userData');
   const settings = await SettingsStore.open(stateFolder(join(userData, 'machine.json'), join(userData, 'state')));
-  // What T3 offers each job, kept current from its WebSocket; a shoot shows the sample instead.
-  const catalog = shootTo
-    ? fixedCatalog(catalogFromConfig(fixture('server-config.json').config), sampleUsage())
-    : T3Catalog.start(new T3Ws(runtimeAddress(), t3Cli(), fetchHttp, nodeConnect));
+  let win: BrowserWindow | null = null;
+  // Windows' own folder dialog, over the window when it's open.
+  const pickFolder = async () => {
+    const options = { title: 'Add a repository', properties: ['openDirectory' as const] };
+    const r = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options);
+    return r.canceled ? null : r.filePaths[0] ?? null;
+  };
+  const github = new GhGitHub();
+  // What T3 offers each job and T3's projects, kept current from its WebSocket; a shoot shows a
+  // sample of each instead (docs/app.md, Screenshots).
+  const { catalog, repos } = shootTo
+    ? { catalog: fixedCatalog(catalogFromConfig(fixture('server-config.json').config), sampleUsage()), repos: await sampleRepos(settings) }
+    : (() => {
+      const address = runtimeAddress();
+      const cli = t3Cli();
+      const ws = new T3Ws(address, cli, fetchHttp, nodeConnect);
+      const feed = T3ProjectFeed.start(ws);
+      return {
+        catalog: T3Catalog.start(ws),
+        repos: Repositories.start({ feed, github, settings, mcp: new T3Mcp(address, cli, fetchHttp), pickFolder }),
+      };
+    })();
   // The clock follows T3's Time format, read from T3's client settings (docs/app.md, The desktop app).
-  const view = await RunnerView.start(settings, new GhGitHub(), await T3TimeFormat.start(), catalog);
+  const view = await RunnerView.start(settings, github, await T3TimeFormat.start(), catalog, repos);
 
   ipcMain.handle(CHANNELS.view, () => view.get());
   ipcMain.handle(CHANNELS.set, (_e, patch) => view.set(patch));
+  ipcMain.handle(CHANNELS.repo, (_e, action) => view.repo(action));
 
   if (shootTo) return shoot(shootTo, settings);
 
-  let win: BrowserWindow | null = null;
   const shell: Shell = {
     singleInstance(onSecondStart) {
       if (!app.requestSingleInstanceLock()) return false;
@@ -131,6 +153,7 @@ async function shoot(dir: string, settings: SettingsStore) {
   const states: [string, string, boolean?][] = [
     ['window', ''],
     ['settings-name', 'settings=name'],
+    ['settings-repos', 'settings=repos'],
     ['settings-models', 'settings=models'],
     ['settings-models-chosen', 'settings=models', true],
     ['settings-share', 'settings=share'],
