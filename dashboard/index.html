@@ -15,7 +15,7 @@
     it builds first, is it up. The column between them is centred in the space they leave.
   - Three pages do three jobs. Overview is the first glance. Inbox is what waits on you. Queue is
     the work.
-  - PROTOTYPE, with sample data only (#30, take 23): the Queue as the lanes on top, one card
+  - PROTOTYPE, with sample data only (#30, take 24, settled): the Queue as the lanes on top, one card
     split down the middle (what Claude and ChatGPT run now, then each one's queue, which opens and
     closes and is remembered; open, a window three rows tall that scrolls, so the card never
     grows), and the efforts below in four tabs, a line under the head saying what each is for.
@@ -36,7 +36,8 @@
     a switch for what its bars show. Take 22: the default bar is done and yours; done tickets
     stay hidden behind a line that opens them; a small number before each effort. Take 23: every
     state, always (no switch); an effort lists only what waits on you, the rest behind Show; ready
-    is ready-for-agent and blocked names its blocker. Take 22 is earlier/take-22.html.
+    is ready-for-agent and blocked names its blocker. Take 24, settled: the rest is "N hidden" in
+    italics and an underlined Show. Take 23 is earlier/take-23.html.
   - The Overview only summarises, in three cards read top to bottom: what's on your plate (the
     Inbox in counts by kind, and the ask that's first in line), what's running (a line per lane,
     with its Stop button and the one thing it takes up next), and what's next (a bar per
@@ -1390,6 +1391,11 @@ body.q-dragging .can-drop { outline: none; }
 .pg-done { color: var(--mute); }
 .et-word { font-family: inherit; }
 .et { grid-template-columns: 26px minmax(0, 30%) minmax(0, 1fr) 76px 168px; }
+/* ---------------------------------------------------------------- take 24 (PROTOTYPE, #30) */
+/* What doesn't need you: "N hidden" in italics, then Show or Hide, underlined. */
+.pg-done em { font-style: italic; color: var(--mute); }
+.pg-done .pg-show { color: var(--ink-2); text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; margin-left: 8px; }
+.pg-done:hover .pg-show { color: var(--ink); }
 </style>
 </head>
 <body>
@@ -2413,7 +2419,7 @@ function restToggle(pid, openIts, doneIts, W) {
   if (!n) return "";
   const id = `rest:${pid}`, open = qOpen.has(id);
   const its = [...openIts.sort((a, b) => segmentOf(a) - segmentOf(b) || a.n - b.n), ...doneIts.sort((a, b) => a.n - b.n)];
-  return `<button class="pg-done" data-act="q-open" data-id="${esc(id)}" aria-expanded="${open}">${plural(n, "more doesn't", "more don't")} need you<span>${open ? "Hide" : "Show"}</span></button>
+  return `<button class="pg-done" data-act="q-open" data-id="${esc(id)}" aria-expanded="${open}" title="${esc(plural(n, "ticket doesn't", "tickets don't"))} need you"><em>${n} hidden</em><span class="pg-show">${open ? "Hide" : "Show"}</span></button>
     ${open ? `<ol class="pg-kids pg-donelist">${its.map((i) => etRow({ i, id: key(i) }, W)).join("")}</ol>` : ""}`;
 }
 // A ticket's state in words that say which: its label's name, or what blocks it.
