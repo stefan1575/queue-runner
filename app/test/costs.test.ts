@@ -49,7 +49,7 @@ describe('learned costs', () => {
     expect(spentOf(before, after)).toEqual({ a: 4, b: 3, c: null });
   });
 
-  test('records are appended to usage.jsonl and read back; a torn last line is left out', async () => {
+  test('records are appended to usage.jsonl and read back; a torn last line is cut off', async () => {
     dir = await mkdtemp(join(tmpdir(), 'qr-costs-'));
     const file = join(dir, 'usage.jsonl');
     const r = rec(opusMedium, 4, 1);
@@ -59,7 +59,7 @@ describe('learned costs', () => {
     const r2 = rec(opusMedium, 5, 1);
     await log.append(r2);
     expect((await CostLog.open(file)).records()).toEqual([r, r2]);
-    expect((await readFile(file, 'utf8')).split('\n')).toHaveLength(4);
+    expect(await readFile(file, 'utf8')).toBe(`${JSON.stringify(r)}\n${JSON.stringify(r2)}\n`);
   });
 
   test('a bad line before the last is an error', async () => {
