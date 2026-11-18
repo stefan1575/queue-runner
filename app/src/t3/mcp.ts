@@ -24,7 +24,8 @@ function rpcResult(text: string, contentType: string): any {
 export class T3Mcp {
   private token: string | null = null;
   private tokenOrigin: string | null = null;
-  private signingIn: Promise<string> | null = null;
+  /** The sign-in under way for each origin, so a call reading another origin never gets its token. */
+  private signingIn = new Map<string, Promise<string>>();
 
   private address: Address;
   private cli: Cli;
@@ -53,11 +54,15 @@ export class T3Mcp {
 
   private async signedIn(origin: string): Promise<string> {
     if (this.token !== null && this.tokenOrigin === origin) return this.token;
-    // one sign-in at a time: calls that find no token wait for the same one
-    this.signingIn ??= signInMcp(origin, this.cli, this.http).then(
-      (t) => { this.token = t; this.tokenOrigin = origin; return t; },
-    ).finally(() => { this.signingIn = null; });
-    return this.signingIn;
+    // one sign-in per origin at a time: calls that find no token there wait for the same one
+    let pending = this.signingIn.get(origin);
+    if (!pending) {
+      pending = signInMcp(origin, this.cli, this.http).then(
+        (t) => { this.token = t; this.tokenOrigin = origin; return t; },
+      ).finally(() => { this.signingIn.delete(origin); });
+      this.signingIn.set(origin, pending);
+    }
+    return pending;
   }
 
   private async send(url: string, method: string, headers: Record<string, string>, body?: string) {

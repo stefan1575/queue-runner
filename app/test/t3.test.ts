@@ -61,12 +61,13 @@ describe('signing in to MCP', () => {
   });
 
   it('gives up when the new token is refused too', async () => {
-    const client = mcp();
+    let refuse = false;
+    const client = new T3Mcp(runtimeAddress(runtime), t3.cli, async (url, req) => (
+      refuse && new URL(url).pathname === '/mcp' ? { status: 401, headers: {}, text: '' } : t3.http(url, req)));
     await client.call('t3_project_list', list);
-    const http = t3.http;
-    t3.http = async (url, req) => (new URL(url).pathname === '/mcp'
-      ? { status: 401, headers: {}, text: '' } : http(url, req));
-    await expect(mcp().call('t3_project_list', list)).rejects.toBeInstanceOf(Unauthorized);
+    refuse = true; // the signed-in client's token, then the new one, are both refused
+    await expect(client.call('t3_project_list', list)).rejects.toBeInstanceOf(Unauthorized);
+    expect(t3.signIns['mcp-client']).toBe(2);
   });
 
   it('re-reads the address after T3 moves port, and signs in there', async () => {

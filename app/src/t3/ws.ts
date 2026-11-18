@@ -17,7 +17,8 @@ export type Subscription = {
 export class T3Ws {
   private token: string | null = null;
   private tokenOrigin: string | null = null;
-  private signingIn: Promise<string> | null = null;
+  /** The sign-in under way for each origin, so a call reading another origin never gets its token. */
+  private signingIn = new Map<string, Promise<string>>();
   private nextId = 1;
 
   private address: Address;
@@ -118,9 +119,13 @@ export class T3Ws {
 
   private async signedIn(origin: string): Promise<string> {
     if (this.token !== null && this.tokenOrigin === origin) return this.token;
-    this.signingIn ??= signInWebSocket(origin, this.cli, this.http).then(
-      (t) => { this.token = t; this.tokenOrigin = origin; return t; },
-    ).finally(() => { this.signingIn = null; });
-    return this.signingIn;
+    let pending = this.signingIn.get(origin);
+    if (!pending) {
+      pending = signInWebSocket(origin, this.cli, this.http).then(
+        (t) => { this.token = t; this.tokenOrigin = origin; return t; },
+      ).finally(() => { this.signingIn.delete(origin); });
+      this.signingIn.set(origin, pending);
+    }
+    return pending;
   }
 }
