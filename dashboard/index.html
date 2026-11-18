@@ -15,7 +15,7 @@
     it builds first, is it up. The column between them is centred in the space they leave.
   - Three pages do three jobs. Overview is the first glance. Inbox is what waits on you. Queue is
     the work.
-  - PROTOTYPE, with sample data only (#30, take 16): the Queue as the lanes on top, one card
+  - PROTOTYPE, with sample data only (#30, take 17): the Queue as the lanes on top, one card
     split down the middle (what Claude and ChatGPT run now, then each one's queue, which opens and
     closes and is remembered; open, a window three rows tall that scrolls, so the card never
     grows), and the efforts below in four tabs, a line under the head saying what each is for.
@@ -23,10 +23,13 @@
     a sentence), opened like a dropdown. Order is for moving: an effort and the efforts inside it
     are one box, each row with a second line saying where it stands, and nothing opens, folds or
     moves while you drag. Board and Graph as before. The card is as tall as its tallest tab, so
-    switching tabs never moves the page, and the page keeps its old width, centred. Colour is
+    switching tabs never moves the page. Take 17: the Queue page is 1320px wide, centred; the
+    lane head shares one baseline; a rank is a circled number everywhere; Progress's bar runs the
+    card's width and a ticket in it says what it is in a line, its state alone at the right; the
+    Board's first column is In line (the Claude lane's line, a fix round's number amber). Colour is
     take 13's step 3: done, moving, and what waits on you. The right-hand rail is not this
     prototype's: it's take 12's here, and settled on its own branch, prototype/rail (#141).
-    Take 15 is earlier/take-15.html.
+    Take 16 is earlier/take-16.html.
   - The Overview only summarises, in three cards read top to bottom: what's on your plate (the
     Inbox in counts by kind, and the ask that's first in line), what's running (a line per lane,
     with its Stop button and the one thing it takes up next), and what's next (a bar per
@@ -1243,6 +1246,62 @@ button.er-name:hover { text-decoration: underline; text-underline-offset: 3px; }
 .q12 .sg.merged, .q12 .sg.building, .q12 .sg.pr { background: var(--run-fill); box-shadow: none; }
 .q12 .sg.ready, .q12 .sg.blocked { background: var(--line); box-shadow: none; }
 .q12 .st.ready, .q12 .st.blocked { color: var(--mute); border-style: solid; }
+/* ---------------------------------------------------------------- take 17 (PROTOTYPE, #30) */
+/* The Queue page is wider than the others (1320px, centred), so the Board's columns and Order's
+   rows have room. Below that, it fills the middle column as before. */
+body.page-queue .top-col, body.page-queue main { max-width: 1320px; }
+
+/* The lane head: every word on one baseline (the name's, its line, the time and "Stop"), and the
+   marks without text (the logo, the dot, the pause icon) centred on that line. Centring each
+   box left the 17px name's letters lower than the 14.5px words beside it. */
+.ln-head { align-items: baseline; }
+.ln-head .who { align-items: baseline; }
+.ln-head .who .mark, .ln-for .dot, .ln-stop .btn .i { align-self: center; }
+.ln-for { align-items: baseline; }
+.ln-stop .btn { height: auto; padding: 5px 12px; line-height: 20px; align-items: baseline; }
+
+/* A rank is a circled number wherever the build order is shown: the lanes, Progress, Order, Board.
+   Amber is a ticket whose PR is already open (a fix round), still in line. */
+.q12 .qn.rk { width: 24px; height: 24px; font-size: 12.5px; color: var(--ink-2); }
+.q12 .qn.mv { box-shadow: inset 0 0 0 1.5px var(--run); color: var(--run); }
+.kc.mv { border-color: color-mix(in srgb, var(--run) 45%, var(--line)); }
+
+/* Progress: the number and the name on one line, the caret at its end; the bar and the sentence
+   under them run the card's width. */
+.pg-head { grid-template-columns: 24px minmax(0, 1fr) max-content 24px; grid-template-areas: "r n k c" "b b b b" "s s s s"; column-gap: 12px; row-gap: 10px; padding: 14px 14px 14px 16px; }
+.pg.nr > .pg-head { grid-template-areas: "n n k c" "b b b b" "s s s s"; }
+.pg.solo > .pg-head { grid-template-areas: "r n k k" "s s s s"; row-gap: 4px; padding-top: 12px; padding-bottom: 12px; }
+.pg-head .qn { grid-area: r; }
+.pg-head .er-caret { grid-area: c; }
+.pg-head .er-caret .i { transition: transform .15s; }
+.pg.open > .pg-head .er-caret .i { transform: rotate(180deg); }
+.pg-body { padding: 0 14px 12px 16px; }
+.pg-kids > .pg { margin: 8px 0; }
+
+/* A ticket inside an effort: title, what it is, its PR, and its state at the right edge, each in
+   a column so they line up row to row. */
+.et { grid-template-columns: 26px minmax(0, 30%) minmax(0, 1fr) 76px 128px; column-gap: 14px; align-items: center; padding: 9px 4px; }
+.et > .sg { align-self: center; }
+.et-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.et-about { min-width: 0; font-size: 14px; color: var(--mute); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.et-pr { font-size: 14px; color: var(--mute); white-space: nowrap; }
+.et-pr .link, .et-pr .pr-ref { margin: 0; font-size: 14px; }
+.et-st { grid-area: auto; justify-self: end; display: inline-flex; }
+.et-name { font-weight: 600; }
+
+/* Order: room around the grip and the number; the efforts inside one sit under its name; every
+   bar is the same size on the same right edge, nested or not. */
+.or-list { gap: 8px; }
+.or-row { grid-template-columns: 16px 24px minmax(0, 1fr) 200px 92px; column-gap: 12px; height: 64px; padding: 0 16px 0 12px; }
+.or-main { gap: 3px; }
+.or-kids { margin: 0 8px 10px 64px; }
+.or-kids .or-row { grid-template-columns: 16px minmax(0, 1fr) 200px 92px; height: 58px; padding: 0 7px 0 11px; }
+.or-bar .fbar { height: 10px; gap: 3px; }
+.or-count { font-size: 13.5px; }
+
+/* Board: five equal columns, Done too. */
+.kboard { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; padding: 14px; }
+.kcol { padding: 10px; }
 </style>
 </head>
 <body>
@@ -2239,19 +2298,22 @@ const perRepo = (W, list) => {
 function qProgress(W) {
   return perRepo(W, (root) => `<ol class="pg-list">${root.order.map((k, x) => pgRow(W.nodes.get(k), W, x + 1)).join("")}</ol>`);
 }
+// Take 17: the number is a badge on the title line, not a column of its own, so the bar and the
+// sentence under it run the card's whole width. The caret is at the line's end, as a dropdown's.
 function pgRow(n, W, rank) {
-  const num = `<span class="er-rank">${rank || ""}</span>`;
+  const num = rank ? `<span class="qn rk">${rank}</span>` : "", nr = rank ? "" : " nr";
   if (n.t === "ticket") {   // a ticket with no effort: a lighter row of its own
     const i = n.i;
-    return `<li class="pg solo"><div class="pg-head">${num}<span class="er-caret dot-only"><i></i></span>
+    return `<li class="pg solo${nr}"><div class="pg-head">${num}
       <span class="pg-name"><span class="t-n">#${i.n}</span>${esc(i.title)}<span class="kind">Ticket</span>${prText(i)}</span>
       <span class="pg-count">${stateTag(i)}</span><span class="pg-say">${esc(whyOf(i, W))}</span></div></li>`;
   }
   const open = qOpen.has(n.id), s = effortSum(n, W), shut = closedSay(n, W);
   const title = n.t === "none" ? `No effort<span class="kind">Tickets</span>` : `${esc(n.title)}<span class="kind">${esc(KINDNAME[n.kind] || "Effort")}</span>`;
   const kids = open ? n.order.map((k) => { const c = W.nodes.get(k); return c.t === "ticket" ? etRow(c, W) : pgRow(c, W, null); }).join("") : "";
-  return `<li class="pg${open ? " open" : ""}"><div class="pg-head">${num}<button class="er-caret" data-act="q-open" data-id="${esc(n.id)}" aria-expanded="${open}" aria-label="${open ? "Close" : "Open"} ${esc(nameOf(n))}">${ICON.right}</button>
+  return `<li class="pg${open ? " open" : ""}${nr}"><div class="pg-head">${num}
       <button class="pg-name" data-act="q-open" data-id="${esc(n.id)}">${title}</button><span class="pg-count" title="Done means live">${esc(s.count)}</span>
+      <button class="er-caret" data-act="q-open" data-id="${esc(n.id)}" aria-expanded="${open}" aria-label="${open ? "Close" : "Open"} ${esc(nameOf(n))}">${ICON.chevron}</button>
       <span class="pg-bar">${s.bar}</span><span class="pg-say">${leftSay(s.v)}</span></div>
     ${open ? `<div class="pg-body"><ol class="pg-kids">${kids}</ol>${shut ? `<p class="eq-shut">${ICON.check}${esc(shut)}</p>` : ""}</div>` : ""}</li>`;
 }
@@ -2264,7 +2326,7 @@ function qOrder(W) {
 }
 function orRow(n, W, rank) {
   const drag = dragAttrs(n), grip = drag ? GRIP : `<span class="grip none"></span>`, flash = isFlash(n.id) ? " flash" : "";
-  const num = rank ? `<span class="er-rank">${rank}</span>` : "";
+  const num = rank ? `<span class="qn rk">${rank}</span>` : "";
   if (n.t === "ticket") {
     const i = n.i;
     return `<li class="or solo${flash}" ${drag}><div class="or-row">${grip}${num}<span class="or-main"><span class="or-name"><span class="t-n">#${i.n}</span>${esc(i.title)}<span class="kind">Ticket</span></span>
@@ -2278,11 +2340,15 @@ function orRow(n, W, rank) {
       <span class="or-sub">${leftSay(s.v, false)}</span></span><span class="or-bar">${s.bar}</span><span class="or-count">${esc(s.count)}</span></div>
     ${inner.length ? `<ol class="or-kids" aria-label="Inside ${esc(nameOf(n))}">${inner.map((c) => orRow(c, W, null)).join("")}</ol>` : ""}</li>`;
 }
+// Take 17: a ticket's row is its title, what it is in a line, its PR, and its state alone at the
+// right edge. Why it stands there is the state's tooltip.
 function etRow(n, W) {
   const i = n.i, seg = SEGMENTS[segmentOf(i)][0];
   return `<li class="et${isFlash(n.id) ? " flash" : ""}"><i class="sg ${seg}" aria-hidden="true"></i>
-    <span class="et-name"><span class="t-n">#${i.n}</span>${esc(i.title)}${prText(i)}${filedTag(i)}</span>
-    <span class="et-say">${stateTag(i)}${fixTag(i)}<span class="et-why">${esc(whyOf(i, W))}</span></span></li>`;
+    <span class="et-name"><span class="t-n">#${i.n}</span>${esc(i.title)}${filedTag(i)}</span>
+    <span class="et-about" title="${esc(i.about || "")}">${esc(i.about || "")}</span>
+    <span class="et-pr">${prText(i)}</span>
+    <span class="et-st" title="${esc(whyOf(i, W))}">${stateTag(i)}</span></li>`;
 }
 
 // ---- the efforts to narrow the board and the graph to: a dropdown, however many there are.
@@ -2298,8 +2364,10 @@ const effortOf = (k, W) => { const p = W.nodes.get(W.nodes.get(k).parent); retur
 
 // ---- Board: every open ticket by where it stands, each column in build order.
 const QCOLS = [
-  ["next", "Up next", (i, W) => i.state === "ready" && !!W.qpos.get(key(i))],
-  ["moving", "Moving", (i) => ["building", "review", "fixing", "fixing-itself", "merged"].includes(i.state)],
+  // Take 17: "In line" is the Claude lane's line as the lane lists it, 1 first. A ticket whose PR
+  // is already open (a fix round) is in it too, its number amber; it leaves Moving while it waits.
+  ["next", "In line", (i, W) => !!W.qpos.get(key(i))],
+  ["moving", "Moving", (i, W) => ["building", "review", "fixing", "fixing-itself", "merged"].includes(i.state) && !W.qpos.get(key(i))],
   ["you", "Waits on you", (i) => ["you", "ready-for-human", "needs-triage"].includes(i.state)],
   ["blocked", "Blocked", (i, W) => i.state === "blocked" || (i.state === "ready" && !W.qpos.get(key(i)))],
   ["done", "Done", (i) => i.state === "done"],
@@ -2314,8 +2382,9 @@ function qBoard(W) {
     const shown = whole ? all : all.slice(0, limit), rest = all.length - shown.length;
     const cards = shown.map((i) => {
       const at = W.qpos.get(key(i));
-      return `<li class="kc ${id}"><p class="kc-t">${id === "next" && at ? `<span class="qn">${at}</span>` : ""}<span class="t-n">#${i.n}</span>${esc(i.title)}</p>
-        <p class="kc-m">${id === "next" || id === "blocked" || id === "done" ? "" : stateTag(i)}<span class="kc-e">${esc(effortOf(key(i), W))}</span>${W.repos.length > 1 ? `<span class="kc-r">${esc(i.repo)}</span>` : ""}</p>
+      const mv = id === "next" && i.state !== "ready";
+      return `<li class="kc ${id}${mv ? " mv" : ""}"><p class="kc-t">${id === "next" && at ? `<span class="qn${mv ? " mv" : ""}">${at}</span>` : ""}<span class="t-n">#${i.n}</span>${esc(i.title)}</p>
+        <p class="kc-m">${(id === "next" && !mv) || id === "blocked" || id === "done" ? "" : stateTag(i)}<span class="kc-e">${esc(effortOf(key(i), W))}</span>${W.repos.length > 1 ? `<span class="kc-r">${esc(i.repo)}</span>` : ""}</p>
         ${id === "done" ? "" : `<p class="kc-why">${esc(whyOf(i, W))}</p>`}</li>`;
     }).join("");
     const toggle = rest > 0 ? `<button class="kc-more" data-act="q-more" data-col="${id}">${id === "done" && !whole ? `Show ${all.length}` : `${rest} more`}</button>`
@@ -2764,6 +2833,7 @@ function draw() {
   document.body.classList.toggle("nav-open", ui.nav);
   document.body.classList.toggle("rail-open", ui.rail);
   document.body.classList.toggle("page-inbox", ui.page === "inbox");
+  document.body.classList.toggle("page-queue", ui.page === "queue");   // take 17: a wider page
   if (snap && ui.repo && !(snap.repos || []).some((r) => r.name === ui.repo)) ui.repo = "";
   put("side", side());
   put("top", topBar());

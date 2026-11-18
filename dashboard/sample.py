@@ -420,7 +420,44 @@ def _issues() -> list[dict]:
     def i(repo, n, title, state, feature=None, pr=None, blocked_by=(), note=None, fix=None, filed=False):
         return {"repo": repo, "n": n, "title": title, "state": state, "feature": feature and f"{repo}#{feature}",
                 "pr": pr, "blocked_by": [b if isinstance(b, str) else f"{repo}#{b}" for b in blocked_by],
-                "note": note, "pick": None, "fix": fix, "runner_filed": filed}
+                "note": note, "pick": None, "fix": fix, "runner_filed": filed,
+                "about": ABOUT.get((repo, n))}
+    # PROTOTYPE (#30, take 17): what a ticket is, in a line, as its issue's first sentence would
+    # say it. Only leads-dashboard's are written; a ticket without one shows none.
+    ABOUT = {
+        (LD, 151): "Stores the phone that rings for each Client.",
+        (LD, 191): "Shows the Client's Twilio tracking number on their page.",
+        (LD, 150): "Each Client gets the phone that rings when a lead calls.",
+        (LD, 216): "A page listing every ring-to change and who made it.",
+        (LD, 233): "Brand registration so texts from Twilio numbers get delivered.",
+        (LD, 235): "Sends texts to callers from the Client's ring-to number.",
+        (LD, 214): "Business details, service areas and call hours, after signing.",
+        (LD, 215): "Adds the SEO questions a Client answers during onboarding.",
+        (LD, 223): "Emails the Client once their onboarding form is in.",
+        (LD, 226): "Records every call as an event the reports can count.",
+        (LD, 227): "Totals each day's call events per Client.",
+        (LD, 228): "Charts of calls and leads over time.",
+        (LD, 229): "Which sources the leads came from, per Client.",
+        (LD, 230): "Downloads the analytics tables as CSV.",
+        (LD, 196): "Every call records which lead source it came from.",
+        (LD, 217): "Every call records how long it lasted.",
+        (LD, 193): "Notes a rep writes about a caller, on the caller's page.",
+        (LD, 205): "Narrows the callers list to one or more tags.",
+        (LD, 212): "Callers quiet for 90 days move to an archive view.",
+        (LD, 213): "Sorts the callers list by each caller's last call.",
+        (LD, 218): "Downloads the calls list as a CSV file.",
+        (LD, 181): "Texts the caller back when nobody picks up.",
+        (LD, 183): "Each Client writes the text their callers get.",
+        (LD, 185): "Stops texts to a caller who replies STOP.",
+        (LD, 199): "Assigns several unassigned leads to a rep at once.",
+        (LD, 211): "Checks each Client domain's DNS and email records.",
+        (LD, 237): "The steps that make a merge live on Lovable Cloud.",
+        (LD, 244): "Stores each Client's CRM export keys.",
+        (LD, 241): "Sends each new lead to the Client's HubSpot.",
+        (LD, 242): "Maps the dashboard's fields to each Client's CRM fields.",
+        (LD, 243): "Syncs every night and logs what it retried.",
+        (LD, 245): "Decide which CRMs to support after HubSpot.",
+    }
     # `state` is where a ticket stands. Done means live: `done` once its live steps ran, `merged`
     # while it's merged and they haven't. Then `review` and `fixing` (in a PR), `building`, `you`
     # (an ask in the Inbox), `ready-for-human` (Stefan builds it), `needs-triage` (he decides what
