@@ -10,7 +10,10 @@ The review loop's rules and words are `docs/flow.md`, The review loop; a served 
 1. **Settle.** Under `sol.lock`, a review the log shows open was cut off with its runner: it
    counts as `failed` (an Opus review's, the fallback or config.toml's, once its thread has ended: The Opus fallback). An open merge is settled from GitHub: `merged` or `failed`.
 2. **Stops** (`stops.Stopper`, before merging, so a PR stopped now neither merges nor is
-   reviewed; see `docs/stops.md`, Stops for Stefan).
+   reviewed; see `docs/stops.md`, Stops for Stefan). In a train repo (#179; `docs/flow.md`,
+   The train) only the front PR is reviewed, stopped or merged (`Reviewer.why_not`, the merge
+   re-check's `First in the train`), and a front PR stacked on a merged or deleted branch is
+   retargeted to the repo's base first.
 3. **Merge** (`merge.Merger`, also right after a clean review is posted). A PR merges once the
    runner's own newest review of its head H is `clean` (a clean review that stops for Stefan is
    `stop`). Just before, it's read again: open, still at H (moved: nothing is tried, and Sol

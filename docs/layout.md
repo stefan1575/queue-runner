@@ -37,6 +37,8 @@ What each module and script is for.
   land, the brief, the answer and its stops.
 - `queue_runner/merge.py`: the pre-merge re-check, the expected-head merge and the worktrees
   removed after; in a repo Stefan merges, the `ready-for-stefan` mark and noticing his merge.
+- `queue_runner/train.py`: a repo that runs as a train (#179): its front PR, why another waits,
+  a stale stacked base, the pause and the build hold, asked by each lane where it decides.
 - `queue_runner/inbox.py`: `--inbox`, everything waiting on Stefan: `collect`, the one
   collection, and `Reader`, the Sol lane's last read for the snapshot.
 - `queue_runner/asks.py`: the Inbox's asks written from that collection and the job log.

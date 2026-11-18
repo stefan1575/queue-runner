@@ -82,8 +82,11 @@ python3 -m dashboard    # http://queue.localhost/ is the runner's; http://localh
   on the page: `provider`, `local` or `external`), `repos` in config.toml's
   order (each with `icon`, its favicon as a data: URL or null: `queue_runner/favicon.py`, below;
   `stopped`, `{"at"}` or null: ticket 37; `doing`, the Claude job running in it,
-  shaped as a lane's `job`, or null; and `wait`, `{until, reason}` while none starts in it
-  because the gate held its job or something holds every repo, or null: #50), `asks` (below; each with `read` and
+  shaped as a lane's `job`, or null; `wait`, `{until, reason}` while none starts in it
+  because the gate held its job or something holds every repo, or null: #50; and on a train
+  repo only, `train`: null while it has no open PR, else `{front, paused}`, the PR that moves
+  (`PR #N`) and why a stop on it pauses the repo, or null, so the row says `Train paused on
+  PR #N`, and each PR behind its front reads `Waiting in the train`: #179), `asks` (below; each with `read` and
   `snoozed_until`: Read and snoozed, below; null, as `answered` is, until the Sol lane's first
   Inbox read, and while any repo has had no read GitHub answered (`Inbox.unread`: a first read
   that failed lists only the job log's part, PR #104's review 1, F1), so a control written

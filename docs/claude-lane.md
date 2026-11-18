@@ -141,6 +141,14 @@ nothing. Its brief has the PR, its commits and files, the base's commits since t
 (the newest 30) and the earlier threads. The pushed head is reviewed by Sol afresh, as any new
 head. A blocking review on H gets its ordinary fix round first.
 
+- **In a train** (`train.py`, #179; `docs/flow.md`, The train), only the front PR (the
+  lowest-numbered open one) gets a fix or conflict round, and `resolving` isn't asked; the
+  others say `the train moves one PR at a time: it waits behind #N`. A front PR stacked on a
+  branch that merged or is gone waits for the Sol pass to retarget it first
+  (`train.stale_base`). No build starts while the repo has an open PR, a build of its own still
+  writing (`JobLog.building`) or merges not live yet (`LiveSteps.pending`):
+  `Runner._choose_in` says `<repo>: no build starts: <why>` once (`train.build_hold`).
+  `Decider.cases` takes no case on a PR behind the front.
 - **One at a time** (`Fixer.resolving`): in a repo, while an open PR that had a conflict round
   (not released) isn't held for Stefan (`stops.held`: a stop, his hold...), it's on its way to
   merging, and no other PR's conflict round starts; among the rest, the lowest number goes
@@ -372,7 +380,8 @@ pass says `merged`, the live run says `live` (the log, and a **Live.** comment o
 - **`--inbox`** (`inbox.py`, read only; `--needs-me` until 2026-11-15): the PRs ready to merge (the re-check passes now,
   as the merge pass reads it), the `needs-info` stops filed and not answered or released,
   the builds a decision left to Stefan (until `--release`), and the threads waiting for his
-  answer (a decision's `stop` on a waiting job), with their links; `Nothing waits on you.` when
+  answer (a decision's `stop` on a waiting job), with their links, after each train paused on
+  its front PR (`Trains paused`, #179); `Nothing waits on you.` when
   there's nothing. A repo GitHub can't read is said after the list. It prints `inbox.collect`,
   the one collection the dashboard's Inbox is written from too (`docs/dashboard.md`, The Inbox's asks).
 - `--once --dry-run`'s merge lines say `would mark ready for Stefan at H` (or `ready for Stefan

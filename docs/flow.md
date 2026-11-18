@@ -121,6 +121,27 @@ A stop comes to Stefan:
 Each stop is recorded on the PR and in one `needs-info` issue per PR, and toasted
 (`docs/stops.md`).
 
+### The train
+
+A repo whose `config.toml` entry says `train = true` runs as a train (#179; Stefan, 2026-11-19:
+"run sequentially and pause for conflicts … make it a train"). Building ahead of merges is what
+makes conflicts: every build branches from a base that holds everything before it.
+
+- **One PR at a time.** The train is the repo's open PRs, lowest number first, whoever opened
+  them. Only the front one gets reviews, fix rounds, conflict rounds, stops, merges and live
+  steps; the others wait untouched, and a decision on one of them waits too.
+- **No build ahead of the train.** A build starts only when the repo has no open PR, no build of
+  its own still on its way to one (running, waiting for an answer, or cut off by a limit), and
+  its last merge's live steps are done.
+- **A stop pauses the train.** A stop or hold on the front PR (any `needs-info` stop: a conflict
+  a round couldn't resolve, a review stop, a failed check) holds the whole repo until Stefan
+  answers or releases it: nothing behind it moves, and no build starts. The dashboard and
+  `--inbox` say the train is paused, and on which PR.
+- **Stacked PRs rejoin the base.** When the front PR's base branch has merged (or no longer
+  exists), the runner retargets the PR to the repo's base before anything else, then its
+  conflict round or review runs.
+- A repo without `train` works as the rest of this file says.
+
 ### Merge
 
 A clean review on the newest commit, checks passed on it, nothing open. Just before merging, the

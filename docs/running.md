@@ -34,7 +34,8 @@ second runner out: it logs `a second runner started (pid N) and exited at once` 
 `config.toml` names the repos it serves (GitHub repo, local clone, base branch, and
 `review_table` for a repo whose PR bodies keep a `## Review` table, `issues = "local"` for one
 whose tickets are local markdown: `docs/claude-lane.md`, Local tickets, `merge = "stefan"` for one whose PRs Stefan
-merges himself: `docs/claude-lane.md`, Stefan merges), in an order that breaks ties between repos' work
+merges himself: `docs/claude-lane.md`, Stefan merges, `train = true` for one that runs as a
+train: `docs/flow.md`, The train), in an order that breaks ties between repos' work
 (`docs/claude-lane.md`, Two lanes); the runner's `state_dir` and `log_dir` (`~/.queue-runner/`, outside every served repo);
 `runs_dir`, `checkouts_dir` and `deps_dir` for reviews; `poll_seconds`, the pause after a pass that started
 nothing; `adopt_reviews_before`, the cutover date before which a blocking review the runner
@@ -99,7 +100,7 @@ Ticket 10 (`docs/flow.md`, The runner and Limits).
 
 Ticket 14. The runner serves its own repo, `stefan1575/queue-runner` (`config.toml`, last, after
 game-backdrop, first since 2026-11-15, Stefan's first run under the dashboard; leads-dashboard
-was served until 2026-11-19): GitHub issues, builds, Sol reviews, and it merges its own clean PRs.
+left on 2026-11-19 and came back as a train, #179): GitHub issues, builds, Sol reviews, and it merges its own clean PRs.
 `.github/workflows/tests.yml` runs `python -m unittest` on Windows on every PR and on main, so
 "checks passed on H" means the tests passed on H.
 
