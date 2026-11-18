@@ -1,4 +1,4 @@
-// The build lane (#154; today's Claude lane for builds, docs/claude-lane.md and docs/flow.md): a
+// The build lane (#154; today's runner's builds, docs/flow.md, ported): a
 // served repo's next ticket becomes a PR. One build per repo at a time, repos side by side, the
 // repo that waited longest first (#50). Each pass, for every served repo with no build running:
 //
@@ -46,7 +46,7 @@ export type BuildLaneDoors = {
   /** The user's name for the brief (Settings, Name; else the gh account's). */
   user: () => Promise<string>;
   log: JobLog;
-  /** Whether a file exists (the repo's AGENTS.md or CLAUDE.md, for the brief). */
+  /** Whether a file exists (the repo's agent instructions file, for the brief). */
   exists: (path: string) => boolean;
   /** A line for the app's log. */
   say: (line: string) => void;
@@ -95,6 +95,11 @@ export class BuildLane {
   stop() {
     this.stopped = true;
     for (const w of this.watches) w.stop();
+  }
+
+  /** T3 read new usage: a pass, if a build waits on the gate (a held one may fit now). */
+  usageChanged(): void {
+    if (this.holdSaid.size) void this.pass();
   }
 
   /** The repos with a build running, by T3 project id. */

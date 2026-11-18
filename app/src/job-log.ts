@@ -1,4 +1,4 @@
-// The job log (#154; today's `queue_runner/state.py`, docs/claude-lane.md, The job log):
+// The job log (#154; today's `queue_runner/state.py` and its doc's The job log):
 // `jobs.jsonl` in the state folder, one JSON event a line, appended. A job's `start`, the
 // `thread` T3 gave it once launched, and its `end`. A torn last line (a crash mid-write) is cut
 // off; a bad line anywhere else is an error.

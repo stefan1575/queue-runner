@@ -17,7 +17,7 @@ describe('the template', () => {
   });
 
   test('points at nothing outside the repo: no home folder, no drive, no absolute path', () => {
-    expect(BUILD_TEMPLATE).not.toContain('~/');
+    expect(BUILD_TEMPLATE).not.toMatch(/~\//);
     expect(BUILD_TEMPLATE).not.toMatch(/\b[A-Za-z]:[\\/]/);
     expect(BUILD_TEMPLATE).not.toMatch(/(^|[\s`(])\/(Users|home|tmp)\b/m);
     expect(BUILD_TEMPLATE).not.toMatch(/evidence\.py|scripts\//);
