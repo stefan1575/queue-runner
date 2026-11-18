@@ -6,7 +6,8 @@ serving Stefan's repos until the cutover ticket. So far it signs in to T3 and li
 could serve (#149), opens as a desktop window that keeps running in the tray, with Settings
 (#150; The desktop app, below), keeps its repositories in step with T3's projects (#151;
 Repositories, below), knows which model does each kind of job and launches it (#152; Job
-models, below), and has a Setup page that says what's missing before it can work (#162; Setup,
+models, below), has a Setup page that says what's missing before it can work (#162; Setup,
+below), and ships as a Windows installer built by CI on a version tag (#164; The installer,
 below).
 
 ## Run it
@@ -17,6 +18,7 @@ pnpm --dir app start -- --list    # every T3 project, its folder and GitHub remo
 pnpm --dir app live:sign-in       # the live sign-in check (Live checks, below)
 pnpm --dir app live:launch        # the live launch check, sandbox only (Live checks, below)
 pnpm --dir app desktop            # builds and opens the desktop app (The desktop app, below)
+pnpm --dir app installer          # builds the Windows installer into installer-dist/ (The installer, below)
 ```
 
 Node runs the `.ts` files as they are (type stripping): no build step, so the code uses only
@@ -135,6 +137,34 @@ typo, "windos"), each `-light.png` and `-dark.png`, at 1440x900. The page's addr
 `#settings=<page>` or `#q=<search>`, and Setup: `#setup`. Setup's samples are the real checks run
 on fixed answers (`sampleSetup` in `src/desktop/sample.ts`). Repositories is shot from a sample (`src/desktop/sample.ts`:
 two served repos, one New and one with no GitHub remote), which reaches neither T3 nor GitHub.
+
+## The installer
+
+`pnpm --dir app installer` (#164; #68, Shipping) builds the desktop app and packs it with
+electron-builder (`electron-builder.json`) into `installer-dist/Queue-runner-Setup-<version>.exe`
+(not committed): NSIS, one click, per user (no administrator rights; the app goes to
+`%LOCALAPPDATA%\Programs\queue-runner-app`), a Start menu shortcut, and the app started when it
+finishes. That start is the first one, so Setup opens (Setup, below). The package holds only
+`desktop-dist`, `desktop/` and `package.json`: Vite and esbuild bundle every package the app
+uses, so they're all devDependencies and none ships in `node_modules`.
+
+- **Uninstalling** removes the app, its shortcut and its logon entry (`installer/uninstall.nsh`
+  deletes the Run value named `LOGON_ENTRY`, `src/platform/platform.ts`; not when an update runs
+  the old uninstaller), and keeps `%APPDATA%\Queue runner`, machine.json and the state folder
+  (`deleteAppDataOnUninstall: false`).
+- **Unsigned for v1:** signing needs a paid certificate and can come later. SmartScreen stops a
+  first run ("Windows protected your PC", Unknown publisher; More info, Run anyway), which the
+  release notes (`release-notes.md`) say.
+- **CI** (`.github/workflows/release.yml`, on Windows): a `v*` tag (`v0.1.0`) runs the typecheck
+  and tests, builds the installer at the tag's version and attaches it to that tag's release,
+  creating the release with `release-notes.md` if there's none. A PR that changes the packaging
+  (the workflow, `electron-builder.json`, `installer/`, `package.json` or the lockfile) builds it
+  without releasing. `package.json`'s `version` is the one a local build gets.
+- **Checked by hand 2026-11-19** (0.1.0, on a PC with no `%APPDATA%\Queue runner` and no logon
+  entry): installing added the Start menu shortcut, started the app, wrote the logon entry and
+  opened Setup; the silent uninstall (`/S`) stopped the app and removed it, its shortcut, its Apps
+  entry and the logon entry, and kept `%APPDATA%\Queue runner`. `test/installer.test.ts` checks
+  the config those rest on.
 
 ## Repositories
 
