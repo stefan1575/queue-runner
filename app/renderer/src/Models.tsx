@@ -118,4 +118,4 @@ export function kindRow(kind: JobKind, view: View, save: Props['save'], Row: Row
   );
 }
 
-export type RowFn = (props: { title: ReactNode; desc?: ReactNode; children?: ReactNode; below?: ReactNode }) => ReactNode;
+export type RowFn = (props: { title: ReactNode; desc?: ReactNode; children?: ReactNode; below?: ReactNode; dim?: boolean }) => ReactNode;

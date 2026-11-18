@@ -48,6 +48,19 @@ describe("T3's catalog, kept current", () => {
     source.stop();
   });
 
+  test("each provider's usage follows T3's providerStatuses events", async () => {
+    const source = T3Catalog.start(ws, 10);
+    expect(source.current().usage).toEqual([]);
+    await until(() => source.current().usage.length > 0);
+    const used = () => source.current().usage.find((u) => u.provider === 'claudeAgent')?.windows[0]?.usedPercent;
+    expect(used()).toBe(46);
+    const providers = structuredClone(snapshot.config.providers);
+    providers.find((p: any) => p.instanceId === 'claudeAgent').usageLimits.windows[0].usedPercent = 71;
+    t3.pushConfig('providerStatuses', { providers });
+    await until(() => used() === 71);
+    source.stop();
+  });
+
   test('a stream that ends says why, keeps the last catalog and is asked again', async () => {
     const source = T3Catalog.start(ws, 10);
     await until(() => source.current().catalog !== null);

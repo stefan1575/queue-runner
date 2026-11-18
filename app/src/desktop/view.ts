@@ -1,6 +1,6 @@
 // What the window shows of the runner, kept in the main process (the runner runs there; the
 // window only shows it): the settings, the `gh` account Name comes from, T3's Time format and
-// T3's catalog of providers and models (#152).
+// T3's catalog of providers and models (#152) and each provider's usage (#153).
 // Every change is told to the listeners, which send it to the window.
 import type { TimeFormat } from '../display.ts';
 import { GitHubError, type Account, type GitHubAccount } from '../github.ts';
@@ -10,6 +10,7 @@ import { SettingsError, type Merger, type Settings, type SettingsPatch, type Set
 import type { CatalogSource } from '../t3/catalog-source.ts';
 import type { SetupSource, SetupState } from '../setup.ts';
 import { T3Error } from '../t3/seams.ts';
+import type { ProviderUsage } from '../usage.ts';
 
 export type View = {
   settings: Settings;
@@ -22,6 +23,8 @@ export type View = {
   catalog: Catalog | null;
   /** Why T3 can't be asked for it now, while it can't. */
   catalogError?: string;
+  /** Each connected provider's usage windows, as T3 last reported them (#153). */
+  usage: ProviderUsage[];
   /** T3's projects, each with its choices; null until T3 has first answered. */
   repos: Repo[] | null;
   /** Why T3's projects can't be had right now, or null. */
@@ -90,7 +93,7 @@ export function briefName(view: View): string | null {
 }
 
 const catalogPart = (c: ReturnType<CatalogSource['current']>) =>
-  ({ catalog: c.catalog, ...(c.error ? { catalogError: c.error } : {}) });
+  ({ catalog: c.catalog, usage: c.usage, ...(c.error ? { catalogError: c.error } : {}) });
 
 export class RunnerView {
   private view: View;

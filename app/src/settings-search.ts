@@ -4,19 +4,21 @@
 // Node.
 import type { View } from './desktop/view.ts';
 import { DATE_STYLES, formatDate, TIME_FORMATS } from './display.ts';
+import { releaseAt, shareRows } from './shares.ts';
 import { defaultModel, JOB_KINDS, kindModels, model, provider, type Catalog, type JobKind, type ModelChoice } from './jobs.ts';
 
-export type PageId = 'name' | 'repos' | 'models' | 'display' | 'machine';
+export type PageId = 'name' | 'repos' | 'models' | 'share' | 'display' | 'machine';
 export const PAGES: { id: PageId; label: string }[] = [
   { id: 'name', label: 'Name' },
   { id: 'repos', label: 'Repositories' },
   { id: 'models', label: 'Models' },
+  { id: 'share', label: 'Your share' },
   { id: 'display', label: 'Display' },
   { id: 'machine', label: 'Machine' },
 ];
 
 /** A repository's row is `repo:<T3 project id>`. */
-export type SettingId = 'name' | `repo:${string}` | 'job-default' | `job-${JobKind}` | 'date' | 'clock' | 'startup';
+export type SettingId = 'name' | `repo:${string}` | 'job-default' | `job-${JobKind}` | `share-${string}` | 'date' | 'clock' | 'startup';
 export type SettingEntry = { id: SettingId; page: PageId; words: string };
 
 const MODEL_WORDS = 'model models provider effort reasoning thinking agent ai job jobs';
@@ -51,6 +53,13 @@ export function settingEntries(view: View, now: Date): SettingEntry[] {
       return {
         id: `job-${k.id}` as SettingId, page: 'models' as PageId,
         words: `${k.label} ${k.does} ${MODEL_WORDS} fallback usage ${m ? `${choiceWords(m.choice, view.catalog)} ${choiceWords(m.fallback, view.catalog)}` : ''}`,
+      };
+    }),
+    ...shareRows(view.usage, s.shares).map((r): SettingEntry => {
+      const at = (d: Date | null) => (d ? `${formatDate(d, s.dateStyle, tf)} ${formatDate(d, s.dateStyle, tf, true)}` : '');
+      return {
+        id: `share-${r.key}`, page: 'share',
+        words: `${r.title} share percent % ${r.share.percent}% keep kept reserve hold back budget usage limit quota week weekly window plan subscription reset resets release released hours ${at(r.resetsAt ? new Date(r.resetsAt) : null)} ${at(releaseAt(r.share, r.resetsAt))} ${r.enforced ? '' : 'coming soon later'}`,
       };
     }),
     { id: 'date', page: 'display', words: `date dates style format day month year weekday calendar today display ${dates}` },

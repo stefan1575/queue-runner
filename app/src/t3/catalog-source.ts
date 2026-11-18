@@ -1,12 +1,16 @@
-// T3's catalog as the main process keeps it (#152): `subscribeServerConfig`'s snapshot, then its
-// `providerStatuses` and `settingsUpdated` events (docs/app.md, The WebSocket API). A stream that
-// ends or fails keeps the last catalog, says why, and is asked again after `retryMs`.
+// T3's catalog and each provider's usage as the main process keeps them (#152, #153):
+// `subscribeServerConfig`'s snapshot, then its `providerStatuses` and `settingsUpdated` events
+// (docs/app.md, The WebSocket API, Usage). T3 sends a `providerStatuses` event whenever a
+// provider's usage changes. A stream that ends or fails keeps the last answer, says why, and is
+// asked again after `retryMs`.
 import type { Catalog } from '../jobs.ts';
+import { usageFromProviders, type ProviderUsage } from '../usage.ts';
 import { catalogFromConfig } from './catalog.ts';
 import type { T3Ws } from './ws.ts';
 
-/** The catalog (null until T3 first answers) and, while T3 can't be asked, why. */
-export type CatalogState = { catalog: Catalog | null; error?: string };
+/** The catalog (null until T3 first answers), each connected provider's usage and, while T3
+ *  can't be asked, why. */
+export type CatalogState = { catalog: Catalog | null; usage: ProviderUsage[]; error?: string };
 
 export interface CatalogSource {
   current(): CatalogState;
@@ -14,10 +18,11 @@ export interface CatalogSource {
 }
 
 /** A catalog that never changes (the screenshots' sample). */
-export const fixedCatalog = (catalog: Catalog): CatalogSource => ({ current: () => ({ catalog }), onChange: () => () => {} });
+export const fixedCatalog = (catalog: Catalog, usage: ProviderUsage[] = []): CatalogSource =>
+  ({ current: () => ({ catalog, usage }), onChange: () => () => {} });
 
 export class T3Catalog implements CatalogSource {
-  private state: CatalogState = { catalog: null };
+  private state: CatalogState = { catalog: null, usage: [] };
   private config: { providers?: unknown; settings?: unknown } = {};
   private listeners = new Set<(s: CatalogState) => void>();
   private ws: Pick<T3Ws, 'subscribe'>;
@@ -63,7 +68,7 @@ export class T3Catalog implements CatalogSource {
 
   private ended(why: string) {
     if (this.stopped) return;
-    this.set({ catalog: this.state.catalog, error: why });
+    this.set({ ...this.state, error: why });
     this.timer = setTimeout(() => { if (!this.stopped) this.subscribe(); }, this.retryMs);
   }
 
@@ -72,7 +77,7 @@ export class T3Catalog implements CatalogSource {
     else if (v?.type === 'providerStatuses') this.config = { ...this.config, providers: v.payload?.providers };
     else if (v?.type === 'settingsUpdated') this.config = { ...this.config, settings: v.payload?.settings };
     else return;
-    this.set({ catalog: catalogFromConfig(this.config as any) });
+    this.set({ catalog: catalogFromConfig(this.config as any), usage: usageFromProviders(this.config.providers) });
   }
 
   private set(state: CatalogState) {

@@ -1,0 +1,10 @@
+{
+ "instanceId": "other",
+ "driver": "other",
+ "displayName": "Other",
+ "enabled": true,
+ "installed": true,
+ "status": "ready",
+ "models": [],
+ "usageLimits": { "checkedAt": "2026-11-18T19:00:00.000Z", "windows": [], "unavailable": { "reason": "unsupported" } }
+}
