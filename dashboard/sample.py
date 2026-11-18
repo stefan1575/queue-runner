@@ -13,10 +13,6 @@ from datetime import datetime, timedelta
 
 LD, QR = "leads-dashboard", "queue-runner"
 GH = {LD: "https://github.com/RoyalBullyAgency-RBA/leads-dashboard", QR: "https://github.com/stefan1575/queue-runner"}
-# A made-up favicon for leads-dashboard, so the sample shows both marks: a favicon, and (queue-runner,
-# with none) the first two letters. The runner reads the real one from the repo (queue_runner/favicon.py).
-LD_ICON = ("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+"
-           "PHJlY3Qgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiByeD0iNyIgZmlsbD0iIzI1NjNlYiIvPjxwYXRoIGQ9Ik05IDIzVjlNOSAyM2g4IiBzdHJva2U9IndoaXRlIiBzdHJva2Utd2lkdGg9IjMiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgZmlsbD0ibm9uZSIvPjxjaXJjbGUgY3g9IjIyIiBjeT0iMjAiIHI9IjMuNSIgZmlsbD0id2hpdGUiLz48L3N2Zz4=")
 T3 = "https://app.t3.codes/threads/264b77bb-5ec7-4453-8ee5-7d0162886008/mcp%3A"
 
 STATES = {
@@ -92,8 +88,8 @@ def build(name: str = DEFAULT, base: datetime | None = None, control: dict | Non
         "repos": [
             # `doing`: the Claude job running in it (as a lane's `job`), and `wait`: why none
             # starts in it now (#50; both filled in by `_doing`, below). `icon`: its favicon as a
-            # data: URL, or null (the page draws its first two letters).
-            {"name": LD, "github": GH[LD], "icon": LD_ICON, "merge": "stefan", "stopped": None},
+            # data: URL, or null (the page draws two capitals, a word's first letter each).
+            {"name": LD, "github": GH[LD], "icon": None, "merge": "stefan", "stopped": None},
             {"name": QR, "github": GH[QR], "icon": None, "merge": "runner", "stopped": None},
         ],
         # An ask is written to be picked up cold, a week later. `kind` is why it came to Stefan:
@@ -234,7 +230,7 @@ def build(name: str = DEFAULT, base: datetime | None = None, control: dict | Non
             # `next_read_at` (issue 66): when Claude's usage endpoint may be asked again (once every
             # 5 minutes), while that's ahead; None for a plan read whenever it's asked. `retrying`:
             # since when its reads have failed, while that isn't shown as an error.
-            {"id": "claude", "provider": "claude", "name": "Claude", "plan": None, "read_at": ago(1), "error": None,
+            {"id": "claude", "provider": "claude", "name": "Claude", "plan": "Pro", "read_at": ago(1), "error": None,
              "resets": {"available": 2}, "next_read_at": ahead(4), "retrying": None, "windows": [
                 {"id": "five_hour", "label": "Session", "used": 38, "resets_at": ahead(60), "gates": True},
                 {"id": "week", "label": "Weekly", "used": 46, "resets_at": ahead(60 * 49.7), "gates": True,
@@ -242,8 +238,8 @@ def build(name: str = DEFAULT, base: datetime | None = None, control: dict | Non
                 {"id": "week_fable", "label": "Weekly, Fable", "used": 100, "resets_at": ahead(60 * 49.7),
                  "gates": False, "note": "The runner doesn't use Fable."},
             ]},
-            {"id": "sol", "provider": "chatgpt", "name": "ChatGPT", "plan": None, "read_at": ago(9), "error": None,
-             "resets": None, "next_read_at": None, "retrying": None, "windows": [
+            {"id": "sol", "provider": "chatgpt", "name": "ChatGPT", "plan": "Plus", "read_at": ago(9), "error": None,
+             "resets": {"available": 2}, "next_read_at": None, "retrying": None, "windows": [
                 {"id": "five_hour", "label": "Session", "used": 26, "resets_at": ahead(94), "gates": True},
                 {"id": "week", "label": "Weekly", "used": 6, "resets_at": ahead(60 * 152.9), "gates": True},
             ]},

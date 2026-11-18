@@ -654,18 +654,35 @@ button.stn-in:hover { background: var(--hover); }
 .loose b { color: var(--ink); font-weight: 400; }
 
 /* ---------------------------------------------------------------- status, usage and build order */
-.status { display: block; text-decoration: none; padding: 14px 20px; }
-.status:hover { border-color: var(--btn-line); }
-.rail .status.down { border-color: var(--bad-line); background: var(--bad-wash); }
-.h-top { display: flex; align-items: center; gap: 9px; }
-.h-top b { font-weight: 600; }
-.h-when { display: block; margin: 2px 0 0 17px; font-size: 14px; color: var(--mute); }
-.h-groups { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 7px 16px; margin-top: 12px; font-size: 14.5px; }
+/* The rail (#141; Stefan, 2026-11-18, after takes 14 to 19 of its prototype). Its three cards keep
+   the cards' own heads and padding; only the items inside a list sit closer. */
+.rail .card.health.down { border-color: var(--bad-line); background: var(--bad-wash); }
+.card-head .hi { width: 20px; height: 20px; stroke-width: 1.6; color: var(--mute); flex: none; }
+.h-groups { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 16px; font-size: 15px; }
 .h-label { color: var(--dim); }
 .h-row { display: flex; flex-wrap: wrap; gap: 4px 16px; color: var(--ink-2); }
 .h-row span { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
-.h-row .no { color: var(--bad); font-weight: 600; }
+.h-row .no { color: var(--bad); }
 .h-bad { display: block; margin-top: 8px; font-size: 14px; color: var(--bad); }
+/* Usage: Session, Weekly and Weekly, Fable are equal rows: the name, the bar, what's left, and
+   under the name when it resets. The figure's column is fixed, so every bar is one length. */
+.p-rail + .p-rail { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--line-soft); }
+.p-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+.p-head .who { font-size: 16px; font-weight: 600; }
+.p-meta { font-size: 13px; color: var(--dim); white-space: nowrap; }
+.u-row { display: grid; grid-template-columns: 112px minmax(0, 1fr) 5.2em; align-items: center; column-gap: 14px; row-gap: 2px; padding: 6px 0; }
+.u-row .lbl { color: var(--ink-2); line-height: 1.25; }
+.u-row .r-when { grid-column: 1 / -1; font-size: 12.5px; color: var(--dim); }
+/* Every bar has the same solid outline with the share left inside; an empty one is the outline alone. */
+.ubar { display: block; position: relative; overflow: hidden; height: 8px; border-radius: 99px; background: var(--sunk); border: 1px solid var(--mute); }
+.ubar .fill { position: absolute; inset: 0 auto 0 0; background: var(--ink-2); border-radius: 99px; }
+.ubar .kept { position: absolute; inset: 0 auto 0 0; background: var(--you); opacity: .6; border-radius: 99px; }
+.ubar.near .fill { background: var(--run); }
+.pct { font-weight: 400; color: var(--ink); white-space: nowrap; font-variant-numeric: tabular-nums; text-align: right; }
+.pct small { font-size: 12.5px; color: var(--mute); font-weight: 400; }
+.pct.near { color: var(--run); }
+.kept-note { font-size: 13.5px; color: var(--mute); margin-top: 10px; }
+.kept-note .dot { background: var(--you); opacity: .8; margin-right: 7px; position: relative; top: -1px; }
 .plan + .plan { margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--line); }
 .plan-name { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 4px; }
 .plan-name .read { font-size: 14px; color: var(--dim); white-space: nowrap; }
@@ -682,21 +699,21 @@ button.stn-in:hover { background: var(--hover); }
 .meter.full .fill { background: var(--bad); }
 .meter.full .pct { color: var(--bad); }
 .plan-note { font-size: 14.5px; color: var(--mute); margin-top: 12px; }
-.card-head .details { margin-left: auto; font-size: 14.5px; color: var(--mute); text-decoration: none; }
-.card-head .details:hover { color: var(--ink); text-decoration: underline; }
-.card-head .details + .refresh { margin-left: 4px; }
 .plan-note.bad { color: var(--bad); }
 .refresh { margin-left: auto; }
 .refresh.spin .i { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .refresh.spin .i { animation-duration: 3s; } }
-.order li { display: flex; align-items: center; gap: 12px; padding: 8px 0; }
-.order .rlogo { width: 28px; height: 28px; border-radius: 7px; font-size: 12.5px; }
-.order li.off .rlogo { opacity: .55; }
-.order li + li { border-top: 1px solid var(--line-soft); }
-.order .name { min-width: 0; flex: 1; font-weight: 600; }
-.order .name span { display: block; font-size: 14px; font-weight: 400; color: var(--mute); }
-.order li.off .name { color: var(--mute); }
+/* Repositories: the mark, the name, and one plain line under it; Stop or Resume at the end. */
+.repos-rail li { display: flex; align-items: flex-start; gap: 12px; padding: 5px 0; }
+.repos-rail li + li { border-top: 1px solid var(--line-soft); }
+.repos-rail .rlogo { width: 28px; height: 28px; border-radius: 7px; font-size: 11.5px; letter-spacing: .02em; margin-top: 1px; }
+.repos-rail li.off .rlogo { opacity: .55; }
+.repos-rail .body { flex: 1; min-width: 0; }
+.repos-rail .nm { font-weight: 600; line-height: 1.3; }
+.repos-rail li.off .nm { color: var(--mute); }
+.repos-rail .doing { font-size: 13.5px; color: var(--mute); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.repos-rail .btn { margin-top: 1px; }
 .tag.off { margin-left: 8px; color: var(--mute); border-style: dashed; }
 
 /* ---------------------------------------------------------------- activity */
@@ -936,6 +953,16 @@ function stamp(iso) {
   const time = d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }).replace(/\s/g, "").toLowerCase();
   return `${date} ${d.toLocaleDateString("en-US", { weekday: "long" })} ${time}`;
 }
+// A time on the rail (#141): Stefan's format, shortened by what's plain. "3:53pm" today, "Friday
+// 4:35pm" within the week, "November 25 Wednesday 12:10am" further out; stamp() is on hover.
+const t12 = (d) => d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }).replace(/\s/g, "").toLowerCase();
+function when(iso, now = new Date()) {
+  const d = new Date(iso), wd = d.toLocaleDateString("en-US", { weekday: "long" });
+  if (d.toDateString() === now.toDateString()) return t12(d);
+  if (Math.abs(d - now) < 6 * 86400e3 && d.getDay() !== now.getDay()) return `${wd} ${t12(d)}`;
+  return `${d.toLocaleDateString("en-US", { month: "long", day: "numeric" })} ${wd} ${t12(d)}`;
+}
+const whenEl = (iso, pre) => `<time datetime="${esc(iso)}" title="${esc(stamp(iso))}">${pre}${esc(when(iso))}</time>`;
 function dayName(iso) {
   const d = new Date(iso), n = new Date(), y = new Date(n - 86400e3);
   const date = d.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" });
@@ -973,13 +1000,14 @@ const key = (i) => `${i.repo}#${i.n}`;
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 const scoped = (xs) => (ui.repo ? xs.filter((x) => x.repo === ui.repo) : xs);
 // A repository's mark (Stefan, 2026-11-16): its favicon, found as T3 Code finds one (the
-// snapshot's `icon`, queue_runner/favicon.py), else its first two letters on a plain tile.
-// Colour is kept for state.
+// snapshot's `icon`, queue_runner/favicon.py), else two capitals on a plain tile, a word's first
+// letter each (leads-dashboard is LD; #141), a one-word name's first two. Colour is kept for state.
 function repoLogo(name) {
   const icon = ((snap && snap.repos) || []).find((r) => r.name === name)?.icon;
   if (icon && /^data:image\//.test(icon)) return `<span class="rlogo img" aria-hidden="true"><img src="${esc(icon)}" alt=""></span>`;
-  const two = String(name || "").replace(/[^a-z0-9]/gi, "").slice(0, 2) || "?";
-  return `<span class="rlogo" aria-hidden="true">${esc(two[0].toUpperCase() + two.slice(1).toLowerCase())}</span>`;
+  const words = String(name || "").split(/[^a-z0-9]+/i).filter(Boolean);
+  const two = (words.length > 1 ? words[0][0] + words[1][0] : (words[0] || "?").slice(0, 2)).toUpperCase();
+  return `<span class="rlogo" aria-hidden="true">${esc(two)}</span>`;
 }
 const repoMark = (name) => `${repoLogo(name)}<span class="rname">${esc(name)}</span>${offTag(name)}`;
 const repoTag = (name) => (ui.repo ? offTag(name) : `<span class="tag">${esc(name)}${repoOff(name) ? ", stopped" : ""}</span>`);
@@ -1846,40 +1874,85 @@ const plan = (p, full) => `<div class="plan">
     ${(p.windows || []).filter((w) => w.reserve).map((w) => `<p class="plan-note">${w.reserve}% of the week is kept for you.</p>`).join("")}
   </div>`;
 
-// Is it up, and is everything it leans on up. One line while all is well.
-// Sources are grouped the way Stefan sorts them: the providers, what runs on this PC, what's outside.
+// The rail's Usage card (#141; Stefan, 2026-11-18). No window ranks above another: Session,
+// Weekly and Weekly, Fable are the same row, each with its name, its bar, "N% left" and its own
+// "resets ..." line under the name, even when two reset together. A bar is a solid outline with
+// the share left inside (amber at 15% left or less); a used-up one is the outline alone, never
+// red, so every bar reads the same size, and its figure is the plain colour.
+function railWindow(w) {
+  const known = typeof w.used === "number", left = known ? Math.max(0, Math.min(100, Math.round(100 - w.used))) : null;
+  const near = known && left > 0 && left <= 15 ? " near" : "";
+  // The kept share is the last of what's left, so it's never wider than what's left (PR #62 F1).
+  const kept = known && w.reserve > 0 ? Math.min(w.reserve, left) : 0;
+  const bar = `<span class="ubar${near}" role="img" aria-label="${esc(w.label)}: ${known ? left + "% left" : "unknown"}">${known && left > 0 ? `<i class="fill" style="width:${left}%"></i>` : ""}${kept ? `<i class="kept" style="width:${kept}%"></i>` : ""}</span>`;
+  const pct = `<span class="pct${near}">${known ? `${left}%<small> left</small>` : "?"}</span>`;
+  const resets = w.resets_at ? whenEl(w.resets_at, "resets ") : "not started";
+  return `<div class="u-row"><span class="lbl"${w.note ? ` title="${esc(w.note)}"` : ""}>${esc(w.label)}</span>${bar}${pct}<span class="r-when">${resets}</span></div>`;
+}
+// Beside the provider, the same for both: its plan, its reset credits left (0 too; nothing when
+// the snapshot has no count) and when it was read ("Pro · 2 resets · read 3:15pm"), and
+// "reconnecting" while its reads fail and aren't an error yet.
+function railMeta(p) {
+  const n = p.resets && typeof p.resets.available === "number" ? p.resets.available : null;
+  return [p.plan ? esc(p.plan) : "", n === null ? "" : plural(n, "reset", "resets"),
+    p.read_at ? whenEl(p.read_at, "read ") : "not read yet",
+    p.retrying && !p.error ? `<span title="${esc(reconnecting(p))}: the runner tries again">reconnecting</span>` : ""].filter(Boolean).join(" · ");
+}
+function railPlan(p) {
+  const kept = (p.windows || []).find((w) => w.reserve);
+  return `<div class="p-rail"><p class="p-head">${who(p.provider, p.name)}<span class="p-meta">${railMeta(p)}</span></p>
+    ${p.error ? `<p class="plan-note bad">${esc(p.error)}</p>` : ""}${(p.windows || []).map(railWindow).join("")}
+    ${kept ? `<p class="kept-note"><i class="dot"></i>${kept.reserve}% of the week is kept for you</p>` : ""}</div>`;
+}
+
+// The cards' equal titles, each with its icon (#141): line-only marks, none a closed shape, each
+// across the full 24px square, so none looks bigger than the others. A gauge, a branch, a pulse.
+const HEAD_ICON = {
+  usage: svg('<path d="m12 14 4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/>'),
+  repos: svg('<path d="M6 3v12"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/>'),
+  health: svg('<path d="M22 12h-2.5a2 2 0 0 0-1.9 1.5l-2.4 8.3a.3.3 0 0 1-.5 0L9.2 2.2a.3.3 0 0 0-.5 0L6.4 10.5A2 2 0 0 1 4.5 12H2"/>'),
+};
+const cardHead = (id, title, extra = "") => `<header class="card-head">${HEAD_ICON[id].replace('class="i"', 'class="i hi"')}<h2>${title}</h2>${extra}</header>`;
+
+// Health: is it up, and is everything it leans on up. Sources are grouped the way Stefan sorts
+// them: the providers, what runs on this PC, what's outside. Each is a dot and a name, the runner
+// one of the things on this PC; since when it's been running (or silent) is on hover only. A
+// silent runner turns its dot and the card red.
 const SOURCE_GROUPS = [["provider", "Providers"], ["local", "Local"], ["external", "External"]];
 function status() {
   const down = frozen(), all = snap.sources || [], bad = all.filter((x) => !x.ok);
   const known = SOURCE_GROUPS.map((g) => g[0]);
-  const groups = [...SOURCE_GROUPS, ["", "Other"]].map(([id, label]) => [label, all.filter((x) => (known.includes(x.group) ? x.group : "") === id)]).filter((g) => g[1].length);
   const one = (x) => `<span class="${x.ok || down ? "" : "no"}" title="${esc(x.name)}: ${esc(retrying(x) ? reconnecting(x) : x.note || "")}"><i class="dot ${dotOf(x, down)}"></i>${esc(x.short || x.name)}</span>`;
-  return `<a class="card status${down ? " down" : ""}" href="${esc(href({ page: "settings", pr: null }))}" data-act="page" data-page="settings" title="Connections are in Settings">
-    <span class="h-top"><i class="dot ${down ? "bad" : "ok"}"></i><b>${down ? "Runner silent" : "Runner running"}</b></span>
-    ${(down ? snap.written_at : (snap.runner || {}).started_at) ? `<span class="h-when">since ${esc(stamp(down ? snap.written_at : snap.runner.started_at))}</span>` : ""}
-    <span class="h-groups">${groups.map(([label, xs]) => `<span class="h-label">${label}</span><span class="h-row">${xs.map(one).join("")}</span>`).join("")}</span>
-    ${!down && bad.length ? `<span class="h-bad">${bad.map((x) => `${esc(x.name)}: ${esc(x.note)}`).join(". ")}</span>` : ""}</a>`;
+  const since = down ? snap.written_at : (snap.runner || {}).started_at;
+  const runner = `<span class="${down ? "no" : ""}"${since ? ` title="${down ? "Silent" : "Running"} since ${esc(stamp(since))}"` : ""}><i class="dot ${down ? "bad" : "ok"}"></i>Queue runner</span>`;
+  const groups = [...SOURCE_GROUPS, ["", "Other"]].map(([id, label]) => [label, (id === "local" ? [runner] : []).concat(all.filter((x) => (known.includes(x.group) ? x.group : "") === id).map(one))]).filter((g) => g[1].length);
+  return `<section class="card health${down ? " down" : ""}">${cardHead("health", "Health")}<div class="card-pad"><div class="h-groups">${groups.map(([label, xs]) => `<span class="h-label">${label}</span><span class="h-row">${xs.join("")}</span>`).join("")}</div>
+    ${!down && bad.length ? `<p class="h-bad">${bad.map((x) => `${esc(x.name)}: ${esc(x.note)}`).join(". ")}</p>` : ""}</div></section>`;
 }
 
-// Each repository's Stop or Resume (ticket 37), in the order the runner takes them up. The page
-// can't reorder them any more (#61, Stefan 2026-11-16: "just stop and resume").
-function repoRows() {
+// Repositories, in the order the runner takes them up, each with Stop or Resume (ticket 37; no
+// reordering since #61). Under the name, one plain line, the same size whatever it says (#141):
+// what its lanes are doing ("Building #212 · Reviewing PR #210": Claude builds and fixes, ChatGPT
+// reviews, so the verb says which), else Waiting, Stopped or Idle. Who, the title and how long
+// are on hover. Who merges isn't on the rail.
+function railRepos() {
   const stale = frozen();
-  const rows = (snap.repos || []).map((r) => {
+  const at = (name) => (snap.lanes || []).flatMap((l) => laneJobs(l).filter((j) => j.repo === name).map((j) => [l, j]));
+  return `<ul class="repos-rail">${(snap.repos || []).map((r) => {
     const name = r.name, a = (ctl.repos || {})[name], pending = a && !wasRead(a.at) && !!a.stop !== !!r.stopped;
-    const off = pending ? !!a.stop : !!r.stopped;
-    // What it's doing now (#50: each runs its own Claude job): the job, else why none starts.
-    const now = r.doing ? `${kind(r.doing.kind)[0]} ${r.doing.ref}, ${ago(r.doing.started_at)} in`
-      : r.wait ? `Waiting: ${r.wait.reason.replace(/\.$/, "")}` : "Idle";
-    const sub = pending ? (a.stop ? "Asked to stop: the runner hasn't read it yet" : "Asked to resume: the runner hasn't read it yet")
-      : r.stopped ? `Stopped${r.stopped.at ? ` since ${clock(r.stopped.at)}` : ""}${r.doing ? `; ${now.replace(/^./, (c) => c.toLowerCase())}` : ""}`
-      : `${now}. ${r.merge === "stefan" ? "You merge" : "The runner merges"}.`;
+    const off = pending ? !!a.stop : !!r.stopped, here = at(name);
+    const jobs = here.map(([, j]) => `${kind(j.kind)[0]} ${j.ref}`).join(" · ");
+    const work = here.map(([l, j]) => `${l.name}: ${kind(j.kind)[0].toLowerCase()} ${j.ref}${j.title ? " " + j.title : ""}, ${ago(j.started_at)} in`).join(". ");
+    const [line, hover] = pending ? [a.stop ? "Asked to stop" : "Asked to resume", "The runner hasn't read it yet"]
+      : r.stopped ? [`Stopped${r.stopped.at ? ` since ${when(r.stopped.at)}` : ""}`, work ? `It finishes what runs: ${work}` : ""]
+      : jobs ? [jobs, work]
+      : r.wait ? [`Waiting: ${r.wait.reason.replace(/\.$/, "")}`, r.wait.reason]
+      : ["Idle", ""];
     const btn = stale ? "" : off
       ? `<button class="btn sm icon solid" data-act="repostop" data-repo="${esc(name)}" data-how="" aria-label="Resume ${esc(name)}" title="Resume: both lanes take up its work again">${ICON.play}</button>`
       : `<button class="btn sm icon" data-act="repostop" data-repo="${esc(name)}" data-how="after-job" aria-label="Stop ${esc(name)}" title="Stop: a job running on it finishes; then neither lane takes up its work">${ICON.pause}</button>`;
-    return `<li${r.stopped ? ' class="off"' : ""}>${repoLogo(name)}<span class="name">${esc(name)}<span>${esc(sub)}</span></span>${btn}</li>`;
-  }).join("");
-  return `<ul class="order">${rows}</ul>`;
+    return `<li${r.stopped ? ' class="off"' : ""}>${repoLogo(name)}<div class="body"><p class="nm">${esc(name)}</p><p class="doing"${hover ? ` title="${esc(hover)}"` : ""}>${esc(line)}</p></div>${btn}</li>`;
+  }).join("")}</ul>`;
 }
 
 // Refresh (ticket 42): asks the runner to read both plans now (control.json's usage.refresh_at).
@@ -1910,9 +1983,9 @@ function rail() {
   clearTimeout(refreshPoll);
   if (refreshPending()) refreshPoll = setTimeout(load, 2000);
   const notes = refreshNotes().map((n) => `<p class="plan-note${n.bad ? " bad" : ""}" style="margin:0 0 14px">${esc(n.text)}</p>`).join("");
-  const usage = `<section class="card"><header class="card-head"><h2>Usage</h2><a class="details" href="${esc(href({ page: "usage", pr: null }))}" data-act="page" data-page="usage">Details</a>${refreshButton()}</header>
-    <div class="card-pad">${notes}${(snap.usage || []).map((p) => plan(p, false)).join("")}</div></section>`;
-  const repos = `<section class="card"><header class="card-head"><h2>Repositories</h2></header><div class="card-pad" style="padding-top:8px">${repoRows()}</div></section>`;
+  const usage = `<section class="card">${cardHead("usage", "Usage", refreshButton())}
+    <div class="card-pad">${notes}${(snap.usage || []).map(railPlan).join("")}</div></section>`;
+  const repos = `<section class="card">${cardHead("repos", "Repositories")}<div class="card-pad" style="padding-top:6px;padding-bottom:10px">${railRepos()}</div></section>`;
   return (ui.page === "usage" ? "" : usage) + repos + status();
 }
 
