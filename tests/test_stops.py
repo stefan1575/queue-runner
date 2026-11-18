@@ -73,12 +73,12 @@ class StopsTest(unittest.TestCase):
         """The PR conflicts again with the base its last conflict round merged, which hasn't
         moved: a stop (issue #91)."""
         self.conflict_rounds(BASE1, BASE2)
-        self.gh.now[20] = {'base_sha': BASE2}
+        self.gh.base_heads['main'] = BASE2
         self.gh.conflicts.add(20)
 
     def conflict_says(self):
         """The conflict stop on PR #20 now, or None (`stops.conflict_stop`)."""
-        return conflict_stop(self.jobs, self.repo, self.gh.pull(self.repo, 20))
+        return conflict_stop(self.jobs, self.gh, self.repo, self.gh.pull(self.repo, 20))
 
     def review_ended(self, outcome, round=1, signals=(), sha=H2):
         j = self.jobs.started(kind='review', repo='first', issue=20, branch='claude/red-5',
@@ -326,11 +326,33 @@ class StopsTest(unittest.TestCase):
                       '2222222 merged main at 5555555 and main has not moved since',
                       stop.reason)
 
+    def test_a_conflict_stop_waits_when_reading_the_bases_tip_fails(self):
+        # Issue #189: with no tip read, whether main moved is unknown: no stop this pass.
+        self.conflict_stops()
+        self.gh.fail.add('branch_head')
+        self.reviewer().review_pass()
+        self.assertEqual(self.stops(), [])
+        self.gh.fail.discard('branch_head')
+        self.reviewer().review_pass()
+        self.assertEqual([s.stop for s in self.stops()], ['conflict'])
+
     # --- a conflict after main moved: another round (issue #91) -------------------------
+
+    def test_a_stale_base_sha_while_main_moved_gets_a_round(self):
+        # Issue #189: GitHub refreshes a PR's base.sha lazily, so it can still say the base the
+        # last round merged while main's own tip has moved: the stop reads the tip, never
+        # base.sha (`PullRequest` no longer carries it), and main moving gets another round.
+        self.conflict_rounds(BASE1, BASE2)
+        self.gh.base_heads['main'] = '6' * 40   # its PR's base.sha may still say BASE2
+        self.gh.conflicts.add(20)
+        self.assertIsNone(self.conflict_says())
+        self.reviewer().review_pass()
+        self.assertEqual(self.stops(), [])
+
 
     def test_a_conflict_on_a_new_base_under_the_ceiling_gets_a_round(self):
         self.conflict_rounds(BASE1, BASE2, BASE1, BASE2)   # four rounds, each pushed
-        self.gh.now[20] = {'base_sha': '6' * 40}           # main moved since the last
+        self.gh.base_heads['main'] = '6' * 40           # main moved since the last
         self.gh.conflicts.add(20)
         self.assertIsNone(self.conflict_says())
         self.reviewer().review_pass()
@@ -338,16 +360,13 @@ class StopsTest(unittest.TestCase):
 
     def test_a_round_without_a_base_counts_as_a_different_base(self):
         self.conflict_rounds(None, None)
-        self.gh.now[20] = {'base_sha': BASE2}
+        self.gh.base_heads['main'] = BASE2
         self.gh.conflicts.add(20)
-        self.assertIsNone(self.conflict_says())
-        self.gh.now[20] = {'base_sha': ''}   # nor does GitHub not saying the base's tip
-        self.conflict_rounds(BASE2)
         self.assertIsNone(self.conflict_says())
 
     def test_after_five_conflict_rounds_the_next_conflict_is_a_stop(self):
         self.conflict_rounds(BASE1, BASE2, BASE1, BASE2, BASE1)
-        self.gh.now[20] = {'base_sha': '6' * 40}   # main moved again: a 6th round would help
+        self.gh.base_heads['main'] = '6' * 40   # main moved again: a 6th round would help
         self.gh.conflicts.add(20)
         self.reviewer().review_pass()
         [stop] = self.stops()
@@ -366,16 +385,16 @@ class StopsTest(unittest.TestCase):
                                   title='Queue runner conflict: first#20', sha='4' * 40,
                                   cause='conflict', base=BASE2, about=cut.id)
         self.jobs.ended(again.id, exit_code=0, outcome='pushed')
-        self.gh.now[20] = {'base_sha': '6' * 40}   # main moved again: the fifth round
+        self.gh.base_heads['main'] = '6' * 40   # main moved again: the fifth round
         self.gh.conflicts.add(20)
         self.assertIsNone(self.conflict_says())
         self.conflict_rounds('7' * 40)             # that fifth round; main moves once more
-        self.gh.now[20] = {'base_sha': '8' * 40}
+        self.gh.base_heads['main'] = '8' * 40
         self.assertIn('5 conflict rounds, main keeps moving under it', self.conflict_says()[0])
 
     def test_a_release_resets_the_count(self):
         self.conflict_rounds(BASE1, BASE2, BASE1, BASE2, BASE1)
-        self.gh.now[20] = {'base_sha': BASE1}   # the same base, too
+        self.gh.base_heads['main'] = BASE1   # the same base, too
         self.gh.conflicts.add(20)
         self.assertIsNotNone(self.conflict_says())
         self.jobs.released('first', 20)

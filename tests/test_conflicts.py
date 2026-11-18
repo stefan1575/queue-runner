@@ -184,8 +184,7 @@ class ConflictRoundTest(unittest.TestCase):
     def main_at(self, sha):
         """main's tip, as git and GitHub both see it."""
         self.git.refs['origin/main'] = sha
-        for n in (20, 21):
-            self.gh.now.setdefault(n, {})['base_sha'] = sha
+        self.gh.base_heads['main'] = sha
 
     def test_a_conflict_after_main_moved_gets_another_round_on_the_same_base_a_stop(self):
         # Issue #91: main moving under a PR is no reason to stop it; a round whose push still

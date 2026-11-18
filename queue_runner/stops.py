@@ -190,7 +190,7 @@ class Stopper:
         if (checks.state == 'failed' and not base_hold(self.jobs, repo.name, pr)
                 and (why := self._failed_check(repo, pr, checks))):
             found.append(('failed-check', why, None))
-        if self.github.has_conflict(repo, n) and (stop := conflict_stop(self.jobs, repo, pr)):
+        if self.github.has_conflict(repo, n) and (stop := conflict_stop(self.jobs, self.github, repo, pr)):
             found.append(('conflict', *stop))
         return found
 
@@ -777,13 +777,15 @@ def rounds_on(jobs, repo_name: str, n: int, sha: str) -> list:
             if j.outcome not in (NOT_STARTED, NOT_SENT)]
 
 
-def conflict_stop(jobs, repo, pr) -> tuple[str, str | None] | None:
+def conflict_stop(jobs, github, repo, pr) -> tuple[str, str | None] | None:
     """Why a conflict on the PR's head H is a stop for Stefan, (why, link), or None while
     another conflict round may still resolve it (issue #91). A stop only when one wouldn't help:
     the newest round on H (a conflict round, or an ordinary fix round that couldn't start) ended
     without resolving it; or the PR conflicts again with the same base commit its last conflict
     round merged in (`base`; a record without one counts as a different base), so that round's
-    push didn't resolve it; or it had MAX_CONFLICT_ROUNDS conflict rounds since the last
+    push didn't resolve it, read against the base branch's own tip (`github.branch_head`; a
+    PR's base.sha is refreshed lazily, issue #189: reading it failing raises, so the PR waits
+    for the next pass); or it had MAX_CONFLICT_ROUNDS conflict rounds since the last
     release (a continued round is the round it carries on: `rounds_counted`), as main keeps moving under it. A conflict after main moved, below that, gets
     another round. An ordinary round's `no-push` is its own `no-push` stop."""
     h7 = pr.head_sha[:7]
@@ -800,7 +802,7 @@ def conflict_stop(jobs, repo, pr) -> tuple[str, str | None] | None:
         return (f'{count} conflict rounds, {pr.base} keeps moving under it: it conflicts '
                 f'again at {h7}', rounds[-1].link)
     earlier = [j for j in rounds if j.sha != pr.head_sha]
-    if earlier and earlier[-1].base and earlier[-1].base == pr.base_sha:
+    if earlier and earlier[-1].base and earlier[-1].base == github.branch_head(repo, pr.base):
         prev = earlier[-1]
         return (f'it conflicts with {pr.base} again at {h7}, though the conflict round on '
                 f'{prev.sha[:7]} merged {pr.base} at {prev.base[:7]} and {pr.base} has not moved '
