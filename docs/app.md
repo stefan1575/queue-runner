@@ -9,7 +9,8 @@ Repositories, below), knows which model does each kind of job and launches it (#
 models, below), gates every job on its provider's usage, keeping your share of each week
 (#153; Usage, below), has a Setup page that says what's missing before it can work (#162; Setup,
 below), ships as a Windows installer built by CI on a version tag (#164; The installer,
-below), and builds a served repo's next ticket into a PR (#154; Builds, below).
+below), builds a served repo's next ticket into a PR (#154; Builds, below), and reviews every
+open PR on its newest commit, posting the review with its ledger (#155; Reviews, below).
 
 ## Run it
 
@@ -20,6 +21,7 @@ pnpm --dir app live:sign-in       # the live sign-in check (Live checks, below)
 pnpm --dir app live:launch        # the live launch check, sandbox only (Live checks, below)
 pnpm --dir app live:usage         # each provider's usage as the app reads it; acts on no project
 pnpm --dir app live:build         # the live build check, sandbox only (Live checks, below)
+pnpm --dir app live:review        # the live review check, GitHub sandbox, dry run (Live checks, below)
 pnpm --dir app desktop            # builds and opens the desktop app (The desktop app, below)
 pnpm --dir app installer          # builds the Windows installer into installer-dist/ (The installer, below)
 ```
@@ -350,6 +352,64 @@ builds (`docs/flow.md`, `docs/claude-lane.md`). `src/build-lane.ts`, `src/picker
   is recorded `not-started`.
 - **The app's log** is its console for now (`say`): a line per start, hold, end and failure.
 
+## Reviews
+
+The review half of the loop (#155; `docs/flow.md` The review loop, `docs/reviews.md`, ported):
+every open PR in a served repo without a review on its newest commit gets one, whoever opened it.
+`src/review-lane.ts`, `src/review/ledger.ts`, `src/review/post.ts`, `src/briefs/review.ts`,
+`src/review/deps.ts`, `src/t3/thread-reply.ts`, the review half of `src/git.ts` and `src/github.ts`.
+
+- **Adoption** (`ReviewLane.whyNot`, cheapest first): not while a build writes to the PR's branch
+  (open, waiting on a question, or cut off by a usage limit); not once the app reviewed its head H
+  (`clean`, `blocking`, `stop`, `approach-note` in the job log); not after two failed reviews on H;
+  not while any review comment is on H already (today's three formats); and only once H's checks
+  passed, `sol-review` not counted (`checks`: check runs and commit statuses). Why not is said once
+  per PR. Lowest number first, repo by repo. Conflicts aren't looked at: GitHub runs no
+  `pull_request` checks on a PR that conflicts, so it waits on its checks (#157 adds conflict
+  rounds). Stops (#158) aren't filed yet: a `stop` or `approach-note` is recorded and posted, and
+  nothing more happens.
+- **One review at a time** (#106 runs them at once later). Each asks the usage gate
+  (`UsageGate.pick`, kind `review`): the kind's own model, or its fallback while that provider has
+  no room (#69); held, it says the gate's reason once and the pass ends. A pass runs at start (after
+  an open review is watched to its end), on T3's usage and the repos changing, after each review
+  (but not after one whose head moved, so a stale list can't loop it), and every minute.
+- **No outside tools** (`docs/reviews.md`, A review has no outside tools): a review runs on a T3
+  provider instance set up without them, as today's fallback reviews run (#127: `claudeReviewer`).
+  T3 serves each instance's launch arguments (`subscribeServerConfig`'s
+  `settings.providerInstances`, seen live 2026-11-19), but checking them would name a driver in
+  code, so the app keeps today's rule instead: a review never runs on the instance the build kind
+  runs on. Such a review waits and says why. A Codex instance for reviews needs its MCP servers off
+  in T3 (codex-sol.sh did that); setting one up is the cutover's.
+- **The checkout:** the PR's head is fetched into `refs/queue-runner/pr<n>` with `origin/<base>`
+  (a head that moved since listing is `head-moved`, nothing counts), and checked out detached at
+  `<state>/checkouts/<repo>-pr<n>`, its dependencies linked in from `<state>/deps/`
+  (`src/review/deps.ts`: one `npm ci` or `bun install --frozen-lockfile` per lockfile key, the
+  three newest kept per repo). It's removed after the review, `node_modules` unlinked first.
+- **The thread:** `launchJob` with kind `review` in the project's folder, no worktree (T3 starts a
+  thread only in a project folder or a worktree it makes), titled `Queue runner review:
+  <project>#<n>`. The brief (`src/briefs/review.ts`, `templates/review.md` and today's `_brief`)
+  opens by sending it to the checkout and asks for no posts, no questions and tests in the
+  foreground. Its inputs are in `<state>/runs/<repo>-pr<n>-r<K>-<time>/`, as today's: the diffs,
+  `pr.md`, each closed issue with its comments, `conversation.md`, `evidence/`. Its end comes
+  from T3's thread events (Builds); its reply is the run's last assistant message, read whole
+  through `t3_thread_read` (`view: messages`, paged, then `textOffset` while truncated; T3's CLI's
+  `runResultText`). A question, a failure or an empty reply fails the review; a usage limit is
+  `out-of-usage` and the next review waits on the gate.
+- **Decide and post** (`src/review/ledger.ts`, `src/review/post.ts`, today's `ledger.py` and
+  `post.py`): the verdict from the reply's last `sol-findings` block; clean means no Important
+  finding open. Then each new Pre-existing finding filed once as a `needs-triage` issue, the
+  comment (its visible ledger and hidden marker), `sol-review` on H only, and a row in the PR body's
+  `## Review` table, on every repo (#36). Each names who reviewed: the model and effort as T3
+  labels them, and on the fallback `, fallback while <provider> is out of usage`
+  (`reviewerName`). gh writes send their JSON on stdin (`--input -`). Only the comment failing
+  fails the review. The run folder keeps `brief.md`, `reply.md`, `comment.md`, `decision.json`.
+- **The job log:** kind `review`, `issue` the PR, with `sha`, `round` and `reviewer`; its end
+  `clean`, `blocking`, `stop`, `approach-note` (with `verdict`, `signals`, `link`), `failed`,
+  `out-of-usage` or `head-moved`. Once the end is recorded the thread is settled, whatever the end:
+  nobody answers a review thread. One the log shows open on start is watched to its end, counted
+  `failed` and settled, as today's `Reviewer.settle`.
+- **Not yet:** merging a clean review and fix rounds (#156), conflict rounds (#157), stops (#158).
+
 ## Setup
 
 What the runner needs from the PC before it can work, checked (#162; #68 story 16, without
@@ -530,6 +590,17 @@ is killed is code -1 with Node's reason in stderr, never a gh exit code (so is t
   asked. It checks the end was `done`, the branch is on `origin`, the thread ran in its own
   worktree on the job branch on the asked model, and it was settled. **Run 2026-11-19** on Haiku
   5.5 at low: all ok, in about 20 seconds.
+- `app/live/review.ts` (`pnpm --dir app live:review [-- --pr N] [-- --run <instance>:<model>]`):
+  today's `scripts/live_review.py` for the app, dry run. One real review of one real PR in
+  `stefan1575/queue-runner-sandbox` only (it refuses another clone), through `ReviewLane.review`
+  with a `DryRunPoster`, after saying what adoption would decide (the sandbox has no CI, so it
+  reviews anyway). The PR's clone is fresh in a temp folder; the thread runs in the "queue-runner
+  sandbox" T3 project, since none holds the GitHub sandbox. Without `--pr` it opens a small PR of
+  its own (one function with an off-by-one) and closes it, branch deleted, at the end. It checks a
+  verdict was read from the ledger, the comment names its reviewer, nothing was posted and no
+  `sol-review` set, the thread ran on the asked model and was settled, and the checkout is gone.
+  **Run 2026-11-19** on `claudeReviewer` Haiku 5.5 at low: all ok, sandbox #4 reviewed blocking in
+  about 30 seconds (F1, the loop bound, shown by running the function).
 - `app/live/usage.ts` (`pnpm --dir app live:usage [-- --minutes N]`): acts on no project. It
   subscribes to T3's server config and prints each connected provider's windows as the app reads
   them, then each `providerStatuses` event that changes one, for N minutes (5 by default). **Run
