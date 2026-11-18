@@ -66,7 +66,9 @@ $threads
   naming the finding's ID, the reason and the evidence. The best evidence is a test, committed
   and pushed, that passes now and would fail if the finding were right. Sol reconsiders a decline
   once, in the next review.
-- **A missing or wrong screenshot finding:** shoot and publish them with the runner's script
+- **A missing or wrong screenshot finding:** where the repo's `AGENTS.md` says how to shoot its
+  states (its own harness, or never `screen`), do it that way; otherwise shoot and publish them
+  with the runner's script
   (`python3 -I $evidence shoot URL OUT.png --size 1440x900`, or `screen OUT.png` for the
   desktop, then `publish --repo . --into pr-$number FILE.png ...`, which prints the image lines),
   don't open them yourself, add them to the PR body, and push (an empty commit if the

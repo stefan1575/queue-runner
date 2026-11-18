@@ -16,7 +16,12 @@ Review independently (the only files you change are tests you add to show a prob
    each state it touches; look at each one and check it shows what the PR and the ticket say. A
    visible change without them, shots that don't show the change, or a `Visible: no` the diff
    contradicts is **important** (`rule`: "a visible change needs screenshots"). A PR that says
-   `Screenshot owed` is important too, until they're added.
+   `Screenshot owed` is important too, until they're added. Give a finding about screenshots
+   alone `"screenshots": "owed"` when the PR's reason holds that only Stefan can reach that state
+   (a UAC prompt, an elevated app), and `"screenshots": "missing"` otherwise (absent, wrong, or an
+   owed reason that doesn't hold): a fix round shoots missing ones, and owed ones go to Stefan.
+   Leave `screenshots` out of every other finding, including one where the screenshots show a
+   defect in the code.
 $again$guide
 Tag every finding:
 - **important** blocks the merge. It needs `file` and `line`, plus either a `scenario` (a failure

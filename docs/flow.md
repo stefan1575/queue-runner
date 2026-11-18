@@ -115,7 +115,11 @@ A stop comes to Stefan:
 - a failed check; a conflict a conflict round couldn't resolve, or a PR's third conflict;
 - review 3 still blocking. A Claude decision thread posts an **Approach note** first: is the
   approach wrong, what would change, and rework, fix on or hold? No fourth review without
-  Stefan's answer.
+  Stefan's answer. A review blocking only on screenshots a fix round can take is no strike: it
+  gets a fix round at any review, for up to three such reviews in a row (game-backdrop #14,
+  2026-11-18: reviews 4 to 6 stopped for screenshots alone, with no code changed);
+- only screenshots block it, and some are owed: a state only Stefan can reach (a UAC prompt).
+  It goes to him at once, with no Approach note.
 
 Each stop is recorded on the PR and in one `needs-info` issue per PR, and toasted
 (`docs/stops.md`).

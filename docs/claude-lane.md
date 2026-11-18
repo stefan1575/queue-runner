@@ -75,7 +75,8 @@ and it gets no other fix round. A repo has one Claude job at a time, so two neve
    each get a round from their old review 1. A PR whose newest review was hand-run after the
    cutover is left to the session that ran it, and so is one that decide() would have sent to
    Stefan (`ledger.escalation`, read from the ledgers: a kept decline, a reopened finding, an
-   earlier class repeated, or review 3 or later still blocking), since stops and Approach notes
+   earlier class repeated, screenshots only Stefan can take, or review 3 or later still blocking
+   other than on screenshots a fix round can take), since stops and Approach notes
    read only the runner's own reviews. Such a PR gets no conflict round either
    (`Fixer.old_escalation`, PR #4's review 2): nothing automatic runs on it until a decision
    orders a round on H. **One round per head:**

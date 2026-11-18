@@ -58,8 +58,13 @@ The review loop's rules are `docs/flow.md`, The review loop; leads-dashboard's
 6. **Decide** (`ledger.py`, no I/O): the verdict and outcome come from the last `sol-findings`
    block in Sol's reply, never its prose. Clean when no Important finding is open; outcomes, in
    order: `stop` (a new Important finding in an earlier class, a closed finding reopened, a
-   decline Sol kept), `approach-note` (blocking from review 3 on: there's no spend guard any
-   more, so every blocking review from 3 comes to Stefan), `merge` (clean), `fix`. An Important
+   decline Sol kept, or `screenshots-owed`: only screenshot findings open and one of them
+   `owed`), `approach-note` (blocking from review 3 on: there's no spend guard any more, so
+   every blocking review from 3 comes to Stefan, unless only on screenshots a fix round can
+   take, for up to `SHOT_ROUNDS` such reviews in a row: `ledger.route`), `merge` (clean), `fix`.
+   A finding about screenshots alone carries `screenshots` (`missing` or `owed`,
+   `templates/review.md` check 5); a new one in an earlier screenshot class is no repeated
+   class, since it names no cause in the code. An Important
    finding without file, line and a scenario (or a cost and rule) counts as a nit; nits past five
    are dropped and named. No readable block: `failed`.
 7. **Write.** `comment.md` (heading, Sol's prose with links made GitHub-relative, findings
