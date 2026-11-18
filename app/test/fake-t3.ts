@@ -15,7 +15,7 @@ type ShellStream = { send(item: unknown): void; end(): void; ended: boolean };
 
 /** A thread's state as `orchestration.subscribeThread` shows it: its runs, runtime requests (a
  *  question to the user is a pending one) and turn items (a failed run's error among them). */
-export type FakeThread = { id: string; projectId: string; runs: any[]; runtimeRequests: any[]; turnItems: any[]; messages?: any[]; title?: string; createdAt?: string };
+export type FakeThread = { id: string; projectId: string; runs: any[]; runtimeRequests: any[]; turnItems: any[]; messages?: any[]; title?: string; createdAt?: string; branch?: string | null };
 
 export class FakeT3 {
   port = 3773;
@@ -38,6 +38,8 @@ export class FakeT3 {
   shellFailures = 0;
   /** Answers `t3_thread_launch` with this failure instead (T3 refusing it). */
   launchFailure: { code: string; message: string } | null = null;
+  /** `t3_thread_launch` runs, then its answer is lost (the connection drops before it arrives). */
+  launchAnswerLost = false;
   /** WebSocket methods that answer once, by tag: the value T3's Exit carries. Any other
    *  method but subscribeServerConfig ends in a Failure. */
   wsMethods: Record<string, (payload: any) => unknown> = {};
@@ -184,7 +186,7 @@ export class FakeT3 {
 
   /** Each thread as T3's shell lists it (docs/app.md, The WebSocket API). */
   private shellThreads() {
-    return Object.values(this.threadState).map((t) => ({ id: t.id, projectId: t.projectId, title: t.title ?? '', createdAt: t.createdAt ?? new Date(0).toISOString(), latestRunId: t.runs.at(-1)?.id ?? null }));
+    return Object.values(this.threadState).map((t) => ({ id: t.id, projectId: t.projectId, title: t.title ?? null, branch: t.branch ?? null, createdAt: t.createdAt ?? new Date(0).toISOString(), latestRunId: t.runs.at(-1)?.id ?? null }));
   }
 
   private tool(name: string, args: any): { result?: unknown; failure?: { code: string; message: string } } {
@@ -200,6 +202,7 @@ export class FakeT3 {
       const n = this.launches.length;
       this.threadState[`thread-${n}`] = {
         id: `thread-${n}`, projectId: args.projectId, title: args.title, createdAt: new Date().toISOString(), runtimeRequests: [], turnItems: [], messages: [],
+        branch: args.workspaceStrategy?.branch ?? null,
         runs: [{ id: `run-${n}`, threadId: `thread-${n}`, ordinal: 1, rootNodeId: `node-${n}`, status: 'running', completedAt: null }],
       };
       return { result: { threadId: `thread-${n}`, runId: `run-${n}`, link: `t3://thread/thread-${n}`, projectId: args.projectId, modelSelection: args.modelSelection, status: 'running' } };
@@ -318,6 +321,7 @@ export class FakeT3 {
         if (msg.id === undefined) return { status: 202, headers: {}, text: '' };
         if (msg.method !== 'tools/call') return json(200, { jsonrpc: '2.0', id: msg.id, error: { message: 'unknown method' } });
         const done = this.tool(msg.params.name, msg.params.arguments);
+        if (this.launchAnswerLost && msg.params.name === 't3_thread_launch') throw new Error('socket hang up');
         if (done.failure) return json(200, { jsonrpc: '2.0', id: msg.id, result: { isError: true, content: [{ text: JSON.stringify(done.failure) }] } });
         const data = `data: ${JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { structuredContent: done.result } })}\n\n`;
         return { status: 200, headers: { 'content-type': 'text/event-stream' }, text: data };

@@ -109,11 +109,19 @@ export class UsageGate {
     this.held.delete(id);
   }
 
-  /** The job started on `choice`, let in at `cost`: it counts as running until `finished`. */
-  started(job: GateJob, cost: Cost) {
+  /** T3's reading of this choice's provider now: the `before` a job let in now is measured from. */
+  reading(choice: ModelChoice): Reading {
+    const u = this.usage(choice.provider);
+    return reading(u?.checkedAt ?? null, u?.windows ?? []);
+  }
+
+  /** The job started on `choice`, let in at `cost` on the reading `before` (T3's reading now
+   *  unless given: a job watched again after a restart passes the one it was let in on, never one
+   *  taken mid-run). It counts as running until `finished`. */
+  started(job: GateJob, cost: Cost, before: Reading = this.reading(job.choice)) {
     const u = this.usage(job.choice.provider);
     const account = u?.account ?? `${job.choice.provider}:${job.choice.provider}`;
-    const r: Running = { id: job.id, account, cost, job, before: reading(u?.checkedAt ?? null, u?.windows ?? []), started: this.now(), beside: new Set() };
+    const r: Running = { id: job.id, account, cost, job, before, started: this.now(), beside: new Set() };
     for (const other of this.running.values()) {
       if (other.account !== account) continue;
       other.beside.add(job.id);

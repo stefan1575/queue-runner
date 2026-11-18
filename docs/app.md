@@ -324,10 +324,21 @@ builds (`docs/flow.md`, `docs/claude-lane.md`). `src/build-lane.ts`, `src/picker
   names the runner's `scripts/evidence.py`, it says in words what that script does (compare the
   before and after, commit the shots to the `evidence` branch under `pr-<n>/` without touching
   the job's branch, link each by that commit).
-- **Starting:** fetch `origin/<base>` (T3 doesn't), then a leftover local branch of the job's name
-  holds the job (`branch-exists`, said in the log line) and T3 isn't asked; else `launchJob` on
-  the build kind's model (or its fallback, as the gate picked) in a worktree from `origin/<base>`
-  on `claude/<slug>-<issue>`, titled `Queue runner build: <project>#<n>`.
+- **Starting:** fetch `origin/<base>` (T3 doesn't), with the refspec named
+  (`+refs/heads/<base>:refs/remotes/origin/<base>`), so the tracking ref is written whatever the
+  clone's own refspec covers (a single-branch clone of another branch); then a leftover local
+  branch of the job's name holds the job (`branch-exists`, said in the log line) and T3 isn't
+  asked; else `launchJob` on the very model the gate let the job in on (its kind's or its
+  fallback; Settings isn't read again) in a worktree from `origin/<base>` on
+  `claude/<slug>-<issue>`, titled `Queue runner build: <project>#<n>`. The served set is asked
+  again after the GitHub reads and right before the launch call: a repo switched off meanwhile
+  gets no gate verdict, or is `not-started`.
+- **A launch with no answer** (the call sent, its answer lost) may still have started a thread,
+  so it isn't taken as not started: after one retry wait the job's thread is looked for in T3's
+  shell snapshot (`orchestration.subscribeShell`; the live build check reads a thread's `branch`
+  there), by the job's own title and branch, and its project when the thread names one. Found, it's recorded and watched like a
+  launched one; absent, the job is `not-started`; while T3 can't be read, the job stays open, its
+  repo busy and its place in the gate kept, looked for again after each wait.
 - **One build per repo, repos side by side** (#50): each pass takes every served repo with no build
   running, the one whose last job ended longest ago first (the job log's `lastEnded`). Each asks
   the usage gate first (`UsageGate.pick`, kind `build`); a held one says its reason once and waits.
@@ -340,7 +351,8 @@ builds (`docs/flow.md`, `docs/claude-lane.md`). `src/build-lane.ts`, `src/picker
   pending runtime request: a question to the user), `usage-limit` (with T3's `resetAt`) or
   `failed` (with the error item's message). A stream that drops opens again after 5 seconds.
 - **The job log** is `jobs.jsonl` in the state folder (`src/job-log.ts`, today's `state.py` cut to
-  a build): `start` (the model the gate let it in on), `thread` (once T3 names it) and `end`.
+  a build): `start` (the model the gate let it in on, the cost it was let in at and T3's reading it
+  was let in on, `cost` and `before`), `thread` (once T3 names it) and `end`.
   Every build that started holds its issue but `not-started` (releasing is a later ticket). The
   usage before and after a job are its record in the gate's `usage.jsonl`, by the same job id: the
   gate counts the job from its let-in and measures it on T3's first reading after its end; a job
@@ -350,11 +362,10 @@ builds (`docs/flow.md`, `docs/claude-lane.md`). `src/build-lane.ts`, `src/picker
   comes from its own launch. One waiting on a question is left for the Inbox ticket and one
   stopped by a usage limit for the limits ticket; both are recorded as such and left unsettled.
 - **An app that stopped mid-build:** on start, each build the log shows open is watched again to
-  its end before any pass (so its repo still has one build). Its thread is the log's, else (the
-  app stopped after T3 took the launch but before the log's line) the one T3's shell lists in its
-  project under its title, made no earlier than 5 s before its start record, the newest
-  (`src/t3/job-thread.ts`, today's `t3.find_job_thread`); a shell that can't be read is asked
-  again, never taken as no thread. One T3 made no thread for is recorded `not-started`.
+  its end before any pass (so its repo still has one build), reserved in the gate at its logged
+  `cost` and measured from its logged `before`, never from a reading taken mid-run (a line with
+  neither, an older app's, is measured as teaching nothing). One T3 never named a thread for is
+  looked for as an unanswered launch is, and `not-started` only once T3's threads show none.
 - **The app's log** is its console for now (`say`): a line per start, hold, end and failure.
 
 ## Reviews
@@ -418,9 +429,12 @@ every open PR in a served repo without a review on its newest commit gets one, w
   `clean`, `blocking`, `stop`, `approach-note` (with `verdict`, `signals`, `link`), `failed`,
   `out-of-usage` or `head-moved`. Once the end is recorded the thread is settled, whatever the end:
   nobody answers a review thread. One the log shows open on start is watched to its end, counted
-  `failed` and settled, as today's `Reviewer.settle`; its thread is found as a build's is (An app
-  that stopped mid-build, above), and no review starts until it ends, so a thread that runs on
-  never has its checkout replaced under it.
+  `failed` and settled, as today's `Reviewer.settle`. Its thread is the log's, else (the app
+  stopped after T3 took the launch but before the log's line) the one T3's shell lists in its
+  project under its title, made no earlier than 5 s before its start record, the newest
+  (`src/t3/job-thread.ts`, today's `t3.find_job_thread`; a review has no branch to match, so not a
+  build's title and branch); a shell that can't be read is asked again, never taken as no thread.
+  No review starts until it ends, so a thread that runs on never has its checkout replaced under it.
 - **Not yet:** merging a clean review and fix rounds (#156), conflict rounds (#157), stops (#158).
 
 ## Setup
