@@ -10,7 +10,7 @@ A head that moved is left to the Sol lane, which reviews the new one. After the 
 worktrees of the PR's build and fix jobs are removed. The repo's live steps run later, in
 the Claude lane (`live.py`).
 
-A repo whose `config.toml` entry says `merge = "stefan"` (leads-dashboard, ticket 17) isn't merged
+A repo whose `config.toml` entry says `merge = "stefan"` (ticket 17) isn't merged
 by the runner: once the same re-check passes, the PR is marked ready for Stefan instead, once per
 head: the `ready-for-stefan` label and a toast that opens the PR (a `ready` job, `marked`). The
 mark comes off (`unmarked`, the label removed) when the head moves or the re-check no longer

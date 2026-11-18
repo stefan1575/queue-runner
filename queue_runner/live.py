@@ -1,6 +1,6 @@
 """Live steps after merges (ticket 11; `docs/flow.md`, Merge), in the Claude lane.
 
-A repo whose `config.toml` entry names a `live_doc` (leads-dashboard: `docs/agents/lovable-cloud.md`)
+A repo whose `config.toml` entry names a `live_doc`
 needs an AI to make a merge live: the Lovable connector's `deploy_project`, `query_database` for each
 migration, then `npm run check:live-schema`. The runner starts one Claude thread per batch: every PR
 merged into the base since the last live run. It waits until no other merge is about to land (no

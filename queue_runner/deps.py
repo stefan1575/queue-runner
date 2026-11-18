@@ -4,7 +4,7 @@ Installing into every checkout would slow every review, so each lockfile is inst
 `<deps_dir>/<repo>-<key>/node_modules`, and linked into the checkout as a junction. The key is the
 lockfile plus package.json's dependency fields, so a PR that changes neither reuses the cache, and
 one that changes them gets its own install, as CI would. bun.lock installs with
-`bun install --frozen-lockfile` (leads-dashboard's CI does), package-lock.json with `npm ci`.
+`bun install --frozen-lockfile`, package-lock.json with `npm ci`.
 
 **Unlink before git removes a checkout:** `git worktree remove --force` follows a junction and
 empties its target (checked 2026-11-10), so `unlink` comes first (`GitCli.remove_checkout`).

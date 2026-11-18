@@ -303,7 +303,7 @@ click, never by itself.
 ## Live steps
 
 `live.py` and `templates/live.md` (ticket 11; `docs/flow.md`, Merge). A repo whose `config.toml`
-entry has `live_doc` (leads-dashboard: `docs/agents/lovable-cloud.md`; `live_migrations` and
+entry has `live_doc` (`live_migrations` and
 `live_functions` default to `supabase/migrations` and `supabase/functions`) gets one Claude thread
 per batch, `Queue runner live: <repo>`, gated as kind `live` (default cost 20% of 5 hours, 5% of
 the week), after decisions and before fix rounds. Merged and live are reported apart: the merge
@@ -352,8 +352,7 @@ pass says `merged`, the live run says `live` (the log, and a **Live.** comment o
 
 ## Stefan merges
 
-`merge.py` (ticket 17). A repo whose `config.toml` entry says `merge = "stefan"` (leads-dashboard,
-since 2026-11-10; game-backdrop, since 2026-11-15) isn't merged by the runner; `merge = "runner"` (the default) is.
+`merge.py` (ticket 17). A repo whose `config.toml` entry says `merge = "stefan"` isn't merged by the runner; `merge = "runner"` (the default) is.
 
 - **Ready:** where the merge pass would merge (the same re-check, A Sol pass, step 3, except an
   open live run doesn't hold it: his merge goes in the next batch), it labels the PR

@@ -23,8 +23,8 @@ The review loop's rules and words are `docs/flow.md`, The review loop; a served 
    the PR's build and fix jobs are removed with their local branches (`GitCli.remove_worktree`:
    gone from `git worktree list` counts, since T3 may hold the empty folder), and one that
    can't be is said, and their threads are settled (`docs/stops.md`, Settling threads). The repo's live
-   steps (leads-dashboard: Lovable) run later in the Claude
-   lane (`docs/claude-lane.md`, Live steps). **In a repo Stefan merges** (leads-dashboard), the PR is marked
+   steps run later in the Claude
+   lane (`docs/claude-lane.md`, Live steps). **In a repo Stefan merges** (`merge = "stefan"`), the PR is marked
    `ready-for-stefan` instead, and his merge is noticed on a later pass (`docs/claude-lane.md`, Stefan merges).
    **Merge job records** (kind `merge`): `sha` H, `head` the merge commit; outcomes `merged`,
    `head-moved`, `failed`.
