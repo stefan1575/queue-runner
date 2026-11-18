@@ -15,7 +15,7 @@
     it builds first, is it up. The column between them is centred in the space they leave.
   - Three pages do three jobs. Overview is the first glance. Inbox is what waits on you. Queue is
     the work.
-  - PROTOTYPE, with sample data only (#30, take 17): the Queue as the lanes on top, one card
+  - PROTOTYPE, with sample data only (#30, take 18): the Queue as the lanes on top, one card
     split down the middle (what Claude and ChatGPT run now, then each one's queue, which opens and
     closes and is remembered; open, a window three rows tall that scrolls, so the card never
     grows), and the efforts below in four tabs, a line under the head saying what each is for.
@@ -29,7 +29,8 @@
     Board's first column is In line (the Claude lane's line, a fix round's number amber). Colour is
     take 13's step 3: done, moving, and what waits on you. The right-hand rail is not this
     prototype's: it's take 12's here, and settled on its own branch, prototype/rail (#141).
-    Take 16 is earlier/take-16.html.
+    Take 18: the lanes two cards again, the page 1480px, quieter bars, and a drag where you hold
+    the whole box inside its list. Take 17 is earlier/take-17.html.
   - The Overview only summarises, in three cards read top to bottom: what's on your plate (the
     Inbox in counts by kind, and the ask that's first in line), what's running (a line per lane,
     with its Stop button and the one thing it takes up next), and what's next (a bar per
@@ -1302,6 +1303,38 @@ body.page-queue .top-col, body.page-queue main { max-width: 1320px; }
 /* Board: five equal columns, Done too. */
 .kboard { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; padding: 14px; }
 .kcol { padding: 10px; }
+/* ---------------------------------------------------------------- take 18 (PROTOTYPE, #30) */
+/* Wider again (1480px, centred), the lanes two cards side by side. */
+body.page-queue .top-col, body.page-queue main { max-width: 1480px; }
+.q12-now { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.q12-now .ln, .q12-now .ln.on { padding: 16px 20px 14px; gap: 12px; border: 1px solid var(--line); border-radius: 14px; }
+
+/* The bars are quieter: the same three colours, mixed halfway into the card, and thinner. */
+.q12 .sg.done { background: color-mix(in srgb, var(--ok) 55%, var(--surface)); }
+.q12 .sg.merged, .q12 .sg.building, .q12 .sg.pr { background: color-mix(in srgb, var(--run-fill) 55%, var(--surface)); }
+.q12 .sg.yours { background: color-mix(in srgb, var(--you) 55%, var(--surface)); }
+.pg-bar .fbar { height: 8px; gap: 3px; }
+.pg-bar .fbar .sg:first-child, .pg-bar .fbar .sg:last-child { border-radius: 4px; }
+
+/* Dragging (take 18): you hold the whole box. It lifts with a shadow and follows the pointer;
+   its place is an empty slot of the same size, so nothing moves; a line marks where it lands. */
+.or[data-drag] > .or-row { cursor: grab; }
+body.q-dragging, body.q-dragging * { cursor: grabbing !important; user-select: none; }
+.or.held { background: none; border: 1.5px dashed var(--btn-line); }
+.or.held > * { visibility: hidden; }
+.or-lift { position: fixed; top: 0; left: 0; z-index: 90; margin: 0; pointer-events: none; list-style: none;
+  background: var(--raised); border-color: var(--btn-line);
+  box-shadow: 0 18px 42px rgba(0, 0, 0, .5), 0 4px 12px rgba(0, 0, 0, .35); }
+.or-lift.solo { background: var(--raised); }
+.or-lift .grip { opacity: 1; color: var(--ink-2); }
+.or-lift.settle { transition: transform .2s cubic-bezier(.2, .8, .2, 1), box-shadow .2s; box-shadow: 0 0 0 rgba(0, 0, 0, 0); }
+.drop-before::before, .drop-after::after { left: 6px; right: 6px; }
+.or-list > .drop-before::before { top: -6px; }
+.or-list > .drop-after::after { bottom: -6px; }
+body.q-dragging .can-drop { outline: none; }
+.drop-line { position: fixed; top: 0; left: 0; height: 3px; border-radius: 2px; background: var(--you); z-index: 95; pointer-events: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--you) 25%, transparent); }
+.drop-line[hidden] { display: none; }
 </style>
 </head>
 <body>
@@ -2144,7 +2177,7 @@ const closedSay = (n, W) => {
 const yoursIn = (r, W) => (snap.issues || []).filter((i) => i.repo === r && ["you", "ready-for-human", "needs-triage"].includes(i.state));
 const isFlash = (id) => lastMove && Date.now() - lastMove.at < 4000 && lastMove.ids.has(id);
 const GRIP = `<span class="grip" aria-hidden="true"><svg viewBox="0 0 10 16"><circle cx="2.5" cy="3" r="1.3"/><circle cx="7.5" cy="3" r="1.3"/><circle cx="2.5" cy="8" r="1.3"/><circle cx="7.5" cy="8" r="1.3"/><circle cx="2.5" cy="13" r="1.3"/><circle cx="7.5" cy="13" r="1.3"/></svg></span>`;
-const dragAttrs = (n) => (repoOff(n.repo) || (n.t === "ticket" && !n.parent.startsWith("repo:")) ? "" : `draggable="true" tabindex="0" data-drag="${esc(n.id)}" data-parent="${esc(n.parent)}" aria-roledescription="${n.t === "ticket" ? "ticket" : "effort"}, drag to reorder"`);
+const dragAttrs = (n) => (repoOff(n.repo) || (n.t === "ticket" && !n.parent.startsWith("repo:")) ? "" : `tabindex="0" data-drag="${esc(n.id)}" data-parent="${esc(n.parent)}" aria-roledescription="${n.t === "ticket" ? "ticket" : "effort"}, drag to reorder"`);
 const KINDNAME = { map: "Map", spec: "Spec" };
 
 // What a repo is doing now and takes up next, in order, each with why.
@@ -2215,7 +2248,7 @@ function queue() {
 // ---- the lanes: what each provider runs now, then what it takes up next.
 function qNow(W) {
   const lanes = snap.lanes || [];
-  return `<div class="q12-now one">${lanes.map((l) => (l.provider === "claude" ? claudeLane(l, W) : reviewLane(l, W))).join("")}</div>`;
+  return `<div class="q12-now">${lanes.map((l) => (l.provider === "claude" ? claudeLane(l, W) : reviewLane(l, W))).join("")}</div>`;
 }
 // Take 14: a lane's whole queue sits in a window three rows tall that scrolls, so the card is the
 // same size whatever it holds. `note` is the line over it; `none`, what it says when it's empty.
@@ -2447,61 +2480,106 @@ function bringUp(id) {
   return { ids, says };
 }
 const clearMarks = () => document.querySelectorAll(".drop-before, .drop-after").forEach((el) => el.classList.remove("drop-before", "drop-after"));
-function dropTarget(e) {
-  if (!dragging) return null;
-  let el = e.target.closest ? e.target.closest("[data-drag]") : null;
-  while (el && el.dataset.parent !== dragging.parent) el = el.parentElement ? el.parentElement.closest("[data-drag]") : null;
-  if (!el || el.dataset.drag === dragging.id) return null;
-  const r = el.getBoundingClientRect();
-  return { el, before: e.clientY < r.top + r.height / 2 };
+// Take 18: the page's own drag, not the browser's, so there is no "not allowed" sign and no
+// one-line picture of the name. You hold the whole box (an effort with the efforts inside it):
+// it lifts and follows the pointer up and down, inside its own list, never out of it. Its place
+// stays as an empty slot, so nothing under it moves, and a line shows where it will land. Let go
+// and it settles into its new place; let go where nothing changes, or press Escape, and it
+// glides back to where it was.
+const LIFT_AFTER = 4;   // px the pointer moves before a press becomes a drag, so a click stays a click
+let press = null;       // { el, x, y } between pointerdown and the drag starting
+let lift = null;        // { el, ghost, list, dy, x, h, y, top, target, raf }
+function liftTarget(cy) {
+  // Where the held box would land: before the first sibling whose middle is below its middle.
+  const sibs = [...lift.list.children].filter((x) => x.dataset && x.dataset.drag && x !== lift.el);
+  if (!sibs.length) return null;
+  let t = null;
+  for (const x of sibs) { const r = x.getBoundingClientRect(); if (cy < r.top + r.height / 2) { t = { el: x, before: true }; break; } }
+  if (!t) t = { el: sibs[sibs.length - 1], before: false };
+  // Landing next to itself changes nothing, so it shows no line.
+  if (t.before && t.el === lift.el.nextElementSibling) return null;
+  if (!t.before && t.el === lift.el.previousElementSibling) return null;
+  return t;
 }
-document.addEventListener("dragstart", (e) => {
-  const el = e.target.closest ? e.target.closest("[data-drag]") : null;
-  if (!el) return;
+function liftAt(clientY) {
+  // Its top follows the pointer, kept inside its list (a little give at either end).
+  const lr = lift.list.getBoundingClientRect();
+  const top = Math.min(Math.max(clientY - lift.dy, lr.top - 10), lr.bottom - lift.h + 10);
+  lift.top = top;
+  lift.ghost.style.transform = `translate(${lift.x}px, ${top}px) scale(1.012)`;
+  lift.target = liftTarget(top + lift.h / 2);
+  // The landing line is drawn over the held box, so it shows even where the box covers the gap.
+  if (!lift.target) { lift.line.hidden = true; return; }
+  const tr = lift.target.el.getBoundingClientRect(), gap = lift.list === lift.target.el.parentElement && lift.list.classList.contains("or-list") ? 4 : 0;
+  lift.line.hidden = false;
+  lift.line.style.transform = `translate(${lr.left + 6}px, ${(lift.target.before ? tr.top - gap : tr.bottom + gap) - 1.5}px)`;
+  lift.line.style.width = `${lr.width - 12}px`;
+}
+function liftStart(e) {
+  const el = press.el, r = el.getBoundingClientRect();
+  const ghost = el.cloneNode(true);
+  ghost.removeAttribute("data-drag"); ghost.removeAttribute("tabindex"); ghost.removeAttribute("id");
+  ghost.classList.add("or-lift"); ghost.classList.remove("flash");
+  ghost.style.width = `${r.width}px`;
+  el.closest(".qv").appendChild(ghost);
+  const line = document.createElement("div");
+  line.className = "drop-line"; line.hidden = true;
+  document.body.appendChild(line);
+  lift = { el, ghost, line, list: el.parentElement, dy: press.y - r.top, x: r.left, h: r.height, y: e.clientY, top: r.top, target: null, raf: 0 };
+  press = null;
   dragging = { id: el.dataset.drag, parent: el.dataset.parent };
-  e.dataTransfer.effectAllowed = "move";
-  // Take 15: a type of its own, not text/plain, so Firefox never takes a stray drop for a link
-  // or a search; Chrome and Firefox both need some data set for the drag to start.
-  e.dataTransfer.setData("application/x-queue-effort", dragging.id);
-  // What's carried is one line with the effort's name, however tall its row is.
-  const chip = document.createElement("div");
-  chip.className = "drag-chip";
-  chip.textContent = nameOf(work().nodes.get(dragging.id));
-  document.body.appendChild(chip);
-  if (e.dataTransfer.setDragImage) e.dataTransfer.setDragImage(chip, 14, 18);
-  setTimeout(() => {   // after the drag has begun: a change made inside dragstart can end it
-    chip.remove();
-    if (!dragging) return;
-    // Take 14: nothing folds or opens. The row held dims, its siblings get an outline, and the
-    // drop line is drawn over the gap, so not one row moves until you let go.
-    document.body.classList.add("q-dragging");
-    el.classList.add("dragging");
-    document.querySelectorAll("[data-drag]").forEach((x) => { if (x.dataset.parent === dragging.parent && x !== el) x.classList.add("can-drop"); });
-  }, 0);
-});
-document.addEventListener("dragover", (e) => {
-  if (dragging) { if (e.clientY < 96) scrollBy(0, -18); else if (e.clientY > innerHeight - 96) scrollBy(0, 18); }
-  const t = dropTarget(e);
-  clearMarks();
-  if (!t) return;
-  e.preventDefault();
-  e.dataTransfer.dropEffect = "move";
-  t.el.classList.add(t.before ? "drop-before" : "drop-after");
-});
-document.addEventListener("drop", (e) => {
-  if (dragging) e.preventDefault();   // a drop anywhere else does nothing, in every browser
-  const t = dropTarget(e);
-  clearMarks();
-  if (!t) return;
-  e.preventDefault();
-  moveTo(dragging.id, dragging.parent, t.el.dataset.drag, t.before);
-});
-document.addEventListener("dragend", () => {
-  clearMarks();
+  el.classList.add("held");
+  document.body.classList.add("q-dragging");
+  getSelection().removeAllRanges();
+  liftAt(e.clientY);
+  const edge = () => {   // near the window's top or bottom edge, the page scrolls on its own
+    if (!lift) return;
+    const v = lift.y < 80 ? -Math.ceil((80 - lift.y) / 6) : lift.y > innerHeight - 80 ? Math.ceil((lift.y - innerHeight + 80) / 6) : 0;
+    if (v) { scrollBy(0, v); liftAt(lift.y); }
+    lift.raf = requestAnimationFrame(edge);
+  };
+  lift.raf = requestAnimationFrame(edge);
+}
+function liftEnd(cancel) {
+  const l = lift; lift = null;
+  cancelAnimationFrame(l.raf);
+  l.line.remove();
+  const t = cancel ? null : l.target, id = dragging.id, parent = dragging.parent;
   dragging = null;
   document.body.classList.remove("q-dragging");
-  draw();
+  if (t) { moveTo(id, parent, t.el.dataset.drag, t.before); draw(); }
+  // Settle: the box glides into its place (the new one, or back to the old), then is let go.
+  const home = [...document.querySelectorAll(".qv:not([inert]) [data-drag]")].find((x) => x.dataset.drag === id) || l.el;
+  home.classList.add("held");
+  if (!l.ghost.isConnected) home.closest(".qv").appendChild(l.ghost);   // a redraw took it with the old rows
+  const r = home.getBoundingClientRect();
+  requestAnimationFrame(() => {
+    l.ghost.classList.add("settle");
+    l.ghost.style.transform = `translate(${r.left}px, ${r.top}px) scale(1)`;
+  });
+  let over = false;
+  const done = () => { if (over) return; over = true; l.ghost.remove(); home.classList.remove("held"); };
+  l.ghost.addEventListener("transitionend", done, { once: true });
+  setTimeout(done, 320);
+}
+document.addEventListener("pointerdown", (e) => {
+  if (ui.page !== "queue" || e.button !== 0 || lift) return;
+  const el = e.target.closest ? e.target.closest(".or[data-drag]") : null;
+  if (!el || e.target.closest("a, button, select, input")) return;
+  press = { el, x: e.clientX, y: e.clientY };
 });
+document.addEventListener("pointermove", (e) => {
+  if (press && !lift && Math.hypot(e.clientX - press.x, e.clientY - press.y) >= LIFT_AFTER) liftStart(e);
+  if (!lift) return;
+  e.preventDefault();
+  lift.y = e.clientY;
+  liftAt(e.clientY);
+});
+document.addEventListener("pointerup", () => { press = null; if (lift) liftEnd(false); });
+document.addEventListener("pointercancel", () => { press = null; if (lift) liftEnd(true); });
+document.addEventListener("keydown", (e) => { if (lift && e.key === "Escape") { e.preventDefault(); liftEnd(true); } });
+// The browser's own drag never starts on the Queue (a row's text or a link dragged by accident).
+document.addEventListener("dragstart", (e) => { if (ui.page === "queue" && e.target.closest && e.target.closest(".or")) e.preventDefault(); });
 // Alt+Up and Alt+Down move the focused row among its siblings, the same rules as a drag.
 document.addEventListener("keydown", (e) => {
   if (ui.page !== "queue" || !e.altKey || !["ArrowUp", "ArrowDown"].includes(e.key)) return;
