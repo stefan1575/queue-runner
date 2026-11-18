@@ -144,6 +144,17 @@ describe('repositories in the view', () => {
     expect(await view.repo({ do: 'remove', id: 'p1' })).toEqual({ error: 'sandbox still has threads in T3.', notEmpty: true });
   });
 
+  test('an action with a field of the wrong kind is refused before Repositories hears of it', async () => {
+    const repos = new FakeRepos();
+    const view = await RunnerView.start(await store(), account('ana-k', null), new FakeTimeFormat(), repos);
+    const bad = [
+      { do: 'serve', id: 'p1', on: 'yes' }, { do: 'serve', on: true }, { do: 'merge', id: 'p1', merge: 'sideways' },
+      { do: 'seen', ids: 'p1' }, { do: 'remove', id: 7 }, { do: 'remove', id: 'p1', withThreads: 'please' }, { do: 'explode' }, null,
+    ];
+    for (const a of bad) expect((await view.repo(a as never)).error).toMatch(/something unknown/);
+    expect(repos.asked).toEqual([]);
+  });
+
   test("a repo's choices can't be saved as a plain setting, past what switching one on does", async () => {
     const view = await RunnerView.start(await store(), account('ana-k', null), new FakeTimeFormat(), new FakeRepos());
     await expect(view.set({ repos: { p1: { served: true, merge: 'runner', seen: true } } })).rejects.toThrow(SettingsError);

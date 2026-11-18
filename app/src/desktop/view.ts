@@ -35,6 +35,25 @@ export type RepoAction =
  *  when the picker was closed. */
 export type RepoResult = { error?: string; notEmpty?: boolean; added?: string | null };
 
+const isId = (v: unknown): v is string => typeof v === 'string' && v !== '';
+
+/** The action as the window sent it over IPC, or null when any field isn't what it should be. */
+export function checkAction(a: unknown): RepoAction | null {
+  const o = a as Record<string, unknown> | null;
+  if (typeof o !== 'object' || o === null) return null;
+  switch (o.do) {
+    case 'serve': return isId(o.id) && typeof o.on === 'boolean' ? { do: 'serve', id: o.id, on: o.on } : null;
+    case 'merge': return isId(o.id) && (o.merge === 'me' || o.merge === 'runner') ? { do: 'merge', id: o.id, merge: o.merge } : null;
+    case 'seen': return Array.isArray(o.ids) && o.ids.every(isId) ? { do: 'seen', ids: o.ids } : null;
+    case 'check': return { do: 'check' };
+    case 'add': return { do: 'add' };
+    case 'remove':
+      return isId(o.id) && (o.withThreads === undefined || typeof o.withThreads === 'boolean')
+        ? { do: 'remove', id: o.id, withThreads: o.withThreads === true } : null;
+    default: return null;
+  }
+}
+
 /** Repositories, as the view needs it (src/repos.ts). */
 export interface RepoSource {
   list(): Repo[] | null;
@@ -104,9 +123,12 @@ export class RunnerView {
   }
 
   /** Does what the window asked of Repositories. A refusal (no remote, gh or T3 failing) comes
-   *  back as `error`, never thrown, so the window can tell a project with threads apart. */
-  async repo(action: RepoAction): Promise<RepoResult> {
+   *  back as `error`, never thrown, so the window can tell a project with threads apart. An
+   *  action with a field of the wrong kind is refused before anything is done. */
+  async repo(asked: RepoAction): Promise<RepoResult> {
     const r = this.repos!;
+    const action = checkAction(asked);
+    if (!action) return { error: `the window asked for something unknown: ${JSON.stringify(asked)}` };
     try {
       switch (action.do) {
         case 'serve': await r.setServed(action.id, action.on); return {};
@@ -116,12 +138,12 @@ export class RunnerView {
         case 'add': return { added: await r.add() };
         case 'remove': await r.remove(action.id, action.withThreads === true); return {};
       }
+      return {};
     } catch (e) {
       if (e instanceof NotEmpty) return { error: e.message, notEmpty: true };
       if (e instanceof RepoError || e instanceof GitHubError || e instanceof T3Error || e instanceof SettingsError) return { error: e.message };
       throw e;
     }
-    return { error: `the window asked for something unknown: ${JSON.stringify(action)}` };
   }
 
   onChange(listener: (v: View) => void): () => void {

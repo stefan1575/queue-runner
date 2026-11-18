@@ -27,23 +27,26 @@ export const DEFAULT_SETTINGS: Settings = { name: null, dateStyle: 'month-first'
 /** A change the page never offers: an unknown key or a value of the wrong kind. */
 export class SettingsError extends Error {}
 
+/** Each repo's choices; `lenient` drops an entry this version can't read (a saved file) where a
+ *  change made now is refused whole. */
+function repoChoices(v: unknown, lenient: boolean): Record<string, RepoChoice> | null | undefined {
+  if (v === null) return null;
+  if (typeof v !== 'object' || Array.isArray(v)) return undefined;
+  const out: Record<string, RepoChoice> = {};
+  for (const [id, c] of Object.entries(v as Record<string, any>)) {
+    if (typeof c?.served === 'boolean' && (c.merge === 'runner' || c.merge === 'me') && typeof c.seen === 'boolean') {
+      out[id] = { served: c.served, merge: c.merge, seen: c.seen };
+    } else if (!lenient) return undefined;
+  }
+  return out;
+}
+
 // Each key's check: the value it keeps, or undefined for one it refuses.
 const CHECKS: { [K in keyof Settings]: (v: unknown) => Settings[K] | undefined } = {
   name: (v) => (v === null ? null : typeof v === 'string' ? (v.trim() || null) : undefined),
   dateStyle: (v) => (DATE_STYLES.some((d) => d.id === v) ? (v as DateStyle) : undefined),
   startWithWindows: (v) => (typeof v === 'boolean' ? v : undefined),
-  repos: (v) => {
-    if (v === null) return null;
-    if (typeof v !== 'object' || Array.isArray(v)) return undefined;
-    // an entry this version can't read is dropped on its own; the rest are kept
-    const out: Record<string, RepoChoice> = {};
-    for (const [id, c] of Object.entries(v as Record<string, any>)) {
-      if (typeof c?.served === 'boolean' && (c.merge === 'runner' || c.merge === 'me') && typeof c.seen === 'boolean') {
-        out[id] = { served: c.served, merge: c.merge, seen: c.seen };
-      }
-    }
-    return out;
-  },
+  repos: (v) => repoChoices(v, false),
 };
 const KEYS = Object.keys(CHECKS) as (keyof Settings)[];
 
@@ -85,7 +88,8 @@ export class SettingsStore {
     }
     const settings: Record<string, unknown> = { ...DEFAULT_SETTINGS };
     for (const k of KEYS) {
-      const kept = k in saved ? CHECKS[k](saved[k]) : undefined;
+      // a saved repo entry this version can't read is dropped on its own; the rest are kept
+      const kept = !(k in saved) ? undefined : k === 'repos' ? repoChoices(saved[k], true) : CHECKS[k](saved[k]);
       if (kept !== undefined) settings[k] = kept;
     }
     return new SettingsStore(file, settings as Settings);

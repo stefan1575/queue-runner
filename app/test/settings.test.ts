@@ -132,4 +132,11 @@ describe('the settings', () => {
     await writeFile(join(folder, 'settings.json'), JSON.stringify({ repos: { p1: { served: true, merge: 'runner', seen: true }, p2: { merge: 'sideways' } } }));
     expect((await SettingsStore.open(folder)).get().repos).toEqual({ p1: { served: true, merge: 'runner', seen: true } });
   });
+
+  test('a change with a bad repo entry is refused whole, not trimmed', async () => {
+    const store = await SettingsStore.open(await temp());
+    await store.update(() => ({ repos: { p1: { served: true, merge: 'runner', seen: true } } }));
+    await expect(store.update((s) => ({ repos: { ...s.repos, p2: { served: 'yes', merge: 'me', seen: true } as never } }))).rejects.toThrow(SettingsError);
+    expect(store.get().repos).toEqual({ p1: { served: true, merge: 'runner', seen: true } });
+  });
 });
