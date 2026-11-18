@@ -32,7 +32,7 @@ bash = "C:/Program Files/Git/bin/bash.exe"
 # Who reviews every PR (issue #76): "claude" (an Opus thread in T3 at [claude]'s model and effort,
 # through the usage gate) or "chatgpt" (Sol, the default; Opus steps in only while Sol is out of
 # usage). Stefan, 2026-11-16: "Claude for now, until I say so, a full override"; later that day,
-# with ChatGPT's usage back: "turn on 6.1 Sol high now".
+# with ChatGPT's usage back: "turn on 6.1 Sol high now"; 2026-11-19: Sol is GPT-6.2 Sol, at high.
 [review]
 provider = "chatgpt"
 # An Opus review starts on this T3 provider instance, launched with no MCP tools, so it gets what a

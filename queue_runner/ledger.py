@@ -476,7 +476,7 @@ def decide(repo: str, n: int, sha: str, rnd: int, earlier: list[dict], has_revie
     # The heading keeps its `## Sol review N · V` start (the review loop's name, and HEADING's).
     byline = (f"Reviewed by {reviewer}: Claude reviewed in Sol's place, in a T3 thread, from "
               f'the same brief, on {sha[:7]}{scope}{guide}' if reviewer else
-              f'GPT-6.1 Sol at effort high, read-only, on {sha[:7]}{scope}{guide}')
+              f'GPT-6.2 Sol at effort high, read-only, on {sha[:7]}{scope}{guide}')
     body = (f'## Sol review {rnd} · {verdict.capitalize()}'
             + (f' · {reviewer}' if reviewer else '') + '\n\n'
             f"<sub>{byline}. Posted by the queue runner from Stefan's PC.</sub>\n\n"

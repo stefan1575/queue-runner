@@ -218,7 +218,7 @@ def build(name: str = DEFAULT, base: datetime | None = None, control: dict | Non
                              "effect": "Cuts the thread off. Its branch stays, and the job carries on later from where it stopped."},
             },
             {
-                "id": "sol", "provider": "chatgpt", "name": "ChatGPT", "does": "reviews", "model": "GPT-6.1 Sol",
+                "id": "sol", "provider": "chatgpt", "name": "ChatGPT", "does": "reviews", "model": "GPT-6.2 Sol",
                 "state": "working",
                 "job": {"kind": "review", "repo": LD, "ref": "PR #210", "title": "Callers list: filter by tag",
                         "started_at": ago(12), "sha": "4be91c2", "pr": 210, "thread": None},
