@@ -80,6 +80,19 @@ class AskCase(unittest.TestCase):
 
 
 class StuckTest(AskCase):
+    def test_a_stop_on_owed_screenshots_says_only_stefan_can_take_them(self):
+        self.built()
+        why = ('review 2 on bbbbbbb: only screenshots block it, and F3 is owed: states only '
+               "Stefan can reach (a UAC prompt), so a fix round can't take them")
+        self.review(2, H2, 'stop', [finding('F1', 'Stale owner', 'fixed', 1),
+                                    finding('F3', 'UAC state lacks screenshots', 'open', 2)],
+                    signals=[('screenshots-owed', why[19:])])
+        self.job('stop', 152, 'filed', sha=H2, stop='review', reason=why,
+                 link='https://github.com/owner/first/issues/30')
+        [ask] = self.snap()['asks']
+        self.assertEqual(ask['situation'],
+                         'Review 2 is blocking only on screenshots that only you can take.')
+
     def test_a_review_stop_is_stuck_and_reads_cold(self):
         self.built()
         why = 'review 2 on bbbbbbb: F3 repeats the class "Stale owner" of F1, raised in review 1'

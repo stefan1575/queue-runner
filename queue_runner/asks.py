@@ -391,7 +391,9 @@ def _stop_ask(story, w, repo) -> dict:
                      if 'repeated-class' in signals else
                      f'Review {r} found a fixed problem back again.' if 'reopened' in signals
                      else f'Review {r} kept open a finding Claude had declined.'
-                     if 'decline-kept' in signals else f'Review {r or ""} stopped the loop for '
+                     if 'decline-kept' in signals else
+                     f'Review {r} is blocking only on screenshots that only you can take.'
+                     if 'screenshots-owed' in signals else f'Review {r or ""} stopped the loop for '
                      'you.'.replace('Review  ', 'The review '))
     elif s.stop == 'approach-note':
         k = story.fix_rounds(w.repo, n)

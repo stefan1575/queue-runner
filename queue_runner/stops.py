@@ -81,6 +81,7 @@ SIGNALS = {   # decide()'s stop signals, when the review's run folder can't say 
     'repeated-class': 'a new Important finding repeats an earlier class',
     'reopened': 'a fixed finding came back',
     'decline-kept': 'Sol kept a decline open',
+    'screenshots-owed': 'only screenshots block it, of states only Stefan can reach',
 }
 
 
