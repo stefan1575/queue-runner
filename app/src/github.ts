@@ -2,6 +2,7 @@
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
+import type { GitHubPosts, OpenIssue } from './review/post.ts';
 
 export type Remote = { nameWithOwner: string; url: string };
 
@@ -56,17 +57,43 @@ export interface GitHubWork {
   defaultBranch(repo: string): Promise<string>;
 }
 
+/** An open PR as the review lane reads it (#155): its head commit and its base branch. */
+export type ReviewPull = { number: number; title: string; body: string; branch: string; base: string; headSha: string; draft: boolean; url: string };
+/** The checks on one commit, `sol-review` not counted: none reported, still running, one failed,
+ *  or every one passed (success, neutral or skipped). */
+export type Checks = { state: 'none' | 'pending' | 'failed' | 'passed'; pending: string[]; failed: string[] };
+export type ReviewComment = Comment & { path?: string | null; line?: number | null };
+
+/** What the review lane reads on GitHub (#155; today's `queue_runner/github.py`). Each is a
+ *  GitHubError when gh fails. */
+export interface GitHubReview {
+  pullsToReview(repo: string): Promise<ReviewPull[]>;
+  checks(repo: string, sha: string): Promise<Checks>;
+  /** An issue's title and body, in any repo. */
+  issue(repo: string, n: number): Promise<{ title: string; body: string }>;
+  issueComments(repo: string, n: number): Promise<Comment[]>;
+  /** A PR's review-thread comments and its reviews' bodies (its other comments are issueComments). */
+  reviewReplies(repo: string, n: number): Promise<ReviewComment[]>;
+}
+
+const PASSED = new Set(['success', 'neutral', 'skipped']);
+/** The status the review sets on the commit it reviewed: never one of the checks it waits for. */
+const REVIEW_STATUS = 'sol-review';
+
 /** One gh run: its exit code and both streams. A gh that can't be started (not installed) or
  *  is killed (the timeout) is a code that isn't 0, with why in `stderr`. */
-export type Gh = (args: string[], cwd: string) => Promise<{ code: number; stdout: string; stderr: string }>;
+export type Gh = (args: string[], cwd: string, input?: string) => Promise<{ code: number; stdout: string; stderr: string }>;
 
-export const ghAt = (program: string): Gh => (args, cwd) => new Promise((resolve) => {
-  execFile(program, args, { cwd, timeout: 60_000, env: { ...process.env, GH_PROMPT_DISABLED: '1' } },
+export const ghAt = (program: string): Gh => (args, cwd, input) => new Promise((resolve) => {
+  const child = execFile(program, args, { cwd, timeout: 60_000, env: { ...process.env, GH_PROMPT_DISABLED: '1' } },
     (error, stdout, stderr) => {
       const code = error ? (typeof error.code === 'number' ? error.code : -1) : 0;
       const why = error && typeof error.code !== 'number' ? `${error.message}\n` : '';
       resolve({ code, stdout: String(stdout), stderr: why + String(stderr) });
     });
+  // a body goes on stdin (`--input -`), never the command line, which Windows caps at 32K
+  child.stdin?.on('error', () => {}); // a gh that never started: its error is the exit's
+  child.stdin?.end(input ?? '');
 });
 export const ghCli: Gh = ghAt('gh');
 
@@ -88,7 +115,7 @@ query($owner: String!, $name: String!, $endCursor: String) {
   }
 }`;
 
-export class GhGitHub implements GitHub, GitHubAccount, GitHubLabels, GitHubWork {
+export class GhGitHub implements GitHub, GitHubAccount, GitHubLabels, GitHubWork, GitHubReview, GitHubPosts {
   private gh: Gh;
   private exists: (folder: string) => boolean;
   constructor(gh: Gh = ghCli, exists: (folder: string) => boolean = existsSync) {
@@ -149,8 +176,8 @@ export class GhGitHub implements GitHub, GitHubAccount, GitHubLabels, GitHubWork
   }
 
   /** `gh api` with its JSON answer. */
-  private async api(args: string[], what: string): Promise<any> {
-    const { code, stdout, stderr } = await this.gh(['api', ...args], homedir());
+  private async api(args: string[], what: string, input?: string): Promise<any> {
+    const { code, stdout, stderr } = await this.gh(['api', ...args], homedir(), input);
     if (code !== 0) throw new GitHubError(`gh api ${what} failed (${code}): ${firstLine(stderr)}`);
     try {
       return JSON.parse(stdout);
@@ -219,5 +246,75 @@ export class GhGitHub implements GitHub, GitHubAccount, GitHubLabels, GitHubWork
     const r = await this.api([`repos/${repo}`], repo);
     if (typeof r?.default_branch !== 'string') throw new GitHubError(`gh api ${repo} named no default branch`);
     return r.default_branch;
+  }
+
+  /** `gh api` writing: the fields as a JSON body on stdin. */
+  private write(method: string, endpoint: string, fields: Record<string, unknown>): Promise<any> {
+    return this.api(['-X', method, endpoint, '--input', '-'], `${method} ${endpoint}`, JSON.stringify(fields));
+  }
+
+  async pullsToReview(repo: string) {
+    const pulls = await this.all(`repos/${repo}/pulls?state=open&per_page=100`);
+    return pulls.map((p) => ({
+      number: p.number, title: p.title ?? '', body: p.body ?? '', branch: p.head?.ref ?? '', base: p.base?.ref ?? '',
+      headSha: p.head?.sha ?? '', draft: p.draft === true, url: p.html_url ?? '',
+    }));
+  }
+
+  async checks(repo: string, sha: string) {
+    const runs = await this.api([`repos/${repo}/commits/${sha}/check-runs?per_page=100`], `${repo} check runs`);
+    const status = await this.api([`repos/${repo}/commits/${sha}/status`], `${repo} statuses`);
+    const seen: [string, string][] = [
+      ...(runs?.check_runs ?? []).map((r: any): [string, string] => [r.name, r.status === 'completed' ? String(r.conclusion) : 'pending']),
+      ...(status?.statuses ?? []).filter((s: any) => s.context !== REVIEW_STATUS).map((s: any): [string, string] => [s.context, s.state]),
+    ];
+    const failed = seen.filter(([, s]) => !PASSED.has(s) && s !== 'pending').map(([n]) => n);
+    const pending = seen.filter(([, s]) => s === 'pending').map(([n]) => n);
+    const state: Checks['state'] = !seen.length ? 'none' : failed.length ? 'failed' : pending.length ? 'pending' : 'passed';
+    return { state, pending, failed };
+  }
+
+  async issue(repo: string, n: number) {
+    const i = await this.api([`repos/${repo}/issues/${n}`], `${repo}#${n}`);
+    return { title: i?.title ?? '', body: i?.body ?? '' };
+  }
+
+  async reviewReplies(repo: string, n: number) {
+    const threads = await this.all(`repos/${repo}/pulls/${n}/comments?per_page=100`);
+    const reviews = await this.all(`repos/${repo}/pulls/${n}/reviews?per_page=100`);
+    return [
+      ...threads.map((c) => ({ author: c.user?.login ?? 'ghost', createdAt: c.created_at ?? '', body: c.body ?? '', path: c.path ?? null, line: c.line ?? c.original_line ?? null })),
+      ...reviews.filter((r) => r.body && r.submitted_at).map((r) => ({ author: r.user?.login ?? 'ghost', createdAt: r.submitted_at, body: r.body })),
+    ];
+  }
+
+  async openIssues(repo: string): Promise<OpenIssue[]> {
+    const issues = await this.all(`repos/${repo}/issues?state=open&per_page=100`);
+    return issues.filter((i) => !('pull_request' in i)).map((i) => ({ number: i.number, title: i.title ?? '', body: i.body ?? '', url: i.html_url ?? '' }));
+  }
+
+  async createIssue(repo: string, title: string, body: string, labels: string[]) {
+    // REST makes a label it doesn't have yet, so a repo without `needs-triage` still gets the issue
+    const i = await this.write('POST', `repos/${repo}/issues`, { title, body, labels });
+    if (typeof i?.html_url !== 'string') throw new GitHubError(`gh api POST repos/${repo}/issues named no issue`);
+    return i.html_url;
+  }
+
+  async postComment(repo: string, n: number, body: string) {
+    const c = await this.write('POST', `repos/${repo}/issues/${n}/comments`, { body });
+    if (typeof c?.html_url !== 'string') throw new GitHubError(`gh api POST ${repo}#${n} comments named no comment`);
+    return c.html_url;
+  }
+
+  async setStatus(repo: string, sha: string, context: string, state: string, description: string, url: string) {
+    await this.write('POST', `repos/${repo}/statuses/${sha}`, { state, context, description, target_url: url });
+  }
+
+  async pullBody(repo: string, n: number) {
+    return (await this.api([`repos/${repo}/pulls/${n}`], `${repo}#${n}`))?.body ?? '';
+  }
+
+  async editPullBody(repo: string, n: number, body: string) {
+    await this.write('PATCH', `repos/${repo}/pulls/${n}`, { body });
   }
 }
