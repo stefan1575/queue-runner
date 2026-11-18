@@ -4,7 +4,7 @@
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, test } from 'vitest';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { T3ProjectFeed } from '../src/t3/project-feed.ts';
 import { runtimeAddress } from '../src/t3/real.ts';
 import { T3Ws } from '../src/t3/ws.ts';
@@ -35,44 +35,40 @@ function feed() {
   feeds.push(f);
   return f;
 }
-const settle = () => new Promise((r) => setTimeout(r, 20));
 const ids = (f: T3ProjectFeed) => f.current()?.map((p) => p.id) ?? null;
 
 describe("T3's projects", () => {
   test("start from T3's snapshot, threads ignored", async () => {
     const f = feed();
     expect(f.current()).toBeNull();
-    await settle();
+    await vi.waitFor(() => expect(f.current()).not.toBeNull());
     expect(f.current()).toEqual([{ id: 'p1', title: 'sandbox', folder: 'C:/sandbox' }]);
     expect(t3.frames.filter((m) => m._tag === 'Request').map((m) => m.tag)).toEqual(['subscribeShell']);
   });
 
   test('a project added or removed in T3 shows up or goes, and each change is told', async () => {
     const f = feed();
-    await settle();
+    await vi.waitFor(() => expect(ids(f)).toEqual(['p1']));
     let told = 0;
     f.onChange(() => { told++; });
     t3.addProject({ id: 'p2', title: 'blog', workspaceRoot: 'C:/blog' });
-    await settle();
-    expect(ids(f)).toEqual(['p1', 'p2']);
+    await vi.waitFor(() => expect(ids(f)).toEqual(['p1', 'p2']));
     t3.removeProject('p1');
-    await settle();
-    expect(ids(f)).toEqual(['p2']);
+    await vi.waitFor(() => expect(ids(f)).toEqual(['p2']));
     expect(told).toBe(2);
   });
 
   test('a stream T3 ends is opened again, and its new snapshot replaces the old list', async () => {
     const f = feed();
-    await settle();
+    await vi.waitFor(() => expect(ids(f)).toEqual(['p1']));
     t3.endShells();
     t3.projects = [{ id: 'p3', title: 'other', workspaceRoot: 'C:/other' }];
-    await settle();
+    await vi.waitFor(() => expect(retries).toHaveLength(1));
     expect(f.error()).toMatch(/T3's WebSocket closed/);
     expect(ids(f)).toEqual(['p1']); // the last list stays while T3 is away
     expect(retries).toHaveLength(1);
     retries[0]!();
-    await settle();
-    expect(ids(f)).toEqual(['p3']);
+    await vi.waitFor(() => expect(ids(f)).toEqual(['p3']));
     expect(f.error()).toBeNull();
     expect(t3.shellCount).toBe(1);
   });
@@ -80,9 +76,8 @@ describe("T3's projects", () => {
   test('T3 not running leaves no list and says why, and is tried again', async () => {
     await rm(join(dir, 'server-runtime.json'));
     const f = feed();
-    await settle();
+    await vi.waitFor(() => expect(retries).toHaveLength(1));
     expect(f.current()).toBeNull();
     expect(f.error()).toMatch(/T3's server isn't running/);
-    expect(retries).toHaveLength(1);
   });
 });

@@ -181,14 +181,11 @@ export class FakeT3 {
         const msg = JSON.parse(request.body ?? '{}');
         if (msg.method === 'initialize') return json(200, { jsonrpc: '2.0', id: msg.id, result: {} }, { 'mcp-session-id': 'mcp-1' });
         if (msg.id === undefined) return { status: 202, headers: {}, text: '' };
-        if (msg.method === 'tools/call' && msg.params.name === 't3_project_list') {
-          const { cursor, limit } = msg.params.arguments;
-          const projects = this.projects.slice(cursor, cursor + limit);
-          const next = cursor + limit < this.projects.length ? cursor + limit : null;
-          const data = `data: ${JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { structuredContent: { projects, nextCursor: next } } })}\n\n`;
-          return { status: 200, headers: { 'content-type': 'text/event-stream' }, text: data };
-        }
-        return json(200, { jsonrpc: '2.0', id: msg.id, result: { isError: true, content: [{ text: '{"code":"unknown","message":"no such tool"}' }] } });
+        if (msg.method !== 'tools/call') return json(200, { jsonrpc: '2.0', id: msg.id, error: { message: 'unknown method' } });
+        const done = this.tool(msg.params.name, msg.params.arguments);
+        if (done.failure) return json(200, { jsonrpc: '2.0', id: msg.id, result: { isError: true, content: [{ text: JSON.stringify(done.failure) }] } });
+        const data = `data: ${JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { structuredContent: done.result } })}\n\n`;
+        return { status: 200, headers: { 'content-type': 'text/event-stream' }, text: data };
       }
     }
     return json(404, { error: 'not found' });

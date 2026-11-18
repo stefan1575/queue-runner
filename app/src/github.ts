@@ -22,6 +22,17 @@ export interface GitHubAccount {
   account(): Promise<Account>;
 }
 
+const firstLine = (text: string) => text.trim().split(/\r?\n/)[0] || 'no message';
+
+export type Label = { name: string; color: string; description: string };
+
+export interface GitHubLabels {
+  /** Every label's name in a repo (`owner/name`). A GitHubError when gh fails. */
+  labelNames(repo: string): Promise<string[]>;
+  /** Creates a label; one that's already there is left as it is. A GitHubError when gh fails. */
+  createLabel(repo: string, label: Label): Promise<void>;
+}
+
 /** One gh run: its exit code and both streams. A gh that can't be started (not installed) or
  *  is killed (the timeout) is a code that isn't 0, with why in `stderr`. */
 export type Gh = (args: string[], cwd: string) => Promise<{ code: number; stdout: string; stderr: string }>;
@@ -44,7 +55,7 @@ const NO_REPO = [
   /no git remotes found/,
 ];
 
-export class GhGitHub implements GitHub, GitHubAccount {
+export class GhGitHub implements GitHub, GitHubAccount, GitHubLabels {
   private gh: Gh;
   private exists: (folder: string) => boolean;
   constructor(gh: Gh = ghCli, exists: (folder: string) => boolean = existsSync) {
@@ -81,5 +92,26 @@ export class GhGitHub implements GitHub, GitHubAccount {
     }
     if (typeof user?.login !== 'string') throw new GitHubError('gh api user named no login');
     return { login: user.login, name: typeof user.name === 'string' && user.name.trim() ? user.name.trim() : null };
+  }
+
+  async labelNames(repo: string): Promise<string[]> {
+    const { code, stdout, stderr } = await this.gh(['label', 'list', '--repo', repo, '--json', 'name', '--limit', '1000'], homedir());
+    if (code !== 0) throw new GitHubError(`gh label list failed (${code}) for ${repo}: ${firstLine(stderr)}`);
+    let labels: any;
+    try {
+      labels = JSON.parse(stdout);
+    } catch {
+      throw new GitHubError(`gh label list printed no JSON for ${repo}: ${stdout.slice(0, 200)}`);
+    }
+    if (!Array.isArray(labels)) throw new GitHubError(`gh label list printed no list for ${repo}`);
+    return labels.map((l) => l?.name).filter((n): n is string => typeof n === 'string');
+  }
+
+  async createLabel(repo: string, label: Label): Promise<void> {
+    const { code, stderr } = await this.gh(
+      ['label', 'create', label.name, '--repo', repo, '--color', label.color, '--description', label.description], homedir());
+    // made meanwhile by someone else: it's there, and it's theirs to keep as it is
+    if (code === 0 || /already exists/.test(stderr)) return;
+    throw new GitHubError(`gh label create ${label.name} failed (${code}) for ${repo}: ${firstLine(stderr)}`);
   }
 }
