@@ -24,7 +24,7 @@ HAND_MARK = re.compile(r'<!-- sol-review round=(\d+) head=([0-9a-f]{7,40}) -->')
 HEADING = re.compile(r'^## Sol review (\d+)\s*\S\s*(Clean|Blocking)\b', re.I | re.M)
 FENCE = re.compile(r'^[ \t]*```+[ \t]*sol-findings[ \t]*\r?\n(.*?)^[ \t]*```+[ \t]*$', re.M | re.S)
 TAGS = {'important': 'Important', 'nit': 'Nit', 'pre-existing': 'Pre-existing'}
-FIELDS = ('id', 'tag', 'class', 'file', 'line', 'scenario', 'cost', 'rule')
+FIELDS = ('id', 'tag', 'class', 'file', 'line', 'scenario', 'cost', 'rule', 'screenshots')
 MAX_NITS = 5
 # A finding's status. Sol gives an earlier open finding one of STATUSES; a new finding is open,
 # or filed when pre-existing. decline-kept stays apart from open: it goes to Stefan.
@@ -35,6 +35,14 @@ OPEN = ('open', 'decline-kept')
 # (docs/flow.md: no fourth review without his answer). The old script did it at review 3 only,
 # with its spend guard behind it; with that guard gone, every later blocking review does too.
 APPROACH_REVIEW = 3
+# A finding about screenshots alone says which kind it is (`screenshots`, templates/review.md):
+# `missing` (absent or wrong, and a fix round can shoot them) or `owed` (a state only Stefan can
+# reach, a UAC prompt). Neither is a defect in the code, so neither counts against the approach:
+# a review blocking only on missing ones gets a fix round from review 3 on too, for up to
+# SHOT_ROUNDS such reviews in a row (game-backdrop #14 needed three: reviews 4 to 6), and one
+# blocking only on screenshots with any owed goes straight to Stefan, who alone can take them.
+SHOTS = ('missing', 'owed')
+SHOT_ROUNDS = 3
 # Every comment the runner posts outside a review carries a hidden line starting with this: the
 # runner's own post, never a reply from Stefan, though it's on his account.
 RUNNER_MARK = '<!-- queue-runner '
@@ -154,8 +162,9 @@ def state(earlier: list[dict]) -> list[dict]:
 def escalation(reviews: list[dict]) -> str | None:
     """Why the newest of the PR's reviews (read_reviews()) went to Stefan rather than to a fix
     round, read from the ledgers alone, as decide() would have said: a kept decline, a closed
-    finding reopened, a new Important finding in an earlier class, or review 3 or later still
-    blocking (an Approach note). None if it only says fix."""
+    finding reopened, a new Important finding in an earlier class, screenshots only Stefan can
+    take, or review 3 or later still blocking (an Approach note) unless only on screenshots a fix
+    round can take (route()). None if it only says fix."""
     if not reviews:
         return None
     now, before = state(reviews), {f['id']: f for f in state(reviews[:-1])}
@@ -168,9 +177,13 @@ def escalation(reviews: list[dict]) -> str | None:
         return f'a finding reopened ({", ".join(back)})'
     seen = {norm(p['class']) for p in before.values() if p['tag'] == 'important'
             and norm(p['class'])}
-    if rep := [f['id'] for f in important if f['id'] not in before and norm(f['class']) in seen]:
+    if rep := [f['id'] for f in important if f['id'] not in before and norm(f['class']) in seen
+               and not shot_kind(f.get('screenshots'))]:
         return f'an earlier class repeated ({", ".join(rep)})'
-    if important and rnd >= APPROACH_REVIEW:
+    way = route(important, rnd, shot_streak(reviews))
+    if way == 'owed':
+        return f'screenshots only Stefan can take ({", ".join(f["id"] for f in important)})'
+    if way == 'approach-note':
         return f'review {rnd} still blocking (an Approach note)'
     return None
 
@@ -178,6 +191,43 @@ def escalation(reviews: list[dict]) -> str | None:
 def norm(c: str) -> str:
     """A class name as reviews compare it: lower case, words only."""
     return ' '.join(re.findall(r'[^\W_]+', (c or '').lower()))
+
+
+def shot_kind(v) -> str:
+    """A finding's `screenshots` as SHOTS has it: `owed`, `missing`, or '' (not about screenshots
+    alone). Sol writing true, yes or anything else means missing."""
+    v = _text(v).lower()
+    return v if v in SHOTS else '' if v in ('', 'false', 'no', 'none', '0') else 'missing'
+
+
+def shots_only(important: list[dict]) -> bool:
+    """Every open Important finding is about screenshots alone (and there is one)."""
+    return bool(important) and all(shot_kind(f.get('screenshots')) for f in important)
+
+
+def shot_streak(reviews: list[dict]) -> int:
+    """How many of the newest reviews in a row blocked on screenshots alone."""
+    n = 0
+    for r in reversed(reviews):
+        if not shots_only([f for f in state([r]) if f['tag'] == 'important'
+                           and f['status'] in OPEN]):
+            break
+        n += 1
+    return n
+
+
+def route(important: list[dict], rnd: int, streak: int) -> str:
+    """Where a review with no stop signal goes: `owed` (to Stefan, for screenshots only he can
+    take), `approach-note`, `fix` or `merge`. `important` is the open Important findings and
+    `streak` counts this review (shot_streak())."""
+    if not important:
+        return 'merge'
+    if shots_only(important):
+        if any(shot_kind(f.get('screenshots')) == 'owed' for f in important):
+            return 'owed'
+        if streak <= SHOT_ROUNDS:
+            return 'fix'
+    return 'approach-note' if rnd >= APPROACH_REVIEW else 'fix'
 
 
 # --- Sol's reply ----------------------------------------------------------------------------------
@@ -213,6 +263,7 @@ def parse_findings(reply: str) -> tuple[list[dict], str]:
             raise SolFailed(f'Two findings have the id {g["id"]}.')
         m = re.match(r'L?(\d+)', g['line'])
         g['line'] = int(m[1]) if m and int(m[1]) > 0 else None
+        g['screenshots'] = shot_kind(g['screenshots'])
         found.append(g)
     return found, FENCE.sub('', reply).strip()
 
@@ -418,15 +469,18 @@ def decide(repo: str, n: int, sha: str, rnd: int, earlier: list[dict], has_revie
     important = [f['id'] for f in now if f['tag'] == 'important' and f['status'] in OPEN]
     verdict = 'blocking' if important else 'clean'
 
-    # The outcome, in order: stop on any signal; the approach note from review 3 if still
-    # blocking; merge if clean; fix otherwise.
+    # The outcome, in order: stop on any signal (screenshots only Stefan can take among them);
+    # the approach note from review 3 if still blocking, unless only on screenshots a fix round
+    # can take (route()); merge if clean; fix otherwise.
     seen = {}
     for p in prior:
         if p['tag'] == 'important' and norm(p['class']):
             seen.setdefault(norm(p['class']), p)
     signals = []
+    # A screenshot finding names no cause in the code, so a new one isn't a class repeating.
     if rep := [(f, seen[norm(f['class'])]) for f in found
-               if f['id'] not in before and f['tag'] == 'important' and norm(f['class']) in seen]:
+               if f['id'] not in before and f['tag'] == 'important' and norm(f['class']) in seen
+               and not f['screenshots']]:
         signals.append({'signal': 'repeated-class', 'ids': [f['id'] for f, _ in rep],
                         'text': '; '.join(f'{f["id"]} repeats the class "{p["class"]}" of '
                                           f'{p["id"]}, raised in review {p["raised"]}'
@@ -438,8 +492,20 @@ def decide(repo: str, n: int, sha: str, rnd: int, earlier: list[dict], has_revie
     if kept:
         signals.append({'signal': 'decline-kept', 'ids': kept,
                         'text': f'Sol kept the decline of {", ".join(kept)} open'})
-    outcome = ('stop' if signals else 'approach-note' if important and rnd >= APPROACH_REVIEW
-               else 'fix' if important else 'merge')
+    open_ = [f for f in now if f['tag'] == 'important' and f['status'] in OPEN]
+    streak = shot_streak([*earlier, {'round': rnd, 'findings': now}])
+    way = route(open_, rnd, streak)
+    if way == 'owed' and not signals:
+        owed = [f['id'] for f in open_ if shot_kind(f.get('screenshots')) == 'owed']
+        signals.append({'signal': 'screenshots-owed', 'ids': [f['id'] for f in open_],
+                        'text': f'only screenshots block it, and {", ".join(owed)} '
+                                f'{"is" if len(owed) == 1 else "are"} owed: states only Stefan '
+                                "can reach (a UAC prompt), so a fix round can't take them"})
+    outcome = 'stop' if signals else way
+    if outcome == 'fix' and rnd >= APPROACH_REVIEW:
+        notes.append('Only screenshots block it, so this is no strike against the approach: '
+                     f'review {rnd} goes back to a fix round to shoot them ({streak} of '
+                     f'{SHOT_ROUNDS} such reviews in a row).')
     notes.append('**Next:** ' + {
         'stop': 'the loop stops here for Stefan: ' + '; '.join(s['text'] for s in signals) + '.',
         'approach-note': f'review {rnd} is still blocking, so an approach note goes to Stefan '
