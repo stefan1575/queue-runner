@@ -4,7 +4,8 @@ A push that updates main runs the Python tests and the app's typecheck and tests
 if any fails: GitHub can't require checks before a push to this private repo, so CI would only
 see a broken main after it landed (#169). A push to any other branch isn't checked, so build and
 fix threads aren't slowed. The tests run in this checkout, so the commit pushed to main must be
-the one checked out, with no changes to tracked files; otherwise the push is refused and says so.
+the one checked out, with no changed, staged or untracked files (ignored ones aside: dependencies
+and build output); otherwise the push is refused and says so.
 
 Git gives the hook `<remote> <url>` as arguments and one line per ref on stdin:
 `<local ref> <local sha> <remote ref> <remote sha>`.
@@ -53,9 +54,18 @@ def main(lines, run=subprocess.run, checks=checks, git=git, say=say_err):
     sha = pushed_to_main(lines)
     if sha is None:
         return 0
-    if git('rev-parse', 'HEAD') != sha or git('status', '--porcelain', '--untracked-files=no'):
+    if git('rev-parse', 'HEAD') != sha:
         say(f'pre-push: refused: the tests run in this checkout, so check out {sha[:7]}, the commit '
-            'you push to main, with no changes to tracked files, and push again')
+            'you push to main, and push again')
+        return 1
+    # The checks run every file here, so any file the commit lacks (changed, staged or untracked)
+    # would be tested in its place. Ignored files are dependencies and build output.
+    unlike = git('status', '--porcelain', '--untracked-files=all')
+    if unlike:
+        files = ', '.join(line.split(None, 1)[-1] for line in unlike.splitlines())
+        say(f'pre-push: refused: the tests run in this checkout, which differs from {sha[:7]}, the '
+            f'commit you push to main, in changed or untracked files ({files}); commit, remove or '
+            'ignore them and push again')
         return 1
     for command in checks():
         say(f'pre-push: main moves to {sha[:7]}: {" ".join(command[1:])}')

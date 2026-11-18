@@ -15,6 +15,9 @@ import pre_push  # noqa: E402
 A = 'a' * 40
 B = 'b' * 40
 ZERO = '0' * 40
+NL = chr(10)
+NEEDS_HELPER = NL.join(['import unittest', 'from helper import ok', '', 'class T(unittest.TestCase):',
+                         '    def test_it(self):', '        self.assertTrue(ok)', ''])
 
 
 class Run:
@@ -81,6 +84,12 @@ class DecideTest(unittest.TestCase):
         code, _ = self.main([f'refs/heads/x {A} refs/heads/main {B}'], run, git=fake_git(status=' M x.py'))
         self.assertEqual((code, run.commands), (1, []))
 
+    def test_untracked_files_are_refused_untested(self):
+        run = Run([])
+        code, said = self.main([f'refs/heads/x {A} refs/heads/main {B}'], run, git=fake_git(status='?? helper.py'))
+        self.assertEqual((code, run.commands), (1, []))
+        self.assertIn('helper.py', said[0])
+
     def test_a_check_that_cant_start_refuses(self):
         def run(command, env):
             raise FileNotFoundError('no pnpm')
@@ -121,6 +130,47 @@ class RealPushTest(unittest.TestCase):
         self.assertNotEqual(pushed.returncode, 0)
         self.assertIn('pre-push: refused: -m unittest failed', pushed.stderr)
         self.assertEqual(git('ls-remote', 'origin', 'main', cwd=self.repo).stdout, '')
+
+    def test_a_commit_missing_a_file_the_checkout_has_untracked_is_refused_untested(self):
+        # #173 F1: the committed test imports helper, which is only in the working directory, so
+        # the checks would pass on files the commit doesn't have.
+        self.commit({'test_broken.py': NEEDS_HELPER})
+        self.write('helper.py', 'ok = True' + NL)
+        pushed = git('push', 'origin', 'HEAD:main', cwd=self.repo)
+        self.assertNotEqual(pushed.returncode, 0)
+        self.assertIn('untracked', pushed.stderr)
+        self.assertIn('helper.py', pushed.stderr)
+        self.assertNotIn('main moves to', pushed.stderr)
+        self.assertEqual(git('ls-remote', 'origin', 'main', cwd=self.repo).stdout, '')
+
+    def test_an_untracked_file_in_a_new_folder_is_refused_untested(self):
+        # A second case: a whole untracked folder (git lists only the folder unless asked for files).
+        os.makedirs(os.path.join(self.repo, 'lib'))
+        self.write(os.path.join('lib', 'helper.py'), 'ok = True' + NL)
+        pushed = git('push', 'origin', 'HEAD:main', cwd=self.repo)
+        self.assertNotEqual(pushed.returncode, 0)
+        self.assertIn('lib/helper.py', pushed.stderr)
+        self.assertNotIn('main moves to', pushed.stderr)
+
+    def test_ignored_files_dont_block_the_push(self):
+        # Ignored files are dependencies and build output (node_modules/, __pycache__/), not source,
+        # so the checks run (and fail here on the committed failing test).
+        self.commit({'.gitignore': 'build/' + NL})
+        os.makedirs(os.path.join(self.repo, 'build'))
+        self.write(os.path.join('build', 'out.txt'), 'x' + NL)
+        pushed = git('push', 'origin', 'HEAD:main', cwd=self.repo)
+        self.assertIn('pre-push: refused: -m unittest failed', pushed.stderr)
+
+    def write(self, name, text):
+        with open(os.path.join(self.repo, name), 'w', encoding='utf-8') as f:
+            f.write(text)
+
+    def commit(self, files):
+        for name, text in files.items():
+            self.write(name, text)
+        for args in (['add', '.'], ['commit', '-qm', 'change']):
+            done = git(*args, cwd=self.repo)
+            self.assertEqual(done.returncode, 0, done.stderr)
 
     def test_a_push_to_another_branch_isnt_checked(self):
         pushed = git('push', 'origin', 'HEAD:feature', cwd=self.repo)

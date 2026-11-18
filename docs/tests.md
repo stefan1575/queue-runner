@@ -18,10 +18,13 @@ python3 scripts/install_hooks.py   # sets core.hooksPath to hooks/
 
 A push that updates `main` then runs `python3 -m unittest`, `pnpm --dir app typecheck` and
 `pnpm --dir app test` in the checkout pushing, and is refused when one fails
-(`scripts/pre_push.py`). The commit pushed must be the one checked out, with no changes to
-tracked files, or the push is refused untested. A push to any other branch isn't checked, so
+(`scripts/pre_push.py`). The commit pushed must be the one checked out, with no changed, staged
+or untracked files (the checks run every file in the checkout, so one the commit lacks would be
+tested in its place; ignored files are dependencies and build output), or the push is refused
+untested. A push to any other branch isn't checked, so
 build and fix threads aren't slowed. `tests/test_pre_push.py` covers it: the decision on fakes,
-then a real push from a temp repo with a failing test, refused to main and let through to a branch.
+then a real push from a temp repo with a failing test, refused to main and let through to a branch,
+and a commit missing a file the checkout has untracked, refused untested.
 
 ## What each file covers
 
