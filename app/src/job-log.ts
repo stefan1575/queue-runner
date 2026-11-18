@@ -10,6 +10,7 @@
 // - **Open jobs:** a start with no end, left by an app that stopped mid-job.
 import { appendFile, mkdir, readFile, truncate } from 'node:fs/promises';
 import { dirname } from 'node:path';
+import type { Cost, Reading } from './costs.ts';
 import type { JobKind, ModelChoice } from './jobs.ts';
 
 export type Outcome = 'done' | 'done-no-pr' | 'waiting' | 'usage-limit' | 'failed' | 'branch-exists' | 'not-started';
@@ -26,6 +27,11 @@ export type JobStart = {
   title: string;
   choice: ModelChoice;
   onFallback: boolean;
+  /** What the usage gate let the job in at, and T3's reading it was let in on: a job watched
+   *  again after a restart is reserved and measured from these. Absent on a line an older app
+   *  wrote, and on a job no gate let in (the live check's). */
+  cost?: Cost;
+  before?: Reading;
 };
 export type JobThread = { threadId: string; runId: string | null; link: string | null };
 export type JobEnd = {

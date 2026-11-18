@@ -47,7 +47,7 @@ class RoomyGate {
   calls: string[] = [];
   admits: { choice: ModelChoice; onFallback: boolean } = { choice: BUILD, onFallback: false };
   pick(id: string) { this.calls.push(`pick ${id}`); return { fits: true as const, ...this.admits, cost: { five_hour: 10 } }; }
-  check() { return { fits: true as const, cost: { five_hour: 10 } }; }
+  reading() { return { checkedAt: null, windows: {} }; }
   started(job: { id: string }) { this.calls.push(`started ${job.id}`); }
   finished(id: string) { this.calls.push(`finished ${id}`); }
   dropped(id: string) { this.calls.push(`dropped ${id}`); }
@@ -322,6 +322,71 @@ describe('an app that stopped mid-build', () => {
     await until(() => t3.launches.length === 1); // then app's next ticket
     expect(log.get(open.id)!.end?.outcome).toBe('done-no-pr');
     expect(organized()[0]).toEqual({ threadId: 'old-thread', action: 'settle' });
+  });
+});
+
+describe('an app that stopped mid-build, measured', () => {
+  let source: T3Catalog;
+  afterEach(() => source?.stop());
+
+  const readAt = async (checkedAt: string, used: number) => {
+    const providers = structuredClone(snapshot.config.providers);
+    for (const p of providers) {
+      if (!p.usageLimits) continue;
+      p.usageLimits.checkedAt = checkedAt;
+      for (const w of p.usageLimits.windows) w.usedPercent = used;
+    }
+    t3.pushConfig('providerStatuses', { providers });
+    await until(() => source.current().usage.some((u) => u.checkedAt === checkedAt));
+  };
+
+  test("a build watched again after a restart is measured from the reading it was let in on, at the cost it was let in at", async () => {
+    let now = new Date('2026-11-18T19:05:00Z');
+    const settings: Settings = { ...DEFAULT_SETTINGS, jobs };
+    source = T3Catalog.start(ws, 10);
+    await until(() => source.current().usage.length > 0);
+    await readAt('2026-11-18T19:04:30.000Z', 0);
+    const costs = join(dir, 'usage.jsonl');
+    gh.ready['owner/app'] = [issue(5)];
+    const gate = new UsageGate(source, () => settings, await CostLog.open(costs), () => now);
+    await makeLane({ gate, catalog: () => source.current().catalog }).pass();
+    expect(t3.launches).toHaveLength(1);
+    const admitted = log.jobs()[0]!;
+    expect(admitted.before).toMatchObject({ checkedAt: '2026-11-18T19:04:30.000Z' });
+    lane.stop();
+
+    // the app restarts mid-run, with the provider at 25% by now
+    now = new Date('2026-11-18T19:10:00Z');
+    await readAt('2026-11-18T19:09:00.000Z', 25);
+    log = await JobLog.open(join(dir, 'jobs.jsonl'));
+    const again = new UsageGate(source, () => settings, await CostLog.open(costs), () => now);
+    const started = vi.spyOn(again, 'started');
+    makeLane({ gate: again, catalog: () => source.current().catalog });
+    void lane.start();
+    await watching('thread-1');
+    // reserved at the cost it was let in at, not what the gate would ask of a new build at 25%
+    expect(started.mock.calls[0]![1]).toEqual(admitted.cost);
+    now = new Date('2026-11-18T19:20:00Z');
+    t3.endRun('thread-1', 'completed');
+    await until(() => log.get(admitted.id)!.end !== undefined);
+    await readAt('2026-11-18T19:30:00.000Z', 60);
+    await again.settled();
+    const [record] = (await CostLog.open(costs)).records();
+    expect(record).toMatchObject({ job: admitted.id, before: { checkedAt: '2026-11-18T19:04:30.000Z' } });
+    expect(Object.keys(record!.spent!).length).toBeGreaterThan(0);
+    expect(Object.values(record!.spent!)).toEqual(Object.values(record!.spent!).map(() => 60));
+  });
+
+  test('a build left open by an app older than this record is measured as teaching nothing, not from a reading mid-run', async () => {
+    const gate = new RoomyGate() as any;
+    const calls: unknown[][] = [];
+    gate.started = (...a: unknown[]) => calls.push(a);
+    const open = await log.started({ kind: 'build', repo: 'p-app', github: 'owner/app', issue: 5, branch: 'claude/x-5', base: 'origin/main', title: 'Queue runner build: app#5', choice: BUILD, onFallback: false });
+    await log.thread(open.id, { threadId: 'old-thread', runId: 'old-run', link: null });
+    t3.threadState['old-thread'] = { id: 'old-thread', projectId: 'p-app', runtimeRequests: [], turnItems: [], runs: [{ id: 'old-run', ordinal: 1, rootNodeId: 'n', status: 'running' }] };
+    void makeLane({ gate }).start();
+    await watching('old-thread');
+    expect(calls[0]![2]).toEqual({ checkedAt: null, windows: {} });
   });
 });
 

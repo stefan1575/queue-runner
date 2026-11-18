@@ -13,8 +13,10 @@
 // A job the log shows open, left by an app that stopped mid-job, is watched again to its end; one
 // that never got a thread is recorded not-started. A repo whose job started no thread rests
 // `restMs` before it's tried again. The usage the job was let in on and T3's first reading after
-// it are the gate's cost record (`usage.jsonl`, by the same job id).
+// it are the gate's cost record (`usage.jsonl`, by the same job id); both the reading and the cost
+// it was let in at are in its start line, so a job watched again after a restart keeps them.
 import { buildBrief } from './briefs/build.ts';
+import { reading } from './costs.ts';
 import { holdText } from './gate.ts';
 import type { GitHubWork } from './github.ts';
 import type { Git } from './git.ts';
@@ -40,7 +42,7 @@ export type BuildLaneDoors = {
   git: Git;
   mcp: Pick<T3Mcp, 'call'>;
   ws: Pick<T3Ws, 'subscribe'>;
-  gate: Pick<UsageGate, 'pick' | 'check' | 'started' | 'finished' | 'dropped' | 'forget'>;
+  gate: Pick<UsageGate, 'pick' | 'reading' | 'started' | 'finished' | 'dropped' | 'forget'>;
   catalog: () => Catalog | null;
   jobs: () => Jobs;
   /** The user's name for the brief (Settings, Name; else the gh account's). */
@@ -191,11 +193,12 @@ export class BuildLane {
     letIn: { choice: Job['choice']; onFallback: boolean; cost: Record<string, number> },
     onLaunched: () => void = () => {}): Promise<Job> {
     const n = ticket.issue.number;
+    const before = this.d.gate.reading(letIn.choice);
     const job = await this.d.log.started({
       kind: 'build', repo: repo.id, github: repo.github, issue: n, branch: ticket.branch, base: ticket.base,
-      title: jobTitle(repo, n), choice: letIn.choice, onFallback: letIn.onFallback,
+      title: jobTitle(repo, n), choice: letIn.choice, onFallback: letIn.onFallback, cost: letIn.cost, before,
     });
-    this.d.gate.started({ id: job.id, kind: 'build', choice: letIn.choice }, letIn.cost);
+    this.d.gate.started({ id: job.id, kind: 'build', choice: letIn.choice }, letIn.cost, before);
     const notStarted = async (outcome: 'not-started' | 'branch-exists', error: string) => {
       this.d.gate.dropped(job.id);
       this.resting.set(repo.id, this.now().getTime() + (this.d.restMs ?? 300_000));
@@ -236,8 +239,9 @@ export class BuildLane {
     if (!job.threadId) {
       return this.d.log.ended(job.id, { outcome: 'not-started', error: 'The app stopped before T3 named its thread.' });
     }
-    const v = this.d.gate.check({ id: job.id, kind: job.kind, choice: job.choice });
-    this.d.gate.started({ id: job.id, kind: job.kind, choice: job.choice }, v.fits ? v.cost : {});
+    // reserved and measured as it was let in; a line with no record of that (an older app's)
+    // teaches nothing rather than measure from a reading taken mid-run
+    this.d.gate.started({ id: job.id, kind: job.kind, choice: job.choice }, job.cost ?? {}, job.before ?? reading(null, []));
     this.d.say(`Watching ${job.title} again: ${job.link ?? job.threadId}`);
     return this.watch(job, job.github);
   }

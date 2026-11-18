@@ -65,7 +65,7 @@ const ticket = {
 
 const state = await mkdtemp(join(tmpdir(), 'qr-live-build-'));
 const log = await JobLog.open(join(state, 'jobs.jsonl'));
-const noGate = { pick: () => { throw new Error('not asked'); }, check: () => ({ fits: true as const, cost: {} }), started() {}, finished() {}, dropped() {}, forget() {} };
+const noGate = { pick: () => { throw new Error('not asked'); }, reading: () => ({ checkedAt: null, windows: {} }), started() {}, finished() {}, dropped() {}, forget() {} };
 const repo = { id: project.id, title: project.title, folder: project.workspaceRoot, github: null };
 const lane = new BuildLane({
   repos: () => [repo], github: new GhGitHub(), git: new GitCli(), mcp, ws, gate: noGate as any,
