@@ -125,7 +125,8 @@ Code both sides use (`display.ts`, `settings-search.ts`) touches no Node. The wi
   writes the file, and polls it (`fs.watchFile`, every 500 ms: it sees a file that's missing or
   replaced by a rename), telling the window when the format changes. A file that's missing or
   unreadable, or has no such key or a value T3 doesn't offer, is System default; a file that
-  turns to not-JSON while watched keeps the format for 2 s first (T3 caught mid-write). It goes once
+  turns to not-JSON while watched keeps the format until it has stayed that same file for 2 s
+  (T3 caught mid-write; each new write gets its own 2 s, and a whole read ends the wait). It goes once
   T3's server serves client settings. The app has no Time format setting of its own.
 
 ### Screenshots
