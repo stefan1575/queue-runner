@@ -15,7 +15,7 @@
     it builds first, is it up. The column between them is centred in the space they leave.
   - Three pages do three jobs. Overview is the first glance. Inbox is what waits on you. Queue is
     the work.
-  - PROTOTYPE, with sample data only (#30, take 19): the Queue as the lanes on top, one card
+  - PROTOTYPE, with sample data only (#30, take 20): the Queue as the lanes on top, one card
     split down the middle (what Claude and ChatGPT run now, then each one's queue, which opens and
     closes and is remembered; open, a window three rows tall that scrolls, so the card never
     grows), and the efforts below in four tabs, a line under the head saying what each is for.
@@ -31,7 +31,8 @@
     prototype's: it's take 12's here, and settled on its own branch, prototype/rail (#141).
     Take 18: the lanes two cards again, the page 1480px, quieter bars, and a drag where you hold
     the whole box inside its list. Take 19: the held box follows the pointer anywhere, and where
-    it lands is its shadow, the rows sliding aside. Take 18 is earlier/take-18.html.
+    it lands is its shadow, the rows sliding aside. Take 20: the cursor is the hitbox (past the
+    middle of the row under it, the shadow moves). Take 19 is earlier/take-19.html.
   - The Overview only summarises, in three cards read top to bottom: what's on your plate (the
     Inbox in counts by kind, and the ask that's first in line), what's running (a line per lane,
     with its Stop button and the one thing it takes up next), and what's next (a bar per
@@ -1321,8 +1322,8 @@ body.page-queue .top-col, body.page-queue main { max-width: 1480px; }
    its place is an empty slot of the same size, so nothing moves; a line marks where it lands. */
 .or[data-drag] > .or-row { cursor: grab; }
 body.q-dragging, body.q-dragging * { cursor: grabbing !important; user-select: none; }
-.or.held { background: none; border: 1.5px dashed var(--btn-line); }
-.or.held > * { visibility: hidden; }
+.or.lifted { background: none; border: 1.5px dashed var(--btn-line); }
+.or.lifted > * { visibility: hidden; }
 .or-lift { position: fixed; top: 0; left: 0; z-index: 90; margin: 0; pointer-events: none; list-style: none;
   background: var(--raised); border-color: var(--btn-line);
   box-shadow: 0 18px 42px rgba(0, 0, 0, .5), 0 4px 12px rgba(0, 0, 0, .35); }
@@ -1338,7 +1339,7 @@ body.q-dragging .can-drop { outline: none; }
 .drop-line[hidden] { display: none; }
 /* ---------------------------------------------------------------- take 19 (PROTOTYPE, #30) */
 /* The held box's place is its shadow: a soft blue slot the size of the box, where it will land. */
-.or.held { background: color-mix(in srgb, var(--you) 7%, transparent); border: 1.5px dashed color-mix(in srgb, var(--you) 45%, var(--line)); }
+.or.lifted { background: color-mix(in srgb, var(--you) 7%, transparent); border: 1.5px dashed color-mix(in srgb, var(--you) 45%, var(--line)); }
 .drop-line { display: none; }
 </style>
 </head>
@@ -2509,37 +2510,44 @@ function slide(change) {
     x.style.transform = "";
   }
 }
-// Which slot the held box is over, by its middle against the other rows' middles as they'd sit
-// without it. That never depends on where the shadow is now, so it can't flicker between two.
+// Take 20: the cursor is the hitbox, as in Stefan's new-tab extension. The row under the cursor
+// (by height only, so the cursor can be off to either side) decides: above its middle, the
+// shadow goes before it; below, after it. Over the shadow itself or a gap, nothing changes, which
+// keeps a tall box and a short row from swapping back and forth. Above the list it goes first,
+// below the list last. Rows are read where they sit, not where a slide is drawing them.
 function shadowAt(cy) {
-  const lr = lift.list.getBoundingClientRect(), gap = parseFloat(getComputedStyle(lift.list).rowGap) || 0;
-  let y = lr.top, at = 0;
-  for (const x of dragSibs()) {
-    const h = x.offsetHeight;
-    if (cy > y + h / 2) at++;
-    y += h + gap;
+  // Measured from the list's first row: the rows share an offset parent, the list may not.
+  const lr = lift.list.getBoundingClientRect(), base = lift.list.firstElementChild.offsetTop, sibs = dragSibs();
+  if (!sibs.length) return;
+  const at = (x) => { const top = lr.top + x.offsetTop - base; return { top, mid: top + x.offsetHeight / 2, bottom: top + x.offsetHeight }; };
+  let next;
+  if (cy < at(sibs[0]).top) next = sibs[0];
+  else if (cy > at(sibs[sibs.length - 1]).bottom) next = null;
+  else {
+    const over = sibs.find((x) => { const r = at(x); return cy >= r.top && cy <= r.bottom; });
+    if (!over) return;
+    next = cy < at(over).mid ? over : over.nextElementSibling === lift.el ? lift.el.nextElementSibling : over.nextElementSibling;
   }
-  const sibs = dragSibs(), next = sibs[at] || null;
-  if (lift.el.nextElementSibling === next || (next === null && !lift.el.nextElementSibling)) return;
+  if (next === lift.el || lift.el.nextElementSibling === next) return;
   slide(() => lift.list.insertBefore(lift.el, next));
 }
 function liftAt(x, y) {
   lift.x = x; lift.y = y;
   const top = y - lift.dy;
   lift.ghost.style.transform = `translate(${x - lift.dx}px, ${top}px) scale(1.015)`;
-  shadowAt(top + lift.h / 2);
+  shadowAt(y);
 }
 function liftStart(e) {
   const el = press.el, r = el.getBoundingClientRect();
   const ghost = el.cloneNode(true);
   ghost.removeAttribute("data-drag"); ghost.removeAttribute("tabindex"); ghost.removeAttribute("id");
-  ghost.classList.add("or-lift"); ghost.classList.remove("flash", "held");
+  ghost.classList.add("or-lift"); ghost.classList.remove("flash", "lifted");
   ghost.style.width = `${r.width}px`;
   el.closest(".qv").appendChild(ghost);
   lift = { el, ghost, list: el.parentElement, home: el.nextElementSibling, dx: press.x - r.left, dy: press.y - r.top, h: r.height, x: e.clientX, y: e.clientY, raf: 0 };
   press = null;
   dragging = { id: el.dataset.drag, parent: el.dataset.parent };
-  el.classList.add("held");
+  el.classList.add("lifted");
   document.body.classList.add("q-dragging");
   getSelection().removeAllRanges();
   liftAt(e.clientX, e.clientY);
@@ -2567,7 +2575,7 @@ function liftEnd(cancel) {
   draw();
   // Settle: the box glides into its place, then is let go.
   const home = [...document.querySelectorAll(".qv:not([inert]) [data-drag]")].find((x) => x.dataset.drag === id) || l.el;
-  home.classList.add("held");
+  home.classList.add("lifted");
   if (!l.ghost.isConnected) home.closest(".qv").appendChild(l.ghost);   // a redraw took it with the old rows
   const r = home.getBoundingClientRect();
   requestAnimationFrame(() => {
@@ -2575,7 +2583,7 @@ function liftEnd(cancel) {
     l.ghost.style.transform = `translate(${r.left}px, ${r.top}px) scale(1)`;
   });
   let over = false;
-  const done = () => { if (over) return; over = true; l.ghost.remove(); home.classList.remove("held"); };
+  const done = () => { if (over) return; over = true; l.ghost.remove(); home.classList.remove("lifted"); };
   l.ghost.addEventListener("transitionend", done, { once: true });
   setTimeout(done, 320);
 }
