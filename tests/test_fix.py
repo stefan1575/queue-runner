@@ -97,7 +97,7 @@ class FixTest(unittest.TestCase):
         # The ledger: the Important finding with its class and scenario, the nit apart.
         self.assertIn('**F1** · Important · write logged wrongly · `src/a.ts:10` · open', brief)
         self.assertIn('Scenario: this input, that wrong result', brief)
-        self.assertIn('**Classes to fix:** "write logged wrongly"', brief)
+        self.assertIn('**Classes:** "write logged wrongly"', brief)
         self.assertIn('**F2** · Nit', brief)
         self.assertIn('https://github.com/owner/first/pull/20#issuecomment-', brief)
         # Git: the branch's commits and the files it changes.
@@ -350,7 +350,7 @@ class AdoptedReviewTest(FixTest):
                 brief = start['message']
                 self.assertIn('**F1** · Important · write logged wrongly · `src/a.ts:10` · open',
                               brief)
-                self.assertIn('**Classes to fix:** "write logged wrongly"', brief)
+                self.assertIn('**Classes:** "write logged wrongly"', brief)
                 self.assertIn('**F2** · Nit', brief)
                 [fix] = self.fixes(r)
                 self.assertEqual((fix.sha, fix.round, fix.outcome), (H2, 1, 'pushed'))

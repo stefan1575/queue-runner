@@ -643,13 +643,19 @@ class Reviewer:
                      'replies posted on the PR since your last review. Give every one a status in '
                      "the block's `earlier` list: `fixed`, `open` (still open), "
                      '`decline-accepted` or `decline-kept`. A decline is a reply that names the '
-                     "finding's ID, gives the reason, and attaches the evidence (the test that "
-                     "wouldn't fail). You get one reply on each: accept it, or keep it open and "
-                     "say in your review what it misses. Repeat nothing already posted: an open "
-                     "finding's status covers it, so don't list it again in `findings`. An open "
-                     'finding about screenshots alone takes its `screenshots` kind (check 5) in '
-                     'its `earlier` entry too, whenever you can tell or it has changed. If a '
-                     'finding that was closed comes back, list it in `findings` with its old ID. '
+                     "finding's ID and gives the reason: the finding is wrong (best shown by a "
+                     "test that wouldn't fail), or it's right but not worth fixing here. You get "
+                     'one reply on each: accept it, or keep it and say in your review what it '
+                     'misses. Keep a decline open only when the finding breaks a rule the repo '
+                     "wrote down (its `AGENTS.md`, `docs/` or the spec): quote that rule in the "
+                     "entry's `rule`. A decline you disagree with on judgment alone is "
+                     "`decline-kept` with no `rule`: say why in your review, and the builder's "
+                     "call stands; don't raise that finding again. Repeat nothing already "
+                     "posted: an open finding's status covers it, so don't list it again in "
+                     "`findings`. An open finding about screenshots alone takes its "
+                     '`screenshots` kind (check 5) in its `earlier` entry too, whenever you can '
+                     'tell or it has changed. If a finding that was closed comes back, list it in '
+                     "`findings` with its old ID. "
                      "Give a new finding an ID not used before (used so far: " + used + ').\n'
                      f'8. **Classes raised so far:** {named}.\n')
         if guidelines is not None:
@@ -677,5 +683,7 @@ class Reviewer:
             statuses=(', and a status for each earlier open finding in `earlier`'
                       if rnd > 1 else ''),
             next_id=f'F{len(prior) + 1}',
-            example=', "earlier": [{"id": "F1", "status": "fixed"}]' if rnd > 1 else '',
+            example=(', "earlier": [{"id": "F1", "status": "fixed"}, {"id": "F2", "status": '
+                     '"decline-kept", "rule": "the AGENTS.md line it breaks, quoted"}]'
+                     if rnd > 1 else ''),
             open_scope=', new or earlier' if rnd > 1 else '')

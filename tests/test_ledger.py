@@ -164,11 +164,36 @@ class DecideTest(unittest.TestCase):
         self.assertEqual([s['signal'] for s in d['signals']], ['reopened'])
         self.assertIn('F1 (fixed in review 2)', d['body'])
 
-    def test_a_decline_sol_keeps_stops(self):
-        d = self.decide(reply(earlier=[{'id': 'F1', 'status': 'decline-kept'}]),
+    def test_a_decline_sol_keeps_under_a_repo_rule_stops(self):
+        rule = 'Always put a game back.'
+        d = self.decide(reply(earlier=[{'id': 'F1', 'status': 'decline-kept', 'rule': rule}]),
                         review1([important('F1')]))
         self.assertEqual((d['outcome'], d['kept']), ('stop', ['F1']))
         self.assertEqual([s['signal'] for s in d['signals']], ['decline-kept'])
+        self.assertIn(rule, d['signals'][0]['text'])
+        self.assertEqual(state([{'round': 2, 'findings': d['findings']}])[0]['kept_rule'], rule)
+
+    def test_a_decline_sol_disagrees_with_on_judgment_alone_stands(self):
+        # Stefan, 2026-11-18: "don't treat review as gospel". With no repo rule behind it, the
+        # builder's decline wins: it closes, the PR can merge, and the disagreement is recorded.
+        for kept in ({'id': 'F1', 'status': 'decline-kept'},
+                     {'id': 'F1', 'status': 'decline-kept', 'rule': '  '}):
+            with self.subTest(kept=kept):
+                d = self.decide(reply(earlier=[kept]), review1([important('F1')]))
+                self.assertEqual((d['verdict'], d['outcome']), ('clean', 'merge'))
+                self.assertEqual((d['kept'], d['stands'], d['signals']), ([], ['F1'], []))
+                [f1] = d['findings']
+                self.assertEqual((f1['status'], f1['closed']), ('decline-stands', 2))
+                self.assertIn('Declined; Sol disagrees', d['body'])
+                self.assertIn('the decline stands', d['body'])
+
+    def test_a_decline_that_stood_raised_again_reopens_and_stops(self):
+        comments = review1([important('F1')]) + [comment(
+            '## Sol review 2 · Clean\n\n' + old_marker(2, 'clean', H2, [
+                {**important('F1'), 'status': 'decline-stands', 'raised': 1, 'closed': 2}]))]
+        d = self.decide(reply(findings=[important('F1')]), comments, sha=H3)
+        self.assertEqual(d['outcome'], 'stop')
+        self.assertEqual([s['signal'] for s in d['signals']], ['reopened'])
 
     def test_an_accepted_decline_closes(self):
         d = self.decide(reply(earlier=[{'id': 'F1', 'status': 'decline-accepted'}]),

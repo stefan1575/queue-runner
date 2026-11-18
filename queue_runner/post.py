@@ -69,6 +69,7 @@ def review_row(d: dict, url: str, at: datetime.datetime) -> str:
             ('decline accepted',
              lambda f: f.get('closed') == rnd and f['status'] == 'decline-accepted'),
             ('decline kept open', lambda f: f['id'] in d['kept']),
+            ('declined, Sol disagrees', lambda f: f['id'] in d.get('stands', ())),
             ('filed as follow-ups', lambda f: f['raised'] == rnd and f['tag'] == 'pre-existing'),
             ('left open', lambda f: f['tag'] == 'important' and f['status'] in OPEN)):
         if got := ids(ok):

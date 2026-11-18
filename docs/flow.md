@@ -87,23 +87,32 @@ no tokens. Every fixed step is the script's; an agent is started only for work t
    statuses and file issues, but not edit code.
 3. **Three tags:**
    - **Important** blocks. It needs file:line and a concrete failure, or a documented rule the
-     change breaks. So is a change to what a person sees without before and after screenshots of
-     each state it touches, or a `Visible: no` the diff contradicts.
+     change breaks. So is a change to what a person sees with no before and after screenshots,
+     shots that contradict what the PR claims, or a wrong `Visible: no`. The shots cover the
+     screens a person would notice changing, not every case the tests cover (a test is the
+     evidence for those); asking for one more state is a nit (Stefan, 2026-11-18, after
+     game-backdrop #14 took 40 PNGs over three reviews).
    - **Nit** is optional, at most five, and needs no fix round.
    - **Pre-existing** becomes a linked `needs-triage` issue, unless it loses or exposes data,
      which makes it Important.
 4. **Post the review with a ledger** (a fenced `sol-findings` JSON block): round, H, a stable ID,
    tag and class for each finding, its evidence, and the status of every earlier finding:
-   `fixed`, `open`, `decline-accepted` or `decline-kept` (one not mentioned stays open). Reuse
+   `fixed`, `open`, `decline-accepted` or `decline-kept` (one not mentioned stays open; a kept
+   decline quotes the repo rule it rests on, and without one the decline stands). Reuse
    IDs; don't repost an unchanged finding as new. **Clean means no Important finding is open**,
    worked out by the runner from the ledger, not from the reviewer's say. A review without a
    readable ledger failed. Set the `sol-review` status on H, never on a newer commit.
-5. **Blocking:** the fix thread fixes every case of each Important class on the PR's branch, with
-   a failing test first where it fits, or declines a finding on the PR with its ID, the reason
-   and evidence. A class names the cause (what in the code lets the failure happen), not the
+5. **Blocking:** the fix thread weighs each finding: the review is advice, not orders (Stefan,
+   2026-11-18). It fixes every case of each Important class it takes on, with a failing test
+   first where it fits, or declines a finding on the PR with its ID and the reason: wrong (best
+   shown by a test), or right but not worth fixing here. A class names the cause (what in the code lets the failure happen), not the
    symptom, so the fix removes the cause: its commit message says the cause in one line, a
    second case of it gets a test where one fits, and a fix that only adjusts a value or a format
-   says why the cause can't recur. The reviewer reconsiders a decline once. Then the new head is reviewed.
+   says why the cause can't recur. The reviewer reconsiders a decline once, and keeps it open
+   only by quoting a rule the repo wrote down (its `AGENTS.md`, `docs/` or the spec) that the
+   finding breaks. A decline the reviewer disagrees with on judgment alone stands
+   (`decline-stands`): the builder's call wins, and the disagreement is recorded in the review
+   comment and the PR's `## Review` row. Then the new head is reviewed.
 
 ### Stops
 
@@ -111,7 +120,7 @@ A stop comes to Stefan:
 
 - a new Important finding in the same class as an earlier one;
 - a fixed finding reopening;
-- a decline the reviewer keeps;
+- a decline the reviewer keeps under a quoted repo rule;
 - a failed check; a conflict a conflict round couldn't resolve, or a PR's third conflict;
 - review 3 still blocking. A Claude decision thread posts an **Approach note** first: is the
   approach wrong, what would change, and rework, fix on or hold? No fourth review without

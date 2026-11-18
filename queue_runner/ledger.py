@@ -27,10 +27,15 @@ TAGS = {'important': 'Important', 'nit': 'Nit', 'pre-existing': 'Pre-existing'}
 FIELDS = ('id', 'tag', 'class', 'file', 'line', 'scenario', 'cost', 'rule', 'screenshots')
 MAX_NITS = 5
 # A finding's status. Sol gives an earlier open finding one of STATUSES; a new finding is open,
-# or filed when pre-existing. decline-kept stays apart from open: it goes to Stefan.
+# or filed when pre-existing. decline-kept stays apart from open: it goes to Stefan. It is kept
+# only for a finding that breaks a rule the repo wrote down (its AGENTS.md or spec), which Sol
+# quotes in the entry's `rule`; a decline Sol disagrees with on judgment alone, naming no rule,
+# stands (decline-stands): the builder's call wins, and the disagreement is recorded on the PR
+# (Stefan, 2026-11-18: "don't treat review as gospel").
 STATUSES = {'fixed': 'Fixed', 'open': 'Still open', 'decline-accepted': 'Decline accepted',
-            'decline-kept': 'Decline kept open'}
+            'decline-kept': 'Decline kept open', 'decline-stands': 'Declined; Sol disagrees'}
 OPEN = ('open', 'decline-kept')
+CLOSED = ('fixed', 'decline-accepted', 'decline-stands')
 # From this review on, a blocking review comes to Stefan with an approach note, not a fix round
 # (docs/flow.md: no fourth review without his answer). The old script did it at review 3 only,
 # with its spend guard behind it; with that guard gone, every later blocking review does too.
@@ -173,7 +178,7 @@ def escalation(reviews: list[dict]) -> str | None:
     if kept := [f['id'] for f in now if f['status'] == 'decline-kept']:
         return f'a decline kept open ({", ".join(kept)})'
     if back := [f['id'] for f in now if f['status'] in OPEN and (f.get('reopened') or
-            f['id'] in before and before[f['id']]['status'] in ('fixed', 'decline-accepted'))]:
+            f['id'] in before and before[f['id']]['status'] in CLOSED)]:
         return f'a finding reopened ({", ".join(back)})'
     seen = {norm(p['class']) for p in before.values() if p['tag'] == 'important'
             and norm(p['class'])}
@@ -268,18 +273,20 @@ def parse_findings(reply: str) -> tuple[list[dict], str]:
     return found, FENCE.sub('', reply).strip()
 
 
-def parse_earlier(reply: str) -> tuple[dict[str, str], dict[str, str]]:
+def parse_earlier(reply: str) -> tuple[dict[str, str], dict[str, str], dict[str, str]]:
     """What Sol said of each earlier finding, from the block's "earlier" list: the status it gave
-    each ({id: status}) and, for those it gave one, its `screenshots` kind ({id: shot_kind()}).
-    Sol must not list an open finding again in `findings`, so this is where it says one is about
-    screenshots (an older one raised before the field existed) or that a missing one is owed."""
+    each ({id: status}); for those it gave one, its `screenshots` kind ({id: shot_kind()}); and
+    the repo rule Sol quoted for each decline it kept ({id: rule}). Sol must not list an open
+    finding again in `findings`, so this is where it says one is about screenshots (an older one
+    raised before the field existed) or that a missing one is owed. A decline Sol kept without
+    quoting a rule stands (`decline-stands`, STATUSES)."""
     data = _block(reply)
     items = data.get('earlier') if isinstance(data, dict) else None
     if items is None:
-        return {}, {}
+        return {}, {}, {}
     if not isinstance(items, list) or not all(isinstance(e, dict) for e in items):
         raise SolFailed("Sol's sol-findings block has an \"earlier\" that isn't a list of objects.")
-    given, shots = {}, {}
+    given, shots, rules = {}, {}, {}
     for i, e in enumerate(items, 1):
         fid = _text(e.get('id'))
         s = re.sub(r'[\s_]+', '-', _text(e.get('status')).lower())
@@ -291,10 +298,15 @@ def parse_earlier(reply: str) -> tuple[dict[str, str], dict[str, str]]:
                             f'{", ".join(STATUSES)}.')
         if fid in given:
             raise SolFailed(f'Earlier finding {fid} has two statuses.')
+        if s == 'decline-kept':
+            if rule := _text(e.get('rule')):
+                rules[fid] = rule
+            else:
+                s = 'decline-stands'
         given[fid] = s
         if 'screenshots' in e:
             shots[fid] = shot_kind(e['screenshots'])
-    return given, shots
+    return given, shots, rules
 
 
 def _root(p: str) -> str:
@@ -379,7 +391,7 @@ def decide(repo: str, n: int, sha: str, rnd: int, earlier: list[dict], has_revie
     the comment's heading and byline and the status say so. An unreadable reply raises
     SolFailed."""
     found, prose = parse_findings(reply)
-    given, shots = parse_earlier(reply)
+    given, shots, rules = parse_earlier(reply)
     notes = []
     last = earlier[-1]['sha'] if earlier else None
     if gone:
@@ -437,7 +449,7 @@ def decide(repo: str, n: int, sha: str, rnd: int, earlier: list[dict], has_revie
         f['raised'] = p['raised'] if p else rnd
         if p and p.get('issue'):   # its follow-up issue's URL stays recorded
             f['issue'] = p['issue']
-        if p and p['status'] in ('fixed', 'decline-accepted'):
+        if p and p['status'] in CLOSED:
             f['reopened'] = p['status']
     asked = [f['id'] for f in prior if f['status'] in OPEN and f['id'] not in new]
     unaddressed = [i for i in asked if i not in given]
@@ -454,12 +466,21 @@ def decide(repo: str, n: int, sha: str, rnd: int, earlier: list[dict], has_revie
                 q['status'] = given[p['id']]
                 if q['status'] not in OPEN:
                     q['closed'] = rnd
+                if p['id'] in rules:
+                    q['kept_rule'] = rules[p['id']]
             if p['id'] in shots:
                 q['screenshots'] = shots[p['id']]
             rows.append(q)
         now.append(q)
     now += [f for f in found if f['id'] not in before]
     kept = [f['id'] for f in rows if f['id'] in given and f['status'] == 'decline-kept']
+    stands = [f['id'] for f in rows if f['id'] in given and f['status'] == 'decline-stands']
+    if stands:
+        one = len(stands) == 1
+        notes.append(f'Sol disagrees with the decline of {", ".join(stands)} but quotes no rule '
+                     f'of the repo {"it" if one else "they"} would break, so the decline stands: '
+                     "on a judgment call the builder's word wins, and the disagreement stays on "
+                     'record here.')
     back = [f for f in found if f.get('reopened')]
     if back:
         notes.append('Raised again after closing in an earlier review: ' + ', '.join(
@@ -498,7 +519,9 @@ def decide(repo: str, n: int, sha: str, rnd: int, earlier: list[dict], has_revie
             f'{before[f["id"]].get("closed", "?")}' for f in back)})
     if kept:
         signals.append({'signal': 'decline-kept', 'ids': kept,
-                        'text': f'Sol kept the decline of {", ".join(kept)} open'})
+                        'text': f'Sol kept the decline of {", ".join(kept)} open, under the '
+                                'repo rule ' + '; '.join(f'"{rules[i]}" ({i})' for i in kept
+                                                         if i in rules)})
     open_ = [f for f in now if f['tag'] == 'important' and f['status'] in OPEN]
     streak = shot_streak([*earlier, {'round': rnd, 'findings': now}])
     way = route(open_, rnd, streak)
@@ -518,8 +541,8 @@ def decide(repo: str, n: int, sha: str, rnd: int, earlier: list[dict], has_revie
         'approach-note': f'review {rnd} is still blocking, so an approach note goes to Stefan '
                          'instead of a fix round.',
         'merge': f"the PR merges once its checks pass on {sha[:7]}.",
-        'fix': "back to a fix round: fix every case of each Important finding's class, or "
-               "decline it with the test that wouldn't fail."}[outcome])
+        'fix': "back to a fix round: fix what matters of each Important finding's class, or "
+               "decline it with the reason."}[outcome])
 
     nits = sum(f['tag'] == 'nit' and f['status'] in OPEN for f in now)
     desc = (f'Blocking: {len(important)} Important finding{"s" * (len(important) != 1)} '
@@ -558,7 +581,7 @@ def decide(repo: str, n: int, sha: str, rnd: int, earlier: list[dict], has_revie
             + _trailer(rnd, verdict, sha, now))
     return {'round': rnd, 'sha': sha, 'verdict': verdict, 'outcome': outcome, 'signals': signals,
             'findings': now,
-            'kept': kept, 'unaddressed': unaddressed,
+            'kept': kept, 'stands': stands, 'unaddressed': unaddressed,
             'status': {'state': 'failure' if important else 'success',
                        'description': desc[:140]},
             # New ones, and earlier ones whose filing failed that Sol didn't list again.

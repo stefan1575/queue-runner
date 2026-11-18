@@ -57,8 +57,9 @@ The review loop's rules are `docs/flow.md`, The review loop; leads-dashboard's
    format (#135).
 6. **Decide** (`ledger.py`, no I/O): the verdict and outcome come from the last `sol-findings`
    block in Sol's reply, never its prose. Clean when no Important finding is open; outcomes, in
-   order: `stop` (a new Important finding in an earlier class, a closed finding reopened, a
-   decline Sol kept, or `screenshots-owed`: only screenshot findings open and one of them
+   order: `stop` (a new Important finding in an earlier class, a closed finding reopened
+   (`decline-stands` counts as closed), a decline Sol kept under a quoted repo rule, or
+   `screenshots-owed`: only screenshot findings open and one of them
    `owed`), `approach-note` (blocking from review 3 on: there's no spend guard any more, so
    every blocking review from 3 comes to Stefan, unless only on screenshots a fix round can
    take, for up to `SHOT_ROUNDS` such reviews in a row: `ledger.route`), `merge` (clean), `fix`.
@@ -68,7 +69,9 @@ The review loop's rules are `docs/flow.md`, The review loop; leads-dashboard's
    one in an earlier screenshot class is no repeated class, since it names no cause in the
    code. An Important
    finding without file, line and a scenario (or a cost and rule) counts as a nit; nits past five
-   are dropped and named. No readable block: `failed`.
+   are dropped and named. A `decline-kept` entry with no `rule` becomes `decline-stands`
+   (`ledger.parse_earlier`): closed, no stop, and named in the comment's notes. No readable
+   block: `failed`.
 7. **Write.** `comment.md` (heading, Sol's prose with links made GitHub-relative, findings
    tables, notes, a visible `sol-findings` ledger of the PR's whole state, and the old script's
    hidden marker) and `decision.json` (verdict, outcome, signals, the `sol-review` status,

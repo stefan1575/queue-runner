@@ -16,12 +16,12 @@ ${direction}## What Sol's review $round found
 
 The review: $review_link
 
-### Important (each one blocks the merge)
+### Important (each blocks the merge until it's fixed or declined)
 
 $important
 
-**Classes to fix:** $classes. Fix every case of each class in the PR's change, not only the line
-cited: look for the same kind of problem everywhere the PR touches.
+**Classes:** $classes. For each finding you fix, fix every case of its class in the PR's change,
+not only the line cited: look for the same kind of problem everywhere the PR touches.
 
 ### Nits (optional)
 
@@ -56,27 +56,36 @@ $threads
 
 ## How to work
 
-- For each Important finding: before fixing it, write its cause in one line in the commit message:
-  what in the code lets the failure happen, not the scenario Sol describes. Write a failing test
-  first where one fits. Fix the cause, and add a test for a second case of it besides Sol's
-  scenario where one fits, then fix every other case of its class. A fix that only adjusts a
-  value or a format (a precision, a pattern, a timeout, an indentation) rather than removing the
-  cause says in the commit message why the cause can't recur.
-- If a finding is wrong, decline it: comment on the PR (`gh pr comment $number --repo $github`)
-  naming the finding's ID, the reason and the evidence. The best evidence is a test, committed
-  and pushed, that passes now and would fail if the finding were right. Sol reconsiders a decline
-  once, in the next review.
-- **A missing or wrong screenshot finding:** where the repo's `AGENTS.md` says how to shoot its
-  states (its own harness, or never `screen`), do it that way; otherwise shoot and publish them
-  with the runner's script
-  (`python3 -I $evidence shoot URL OUT.png --size 1440x900`, or `screen OUT.png` for the
-  desktop, then `publish --repo . --into pr-$number FILE.png ...`, which prints the image lines),
-  don't open them yourself, add them to the PR body, and push (an empty commit if the
-  code didn't change, so there is a new head to review). A change that shows only in the app's
-  own data is shot from that data, not a sample page: the repo's docs say how. If `publish`
-  refuses a before and after as byte-identical, the shot missed the change: reshoot it, or
-  write `Screenshot owed: <why>`. If the screen can't be captured, say so on the PR and end
-  your turn.
+- **Weigh every finding before you act on it: the review is advice, not orders.** Fix what
+  matters for what the repo is for and what its rules ask. Decline what's wrong, or right but not
+  worth it here (a case no real use reaches, a fix that costs more than the harm it prevents),
+  with the reason. Sol reconsiders a decline once, and your call stands unless Sol quotes a rule
+  the repo wrote down (its `AGENTS.md`, `docs/` or the spec) that the finding breaks. Leave nits
+  that don't earn their change.
+- For each Important finding you fix: before fixing it, write its cause in one line in the commit
+  message: what in the code lets the failure happen, not the scenario Sol describes. Write a failing
+  test first where one fits. Fix the cause, and add a test for a second case of it besides Sol's
+  scenario where one fits, then fix every other case of its class. A fix that only adjusts a value
+  or a format (a precision, a pattern, a timeout, an indentation) rather than removing the cause
+  says in the commit message why the cause can't recur.
+- To decline a finding, comment on the PR (`gh pr comment $number --repo $github`) naming its
+  ID and the reason. For one you say is wrong, the best evidence is a test, committed and pushed,
+  that passes now and would fail if the finding were right. For one not worth it, say what it
+  would cost and why that's more than it saves. Sol reconsiders a decline once, in the next
+  review. A round that declines everything still pushes (an empty commit), so there's a new head
+  to review.
+- **A missing or wrong screenshot finding:** shoot the screens a person would notice changing, what
+  the PR sets out to change, not every case its tests cover (a test is the evidence for those);
+  where a finding asks for more than that, decline that part. Where the repo's `AGENTS.md` says how
+  to shoot its states (its own harness, or never `screen`), do it that way; otherwise shoot and
+  publish them with the runner's script (`python3 -I $evidence shoot URL OUT.png --size 1440x900`,
+  or `screen OUT.png` for the desktop, then `publish --repo . --into pr-$number FILE.png ...`, which
+  prints the image lines), don't open them yourself, add them to the PR body, and push (an empty
+  commit if the code didn't change, so there is a new head to review). A change that shows only in
+  the app's own data is shot from that data, not a sample page: the repo's docs say how. If
+  `publish` refuses a before and after as byte-identical, the shot missed the change: reshoot it, or
+  write `Screenshot owed: <why>`. If the screen can't be captured, say so on the PR and end your
+  turn.
 - Commit after every step, with the decision in the commit message: what you chose and why. A
   usage limit can cut this thread off at any point, and the next job starts from your commits.
 - End the round by pushing to `$branch`. A round that ends without a push isn't reviewed again:

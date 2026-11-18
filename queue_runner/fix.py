@@ -28,7 +28,7 @@ from importlib import resources
 from string import Template
 
 from .brief import EVIDENCE, _agents_pointer
-from .ledger import OPEN, STATUSES, escalation, newest_on, norm, read_reviews, state
+from .ledger import CLOSED, OPEN, STATUSES, escalation, newest_on, norm, read_reviews, state
 from .picker import closed_issues
 from .state import NOT_SENT, NOT_STARTED, Job, JobLog
 from .stops import CONFLICT, conflict_rounds, conflict_stop, held, positions
@@ -215,7 +215,7 @@ class Fixer:
         found = state(read_reviews(self.github.issue_comments(repo, pr.number)))
         important = [f for f in found if f['tag'] == 'important' and f['status'] in OPEN]
         nits = [f for f in found if f['tag'] == 'nit' and f['status'] in OPEN]
-        settled = [f for f in found if f['status'] in ('fixed', 'decline-accepted')]
+        settled = [f for f in found if f['status'] in CLOSED]
         classes = list(dict.fromkeys(f['class'] for f in important if norm(f['class'])))
         commits = self.git.log(repo.path, f'origin/{pr.base}', h)
         here = repo.github.lower()
