@@ -1280,20 +1280,13 @@ body.q-dragging .q12:not(.v-b) .er { background: var(--surface); }
 .eq-row { display: grid; grid-template-columns: 112px minmax(0, 1fr) max-content; align-items: center; column-gap: 14px; row-gap: 2px; padding: 6px 0; }
 .eq-row .lbl { color: var(--ink-2); line-height: 1.25; }
 .eq-row .r-when { grid-column: 1 / -1; }
-/* Take 18 (Stefan: "a bit more compact"): the rail's three cards tighter, the same in all three:
-   a shorter head, less padding, closer rows. Sizes of type and bars are unchanged. */
-.r14 .card-head { min-height: 44px; padding: 6px 16px; }
-.r14 .card-pad { padding: 10px 16px 12px; }
-.r14 .p-head { margin-bottom: 4px; }
-.r14 .p14 + .p14 { margin-top: 10px; padding-top: 10px; }
-.r14 .eq-row { padding: 3px 0; row-gap: 0; grid-template-columns: 112px minmax(0, 1fr) 5.2em; }
+/* Take 19 (Stefan): the cards keep their spacing; only the items inside a list sit closer, the
+   repositories to each other, and Providers, Local and External to each other. */
+.r14 .repo14 li { padding: 5px 0; }
+.r14 .h14 { row-gap: 4px; }
 /* The figure's column is fixed, so "0% left" and "62% left" leave every bar the same length. */
+.r14 .eq-row { grid-template-columns: 112px minmax(0, 1fr) 5.2em; }
 .r14 .eq-row .pct { text-align: right; }
-.r14 .kept-note { margin-top: 4px; }
-.r14 .repo14 li { padding: 6px 0; gap: 10px; align-items: center; }
-.r14 .repo14 .rlogo { width: 24px; height: 24px; border-radius: 6px; font-size: 10.5px; margin-top: 0; }
-.r14 .repo14 .idle { margin-top: 0; }
-.r14 .h14 { gap: 5px 14px; font-size: 14.5px; }
 .r14 .card-head .hi { width: 20px; height: 20px; stroke-width: 1.6; }
 .proto.railp { left: auto; right: 12px; bottom: 14px; width: auto; }
 .proto.railp .proto-name { min-width: 150px; }
@@ -2886,7 +2879,7 @@ function rail14(notes) {
   const plans = snap.usage || [];
   const body = plans.map(usageEq).join("");
   const usage = `<section class="card">${head14("usage", "Usage", `<span style="margin-left:auto"></span>${refreshButton()}`)}<div class="card-pad">${notes}${body}</div></section>`;
-  const repos = `<section class="card">${head14("repos", "Repositories")}<div class="card-pad" style="padding-top:4px;padding-bottom:4px">${repos14()}</div></section>`;
+  const repos = `<section class="card">${head14("repos", "Repositories")}<div class="card-pad" style="padding-top:6px;padding-bottom:10px">${repos14()}</div></section>`;
   return `<div class="r14" style="display:grid;gap:16px">${ui.page === "usage" ? "" : usage}${repos}${health14()}</div>`;
 }
 
