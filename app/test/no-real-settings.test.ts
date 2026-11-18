@@ -31,6 +31,12 @@ describe('no test reaches the real settings', () => {
     ["HOME over two lines", "const home = process.env\n  .HOME;"],
     ["HOME by key", "const home = process.env['HOME'];"],
     ["HOME destructured", "const { HOME } = process.env;"],
+    // #173 F3: a regular expression's contents are neither a comment nor a string.
+    ["a call after a regex holding /*", "const special = /[/*]/;\nconst address = runtimeAddress();"],
+    ["a call after an escaped-slash URL regex", "const url = /https:\\/\\//; const cli = t3Cli();"],
+    ["a call after a regex holding a quote", "const quote = /['\"]/;\nconst address = runtimeAddress();"],
+    ["a call after a regex holding a backtick", "const tick = /`/g; const cli = t3Cli();"],
+    ["a call after a regex in a call", "s.replace(/\\/*/g, ''); const cli = t3Cli();"],
   ])('finds a test that reads %s', (_, source) => {
     expect(realSettingsReads(source)).not.toEqual([]);
   });
@@ -51,6 +57,10 @@ describe('no test reaches the real settings', () => {
       "   runtimeAddress() and USERPROFILE */",
       "const url = 'https://example.invalid/'; // a trailing comment: t3Cli()",
       "const env = { ...process.env, PATH: dir }; const HOMEPAGE = 1;",
+      "const half = total / 2; // a division isn't a regex: t3Cli()",
+      "const ratio = (a) / b / c; /* nor is this: runtimeAddress() */",
+      "const quote = /'/; // a quote in a regex opens no string: t3Cli() '",
+      "const s = `a ${b /* in a template: runtimeAddress() */} c`;",
     ].join('\n');
     expect(realSettingsReads(source)).toEqual([]);
   });

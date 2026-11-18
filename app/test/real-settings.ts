@@ -4,6 +4,8 @@
 //
 // The patterns run over the whole source with its comments blanked out, not line by line, so a
 // call or an access split over lines (`t3Cli(\n)`, `process.env\n  .HOME`) is still found (#173).
+import ts from 'typescript';
+
 const REAL: [RegExp, string][] = [
   [/\bhomedir\b/g, "the user's home folder"],
   [/\b(?:USERPROFILE|HOMEDRIVE|HOMEPATH|APPDATA|LOCALAPPDATA)\b/g, "the user's home or app-data folder"],
@@ -21,37 +23,32 @@ const REAL: [RegExp, string][] = [
 ];
 
 /** `source` with every comment replaced by spaces, newlines kept, so offsets and line numbers
- *  still match. Strings are kept: a `//` inside one (`'https://'`) isn't a comment. */
+ *  still match. TypeScript's own parser finds the tokens: only it can tell a regular expression
+ *  (`/[/*]/`, `/https:\/\//`) or a string from a division, so a hand-written scanner read a
+ *  regex's contents as a comment and blanked real code after it (#173 F3). A comment can only
+ *  sit in the trivia before a token, which holds nothing but whitespace and comments, so each
+ *  token's trivia is scanned on its own and its comments blanked. */
 export function blankComments(source: string): string {
+  const file = ts.createSourceFile('test.ts', source, ts.ScriptTarget.Latest, false, ts.ScriptKind.TS);
+  const scanner = ts.createScanner(ts.ScriptTarget.Latest, false, ts.LanguageVariant.Standard, source);
   const out = source.split('');
-  let i = 0;
-  const blank = (from: number, to: number) => {
-    for (let j = from; j < to; j++) if (out[j] !== '\n' && out[j] !== '\r') out[j] = ' ';
-  };
-  while (i < source.length) {
-    const c = source[i];
-    if (c === '/' && source[i + 1] === '/') {
-      const end = source.indexOf('\n', i);
-      const to = end === -1 ? source.length : end;
-      blank(i, to);
-      i = to;
-    } else if (c === '/' && source[i + 1] === '*') {
-      const end = source.indexOf('*/', i + 2);
-      const to = end === -1 ? source.length : end + 2;
-      blank(i, to);
-      i = to;
-    } else if (c === "'" || c === '"' || c === '`') {
-      i++;
-      while (i < source.length && source[i] !== c) {
-        if (source[i] === '\\') i++;
-        else if (c !== '`' && source[i] === '\n') break;
-        i++;
+  const blankTrivia = (from: number, to: number) => {
+    scanner.resetTokenState(from);
+    for (let kind = scanner.scan(); scanner.getTokenStart() < to; kind = scanner.scan()) {
+      if (kind === ts.SyntaxKind.SingleLineCommentTrivia || kind === ts.SyntaxKind.MultiLineCommentTrivia) {
+        for (let j = scanner.getTokenStart(); j < scanner.getTokenEnd(); j++) {
+          if (out[j] !== '\n' && out[j] !== '\r') out[j] = ' ';
+        }
       }
-      i++;
-    } else {
-      i++;
+      if (kind === ts.SyntaxKind.EndOfFileToken) break;
     }
-  }
+  };
+  const visit = (node: ts.Node) => {
+    const children = node.getChildren(file).filter((child) => !ts.isJSDoc(child));
+    if (children.length === 0) blankTrivia(node.pos, node.getStart(file));
+    else children.forEach(visit);
+  };
+  visit(file);
   return out.join('');
 }
 
