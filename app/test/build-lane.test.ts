@@ -293,6 +293,45 @@ describe('the end', () => {
     expect(t3.launches).toEqual([]); // resting
   });
 
+  test("a launch whose answer never came is found in T3's threads and watched: the repo stays busy and the gate keeps it", async () => {
+    gh.ready['owner/app'] = [issue(5), issue(6)];
+    t3.launchAnswerLost = true;
+    const gate = new RoomyGate();
+    await makeLane({ gate: gate as any, restMs: 0 }).pass();
+    await watching('thread-1');
+    expect(log.jobs()[0]).toMatchObject({ issue: 5, threadId: 'thread-1' });
+    expect(log.jobs()[0]!.end).toBeUndefined();
+    expect(lane.running()).toEqual(['p-app']);
+    t3.launchAnswerLost = false;
+    await lane.pass(); // #6 waits for #5's thread
+    expect(t3.launches).toHaveLength(1);
+    expect(gate.calls.some((c) => c.startsWith('dropped'))).toBe(false);
+    t3.endRun('thread-1', 'completed');
+    await until(() => t3.launches.length === 2);
+    expect(log.jobs()[0]!.end?.outcome).toBe('done-no-pr');
+    expect(organized()[0]).toEqual({ threadId: 'thread-1', action: 'settle' });
+  });
+
+  test("a launch whose answer never came, while T3's threads can't be read either, leaves the job open and its repo busy until they can", async () => {
+    gh.ready['owner/app'] = [issue(5), issue(6)];
+    t3.launchAnswerLost = true;
+    let down = true;
+    const flaky = {
+      subscribe: ws.subscribe.bind(ws),
+      first: async (tag: string, payload?: object) => { if (down) throw new Error('T3 is down'); return ws.first(tag, payload); },
+    };
+    await makeLane({ ws: flaky as any, restMs: 0 }).pass();
+    await until(() => lines.some((l) => /can't tell whether T3 started/.test(l)));
+    expect(log.jobs()[0]!.end).toBeUndefined();
+    expect(lane.running()).toEqual(['p-app']);
+    t3.launchAnswerLost = false;
+    await lane.pass();
+    expect(t3.launches).toHaveLength(1);
+    down = false;
+    await watching('thread-1');
+    expect(log.jobs()[0]!.threadId).toBe('thread-1');
+  });
+
   test('a stream that drops is opened again and still hears the end', async () => {
     gh.ready['owner/app'] = [issue(5)];
     await makeLane().pass();
@@ -307,6 +346,19 @@ describe('the end', () => {
 });
 
 describe('an app that stopped mid-build', () => {
+  test("a build the log shows open with no thread id is found in T3's threads by its title and branch, and watched", async () => {
+    gh.ready['owner/app'] = [issue(7)];
+    const open = await log.started({ kind: 'build', repo: 'p-app', github: 'owner/app', issue: 5, branch: 'claude/x-5', base: 'origin/main', title: 'Queue runner build: app#5', choice: BUILD, onFallback: false });
+    t3.threadState['its-thread'] = { id: 'its-thread', projectId: 'p-app', title: 'Queue runner build: app#5', branch: 'claude/x-5', runtimeRequests: [], turnItems: [], runs: [{ id: 'r', ordinal: 1, rootNodeId: 'n', status: 'running' }] };
+    await makeLane().start();
+    await watching('its-thread');
+    expect(t3.launches).toEqual([]);
+    expect(log.get(open.id)).toMatchObject({ threadId: 'its-thread' });
+    t3.endRun('its-thread', 'completed');
+    await until(() => t3.launches.length === 1);
+    expect(log.get(open.id)!.end?.outcome).toBe('done-no-pr');
+  });
+
   test("a build the log shows open is watched again to its end, and holds its repo meanwhile; one T3 never named is not-started", async () => {
     gh.ready['owner/app'] = [issue(7)];
     const start = (issue: number, repo = 'p-app') => ({ kind: 'build' as const, repo, github: 'owner/app', issue, branch: `claude/x-${issue}`, base: 'origin/main', title: `Queue runner build: app#${issue}`, choice: BUILD, onFallback: false });
@@ -316,6 +368,7 @@ describe('an app that stopped mid-build', () => {
     t3.threadState['old-thread'] = { id: 'old-thread', projectId: 'p-app', runtimeRequests: [], turnItems: [], runs: [{ id: 'old-run', ordinal: 1, rootNodeId: 'n', status: 'running' }] };
     await makeLane().start();
     expect(t3.launches).toEqual([]); // app's one build is the open one
+    await until(() => log.get(lost.id)!.end !== undefined); // once T3's threads show it has none
     expect(log.get(lost.id)!.end).toMatchObject({ outcome: 'not-started' });
     await watching('old-thread');
     t3.endRun('old-thread', 'completed');
