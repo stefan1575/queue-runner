@@ -5,6 +5,7 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { DATE_STYLES, type DateStyle } from './display.ts';
 import { checkJobs, DEFAULT_JOBS, type Jobs } from './jobs.ts';
+import { checkShares, type Shares } from './shares.ts';
 
 export type Settings = {
   /** Your name for the briefs; null follows the `gh` account's name. */
@@ -13,6 +14,9 @@ export type Settings = {
   startWithWindows: boolean;
   /** Which model does each kind of job (#152; `src/jobs.ts`). */
   jobs: Jobs;
+  /** Your share of each provider's weekly windows, by `<driver>/<window id>` (#153; `src/shares.ts`).
+   *  A window not named keeps 0%. */
+  shares: Shares;
   /** Each repo's choices, by T3 project id (#151). null until T3's projects were first seen: that
    *  first sight is a new install, where no project is marked New. */
   repos: Record<string, RepoChoice> | null;
@@ -27,7 +31,7 @@ export type Merger = 'runner' | 'me';
 export type RepoChoice = { served: boolean; merge: Merger; seen: boolean };
 export type SettingsPatch = Partial<Settings>;
 
-export const DEFAULT_SETTINGS: Settings = { name: null, dateStyle: 'month-first', startWithWindows: true, jobs: DEFAULT_JOBS, repos: null, setupSeen: false };
+export const DEFAULT_SETTINGS: Settings = { name: null, dateStyle: 'month-first', startWithWindows: true, jobs: DEFAULT_JOBS, shares: {}, repos: null, setupSeen: false };
 
 /** A change the page never offers: an unknown key or a value of the wrong kind. */
 export class SettingsError extends Error {}
@@ -52,6 +56,7 @@ const CHECKS: { [K in keyof Settings]: (v: unknown) => Settings[K] | undefined }
   dateStyle: (v) => (DATE_STYLES.some((d) => d.id === v) ? (v as DateStyle) : undefined),
   startWithWindows: (v) => (typeof v === 'boolean' ? v : undefined),
   jobs: checkJobs,
+  shares: checkShares,
   repos: (v) => repoChoices(v, false),
   setupSeen: (v) => (typeof v === 'boolean' ? v : undefined),
 };

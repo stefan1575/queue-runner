@@ -40,7 +40,7 @@ let current: View;
 let push: (v: View) => void;
 
 const viewWith = (setup: SetupState, setupSeen = true): View => ({
-  settings: { ...DEFAULT_SETTINGS, setupSeen }, account: null, timeFormat: '24-hour', catalog: null, repos: [], reposError: null, setup,
+  settings: { ...DEFAULT_SETTINGS, setupSeen }, account: null, timeFormat: '24-hour', catalog: null, repos: [], reposError: null, usage: [], setup,
 });
 
 beforeEach(() => {

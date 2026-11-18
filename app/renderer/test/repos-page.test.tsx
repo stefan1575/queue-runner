@@ -19,7 +19,7 @@ const bare: Repo = { id: 'p3', title: 'notes', folder: 'C:/notes', github: null,
 const unread: Repo = { id: 'p4', title: 'wiki', folder: 'C:/wiki', github: null, remoteError: 'gh repo view failed (4): not signed in', checking: false, served: false, merge: 'me', isNew: false };
 const view: View = {
   settings: { ...DEFAULT_SETTINGS }, account: { login: 'ana-gh', name: 'Ana GH' }, timeFormat: 'locale',
-  catalog: null, repos: [served, fresh, bare, unread], reposError: null, setup: { report: null, checking: false },
+  catalog: null, repos: [served, fresh, bare, unread], reposError: null, usage: [], setup: { report: null, checking: false },
 };
 /** What was asked past the read of every remote the page asks for as it opens. */
 const acted = () => asked.filter((a) => a.do !== 'check');

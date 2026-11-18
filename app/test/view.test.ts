@@ -9,6 +9,7 @@ import { NotEmpty, RepoError, type Repo } from '../src/repos.ts';
 import { SettingsError } from '../src/settings.ts';
 import type { TimeFormat } from '../src/display.ts';
 import { GhGitHub, GitHubError, type Gh } from '../src/github.ts';
+import type { ProviderUsage } from '../src/usage.ts';
 import type { Catalog } from '../src/jobs.ts';
 import { SettingsStore } from '../src/settings.ts';
 import type { CatalogSource, CatalogState } from '../src/t3/catalog-source.ts';
@@ -55,7 +56,7 @@ class FakeRepos implements RepoSource {
 }
 
 class FakeCatalog implements CatalogSource {
-  state: CatalogState = { catalog: null };
+  state: CatalogState = { catalog: null, usage: [] };
   private listeners = new Set<(s: CatalogState) => void>();
   current() { return this.state; }
   onChange(l: (s: CatalogState) => void) { this.listeners.add(l); return () => this.listeners.delete(l); }
@@ -143,16 +144,18 @@ describe('the view', () => {
     expect(seen.map((v) => v.settings.dateStyle)).toEqual(['iso']);
   });
 
-  test("T3's catalog reaches the window, and so does why T3 can't be asked, until it can", async () => {
+  test("T3's catalog and usage reach the window, and so does why T3 can't be asked, until it can", async () => {
     const t3 = new FakeCatalog();
     const view = await RunnerView.start(await store(), account('ana-k', null), new FakeTimeFormat(), t3, new FakeRepos(), new FakeSetup());
     expect(view.get().catalog).toBeNull();
+    expect(view.get().usage).toEqual([]);
     const catalog: Catalog = { providers: [{ id: 'p', label: 'P', models: [] }], t3Default: null };
-    t3.change({ catalog });
-    expect(view.get().catalog).toEqual(catalog);
-    t3.change({ catalog, error: 'T3 is down' });
+    const usage: ProviderUsage[] = [{ provider: 'p', driver: 'p', account: 'p:p', label: 'P', name: 'P', checkedAt: null, windows: [], resetCredits: null, unavailable: 'unsupported' }];
+    t3.change({ catalog, usage });
+    expect(view.get()).toMatchObject({ catalog, usage });
+    t3.change({ catalog, usage, error: 'T3 is down' });
     expect(view.get()).toMatchObject({ catalog, catalogError: 'T3 is down' });
-    t3.change({ catalog });
+    t3.change({ catalog, usage });
     expect(view.get()).not.toHaveProperty('catalogError');
   });
 });

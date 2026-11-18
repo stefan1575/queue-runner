@@ -191,7 +191,38 @@
        ]
       }
      }
-    ]
+    ],
+    "auth": {
+     "status": "authenticated",
+     "type": "chatgpt",
+     "label": "ChatGPT Plus Subscription",
+     "workspaceId": "sample-chatgpt-workspace"
+    },
+    "usageLimits": {
+     "checkedAt": "2026-11-18T19:04:14.540Z",
+     "windows": [
+      {
+       "id": "primary",
+       "kind": "session",
+       "label": "Session",
+       "usedPercent": 100,
+       "resetsAt": "2026-11-18T20:52:50.000Z",
+       "windowDurationMins": 300
+      },
+      {
+       "id": "secondary",
+       "kind": "weekly",
+       "label": "Weekly",
+       "usedPercent": 47,
+       "resetsAt": "2026-11-24T14:25:01.000Z",
+       "windowDurationMins": 10080
+      }
+     ],
+     "resetCredits": {
+      "availableCount": 2,
+      "nextExpiresAt": "2026-12-01T22:03:23.000Z"
+     }
+    }
    },
    {
     "instanceId": "claudeAgent",
@@ -369,7 +400,42 @@
        ]
       }
      }
-    ]
+    ],
+    "auth": {
+     "status": "authenticated",
+     "type": "Claude Pro",
+     "label": "Claude Pro Subscription",
+     "workspaceId": "sample-claude-workspace"
+    },
+    "usageLimits": {
+     "checkedAt": "2026-11-18T18:59:58.412Z",
+     "windows": [
+      {
+       "id": "five_hour",
+       "kind": "session",
+       "label": "Session",
+       "usedPercent": 46,
+       "resetsAt": "2026-11-18T20:40:00.140Z",
+       "windowDurationMins": 300
+      },
+      {
+       "id": "seven_day",
+       "kind": "weekly",
+       "label": "Weekly",
+       "usedPercent": 36,
+       "resetsAt": "2026-11-23T11:00:00.140Z",
+       "windowDurationMins": 10080
+      },
+      {
+       "id": "seven_day_fable",
+       "kind": "weekly",
+       "label": "Weekly · Fable",
+       "usedPercent": 11,
+       "resetsAt": "2026-11-23T11:00:00.140Z",
+       "windowDurationMins": 10080
+      }
+     ]
+    }
    },
    {
     "instanceId": "claudeReviewer",
@@ -483,7 +549,42 @@
        ]
       }
      }
-    ]
+    ],
+    "auth": {
+     "status": "authenticated",
+     "type": "Claude Pro",
+     "label": "Claude Pro Subscription",
+     "workspaceId": "sample-claude-workspace"
+    },
+    "usageLimits": {
+     "checkedAt": "2026-11-18T18:59:58.412Z",
+     "windows": [
+      {
+       "id": "five_hour",
+       "kind": "session",
+       "label": "Session",
+       "usedPercent": 46,
+       "resetsAt": "2026-11-18T20:40:00.140Z",
+       "windowDurationMins": 300
+      },
+      {
+       "id": "seven_day",
+       "kind": "weekly",
+       "label": "Weekly",
+       "usedPercent": 36,
+       "resetsAt": "2026-11-23T11:00:00.140Z",
+       "windowDurationMins": 10080
+      },
+      {
+       "id": "seven_day_fable",
+       "kind": "weekly",
+       "label": "Weekly · Fable",
+       "usedPercent": 11,
+       "resetsAt": "2026-11-23T11:00:00.140Z",
+       "windowDurationMins": 10080
+      }
+     ]
+    }
    },
    {
     "instanceId": "cursor",
