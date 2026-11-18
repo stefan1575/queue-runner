@@ -7,7 +7,8 @@ import type { Platform } from './platform.ts';
 export function windowsPlatform(trayIcon: string): Platform {
   // Started at logon, the app runs as it was started now (Electron and the app's folder while
   // unpackaged), with --hidden so it stays in the tray.
-  const logon = { path: process.execPath, args: [...(app.isPackaged ? [] : [app.getAppPath()]), '--hidden'] };
+  // The entry is named for the app, not Electron's default (`electron.app.Electron` unpackaged).
+  const logon = { name: 'Queue runner', path: process.execPath, args: [...(app.isPackaged ? [] : [app.getAppPath()]), '--hidden'] };
   let tray: Tray | null = null; // held, or the icon is collected away
   return {
     tray(menu) {
@@ -21,7 +22,8 @@ export function windowsPlatform(trayIcon: string): Platform {
       tray.on('click', menu.open);
     },
     startAtLogon: {
-      isOn: () => app.getLoginItemSettings(logon).openAtLogin,
+      // openAtLogin looks under Electron's default name, so the entry is found by its own
+      isOn: () => app.getLoginItemSettings(logon).launchItems.some((i) => i.name === logon.name && i.scope === 'user'),
       set: (on) => app.setLoginItemSettings({ ...logon, openAtLogin: on }),
     },
   };
