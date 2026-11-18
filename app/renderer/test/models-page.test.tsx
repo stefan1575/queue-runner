@@ -34,7 +34,7 @@ afterEach(() => {
   document.body.innerHTML = '';
 });
 
-const viewWith = (jobs: Jobs, c = catalog): View => ({ settings: { ...DEFAULT_SETTINGS, jobs }, account: null, timeFormat: 'locale', catalog: c, repos: [], reposError: null, usage: [] });
+const viewWith = (jobs: Jobs, c = catalog): View => ({ settings: { ...DEFAULT_SETTINGS, jobs }, account: null, timeFormat: 'locale', catalog: c, repos: [], reposError: null, usage: [], setup: { report: null, checking: false } });
 const show = (view: View) => act(() => root.render(<Settings view={view} open={{ page: 'models', query: '' }} onOpen={() => {}} onClose={() => {}} />));
 const button = (label: string) => {
   const b = [...document.querySelectorAll<HTMLButtonElement>('button')].find((x) => x.getAttribute('aria-label')?.startsWith(label) || x.textContent?.startsWith(label));

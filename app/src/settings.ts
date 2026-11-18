@@ -20,6 +20,8 @@ export type Settings = {
   /** Each repo's choices, by T3 project id (#151). null until T3's projects were first seen: that
    *  first sight is a new install, where no project is marked New. */
   repos: Record<string, RepoChoice> | null;
+  /** Whether Setup has been shown: it opens by itself on the app's first start only (#162). */
+  setupSeen: boolean;
 };
 
 /** Who merges a served repo's clean PRs. */
@@ -29,7 +31,7 @@ export type Merger = 'runner' | 'me';
 export type RepoChoice = { served: boolean; merge: Merger; seen: boolean };
 export type SettingsPatch = Partial<Settings>;
 
-export const DEFAULT_SETTINGS: Settings = { name: null, dateStyle: 'month-first', startWithWindows: true, jobs: DEFAULT_JOBS, shares: {}, repos: null };
+export const DEFAULT_SETTINGS: Settings = { name: null, dateStyle: 'month-first', startWithWindows: true, jobs: DEFAULT_JOBS, shares: {}, repos: null, setupSeen: false };
 
 /** A change the page never offers: an unknown key or a value of the wrong kind. */
 export class SettingsError extends Error {}
@@ -56,6 +58,7 @@ const CHECKS: { [K in keyof Settings]: (v: unknown) => Settings[K] | undefined }
   jobs: checkJobs,
   shares: checkShares,
   repos: (v) => repoChoices(v, false),
+  setupSeen: (v) => (typeof v === 'boolean' ? v : undefined),
 };
 const KEYS = Object.keys(CHECKS) as (keyof Settings)[];
 

@@ -9,8 +9,10 @@ export type Bridge = {
   set(patch: SettingsPatch): Promise<View>;
   /** Asks something of Repositories (switch one on, add one, ...); says how it went. */
   repo(action: RepoAction): Promise<RepoResult>;
+  /** Runs Setup's checks again (#162); the view carries the new report. */
+  checkSetup(): Promise<View>;
   /** Every new view, as the main process sends it. Returns the way to stop listening. */
   onView(listener: (view: View) => void): () => void;
 };
 
-export const CHANNELS = { view: 'runner:view', set: 'runner:set', repo: 'runner:repo', changed: 'runner:changed' } as const;
+export const CHANNELS = { view: 'runner:view', set: 'runner:set', repo: 'runner:repo', setup: 'runner:setup', changed: 'runner:changed' } as const;

@@ -6,8 +6,10 @@ serving Stefan's repos until the cutover ticket. So far it signs in to T3 and li
 could serve (#149), opens as a desktop window that keeps running in the tray, with Settings
 (#150; The desktop app, below), keeps its repositories in step with T3's projects (#151;
 Repositories, below), knows which model does each kind of job and launches it (#152; Job
-models, below), and gates every job on its provider's usage, keeping your share of each week
-(#153; Usage, below).
+models, below), gates every job on its provider's usage, keeping your share of each week
+(#153; Usage, below), has a Setup page that says what's missing before it can work (#162; Setup,
+below), and ships as a Windows installer built by CI on a version tag (#164; The installer,
+below).
 
 ## Run it
 
@@ -18,6 +20,7 @@ pnpm --dir app live:sign-in       # the live sign-in check (Live checks, below)
 pnpm --dir app live:launch        # the live launch check, sandbox only (Live checks, below)
 pnpm --dir app live:usage         # each provider's usage as the app reads it; acts on no project
 pnpm --dir app desktop            # builds and opens the desktop app (The desktop app, below)
+pnpm --dir app installer          # builds the Windows installer into installer-dist/ (The installer, below)
 ```
 
 Node runs the `.ts` files as they are (type stripping): no build step, so the code uses only
@@ -108,7 +111,7 @@ Code both sides use (`display.ts`, `settings-search.ts`) touches no Node. The wi
 - **Settings** are `settings.json` in the state folder (`src/settings.ts`): Name (null follows
   the `gh` account: `gh api user`, its name, else its login), the date style (default
   `month-first`, "November 16, 2026 Monday"), Start with Windows (on) and each repo's choices
-  (`repos`; Repositories, below). Each change is checked,
+  (`repos`; Repositories, below) and whether Setup has been shown (`setupSeen`; Setup, below). Each change is checked,
   saved at once (written aside and renamed over) and sent to the window; there's no Save button.
   The state folder's location is the only thing in a machine file, `machine.json` in Electron's
   userData (`%APPDATA%\Queue runner`); a first start writes `%APPDATA%\Queue runner\state`
@@ -128,15 +131,45 @@ Code both sides use (`display.ts`, `settings-search.ts`) touches no Node. The wi
 
 `pnpm --dir app desktop:shoot <absolute dir>` renders the real window on a fresh state in a temp
 folder (never the real state, lock or logon entry), on the sample T3 catalog
-(`test/fixtures/server-config.json`, never the real T3): `window`, `settings-name`,
+(`test/fixtures/server-config.json`, never the real T3): `window`, `setup` (every check passed),
+`setup-failing` (T3 not running, gh signed out), `settings-name`,
 `settings-repos`, `settings-models` (a new install), `settings-models-chosen` (the sample choices in
 `test/fixtures/shoot-jobs.json`), `settings-share` (a new install) and `settings-share-kept` (the
 sample share in `test/fixtures/shoot-shares.json`), on the fixture's usage moved so T3 read it a
 minute before the shoot, with one sample provider T3 reads no usage for
 (`shoot-unread-provider.json`, its row Coming soon), `settings-display`, `settings-machine` and `settings-search` (a
 typo, "windos"), each `-light.png` and `-dark.png`, at 1440x900. The page's address opens Settings for it:
-`#settings=<page>` or `#q=<search>`. Repositories is shot from a sample (`src/desktop/sample.ts`:
+`#settings=<page>` or `#q=<search>`, and Setup: `#setup`. Setup's samples are the real checks run
+on fixed answers (`sampleSetup` in `src/desktop/sample.ts`). Repositories is shot from a sample (`src/desktop/sample.ts`:
 two served repos, one New and one with no GitHub remote), which reaches neither T3 nor GitHub.
+
+## The installer
+
+`pnpm --dir app installer` (#164; #68, Shipping) builds the desktop app and packs it with
+electron-builder (`electron-builder.json`) into `installer-dist/Queue-runner-Setup-<version>.exe`
+(not committed): NSIS, one click, per user (no administrator rights; the app goes to
+`%LOCALAPPDATA%\Programs\queue-runner-app`), a Start menu shortcut, and the app started when it
+finishes. That start is the first one, so Setup opens (Setup, below). The package holds only
+`desktop-dist`, `desktop/` and `package.json`: Vite and esbuild bundle every package the app
+uses, so they're all devDependencies and none ships in `node_modules`.
+
+- **Uninstalling** removes the app, its shortcut and its logon entry (`installer/uninstall.nsh`
+  deletes the Run value named `LOGON_ENTRY`, `src/platform/platform.ts`; not when an update runs
+  the old uninstaller), and keeps `%APPDATA%\Queue runner`, machine.json and the state folder
+  (`deleteAppDataOnUninstall: false`).
+- **Unsigned for v1:** signing needs a paid certificate and can come later. SmartScreen stops a
+  first run ("Windows protected your PC", Unknown publisher; More info, Run anyway), which the
+  release notes (`release-notes.md`) say.
+- **CI** (`.github/workflows/release.yml`, on Windows): a `v*` tag (`v0.1.0`) runs the typecheck
+  and tests, builds the installer at the tag's version and attaches it to that tag's release,
+  creating the release with `release-notes.md` if there's none. A PR that changes the packaging
+  (the workflow, `electron-builder.json`, `installer/`, `package.json` or the lockfile) builds it
+  without releasing. `package.json`'s `version` is the one a local build gets.
+- **Checked by hand 2026-11-19** (0.1.0, on a PC with no `%APPDATA%\Queue runner` and no logon
+  entry): installing added the Start menu shortcut, started the app, wrote the logon entry and
+  opened Setup; the silent uninstall (`/S`) stopped the app and removed it, its shortcut, its Apps
+  entry and the logon entry, and kept `%APPDATA%\Queue runner`. `test/installer.test.ts` checks
+  the config those rest on.
 
 ## Repositories
 
@@ -262,6 +295,34 @@ tickets; the tests drive it on fake T3's events.
   usage for shows one row greyed, Coming soon. A provider that isn't connected shows no row (#36's
   open question 8): its jobs can't run anyway. Stefan's 5% of Claude's week is set at the
   cutover, not in code.
+
+## Setup
+
+What the runner needs from the PC before it can work, checked (#162; #68 story 16, without
+skills). `src/setup.ts` runs the checks in the main process through the app's own seams; the
+window (`renderer/src/Setup.tsx`) shows each one passed, waiting, or missing with how to fix it
+and what T3 or gh said.
+
+- **T3 Code:** installed (its CLI is at `~/.t3/bin/t3.cmd`), running (`server-runtime.json` names
+  an origin), and reachable with the app signed in: `subscribeServerConfig` answers on the
+  WebSocket and `t3_project_list` on MCP, so both of the app's sign-ins are tried. A refused
+  pairing code or OAuth step is "couldn't sign in"; anything else is "isn't answering".
+- **Providers:** from that same server config; connected is `enabled` and `status: ready`, as the
+  catalog counts it. Each connected one is listed; with none, each one switched on but not ready
+  is shown with T3's message.
+- **GitHub:** `gh auth status --hostname github.com --json hosts`: signed in names the login, a
+  host whose `state` isn't `success` is a sign-in that no longer works, no hosts is signed out,
+  and a gh that can't start is not installed. T3 runs the same gh, so its sign-in is T3's: T3
+  serves no GitHub account of its own (`sourceControlHosts` was empty, seen live 2026-11-19
+  against T3 0.1.9).
+- **Resume after usage limits:** T3's `autoResumeLimitedThreads` (in the config's `settings`) must
+  be off, since it would race the runner's own resumes. A T3 without the key passes.
+- Providers and Resume wait while T3 can't be reached; gh is checked beside T3.
+- **When:** the checks run at start and again on **Check again** (`runner:setup`; a run asked for
+  during one is that run). Setup opens by itself on the first start only (`setupSeen` is then
+  saved), and later from the sidebar's Setup button, which carries a red mark while a check wants
+  fixing: it stands in for Health's link until Health is built. No skills are checked (#68,
+  2026-11-18).
 
 ## Signing in
 
