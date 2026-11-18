@@ -314,10 +314,18 @@ class JobLog:
         """A Claude job that is writing to this branch, or may again: a build or fix still
         open, waiting for an answer, or cut off by a usage limit and not yet recovered (until
         it ends or is released). One writer per PR."""
+        return self._writing(repo, ('build', 'fix'), branch)
+
+    def building(self, repo: str) -> Job | None:
+        """A build in the repo that is writing, or may again, as `writer` counts it: on its way
+        to a PR (a train builds nothing beside it, #179)."""
+        return self._writing(repo, ('build',))
+
+    def _writing(self, repo: str, kinds, branch: str | None = None) -> Job | None:
         jobs, _, gone = self._fold()
         limited = {j.id for j in self._limited(jobs, gone, stuck=True)}
-        return next((j for j in jobs if j.kind in ('build', 'fix') and j.repo == repo
-                     and j.branch == branch and (j.open or j.id in limited or (
+        return next((j for j in jobs if j.kind in kinds and j.repo == repo
+                     and (branch is None or j.branch == branch) and (j.open or j.id in limited or (
                          j.outcome == 'waiting' and j.id not in gone))), None)
 
     @staticmethod

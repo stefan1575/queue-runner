@@ -209,6 +209,7 @@ class Runner:
         self._order_lock = threading.Lock()
         self._said_unknown: str | None = None   # control.json stops a repo not served (37)
         self._said_red: dict[str, str] = {}   # a repo's red base, said once per head (#98)
+        self._said_train: dict[str, str] = {}   # why a train builds nothing, said once (#179)
 
     def say(self, line: str) -> None:
         with self._say_lock:   # both lanes say things
@@ -353,11 +354,28 @@ class Runner:
                 self.say(text)
             return None
         self._said_red.pop(name, None)
+        if hold := self._train_hold(repo):   # no build ahead of the train (#179)
+            if self._said_train.get(name) != hold:
+                self._said_train[name] = hold
+                self.say(f'{name}: no build starts: {hold}')
+            return None
+        self._said_train.pop(name, None)
         job = pick(repo, self.github, held=self.jobs.held_issues(name))
         if job is not None:
             return Start(name, 'build', None, lambda: self.run_build(job),
                          f'build {name}#{job.issue.number}')
         return None
+
+    def _train_hold(self, repo: Repo) -> str | None:
+        """Why a train repo starts no build now (`train.build_hold`), or None; GitHub or git
+        failing holds it too, since what's open can't be told."""
+        if not repo.train:
+            return None
+        from .train import build_hold
+        try:
+            return build_hold(repo, self.github.open_pulls(repo), self.jobs, self.live)
+        except Exception as e:
+            return f'the train could not be read ({type(e).__name__}: {e})'
 
     def _waited(self, repo: str) -> float:
         """Since when the repo's work has waited for a Claude job: when its last one ended

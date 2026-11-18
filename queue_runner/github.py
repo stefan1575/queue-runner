@@ -383,6 +383,11 @@ class GhCli:
         self._send('PUT', f'repos/{repo.github}/pulls/{number}/update-branch',
                    {'expected_head_sha': expected_head})
 
+    def retarget(self, repo, number, base) -> None:
+        """Points the PR at `base` (a stacked PR whose base merged rejoins the repo's base:
+        `train.py`, #179)."""
+        self._send('PATCH', f'repos/{repo.github}/pulls/{number}', {'base': base})
+
     def set_status(self, repo, sha, state, description, target_url='', context=SOL_REVIEW):
         """A commit status on exactly `sha`."""
         self._send('POST', f'repos/{repo.github}/statuses/{sha}',

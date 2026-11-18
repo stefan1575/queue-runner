@@ -82,6 +82,9 @@ class Merger:
                                      'reviews that first')
             return
         yield 'Not a draft', 'it is a draft' if pr.draft else None
+        if repo.train:   # one PR at a time (#179): only the front one merges
+            from .train import behind
+            yield 'First in the train', behind(repo, pr, self.github.open_pulls(repo))
         job = self.jobs.writer(repo.name, pr.branch)
         yield 'No job writing to it', f'a {job.kind} job is writing to {pr.branch}' if job else None
         # Stefan may merge while a live run is open: his merge goes in the next batch.

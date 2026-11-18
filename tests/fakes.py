@@ -124,6 +124,11 @@ class FakeGitHubForReviews(FakeGitHubWithPulls):
             raise GhError('gh api failed (1): merge conflict between base and head (HTTP 422)')
         self.posts.append(('update-branch', number, expected_head))
 
+    def retarget(self, repo, number, base):
+        """Points the PR at `base`: GitHub works its mergeability out again."""
+        self._write('retarget', number, base)
+        self.now.setdefault(number, {})['base'] = base
+
     def close_completed(self, repo, number):
         self._write('close-done', number)
         self.close_issue(number)

@@ -204,7 +204,7 @@ class Reviewer:
             pr = next((p for p in self.github.open_pulls(repo) if p.number == number), None)
             if pr is None:
                 return IDLE, f'#{number} is not an open PR in {repo.github}'
-            why = self.why_not(repo, pr)
+            why = self.why_not(repo, pr, self.github.open_pulls(repo))
             if why:
                 return IDLE, why
             if (who := self._who(gate_label(repo.name, pr.number))) is None:
@@ -261,9 +261,10 @@ class Reviewer:
         return list(self._candidates(repo))
 
     def _candidates(self, repo):
-        for pr in sorted(self.github.open_pulls(repo), key=lambda p: p.number):
+        prs = sorted(self.github.open_pulls(repo), key=lambda p: p.number)
+        for pr in prs:
             try:
-                why = self.why_not(repo, pr)
+                why = self.why_not(repo, pr, prs)
             except Exception as e:   # GitHub failing on one PR leaves the others to go on
                 why = f'reading it failed ({type(e).__name__}: {e})'
             yield pr, why
@@ -365,9 +366,15 @@ class Reviewer:
             self.say(f'review {repo.name}#{pr.number}: not now, {why}')
         self._last_why[key] = why
 
-    def why_not(self, repo: Repo, pr: PullRequest) -> str | None:
-        """Why this PR isn't reviewed now, or None if it is: cheapest checks first."""
+    def why_not(self, repo: Repo, pr: PullRequest, prs=None) -> str | None:
+        """Why this PR isn't reviewed now, or None if it is: cheapest checks first. `prs` is
+        the repo's open PRs (read here when not given): in a train only the front one is
+        reviewed (#179)."""
+        from .train import behind, retarget_first, stale_base
         h, h7 = pr.head_sha, pr.head_sha[:7]
+        if repo.train and (why := behind(repo, pr, self.github.open_pulls(repo)
+                                         if prs is None else prs)):
+            return why
         # One writer per PR: a waiting build or fix writes again once Stefan answers it, so it's
         # left alone until that job ends or is released.
         if job := self.jobs.writer(repo.name, pr.branch):
@@ -378,6 +385,8 @@ class Reviewer:
                     f'a {job.kind} job is still writing to its branch')
         if why := held(self.jobs, repo, pr.number):
             return why
+        if stale := stale_base(self.github, repo, pr):
+            return retarget_first(stale, repo)
         if any(j.open and j.reviewer in OPUS_KINDS and j.id != self.live
                for j in self.jobs.on('review', repo.name, pr.number)):
             return ("a stopped runner's Opus fallback review of it runs on in T3: counted as "

@@ -163,7 +163,8 @@ class Fixer:
         # the stop: `_busy` has seen that no round ran after it.
         if not self.order(repo, pr) and (stop := conflict_stop(self.jobs, repo, pr)):
             return f'{stop[0]}: a stop for Stefan'
-        if other := self.resolving(repo, pr, prs):
+        # A train moves one PR at a time already (#179): no other PR is on its way to merging.
+        if not repo.train and (other := self.resolving(repo, pr, prs)):
             return (f"PR #{other.number} had a conflict round and hasn't merged or stopped yet: "
                     'one conflicted PR at a time')
         return None
@@ -183,12 +184,20 @@ class Fixer:
         """(PR, its blocking review job, why not now) for each open PR the runner found
         blocking, and (PR, None, why not now) for each with no blocking review that conflicts
         with its base (a conflict round), lowest number first. Only the first conflicted PR
-        may go: the others wait for it."""
+        may go: the others wait for it. In a train (#179) only its front PR may go, once it's
+        stacked on nothing that merged (`train.stale_base`): the others wait behind it."""
+        from .train import behind, retarget_first, stale_base
         prs = sorted(self.github.open_pulls(repo), key=lambda p: p.number)
         first = None   # the conflicted PR whose round goes first this pass
         for pr in prs:
             review = None
+            if why := behind(repo, pr, prs):   # untouched: not even read
+                yield pr, None, why
+                continue
             try:
+                if stale := stale_base(self.github, repo, pr):
+                    yield pr, None, retarget_first(stale, repo)
+                    continue
                 review = self.review_to_fix(repo, pr)   # may read its comments (`adopted`)
                 if review is not None:
                     why = self.why_not(repo, pr)

@@ -25,6 +25,10 @@ class Repo:
     # Who merges a clean PR (ticket 17, `merge.py`): 'runner' (it merges itself), or 'stefan'
     # (it labels the PR `ready-for-stefan` and toasts once; Stefan merges, and the runner notices).
     merge: str = 'runner'
+    # One PR at a time (#179, `train.py`; docs/flow.md, The train): only the lowest-numbered
+    # open PR moves, no build starts while one is open or the last merge's live steps aren't
+    # done, and a stop on that PR pauses the repo.
+    train: bool = False
 
     @property
     def local_issues(self) -> bool:
@@ -145,7 +149,7 @@ def load_config(path: str = DEFAULT_CONFIG) -> Config:
                   live_doc=r.get('live_doc') or None,
                   live_migrations=r.get('live_migrations', 'supabase/migrations'),
                   live_functions=r.get('live_functions', 'supabase/functions'),
-                  issues=_issues(r), merge=_merge(r))
+                  issues=_issues(r), merge=_merge(r), train=bool(r.get('train')))
              for r in raw.get('repos', [])]
     claude, sol = raw.get('claude', {}), raw.get('sol', {})
     state_dir = _path(raw['state_dir'])

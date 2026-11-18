@@ -346,8 +346,32 @@ class Stopper:
             except Exception as e:   # GitHub down: the next pass tries again
                 self.say(f'stops on {repo.name}: listing PRs failed ({type(e).__name__}: {e})')
                 continue
+            if repo.train:   # one PR at a time (#179): the others are left as they are
+                prs = self.train_front(repo, prs)
             for pr in prs:
                 self.check(repo, pr)
+
+    def train_front(self, repo, prs) -> list:
+        """A train's front PR (#179), as a list of it alone (or none): the only one whose stops
+        are looked for. Stacked on a branch that merged or is gone (`train.stale_base`), it's
+        pointed at the repo's base first, and listed as it is then; GitHub failing is said, and
+        the next pass tries again."""
+        from .train import front, stale_base
+        first = front(prs)
+        if first is None:
+            return []
+        name = f'train {repo.name}#{first.number}'
+        try:
+            why = stale_base(self.github, repo, first)
+            if why is None:
+                return [first]
+            self.github.retarget(repo, first.number, repo.base)
+            self.say(f'{name}: {why}; retargeted from {first.base} to {repo.base}')
+            return [self.github.pull(repo, first.number)]
+        except Exception as e:
+            self.say(f'{name}: retargeting it to {repo.base} failed ({type(e).__name__}: {e}); '
+                     'next pass')
+            return []
 
     def check(self, repo, pr) -> None:
         """Files each stop on the PR's head that isn't filed yet. GitHub failing is said; the

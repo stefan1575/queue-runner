@@ -226,6 +226,10 @@ class Decider:
         """The cases waiting for a decision in this repo, in the order they're taken."""
         jobs = self.jobs
         prs = {p.number: p for p in self.github.open_pulls(repo)}
+        if repo.train:   # one PR at a time (#179): the cases on the PRs behind its front wait
+            from .train import front
+            first = front(prs.values())
+            prs = {first.number: first} if first else {}
         for n in sorted(prs):
             pr = prs[n]
             if jobs.writer(repo.name, pr.branch):

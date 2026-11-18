@@ -290,6 +290,26 @@ class LiveSteps:
                 why = f'no PR merged since {last.head[:7]}'
         return self._note(repo, why)
 
+    def pending(self, repo) -> str | None:
+        """Why the repo's merges aren't all live yet, or None: it has no live steps, or the last
+        live run (or first sight) reached the base's head, or nothing merged by a PR since. A
+        train builds only once they're done (#179)."""
+        if not (repo.live_doc and repo.github):
+            return None
+        last, _ = self.reach(repo)
+        if last is None:
+            return 'its live steps have not been read yet'
+        target = self.target(repo)
+        if last.head == target:
+            return None
+        if not self.git.is_ancestor(repo.path, last.head, target):
+            return (f'{repo.base} at {target[:7]} no longer holds {last.head[:7]}, where the last '
+                    'live run reached')
+        prs = pr_numbers(self.git.first_parent(repo.path, last.head, target))
+        if not prs:
+            return None
+        return 'the live steps of ' + ', '.join(f'#{n}' for n in prs) + ' are not done'
+
     def target(self, repo) -> str:
         """The base's head on origin now."""
         self.git.fetch(repo.path, repo.base)
