@@ -80,7 +80,7 @@ def shot_url(port: int, shot: str, real: bool) -> str:
 MEDIA = re.compile(r"^@media \(max-width: (\d+)px\) \{\n(.*?)^\}", re.S | re.M)
 HIDES = re.compile(r"^\s*([^{}\n]*?)\s*\{\s*display:\s*none;\s*\}", re.M)
 RAIL = re.compile(r"(?:body\.page-([\w-]+) )?\.rail")
-MARGIN, HEIGHT, LEAST = 120, 900, 1440
+MARGIN, HEIGHT, LEAST = 120, 1200, 1440   # 1200 high: the whole rail, Health last
 
 
 def rail_breakpoints(css: str) -> list[tuple[int, str | None]]:

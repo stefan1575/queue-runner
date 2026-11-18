@@ -121,8 +121,8 @@ class RailInShotTest(unittest.TestCase):
                     self.assertGreater(w, px, (page, px))
 
     def test_each_shot_is_sized_from_its_page_unless_a_size_is_named(self):
-        self.assertEqual(shoot.shot_size(self.CSS, 'busy', None), '1600x900')
-        self.assertEqual(shoot.shot_size(self.CSS, 'busy/inbox', None), '2120x900')
+        self.assertEqual(shoot.shot_size(self.CSS, 'busy', None), '1600x1200')
+        self.assertEqual(shoot.shot_size(self.CSS, 'busy/inbox', None), '2120x1200')
         self.assertEqual(shoot.shot_size(self.CSS, 'busy/inbox', '1440x900'), '1440x900')
 
 

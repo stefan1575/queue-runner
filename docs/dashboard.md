@@ -441,7 +441,7 @@ python3 -m dashboard    # http://queue.localhost/ is the runner's; http://localh
 A PR that changes what the page shows gets a before and an after screenshot of the change its
 ticket asked for (`templates/build.md`, Screenshots: what a screenshot is for, and when there
 are enough). `scripts/shoot.py` runs the dashboard from the checkout, or from any commit with
-`--commit`, on a free port of its own, and shoots `?sample=STATE&page=PAGE` 900 high, in a window
+`--commit`, on a free port of its own, and shoots `?sample=STATE&page=PAGE` 1200 high (the whole rail, Health last), in a window
 wider than every breakpoint that hides the rail on that page (read from the page being shot:
 1600 wide today, 2120 for the Inbox; `--size WxH` overrides). At 1440 the rail collapsed and
 #147's 12 shots of a rail change showed none of it:
