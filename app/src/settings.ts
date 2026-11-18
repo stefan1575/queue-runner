@@ -5,6 +5,7 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { DATE_STYLES, type DateStyle } from './display.ts';
 import { checkJobs, DEFAULT_JOBS, type Jobs } from './jobs.ts';
+import { checkShares, type Shares } from './shares.ts';
 
 export type Settings = {
   /** Your name for the briefs; null follows the `gh` account's name. */
@@ -13,10 +14,13 @@ export type Settings = {
   startWithWindows: boolean;
   /** Which model does each kind of job (#152; `src/jobs.ts`). */
   jobs: Jobs;
+  /** Your share of each provider's weekly windows, by `<driver>/<window id>` (#153; `src/shares.ts`).
+   *  A window not named keeps 0%. */
+  shares: Shares;
 };
 export type SettingsPatch = Partial<Settings>;
 
-export const DEFAULT_SETTINGS: Settings = { name: null, dateStyle: 'month-first', startWithWindows: true, jobs: DEFAULT_JOBS };
+export const DEFAULT_SETTINGS: Settings = { name: null, dateStyle: 'month-first', startWithWindows: true, jobs: DEFAULT_JOBS, shares: {} };
 
 /** A change the page never offers: an unknown key or a value of the wrong kind. */
 export class SettingsError extends Error {}
@@ -27,6 +31,7 @@ const CHECKS: { [K in keyof Settings]: (v: unknown) => Settings[K] | undefined }
   dateStyle: (v) => (DATE_STYLES.some((d) => d.id === v) ? (v as DateStyle) : undefined),
   startWithWindows: (v) => (typeof v === 'boolean' ? v : undefined),
   jobs: checkJobs,
+  shares: checkShares,
 };
 const KEYS = Object.keys(CHECKS) as (keyof Settings)[];
 

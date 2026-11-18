@@ -46,7 +46,7 @@ describe('the settings', () => {
   test('a new install has the defaults', async () => {
     const store = await SettingsStore.open(await temp());
     expect(store.get()).toEqual(DEFAULT_SETTINGS);
-    expect(DEFAULT_SETTINGS).toEqual({ name: null, dateStyle: 'month-first', startWithWindows: true, jobs: DEFAULT_JOBS });
+    expect(DEFAULT_SETTINGS).toEqual({ name: null, dateStyle: 'month-first', startWithWindows: true, jobs: DEFAULT_JOBS, shares: {} });
   });
 
   test('a change is saved at once and survives a restart', async () => {
@@ -125,6 +125,18 @@ describe('the settings', () => {
     expect((await SettingsStore.open(folder)).get().jobs).toEqual(jobs);
     await expect(store.set({ jobs: { ...jobs, default: { provider: 'p' } } } as any)).rejects.toThrow(SettingsError);
     expect((await SettingsStore.open(folder)).get().jobs).toEqual(jobs);
+  });
+
+  // Your share (#153): nothing kept until a row is set.
+  test('your share of a window is saved and survives a restart, and a malformed one is refused', async () => {
+    const folder = await temp();
+    const store = await SettingsStore.open(folder);
+    expect(store.get().shares).toEqual({});
+    const shares = { 'p/week': { percent: 5, releaseHours: 24 } };
+    await store.set({ shares });
+    expect((await SettingsStore.open(folder)).get().shares).toEqual(shares);
+    await expect(store.set({ shares: { 'p/week': { percent: -1, releaseHours: 24 } } })).rejects.toThrow(SettingsError);
+    expect(store.get().shares).toEqual(shares);
   });
 
   test('a file with a bad value keeps the rest and defaults that one', async () => {
