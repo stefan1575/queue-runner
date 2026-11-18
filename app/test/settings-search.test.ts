@@ -63,6 +63,24 @@ describe('Search', () => {
     expect(find('fallback')).toHaveLength(6);
   });
 
+  test("finds your share of a provider's week by its name, its percent and what it does", () => {
+    const week = { id: 'wk', kind: 'weekly' as const, label: 'Weekly', usedPercent: 10, resetsAt: '2026-11-20T11:00:00Z', minutes: 10080 };
+    const withUsage: View = {
+      ...view,
+      settings: { ...view.settings, shares: { 'a/wk': { percent: 7, releaseHours: 24 } } },
+      usage: [
+        { provider: 'p1', driver: 'a', account: 'a:1', label: 'Alpha', name: 'Alpha', checkedAt: null, windows: [week], resetCredits: null, unavailable: null },
+        { provider: 'p2', driver: 'b', account: 'b:1', label: 'Beta', name: 'Beta', checkedAt: null, windows: [], resetCredits: null, unavailable: 'unsupported' },
+      ],
+    };
+    const in2 = (q: string) => searchSettings(withUsage, now, q).map((s) => s.id);
+    expect(in2('alpha week')).toEqual(['share-a/wk']);
+    expect(in2('7%')).toEqual(['share-a/wk']);
+    expect(in2('reserve')).toEqual(['share-a/wk', 'share-b/weekly']);
+    expect(in2('coming soon')).toEqual(['share-b/weekly']);
+    expect(searchSettings(withUsage, now, 'kept').map((s) => s.page)).toEqual(['share', 'share']);
+  });
+
   test("Models wants a choice while Default follows T3's", () => {
     expect(wantsChoice(view)).toEqual({ models: 1 });
     const chosen = { ...view, settings: { ...view.settings, jobs: { ...view.settings.jobs, default: catalog.t3Default } } };

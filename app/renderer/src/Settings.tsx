@@ -3,7 +3,7 @@
 // on the left with Search and "/" on top, a "Settings / Page" header, one page at a time, each
 // setting a row in a bordered card (a medium title over a smaller grey line, the control on the
 // right). A change saves the moment it's made; there's no Save button.
-import { CalendarClock, Check, Cpu, Monitor, Search, User, X, type LucideIcon } from 'lucide-react';
+import { CalendarClock, Check, Cpu, Monitor, PieChart, Search, User, X, type LucideIcon } from 'lucide-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { View } from '../../src/desktop/view.ts';
 import { DATE_STYLES, clock, formatDate, isTwelveHour, TIME_FORMATS, type DateStyle } from '../../src/display.ts';
@@ -14,15 +14,17 @@ import type { Open } from './App.tsx';
 import { cn } from './cn.ts';
 import { NameField, Pick, Toggle } from './controls.tsx';
 import { defaultRow, kindRow } from './Models.tsx';
+import { shareRow, usageNote } from './Share.tsx';
+import { shareRows } from '../../src/shares.ts';
 import { runner, useNow } from './runner.ts';
 
-const ICONS: Record<PageId, LucideIcon> = { name: User, models: Cpu, display: CalendarClock, machine: Monitor };
+const ICONS: Record<PageId, LucideIcon> = { name: User, models: Cpu, share: PieChart, display: CalendarClock, machine: Monitor };
 
-function Row({ title, desc, children, below }: { title: ReactNode; desc?: ReactNode; children?: ReactNode; below?: ReactNode }) {
+function Row({ title, desc, children, below, dim }: { title: ReactNode; desc?: ReactNode; children?: ReactNode; below?: ReactNode; dim?: boolean }) {
   return (
     <div className="px-5 py-3.5">
       <div className="flex flex-wrap items-center justify-between gap-x-8 gap-y-2.5 lg:flex-nowrap">
-        <div className="min-w-0">
+        <div className={cn('min-w-0', dim && 'opacity-55')}>
           <div className="flex flex-wrap items-center gap-2 text-[16px] font-medium leading-snug">{title}</div>
           {desc && <div className="mt-1 max-w-[72ch] text-pretty text-[14px] leading-normal text-mute">{desc}</div>}
         </div>
@@ -85,6 +87,7 @@ export function Settings({ view, open, onOpen, onClose }: { view: View; open: No
     ),
     'job-default': defaultRow(view, save, Row),
     ...(Object.fromEntries(JOB_KINDS.map((k) => [`job-${k.id}`, kindRow(k.id, view, save, Row)])) as Record<`job-${JobKind}`, ReactNode>),
+    ...Object.fromEntries(shareRows(view.usage, s.shares).map((r) => [`share-${r.key}`, shareRow(r, view, save, Row)])),
     date: (
       <Row title="Date style" desc={<>How dates are written across the app. In tight spots: {formatDate(now, s.dateStyle, tf, true)}.</>}>
         <Pick<DateStyle> className="w-[380px]" label="Date style" value={s.dateStyle}
@@ -165,7 +168,9 @@ export function Settings({ view, open, onOpen, onClose }: { view: View; open: No
                 </>
               ) : (
                 <section aria-label={page.label}>
-                  <Card>{onPage(page.id).map((id) => <div key={id}>{rows[id]}</div>)}</Card>
+                  {page.id === 'share' && usageNote(view)
+                    ? <p className="px-1 text-[15px] text-mute">{usageNote(view)}</p>
+                    : <Card>{onPage(page.id).map((id) => <div key={id}>{rows[id]}</div>)}</Card>}
                 </section>
               )}
             </div>

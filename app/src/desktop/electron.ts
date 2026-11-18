@@ -3,8 +3,8 @@
 //
 //   --hidden        a start at logon: the app stays in the tray
 //   --shoot <dir>   renders the window and each Settings page, light and dark, into <dir> as
-//                   PNGs, on a fresh state in a temp folder with the sample T3 catalog in
-//                   test/fixtures, and quits (docs/app.md, Screenshots)
+//                   PNGs, on a fresh state in a temp folder with the sample T3 catalog and usage
+//                   in test/fixtures, and quits (docs/app.md, Screenshots)
 import { app, BrowserWindow, ipcMain, nativeTheme } from 'electron';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -13,6 +13,8 @@ import { fileURLToPath } from 'node:url';
 import { GhGitHub } from '../github.ts';
 import { windowsPlatform } from '../platform/windows.ts';
 import { checkJobs, DEFAULT_JOBS } from '../jobs.ts';
+import { checkShares } from '../shares.ts';
+import { usageFromProviders } from '../usage.ts';
 import { SettingsStore } from '../settings.ts';
 import { catalogFromConfig } from '../t3/catalog.ts';
 import { fixedCatalog, T3Catalog } from '../t3/catalog-source.ts';
@@ -58,7 +60,7 @@ async function main() {
   const settings = await SettingsStore.open(stateFolder(join(userData, 'machine.json'), join(userData, 'state')));
   // What T3 offers each job, kept current from its WebSocket; a shoot shows the sample instead.
   const catalog = shootTo
-    ? fixedCatalog(catalogFromConfig(fixture('server-config.json').config))
+    ? fixedCatalog(catalogFromConfig(fixture('server-config.json').config), sampleUsage())
     : T3Catalog.start(new T3Ws(runtimeAddress(), t3Cli(), fetchHttp, nodeConnect));
   // The clock follows T3's Time format, read from T3's client settings (docs/app.md, The desktop app).
   const view = await RunnerView.start(settings, new GhGitHub(), await T3TimeFormat.start(), catalog);
@@ -102,17 +104,37 @@ async function main() {
   app.on('window-all-closed', () => {});
 }
 
+/** The sample's usage, its times moved so T3 read it a minute ago (its resets stay ahead), with
+ *  one more provider T3 reads no usage for (its Your share row is Coming soon). */
+function sampleUsage() {
+  const providers = [...fixture('server-config.json').config.providers, fixture('shoot-unread-provider.json')];
+  const read = Math.max(...providers.map((p: any) => Date.parse(p.usageLimits?.checkedAt ?? '') || 0));
+  const shift = Date.now() - 60_000 - read;
+  const moved = (t: unknown) => (typeof t === 'string' ? new Date(Date.parse(t) + shift).toISOString() : t);
+  for (const p of providers) {
+    if (!p.usageLimits) continue;
+    p.usageLimits.checkedAt = moved(p.usageLimits.checkedAt);
+    for (const w of p.usageLimits.windows) w.resetsAt = moved(w.resetsAt);
+  }
+  return usageFromProviders(providers);
+}
+
 /** The window and each Settings page, light and dark, as PNGs in `dir`. */
 async function shoot(dir: string, settings: SettingsStore) {
   mkdirSync(dir, { recursive: true });
   // The Models page twice: a new install (T3's default, the nudge) and with a sample of chosen
   // values (test/fixtures/shoot-jobs.json).
+  // Your share twice too: a new install (nothing kept) and a sample share
+  // (test/fixtures/shoot-shares.json).
   const chosen = checkJobs(fixture('shoot-jobs.json'))!;
+  const shares = checkShares(fixture('shoot-shares.json'))!;
   const states: [string, string, boolean?][] = [
     ['window', ''],
     ['settings-name', 'settings=name'],
     ['settings-models', 'settings=models'],
     ['settings-models-chosen', 'settings=models', true],
+    ['settings-share', 'settings=share'],
+    ['settings-share-kept', 'settings=share', true],
     ['settings-display', 'settings=display'],
     ['settings-machine', 'settings=machine'],
     ['settings-search', 'q=windos'],
@@ -122,7 +144,7 @@ async function shoot(dir: string, settings: SettingsStore) {
   for (const theme of ['light', 'dark'] as const) {
     nativeTheme.themeSource = theme;
     for (const [name, hash, withChoices] of states) {
-      await settings.set({ jobs: withChoices ? chosen : DEFAULT_JOBS });
+      await settings.set({ jobs: withChoices ? chosen : DEFAULT_JOBS, shares: withChoices ? shares : {} });
       // The same address again would keep the page (and the view it holds): load it fresh.
       await win.loadURL('about:blank');
       const p = page(hash);

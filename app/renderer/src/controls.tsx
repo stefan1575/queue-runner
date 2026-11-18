@@ -76,3 +76,28 @@ export function NameField({ value, fallback, onSave }: { value: string | null; f
     />
   );
 }
+
+/** A whole number from `min` to `max` that saves when you leave the field or press Enter. A value
+ *  out of range is brought into it; one that isn't a number puts back what was saved, and so does
+ *  Escape. */
+export function NumberField({ value, onSave, label, min, max, disabled }: {
+  value: number; onSave: (n: number) => void; label: string; min: number; max: number; disabled?: boolean;
+}) {
+  const [text, setText] = useState(String(value));
+  useEffect(() => { setText(String(value)); }, [value]);
+  const commit = () => {
+    const n = Number(text.trim());
+    if (!text.trim() || !Number.isFinite(n)) { setText(String(value)); return; }
+    const kept = Math.min(max, Math.max(min, Math.round(n)));
+    setText(String(kept));
+    if (kept !== value) onSave(kept);
+  };
+  return (
+    <input
+      aria-label={label} value={text} inputMode="numeric" disabled={disabled} spellCheck={false} autoComplete="off"
+      onChange={(e) => setText(e.target.value)} onBlur={commit}
+      onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape') { e.preventDefault(); setText(String(value)); } }}
+      className="h-9 w-[64px] rounded-lg border border-line bg-surface px-2 text-right text-[15.5px] tabular-nums disabled:cursor-not-allowed disabled:opacity-50"
+    />
+  );
+}
