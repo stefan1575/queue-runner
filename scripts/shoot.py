@@ -4,7 +4,8 @@
     python3 scripts/shoot.py --commit REF --out DIR STATE[/PAGE] ...  # before: the page as it was at REF
     python3 scripts/shoot.py [--commit REF] --state-dir SDIR --out DIR NAME[/PAGE] ...
 
-Each shot is `?sample=STATE&page=PAGE` (PAGE defaults to the Overview). With `--state-dir`, the
+Each shot is `?sample=STATE&page=PAGE` (PAGE defaults to the Overview), in a window wider than
+the page's breakpoints that hide the rail (`--size WxH` overrides). With `--state-dir`, the
 dashboard serves SDIR instead and the shot is the runner's own address,
 `http://queue.localhost:<port>/?page=PAGE` (`localhost:<port>` only ever serves sample data,
 issue #136); NAME then only names the file. Each is saved as
@@ -18,6 +19,7 @@ Screenshots.
 from __future__ import annotations
 
 import argparse
+import re
 import socket
 import subprocess
 import sys
@@ -71,9 +73,44 @@ def shot_url(port: int, shot: str, real: bool) -> str:
     return f"http://localhost:{port}/?sample={st}" + (f"&page={page}" if page else "")
 
 
-def shoot_from(src: Path, shots: list[str], out: Path, size: str, label: str,
+# A shot is wider than every breakpoint that hides the rail on its page (PR #147 review 1, F1:
+# 1440x900 was under the 1480px one, so a rail change's 12 shots showed no rail). The widths are
+# read from the page being shot, so a moved breakpoint moves the window, and a before shot is
+# sized from its own commit's page.
+MEDIA = re.compile(r"^@media \(max-width: (\d+)px\) \{\n(.*?)^\}", re.S | re.M)
+HIDES = re.compile(r"^\s*([^{}\n]*?)\s*\{\s*display:\s*none;\s*\}", re.M)
+RAIL = re.compile(r"(?:body\.page-([\w-]+) )?\.rail")
+MARGIN, HEIGHT, LEAST = 120, 900, 1440
+
+
+def rail_breakpoints(css: str) -> list[tuple[int, str | None]]:
+    """Each max-width that hides `.rail`, with the one page it's scoped to (None: every page)."""
+    out = []
+    for m in MEDIA.finditer(css):
+        for sel in HIDES.findall(m.group(2)):
+            for one in sel.split(","):
+                r = RAIL.fullmatch(one.strip())
+                if r:
+                    out.append((int(m.group(1)), r.group(1)))
+    return out
+
+
+def rail_width(css: str, page: str) -> int:
+    page = page or "overview"
+    widest = max([px for px, only in rail_breakpoints(css) if only in (None, page)], default=0)
+    return max(LEAST, widest + MARGIN)
+
+
+def shot_size(css: str, shot: str, size: str | None) -> str:
+    """`--size` when named, else a window that shows the rail on the shot's page."""
+    return size or f"{rail_width(css, shot.partition('/')[2])}x{HEIGHT}"
+
+
+def shoot_from(src: Path, shots: list[str], out: Path, size: str | None, label: str,
                state_dir: Path | None = None) -> list[Path]:
     evidence = load_evidence()
+    page = src / "dashboard" / "index.html"   # absent only in a test's faked worktree
+    css = page.read_text(encoding="utf-8") if page.exists() else ""
     port = free_port()
     with tempfile.TemporaryDirectory() as tmp:
         state = str(state_dir.resolve()) if state_dir else tmp
@@ -85,7 +122,7 @@ def shoot_from(src: Path, shots: list[str], out: Path, size: str, label: str,
             made = []
             for shot in shots:
                 f = out / shot_name(label, shot)
-                evidence.shoot(shot_url(port, shot, state_dir is not None), f, size)
+                evidence.shoot(shot_url(port, shot, state_dir is not None), f, shot_size(css, shot, size))
                 made.append(f)
             return made
         finally:
@@ -99,7 +136,7 @@ def parse(argv: list[str] | None = None) -> argparse.Namespace:
     ap.add_argument("--label", choices=("before", "after"),
                     help="the file names' prefix (default: before with --commit, else after)")
     ap.add_argument("--out", type=Path, required=True)
-    ap.add_argument("--size", default="1440x900")
+    ap.add_argument("--size", help="WxH; by default wide enough to show the rail on the shot's page")
     ap.add_argument("--state-dir", type=Path,
                     help="a state folder to shoot on the runner's address instead of sample states")
     ap.add_argument("shots", nargs="+",

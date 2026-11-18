@@ -88,5 +88,43 @@ class StateDirTest(unittest.TestCase):
                                          'after-reconnecting-usage.png')])
 
 
+class RailInShotTest(unittest.TestCase):
+    """A shot's window is wider than the page's own rail breakpoints (PR #147 review 1, F1): at
+    the old 1440x900 the 1480px breakpoint hid the rail, so all 12 of #147's shots of a rail
+    change showed no rail. The width comes from the page being shot, so a breakpoint that moves
+    moves the window with it, and a before shot is sized from its own commit's page."""
+
+    CSS = """@media (max-width: 1480px) {
+  .rail { display: none; }
+}
+@media (max-width: 2000px) {
+  body.page-inbox .rail { display: none; }
+}
+@media (max-width: 1040px) {
+  .mail { display: none; }
+}"""
+
+    def test_the_window_is_wider_than_every_breakpoint_that_hides_the_rail_on_that_page(self):
+        self.assertGreater(shoot.rail_width(self.CSS, ''), 1480)
+        self.assertGreater(shoot.rail_width(self.CSS, 'usage'), 1480)
+        self.assertLess(shoot.rail_width(self.CSS, 'usage'), 2000)
+        self.assertGreater(shoot.rail_width(self.CSS, 'inbox'), 2000)
+
+    def test_the_dashboards_own_page_shows_its_rail_on_every_page(self):
+        css = (shoot.REPO / 'dashboard' / 'index.html').read_text(encoding='utf-8')
+        hide = shoot.rail_breakpoints(css)
+        self.assertIn((1480, None), hide)   # the page still collapses the rail; it's found
+        for page in ('', 'usage', 'inbox', 'queue', 'activity', 'settings'):
+            w = shoot.rail_width(css, page)
+            for px, only in hide:
+                if only in (None, page or 'overview'):
+                    self.assertGreater(w, px, (page, px))
+
+    def test_each_shot_is_sized_from_its_page_unless_a_size_is_named(self):
+        self.assertEqual(shoot.shot_size(self.CSS, 'busy', None), '1600x900')
+        self.assertEqual(shoot.shot_size(self.CSS, 'busy/inbox', None), '2120x900')
+        self.assertEqual(shoot.shot_size(self.CSS, 'busy/inbox', '1440x900'), '1440x900')
+
+
 if __name__ == '__main__':
     unittest.main()
