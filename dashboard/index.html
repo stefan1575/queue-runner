@@ -15,13 +15,19 @@
     it builds first, is it up. The column between them is centred in the space they leave.
   - Three pages do three jobs. Overview is the first glance. Inbox is what waits on you. Queue is
     the work.
-  - PROTOTYPE, with sample data only (#30, take 12): the Queue as the lanes on top (what Claude
-    and ChatGPT run now, then their next three), and the efforts below in three views: List (the
-    build order: efforts closed until opened, remembered; drag an effort among its siblings, and a
-    ticket goes where its effort and its blockers put it), Board (every open ticket by where it
-    stands) and Graph (what waits on what), the last two narrowed by an effort dropdown. Variant
-    A: a ticket with no effort is a row of its own in the order; B: they're one "No effort" row.
-    The rules and reasons are #107's and #109's (work()). Take 11 is earlier/take-11.html.
+  - PROTOTYPE, with sample data only (#30, take 13): the Queue as the lanes on top (what Claude
+    and ChatGPT run now, then their next three, opening to the whole queue), and the efforts below
+    in three views: List, Board and Graph. Two questions, each with its own pill at the foot of
+    the sidebar. How is an effort moved without dragging a block taller than the screen? A: every
+    effort folds to one line the moment a drag starts and opens again on the drop. B: a narrow
+    Build order column beside the efforts is the only thing dragged. C: tracks, an effort as one
+    line with its tickets left to right, so a row is never tall. And how much colour says the
+    state at a glance? Four steps, from one tone (done or not) up to every state. In all of them
+    an open effort reads like the live page's feature card (what's left in a sentence, a row per
+    ticket), and a ticket with no effort is a lighter row of its own (take 12's variant A).
+    The rail: no Details link, the plan and its resets beside each provider, "N% of the week is
+    kept for you", Fable's week set like Weekly, a mark per repository, and the runner listed
+    under Local in a Health card. Take 12 is earlier/take-12.html.
   - The Overview only summarises, in three cards read top to bottom: what's on your plate (the
     Inbox in counts by kind, and the ask that's first in line), what's running (a line per lane,
     with its Stop button and the one thing it takes up next), and what's next (a bar per
@@ -1098,6 +1104,102 @@ button.er-name:hover { text-decoration: underline; text-underline-offset: 3px; }
 .mrow2.full .fill { background: var(--bad); }
 .mrow2.full .m-pct { color: var(--bad); }
 .plan2-note { font-size: 13.5px; color: var(--mute); margin-top: 8px; }
+
+/* ---------------------------------------------------------------- take 13 (PROTOTYPE, #30) */
+/* The rail: its three titles a step above what's under them, none with a mark of its own. */
+.rail .card-head h2 { font-size: 19px; }
+.rail .card-head .refresh { margin-left: auto; }
+.mrow2 { grid-template-columns: 112px minmax(0, 1fr) max-content; row-gap: 1px; }
+.m-pct small { font-size: 12.5px; font-weight: 400; color: var(--mute); }
+.m-when { grid-column: 1 / -1; }
+.plan2-note { color: var(--ink-2); font-size: 14px; }
+.order .rlogo { text-transform: uppercase; }
+.health .card-pad { padding-top: 14px; }
+.health .h-groups { margin-top: 0; font-size: 15px; row-gap: 10px; }
+.h-runner small { font-size: 13.5px; color: var(--mute); margin-left: -2px; }
+.rail .health.down { border-color: var(--bad-line); background: var(--bad-wash); }
+
+/* A lane's queue opens and closes. */
+.ln-more { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; }
+.ln-all { display: inline-flex; align-items: center; gap: 4px; background: none; border: 0; padding: 2px 0; color: var(--ink-2); font: 600 14px var(--sans); cursor: pointer; }
+.ln-all:hover { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
+.ln-all .i { width: 15px; height: 15px; transition: transform .15s; }
+.ln-all[aria-expanded="true"] .i { transform: rotate(90deg); }
+
+/* An effort is a block of its own shade; a ticket with no effort is a lighter row between them. */
+.er { border-color: var(--line); background: var(--sunk); }
+.er.er-loose { border-color: transparent; background: none; }
+.er.er-loose:hover { border-color: var(--line); }
+.grip.none { cursor: default; opacity: 0; }
+.q12.v-b .er-head { grid-template-columns: 0 22px 24px minmax(0, 1fr) 150px 84px; }
+/* Open, it reads as the live page's feature card does: what's left, then a row per ticket. */
+.er-body { padding: 2px 12px 12px 58px; }
+.er-left { font-size: 14.5px; color: var(--ink-2); margin: 0 0 6px 46px; }
+.er-left b { font-weight: 600; color: var(--ink); }
+.er-left .mine { color: var(--you); font-weight: 600; }
+.er-kids { gap: 0; }
+.et { grid-template-columns: 26px minmax(0, 1fr) minmax(0, 46%); grid-template-areas: none; column-gap: 12px; align-items: baseline; padding: 8px 8px; border-radius: 0; }
+.et + .et { border-top: 1px solid var(--line-soft); }
+.et > .sg { width: 26px; height: 10px; align-self: center; }
+.et-name { grid-area: auto; white-space: normal; }
+.et-say { min-width: 0; display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; }
+.et-why { grid-area: auto; }
+.er-kids > .er { margin: 6px 0; }
+
+/* A and C: while a row is held, every effort is its one line, so the whole order is on screen. */
+body.q-dragging .q12:not(.v-b) .er:not(.keep-open) > .er-body { display: none; }
+body.q-dragging .q12:not(.v-b) .er-list .er-say { display: none; }
+body.q-dragging .q12:not(.v-b) .er { background: var(--surface); }
+.drag-chip { position: fixed; top: -200px; left: 0; max-width: 360px; padding: 8px 14px; border-radius: 9px; background: var(--ink); color: var(--page); font: 600 15px/1.3 var(--sans); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* B: the order beside the work. The column is all that's dragged, and stays in view. */
+.ob { display: grid; grid-template-columns: 236px minmax(0, 1fr); gap: 16px; align-items: start; }
+.ob-order { position: sticky; top: 84px; max-height: calc(100vh - 108px); overflow-y: auto; scrollbar-width: thin; border: 1px solid var(--line); border-radius: 11px; padding: 10px 6px 8px; }
+.ob-title { font: 600 14px/1.2 var(--sans); color: var(--mute); margin: 0 8px 6px; }
+.ob-list, .ob-kids { display: grid; gap: 1px; }
+.ob-kids { margin-left: 26px; }
+.ob-item { border-radius: 8px; position: relative; }
+.ob-row { display: grid; grid-template-columns: 16px 20px minmax(0, 1fr) max-content; align-items: center; column-gap: 6px; padding: 5px 8px 5px 4px; border-radius: 8px; }
+.ob-kids .ob-row { grid-template-columns: 16px 0 minmax(0, 1fr) max-content; }
+.ob-row:hover { background: var(--hover); }
+.ob-row > .grip, .ob-row > .er-rank { grid-area: auto; }
+.ob-name { min-width: 0; text-align: left; background: none; border: 0; padding: 0; color: inherit; font: 600 14.5px/1.3 var(--sans); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+.ob-item.loose > .ob-row .ob-name { font-weight: 400; color: var(--ink-2); }
+.ob-name .t-n { margin-right: 5px; }
+.ob-count { font-size: 12.5px; color: var(--mute); font-variant-numeric: tabular-nums; }
+.ob-row .sg { width: 14px; height: 8px; }
+.ob-item.dragging { opacity: .4; }
+@media (max-width: 1180px) { .ob { grid-template-columns: 1fr; } .ob-order { position: static; max-height: none; } }
+
+/* C: tracks. An effort is one line: its name, then its tickets left to right until it's usable. */
+.q12.v-c .er:not(.er-loose) > .er-head { grid-template-columns: 16px 22px 24px minmax(120px, 210px) minmax(0, 1fr) 84px; grid-template-areas: "g r c n b k" ". . . s s s"; }
+.q12.v-c .er-body .er:not(.er-loose) > .er-head { grid-template-columns: 16px 0 24px minmax(120px, 188px) minmax(0, 1fr) 84px; }
+.track { display: flex; flex-wrap: wrap; align-items: center; row-gap: 4px; }
+.tc { display: inline-flex; align-items: center; gap: 4px; font: 500 12.5px/1 var(--sans); color: var(--mute); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tc + .tc::before { content: ""; width: 8px; height: 1px; background: var(--btn-line); margin: 0 4px; }
+.tc .sg { width: 13px; height: 10px; }
+.tc.end { color: var(--dim); }
+.tc.end.ok { color: var(--ok); font-weight: 600; }
+
+/* How much colour says the state. 4 is every state, as before; each step down says less in
+   colour and leaves the rest to the words. */
+.proto.two { bottom: 120px; }
+/* 3: done, moving, yours. No hatching: what's merged or building is moving; ready and blocked are just not started. */
+.q12.c3 .sg.merged, .q12.c3 .sg.building, .q12.c3 .sg.pr { background: var(--run-fill); box-shadow: none; }
+.q12.c3 .sg.ready, .q12.c3 .sg.blocked { background: var(--line); box-shadow: none; }
+.q12.c3 .st.ready, .q12.c3 .st.blocked { color: var(--mute); border-style: solid; }
+/* 2: only what waits on you has a colour. */
+.q12.c2 .sg.done, .q12.c1 .sg.done { background: var(--ink-2); }
+.q12.c2 .sg.merged, .q12.c2 .sg.building, .q12.c2 .sg.pr, .q12.c2 .sg.ready, .q12.c2 .sg.blocked,
+.q12.c1 .sg.merged, .q12.c1 .sg.building, .q12.c1 .sg.pr, .q12.c1 .sg.ready, .q12.c1 .sg.blocked { background: var(--line); box-shadow: none; }
+.q12.c2 .st.run, .q12.c2 .st.ok, .q12.c2 .st.ready, .q12.c2 .st.blocked,
+.q12.c1 .st { background: none; border: 1px solid var(--line); color: var(--ink-2); }
+.q12.c2 .es.run, .q12.c2 .es.ok, .q12.c1 .es, .q12.c1 .es.you, .q12.c1 .es.run { color: var(--ink); }
+.q12.c2 .fix-ref, .q12.c1 .fix-ref { color: var(--mute); }
+.q12.c2 .ln-for.run, .q12.c1 .ln-for.run { color: var(--ink-2); }
+/* 1: one tone. Done is filled, everything else is not. */
+.q12.c1 .sg.yours { background: var(--line); }
+.q12.c1 .er-left .mine, .q12.c1 .tc.end.ok { color: var(--ink); }
 </style>
 </head>
 <body>
@@ -1166,7 +1268,9 @@ let faultStart = ""; // with "missing": how to start the runner, as the server s
 const PAGES = [["overview", "Overview"], ["inbox", "Inbox"], ["queue", "Queue"], ["activity", "Activity"], ["usage", "Usage"], ["settings", "Settings"]];
 const UNBUILT = [];   // pages still as they were before the split
 // PROTOTYPE (ticket 21): the Queue page's three arrangements, ?variant=a|b|c
-const VARIANTS = [["a", "Tickets in the order"], ["b", "No effort, one row"]];   // take 12 (#30)
+const VARIANTS = [["a", "Fold while dragging"], ["b", "Order beside the work"], ["c", "Tracks"]];   // take 13 (#30)
+// How much colour says a ticket's state: each step adds to the one before.
+const COLOURS = [["1", "One tone"], ["2", "Plus what waits on you"], ["3", "Plus what's moving"], ["4", "Every state"]];
 const sampleName = new URLSearchParams(location.search).get("sample");
 const ui = { page: "overview", repo: "", view: "list", pr: null, ask: null, hold: null, sel: null, pop: null, nav: false, rail: false,
   variant: "a", feature: "", open: [], qview: "", qeffort: "" };   // qview, qeffort: the Queue (take 12)   // the Queue: which arrangement, the feature it's narrowed to (A), the features unfolded (B)
@@ -1812,7 +1916,7 @@ function work() {
   for (const r of repos) nodes.set(`repo:${r}`, { t: "repo", id: `repo:${r}`, repo: r, kids: [] });
   for (const e of snap.efforts || []) nodes.set(e.id, { t: "effort", ...e, parent: e.parent || `repo:${e.repo}`, kids: [] });
   for (const r of repos) nodes.set(`none:${r}`, { t: "none", id: `none:${r}`, repo: r, n: null, title: "No effort", parent: `repo:${r}`, blocked_by: [], kids: [] });
-  for (const i of issues) nodes.set(key(i), { t: "ticket", id: key(i), i, repo: i.repo, parent: i.feature && nodes.has(i.feature) ? i.feature : ui.variant === "b" ? `none:${i.repo}` : `repo:${i.repo}` });
+  for (const i of issues) nodes.set(key(i), { t: "ticket", id: key(i), i, repo: i.repo, parent: i.feature && nodes.has(i.feature) ? i.feature : `repo:${i.repo}` });
   for (const n of nodes.values()) if (n.parent && nodes.has(n.parent)) nodes.get(n.parent).kids.push(n.id);
   const tickets = (id) => { const n = nodes.get(id); return n.t === "ticket" ? [n.i] : n.kids.flatMap(tickets); };
   const openIn = (id) => tickets(id).filter(isOpen);
@@ -1983,17 +2087,20 @@ const repoHead = (r, W, extra = "") => {
 const QVIEWS = [["list", "List"], ["board", "Board"], ["graph", "Graph"]];
 const qOpen = new Set((() => { try { return JSON.parse(recall("qopen") || "[]"); } catch { return []; } })());
 // The sample addresses can open efforts and pick a view (?qopen=id,id&qview=board), for screenshots.
-{ const q = new URLSearchParams(location.search); if (q.get("qopen")) q.get("qopen").split(",").forEach((id) => qOpen.add(id)); if (q.get("qview")) ui.qview = q.get("qview"); }
+{ const q = new URLSearchParams(location.search); if (q.get("qopen")) q.get("qopen").split(",").forEach((id) => qOpen.add(id)); if (q.get("qview")) ui.qview = q.get("qview"); if (q.get("fold")) document.body.classList.add("q-dragging"); }
 function toggleOpen(id) { if (qOpen.has(id)) qOpen.delete(id); else qOpen.add(id); remember("qopen", JSON.stringify([...qOpen])); }
 const qMore = new Set();   // board columns shown whole
+const qLane = new Set((() => { try { return JSON.parse(recall("qlane") || "[]"); } catch { return []; } })());   // lanes showing their whole queue
+let qColour = COLOURS.some((c) => c[0] === recall("qcolour")) ? recall("qcolour") : "4";
+{ const q = new URLSearchParams(location.search); if (COLOURS.some((c) => c[0] === q.get("colour"))) qColour = q.get("colour"); if (q.get("qlane")) q.get("qlane").split(",").forEach((id) => qLane.add(id)); }   // for screenshots
 
 function queue() {
   if (!QVIEWS.some((v) => v[0] === ui.qview)) ui.qview = QVIEWS.some((v) => v[0] === recall("qview")) ? recall("qview") : "list";
   const W = work();
   if (ui.qeffort && !(W.nodes.has(ui.qeffort) && W.repos.includes(W.nodes.get(ui.qeffort).repo))) ui.qeffort = "";
   const view = { list: qList, board: qBoard, graph: qGraph }[ui.qview];
-  const hint = { list: "In the order they're built. Drag an effort to build it sooner or later.", board: "Every open ticket by where it stands.", graph: "A blocker above what it blocks." }[ui.qview];
-  return `<div class="q12">${moveNote()}${qNow(W)}
+  const hint = { list: { a: "In the order they're built. Drag an effort to build it sooner or later: the list folds while you drag.", b: "Drag in Build order to build an effort sooner or later. Pick one there to open it.", c: "In the order they're built, each effort's tickets left to right. Drag a row to build it sooner or later." }[ui.variant], board: "Every open ticket by where it stands.", graph: "A blocker above what it blocks." }[ui.qview];
+  return `<div class="q12 v-${ui.variant} c${qColour}">${moveNote()}${qNow(W)}
     <section class="card q12-work" aria-label="Efforts"><header class="q12-head"><h2>Efforts</h2><span class="q12-hint">${hint}</span>
       ${ui.qview === "list" ? "" : effortPick(W)}
       <span class="seg" role="tablist" aria-label="View">${QVIEWS.map(([k, label]) => `<button role="tab" aria-selected="${ui.qview === k}" data-act="q-view" data-view="${k}">${label}</button>`).join("")}</span></header>
@@ -2014,6 +2121,14 @@ function laneCard(l, doing, then, more) {
     ${then.length ? `<ol class="ln-then">${then.join("")}</ol>` : `<p class="ln-none">Nothing waits for it${ui.repo ? ` in ${esc(ui.repo)}` : ""}.</p>`}
     ${more ? `<p class="ln-more">${more}</p>` : ""}</article>`;
 }
+// A lane shows its next three; the line under them opens the whole queue, and closes it again.
+const LANE_SHOWS = 3;
+function laneFold(l, rows, note = "") {
+  const whole = qLane.has(l.id), rest = rows.length - LANE_SHOWS;
+  if (rest <= 0) return [rows, note];
+  const btn = `<button class="ln-all" data-act="q-lane" data-lane="${esc(l.id)}" aria-expanded="${whole}">${ICON.right}${whole ? "Show the next three only" : `Show all ${rows.length}`}</button>`;
+  return [whole ? rows : rows.slice(0, LANE_SHOWS), `${btn}${note ? `<span>${note}</span>` : ""}`];
+}
 const thenRow = (x, label, title, why, repo) => `<li><span class="qn">${x}</span><span class="ln-j"><b>${esc(label)}</b> ${esc(title)}${repo ? ` <span class="ln-repo">${esc(repo)}</span>` : ""}</span><span class="ln-why">${esc(why || "")}</span></li>`;
 function doingLine(j) {
   return `<p class="ln-now"><b>${esc(kind(j.kind)[0])} ${esc(j.ref)}</b> ${esc(j.title)}<span class="ln-meta">${esc(j.repo)} · ${esc(ago(j.started_at))}${j.thread ? ` · <a class="link" href="${esc(j.thread)}" target="_blank" rel="noreferrer">Thread</a>` : ""}${j.pr ? ` · ${prLink(j.repo, j.pr, "PR history")}` : ""}</span></p>`;
@@ -2029,13 +2144,16 @@ function claudeLane(l, W) {
   let then = [], more = "";
   if (W.repos.length === 1) {
     const q = W.queues.get(W.repos[0]);
-    then = q.jobs.slice(0, 3).map((j, x) => thenRow(x + 1, jobLabel(j), j.title, j.why));
-    if (q.jobs.length > 3) more = `Then ${plural(q.jobs.length - 3, "more", "more")}, in the order below.`;
-    else if (!q.jobs.length && !elsewhere.length) more = esc(q.starts || "");
+    [then, more] = laneFold(l, q.jobs.map((j, x) => thenRow(x + 1, jobLabel(j), j.title, j.why)));
+    if (!q.jobs.length && !elsewhere.length) more = esc(q.starts || "");
   } else {
-    // A job per repository at once (#50): each repository's next.
-    then = W.repos.map((r) => W.queues.get(r)).filter((q) => q.jobs.length).map((q, x) => thenRow(x + 1, jobLabel(q.jobs[0]), q.jobs[0].title, q.jobs[0].why, q.repo));
-    more = "One job per repository at once. Pick a repository to see its whole queue.";
+    // A job per repository at once (#50): each repository's next; opened, each one's whole queue,
+    // repository by repository, numbered within its own.
+    const qs = W.repos.map((r) => W.queues.get(r)).filter((q) => q.jobs.length);
+    then = qLane.has(l.id) ? qs.flatMap((q) => q.jobs.map((j, x) => thenRow(x + 1, jobLabel(j), j.title, j.why, q.repo)))
+      : qs.map((q, x) => thenRow(x + 1, jobLabel(q.jobs[0]), q.jobs[0].title, q.jobs[0].why, q.repo));
+    const all = qs.reduce((n, q) => n + q.jobs.length, 0), whole = qLane.has(l.id);
+    more = `${all > qs.length ? `<button class="ln-all" data-act="q-lane" data-lane="${esc(l.id)}" aria-expanded="${whole}">${ICON.right}${whole ? "Show each repository's next only" : `Show all ${all}`}</button>` : ""}<span>One job per repository at once.</span>`;
   }
   return laneCard(l, doing, then, more);
 }
@@ -2045,8 +2163,8 @@ function reviewLane(l, W) {
   const rank = new Map((snap.repos || []).map((r, n) => [r.name, n]));
   const waiting = (snap.issues || []).filter((i) => W.repos.includes(i.repo) && i.state === "review" && i.pr && !(l.job && l.job.repo === i.repo && l.job.pr === i.pr))
     .sort((a, b) => (rank.get(a.repo) ?? 99) - (rank.get(b.repo) ?? 99) || a.pr - b.pr);
-  const then = waiting.slice(0, 3).map((i, x) => thenRow(x + 1, `Review PR #${i.pr}`, i.title, i.note, W.repos.length > 1 ? i.repo : ""));
-  return laneCard(l, doing, then, waiting.length > 3 ? `Then ${waiting.length - 3} more.` : "");
+  const [then, more] = laneFold(l, waiting.map((i, x) => thenRow(x + 1, `Review PR #${i.pr}`, i.title, i.note, W.repos.length > 1 ? i.repo : "")));
+  return laneCard(l, doing, then, more);
 }
 
 // ---- where an effort stands, in a line: what's moving, what's next, what waits on you.
@@ -2072,36 +2190,66 @@ function effortStatus(n, W) {
 // ---- List: the order itself. Efforts closed until opened; a ticket isn't dragged on its own.
 function qList(W) {
   if (!W.repos.length) return `<p class="empty">No repository.</p>`;
+  const side = ui.variant === "b";
   return W.repos.map((r) => {
     const root = W.nodes.get(`repo:${r}`);
     const head = W.repos.length > 1 ? `<h3 class="q12-repo">${repoLogo(r)}${esc(r)}${offTag(r)}</h3>` : "";
-    const rows = root.order.length ? `<ol class="er-list">${root.order.map((k, x) => erRow(W.nodes.get(k), W, x + 1)).join("")}</ol>` : `<p class="empty small">Nothing open.</p>`;
+    if (!root.order.length) return `<div class="q12-sec">${head}<p class="empty small">Nothing open.</p>${finished(r, W)}</div>`;
+    const cards = `<ol class="er-list">${root.order.map((k, x) => erRow(W.nodes.get(k), W, x + 1)).join("")}</ol>`;
+    // B: the order is its own narrow column, the only thing dragged; it stays in view as you read.
+    const rows = side ? `<div class="ob"><nav class="ob-order" aria-label="Build order of ${esc(r)}"><p class="ob-title">Build order</p>
+        <ol class="ob-list">${root.order.map((k, x) => obRow(W.nodes.get(k), W, x + 1)).join("")}</ol></nav>${cards}</div>` : cards;
     return `<div class="q12-sec">${head}${rows}${finished(r, W)}</div>`;
   }).join("");
 }
+// C: an effort's tickets as one line, left to right in the bar's order, ending where it's usable.
+function track(n, W) {
+  const its = W.tickets(n.id).sort((a, b) => segmentOf(a) - segmentOf(b) || a.n - b.n), left = its.filter((i) => i.state !== "done").length;
+  return `<span class="track" role="img" aria-label="${esc(nameOf(n))}: ${its.length - left} of ${its.length} done">${its.map((i) =>
+    `<span class="tc" title="#${i.n} ${esc(i.title)}: ${esc(stateOf(i)[0])}"><i class="sg ${SEGMENTS[segmentOf(i)][0]}"></i>${i.n}</span>`).join("")}<span class="tc end${left ? "" : " ok"}">Usable</span></span>`;
+}
+// An effort, or a ticket with no effort, as a row. A and C: the row itself is dragged. B: it's read.
 function erRow(n, W, rank) {
+  const drag = ui.variant === "b" ? "" : dragAttrs(n), grip = drag ? GRIP : `<span class="grip none"></span>`;
   const flash = isFlash(n.id) ? " flash" : "", num = rank ? `<span class="er-rank">${rank}</span>` : "";
-  if (n.t === "ticket") {   // a ticket with no effort: a row of its own in the order (variant A)
+  if (n.t === "ticket") {   // a ticket with no effort: a lighter row of its own in the order
     const i = n.i;
-    return `<li class="er er-loose${flash}" ${dragAttrs(n)}><div class="er-head">${GRIP}${num}<span class="er-caret dot-only"><i></i></span>
+    return `<li class="er er-loose${flash}" data-er="${esc(n.id)}" ${drag}><div class="er-head">${grip}${num}<span class="er-caret dot-only"><i></i></span>
       <span class="er-name"><span class="t-n">#${i.n}</span>${esc(i.title)}<span class="kind">Ticket</span>${prText(i)}</span>
       <span class="er-st">${stateTag(i)}</span><span class="er-say">${esc(whyOf(i, W))}</span></div></li>`;
   }
   const open = qOpen.has(n.id), s = effortSum(n, W), shut = closedSay(n, W);
   const title = n.t === "none" ? `No effort<span class="kind">Tickets</span>` : `${esc(n.title)}<span class="kind">${esc(KINDNAME[n.kind] || "Effort")}</span>`;
   const kids = open ? n.order.map((k) => { const c = W.nodes.get(k); return c.t === "ticket" ? etRow(c, W) : erRow(c, W, null); }).join("") : "";
-  return `<li class="er${open ? " open" : ""}${n.t === "none" ? " none" : ""}${flash}" ${dragAttrs(n)}>
-    <div class="er-head">${GRIP}${num}<button class="er-caret" data-act="q-open" data-id="${esc(n.id)}" aria-expanded="${open}" aria-label="${open ? "Close" : "Open"} ${esc(nameOf(n))}">${ICON.right}</button>
+  return `<li class="er${open ? " open" : ""}${n.t === "none" ? " none" : ""}${flash}" data-er="${esc(n.id)}" ${drag}>
+    <div class="er-head">${grip}${num}<button class="er-caret" data-act="q-open" data-id="${esc(n.id)}" aria-expanded="${open}" aria-label="${open ? "Close" : "Open"} ${esc(nameOf(n))}">${ICON.right}</button>
       <button class="er-name" data-act="q-open" data-id="${esc(n.id)}">${title}</button>
-      <span class="er-bar">${s.bar}</span><span class="er-count">${esc(s.count)}</span>
+      <span class="er-bar">${ui.variant === "c" ? track(n, W) : s.bar}</span><span class="er-count">${esc(s.count)}</span>
       <span class="er-say">${effortStatus(n, W)}</span></div>
-    ${open ? `<div class="er-body"><ol class="er-kids">${kids}</ol>${shut ? `<p class="eq-shut">${ICON.check}${esc(shut)}</p>` : ""}</div>` : ""}</li>`;
+    ${open ? `<div class="er-body"><p class="er-left">${s.say}</p><ol class="er-kids">${kids}</ol>${shut ? `<p class="eq-shut">${ICON.check}${esc(shut)}</p>` : ""}</div>` : ""}</li>`;
+}
+// B's order column: a line per effort, its efforts inside it a step in. Picking one opens it.
+function obRow(n, W, rank) {
+  const flash = isFlash(n.id) ? " flash" : "";
+  let name, st, kids = "";
+  if (n.t === "ticket") {
+    name = `<span class="t-n">#${n.i.n}</span>${esc(n.i.title)}`;
+    st = `<i class="sg ${SEGMENTS[segmentOf(n.i)][0]}" title="${esc(stateOf(n.i)[0])}"></i>`;
+  } else {
+    const its = W.tickets(n.id), done = its.filter((i) => i.state === "done").length;
+    name = esc(nameOf(n));
+    st = `<span class="ob-count" title="${done} of ${its.length} done">${done}/${its.length}</span>`;
+    const inner = n.order.map((k) => W.nodes.get(k)).filter((c) => c.t !== "ticket");
+    if (inner.length) kids = `<ol class="ob-kids">${inner.map((c) => obRow(c, W, null)).join("")}</ol>`;
+  }
+  return `<li class="ob-item${n.t === "ticket" ? " loose" : ""}${flash}" ${dragAttrs(n)}><div class="ob-row">${GRIP}<span class="er-rank">${rank || ""}</span>
+    <button class="ob-name" data-act="q-go" data-id="${esc(n.id)}" title="${esc(nameOf(n))}">${name}</button>${st}</div>${kids}</li>`;
 }
 function etRow(n, W) {
-  const i = n.i, at = W.qpos.get(n.id);
-  return `<li class="et${isFlash(n.id) ? " flash" : ""}"><span class="qn${at ? "" : " none"}"${at ? ` title="${nth(at)} in ${esc(i.repo)}'s queue"` : ""}>${at || ""}</span>
+  const i = n.i, seg = SEGMENTS[segmentOf(i)][0];
+  return `<li class="et${isFlash(n.id) ? " flash" : ""}"><i class="sg ${seg}" aria-hidden="true"></i>
     <span class="et-name"><span class="t-n">#${i.n}</span>${esc(i.title)}${prText(i)}${filedTag(i)}</span>
-    <span class="et-st">${stateTag(i)}${fixTag(i)}</span><span class="et-why">${esc(whyOf(i, W))}</span></li>`;
+    <span class="et-say">${stateTag(i)}${fixTag(i)}<span class="et-why">${esc(whyOf(i, W))}</span></span></li>`;
 }
 
 // ---- the efforts to narrow the board and the graph to: a dropdown, however many there are.
@@ -2211,13 +2359,26 @@ document.addEventListener("dragstart", (e) => {
   dragging = { id: el.dataset.drag, parent: el.dataset.parent };
   e.dataTransfer.effectAllowed = "move";
   e.dataTransfer.setData("text/plain", dragging.id);
-  document.body.classList.add("q-dragging");
-  requestAnimationFrame(() => {
+  // What's carried is one line with the effort's name, however tall its row is.
+  const chip = document.createElement("div");
+  chip.className = "drag-chip";
+  chip.textContent = nameOf(work().nodes.get(dragging.id));
+  document.body.appendChild(chip);
+  if (e.dataTransfer.setDragImage) e.dataTransfer.setDragImage(chip, 14, 18);
+  const top = el.getBoundingClientRect().top;
+  setTimeout(() => {   // after the drag has begun: a change made inside dragstart can end it
+    chip.remove();
+    if (!dragging) return;
+    for (let p = el.parentElement.closest(".er"); p; p = p.parentElement.closest(".er")) p.classList.add("keep-open");
+    document.body.classList.add("q-dragging");   // A and C: every effort folds to its one line
     el.classList.add("dragging");
     document.querySelectorAll("[data-drag]").forEach((x) => { if (x.dataset.parent === dragging.parent && x !== el) x.classList.add("can-drop"); });
-  });
+    const moved = el.getBoundingClientRect().top - top;   // keep the row held under the pointer
+    if (moved) scrollBy(0, moved);
+  }, 0);
 });
 document.addEventListener("dragover", (e) => {
+  if (dragging) { if (e.clientY < 96) scrollBy(0, -18); else if (e.clientY > innerHeight - 96) scrollBy(0, 18); }
   const t = dropTarget(e);
   clearMarks();
   if (!t) return;
@@ -2256,11 +2417,20 @@ document.addEventListener("keydown", (e) => {
 // ---- the switcher between the three. Sample data only, so it can never reach the real page.
 function protoBar() {
   if (!snap.sample) return "";
-  const [k, name] = VARIANTS.find((v) => v[0] === ui.variant);
-  return `<div class="proto" role="group" aria-label="Prototype: the Queue page's variants" title="Prototype: three arrangements of the Queue page">
+  const [k, name] = VARIANTS.find((v) => v[0] === ui.variant), [c, cname] = COLOURS.find((x) => x[0] === qColour);
+  return `<div class="proto two" role="group" aria-label="Prototype: how much colour says the state" title="Prototype: how much colour says a ticket's state. Keys [ and ]">
+    <button data-act="colour" data-by="-1" aria-label="Less colour" title="[ key">${ICON.left}</button>
+    <span class="proto-name"><b>${c}</b>${esc(cname)}</span>
+    <button data-act="colour" data-by="1" aria-label="More colour" title="] key">${ICON.right}</button></div>
+  <div class="proto" role="group" aria-label="Prototype: the Queue page's variants" title="Prototype: three ways to arrange and move the efforts. Left and right arrow keys">
     <button data-act="variant" data-by="-1" aria-label="Previous variant" title="Left arrow key">${ICON.left}</button>
     <span class="proto-name"><b>${k.toUpperCase()}</b>${esc(name)}</span>
     <button data-act="variant" data-by="1" aria-label="Next variant" title="Right arrow key">${ICON.right}</button></div>`;
+}
+function turnColour(by) {
+  const at = COLOURS.findIndex((x) => x[0] === qColour);
+  qColour = COLOURS[(at + by + COLOURS.length) % COLOURS.length][0];
+  remember("qcolour", qColour);
 }
 function turnVariant(by) {
   const at = VARIANTS.findIndex((v) => v[0] === ui.variant);
@@ -2382,41 +2552,46 @@ const planFull = (p) => `<div class="plan">
 // a row per window, its name, a thin bar and the bold figure, with when it resets small under the
 // name. A model's own week (Fable's) is a line under Weekly, not a window of its own; it says its
 // reset only when that isn't Weekly's.
-function meterRow(w, sub, week) {
+function meterRow(w, when) {
   const known = typeof w.used === "number", left = known ? Math.max(0, Math.min(100, Math.round(100 - w.used))) : null;
   const cls = known && left <= 0 ? " full" : known && left <= 15 ? " near" : "";
   const kept = known && w.reserve > 0 ? Math.min(w.reserve, left) : 0;
-  const same = sub && week && w.resets_at && week.resets_at && Math.abs(ms(w.resets_at) - ms(week.resets_at)) < 90e3;
-  const label = sub ? w.label.replace(/^Weekly,?\s*/, "") : w.label;
-  const when = !w.resets_at ? (sub ? "" : "not started") : same ? "" : `resets ${clock(w.resets_at)}`;
-  return `<div class="mrow2${sub ? " sub" : ""}${cls}" title="${esc([w.note, w.resets_at ? `Resets ${stamp(w.resets_at)}` : ""].filter(Boolean).join(". "))}">
-    <span class="m-label">${esc(label)}${when ? `<span class="m-when">${esc(when)}</span>` : ""}</span>
+  return `<div class="mrow2${cls}" title="${esc([w.note, w.resets_at ? `Resets ${stamp(w.resets_at)}` : ""].filter(Boolean).join(". "))}">
+    <span class="m-label">${esc(w.label)}</span>
     <span class="m-bar" role="img" aria-label="${esc(w.label)}: ${known ? left + "% left" : "unknown"}">${known ? `<i class="fill" style="width:${left}%"></i>` : ""}${kept > 0 ? `<i class="kept" style="width:${kept}%"></i>` : ""}</span>
-    <span class="m-pct">${known ? left + "%" : "?"}</span></div>`;
+    <span class="m-pct">${known ? `${left}%<small> left</small>` : "?"}</span>${when ? `<span class="m-when">${esc(when)}</span>` : ""}</div>`;
 }
+// Take 13 (Stefan, 2026-11-18): beside the provider, its plan, the resets it has left (only when
+// it has some) and when it was read. A model's own week (Fable's) is a row set like Weekly; the
+// two share one "resets" line under them while they reset together, and each has its own if not.
 function planCard(p) {
-  const ws = p.windows || [], week = ws.find((w) => w.id === "week");
-  const rows = ws.map((w) => meterRow(w, w.id.startsWith("week_"), week)).join("");
+  const ws = p.windows || [], said = (w) => (w.resets_at ? `resets ${clock(w.resets_at)}` : "not started");
+  const weeks = ws.filter((w) => w.id === "week" || w.id.startsWith("week_"));
+  const together = weeks.length > 1 && weeks.every((w) => w.resets_at && Math.abs(ms(w.resets_at) - ms(weeks[0].resets_at)) < 90e3);
+  const rows = ws.map((w) => meterRow(w, together && weeks.includes(w) ? (w === weeks[weeks.length - 1] ? said(w) : "") : said(w))).join("");
   const kept = ws.find((w) => w.reserve);
+  const about = [p.plan ? esc(p.plan) : "", resetsLeft(p).replace(/, $/, ""), p.read_at ? `<span title="${esc(stamp(p.read_at))}">read ${esc(hm(p.read_at))}</span>` : "not read yet"].filter(Boolean).join(", ");
   return `<div class="plan2">
-    <p class="plan2-name">${who(p.provider, p.name)}<span class="read">${p.plan ? esc(p.plan) + " · " : ""}${p.resets && p.resets.available > 0 ? `${plural(p.resets.available, "reset", "resets")} · ` : ""}${p.read_at ? `<span title="${esc(stamp(p.read_at))}">read ${esc(hm(p.read_at))}</span>` : "not read yet"}</span></p>
+    <p class="plan2-name">${who(p.provider, p.name)}<span class="read">${about}</span></p>
     ${p.error ? `<p class="plan-note bad">${esc(p.error)}</p>` : ""}${rows}
-    ${kept ? `<p class="plan2-note">Your ${kept.reserve}% of the week${kept.reserve_opens_at ? ` opens to the runner ${esc(clock(kept.reserve_opens_at))}` : " is kept for you"}.</p>` : ""}</div>`;
+    ${kept ? `<p class="plan2-note"${kept.reserve_opens_at ? ` title="It opens to the runner ${esc(stamp(kept.reserve_opens_at))}"` : ""}>${kept.reserve}% of the week is kept for you.</p>` : ""}</div>`;
 }
 
 // Is it up, and is everything it leans on up. One line while all is well.
 // Sources are grouped the way Stefan sorts them: the providers, what runs on this PC, what's outside.
 const SOURCE_GROUPS = [["provider", "Providers"], ["local", "Local"], ["external", "External"]];
+// Take 13: the runner is one of the things on this PC, so it's a row under Local with since when,
+// not a headline of its own; the card is named for what it answers.
 function status() {
   const down = frozen(), all = snap.sources || [], bad = all.filter((x) => !x.ok);
   const known = SOURCE_GROUPS.map((g) => g[0]);
-  const groups = [...SOURCE_GROUPS, ["", "Other"]].map(([id, label]) => [label, all.filter((x) => (known.includes(x.group) ? x.group : "") === id)]).filter((g) => g[1].length);
   const one = (x) => `<span class="${x.ok || down ? "" : "no"}" title="${esc(x.name)}: ${esc(retrying(x) ? reconnecting(x) : x.note || "")}"><i class="dot ${dotOf(x, down)}"></i>${esc(x.short || x.name)}</span>`;
-  return `<a class="card status${down ? " down" : ""}" href="${esc(href({ page: "settings", pr: null }))}" data-act="page" data-page="settings" title="Connections are in Settings">
-    <span class="h-top"><i class="dot ${down ? "bad" : "ok"}"></i><b>${down ? "Runner silent" : "Runner running"}</b></span>
-    ${(down ? snap.written_at : (snap.runner || {}).started_at) ? `<span class="h-when">since ${esc(stamp(down ? snap.written_at : snap.runner.started_at))}</span>` : ""}
-    <span class="h-groups">${groups.map(([label, xs]) => `<span class="h-label">${label}</span><span class="h-row">${xs.map(one).join("")}</span>`).join("")}</span>
-    ${!down && bad.length ? `<span class="h-bad">${bad.map((x) => `${esc(x.name)}: ${esc(x.note)}`).join(". ")}</span>` : ""}</a>`;
+  const since = down ? snap.written_at : (snap.runner || {}).started_at;
+  const runner = `<span class="h-runner${down ? " no" : ""}"${since ? ` title="${down ? "Silent" : "Running"} since ${esc(stamp(since))}"` : ""}><i class="dot ${down ? "bad" : "ok"}"></i>Queue runner<small>${down ? "silent" : "running"}${since ? ` since ${esc(clock(since))}` : ""}</small></span>`;
+  const groups = [...SOURCE_GROUPS, ["", "Other"]].map(([id, label]) => [label, (id === "local" ? [runner] : []).concat(all.filter((x) => (known.includes(x.group) ? x.group : "") === id).map(one))]).filter((g) => g[1].length);
+  return `<section class="card health${down ? " down" : ""}"><header class="card-head"><h2>Health</h2></header>
+    <div class="card-pad"><div class="h-groups">${groups.map(([label, xs]) => `<span class="h-label">${label}</span><span class="h-row">${xs.join("")}</span>`).join("")}</div>
+    ${!down && bad.length ? `<p class="h-bad">${bad.map((x) => `${esc(x.name)}: ${esc(x.note)}`).join(". ")}</p>` : ""}</div></section>`;
 }
 
 // Each repository's Stop or Resume (ticket 37), in the order the runner takes them up. The page
@@ -2435,7 +2610,7 @@ function repoRows() {
     const btn = stale ? "" : off
       ? `<button class="btn sm icon solid" data-act="repostop" data-repo="${esc(name)}" data-how="" aria-label="Resume ${esc(name)}" title="Resume: both lanes take up its work again">${ICON.play}</button>`
       : `<button class="btn sm icon" data-act="repostop" data-repo="${esc(name)}" data-how="after-job" aria-label="Stop ${esc(name)}" title="Stop: a job running on it finishes; then neither lane takes up its work">${ICON.pause}</button>`;
-    return `<li${r.stopped ? ' class="off"' : ""}><span class="name">${esc(name)}<span>${esc(sub)}</span></span>${btn}</li>`;
+    return `<li${r.stopped ? ' class="off"' : ""}>${repoLogo(name)}<span class="name">${esc(name)}<span>${esc(sub)}</span></span>${btn}</li>`;
   }).join("");
   return `<ul class="order">${rows}</ul>`;
 }
@@ -2468,7 +2643,7 @@ function rail() {
   clearTimeout(refreshPoll);
   if (refreshPending()) refreshPoll = setTimeout(load, 2000);
   const notes = refreshNotes().map((n) => `<p class="plan-note${n.bad ? " bad" : ""}" style="margin:0 0 14px">${esc(n.text)}</p>`).join("");
-  const usage = `<section class="card usage2"><header class="card-head"><span class="u-icon">${ICON.usage}</span><h2>Usage</h2><a class="details" href="${esc(href({ page: "usage", pr: null }))}" data-act="page" data-page="usage">Details</a>${refreshButton()}</header>
+  const usage = `<section class="card usage2"><header class="card-head"><h2>Usage</h2>${refreshButton()}</header>
     <div class="card-pad">${notes}${(snap.usage || []).map((p) => plan(p, false)).join("")}</div></section>`;
   const repos = `<section class="card"><header class="card-head"><h2>Repositories</h2></header><div class="card-pad" style="padding-top:8px">${repoRows()}</div></section>`;
   return (ui.page === "usage" ? "" : usage) + repos + status();
@@ -2663,6 +2838,15 @@ document.addEventListener("click", (e) => {
     case "open": ui.open = ui.open.includes(d.id) ? ui.open.filter((x) => x !== d.id) : [...ui.open, d.id]; break;   // the Queue, B
     case "variant": turnVariant(Number(d.by)); break;   // PROTOTYPE
     case "q-open": toggleOpen(d.id); break;   // PROTOTYPE (#30, take 12)
+    case "q-lane": if (qLane.has(d.lane)) qLane.delete(d.lane); else qLane.add(d.lane); remember("qlane", JSON.stringify([...qLane])); break;
+    case "colour": turnColour(Number(d.by)); break;   // PROTOTYPE (take 13)
+    case "q-go": {   // B: pick an effort in the order: it opens, and comes into view
+      if (work().nodes.get(d.id).t !== "ticket" && !qOpen.has(d.id)) toggleOpen(d.id);
+      draw();
+      const card = [...document.querySelectorAll("[data-er]")].find((x) => x.dataset.er === d.id);
+      if (card) { card.scrollIntoView({ block: "center", behavior: "smooth" }); card.classList.add("flash"); }
+      return;
+    }
     case "q-view": ui.qview = d.view; remember("qview", d.view); break;
     case "q-more": if (qMore.has(d.col)) qMore.delete(d.col); else qMore.add(d.col); break;
     case "q-undo": { const was = JSON.parse(undo.pop() || "null"); if (was) { ord.kids = was.kids; ord.touched = new Set(was.touched); } lastMove = null; break; }
@@ -2728,6 +2912,7 @@ document.addEventListener("change", (e) => {
 document.addEventListener("keydown", (e) => {
   if (ui.page !== "queue" || !snap || !snap.sample || ui.pr || e.ctrlKey || e.metaKey || e.altKey) return;
   if (e.target.closest?.("input, textarea, select, [contenteditable]")) return;
+  if (e.key === "[" || e.key === "]") { e.preventDefault(); turnColour(e.key === "]" ? 1 : -1); draw(); return; }
   const turn = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
   if (!turn) return;
   e.preventDefault();
