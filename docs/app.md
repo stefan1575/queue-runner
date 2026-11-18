@@ -28,7 +28,17 @@ pnpm --dir app typecheck
 pnpm --dir app test
 ```
 
-CI runs both on Windows (`.github/workflows/tests.yml`, job `app`), beside the Python tests.
+CI runs both on Windows (`.github/workflows/tests.yml`, job `app`), beside the Python tests. A
+push to `main` runs them first (`docs/tests.md`, Main is tested before a push).
+
+**Tests check the code, never Stefan's settings** (#172). A test builds its own settings, in a
+temp folder or an in-memory store, and checks what the code does with them. No test reads the
+app's real settings, the runner's `config.toml` or T3's real files, and none asserts one of
+Stefan's values (a model, an effort, which repo he merges): changing a setting must never turn
+main red (#169). `test/no-real-settings.test.ts` fails on a test file that reaches the user's
+home or app-data folders, `T3_HOME` or `T3CODE_HOME`, T3's real runtime file or CLI
+(`runtimeAddress()` or `t3Cli()` with no path), `config.toml`, or the real settings path, which
+the settings tickets export as `SETTINGS_PATH` (`test/real-settings.ts` lists them all).
 
 ## Rules for every rebuild ticket
 
