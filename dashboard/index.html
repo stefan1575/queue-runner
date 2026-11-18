@@ -15,7 +15,7 @@
     it builds first, is it up. The column between them is centred in the space they leave.
   - Three pages do three jobs. Overview is the first glance. Inbox is what waits on you. Queue is
     the work.
-  - PROTOTYPE, with sample data only (#30, take 21): the Queue as the lanes on top, one card
+  - PROTOTYPE, with sample data only (#30, take 22): the Queue as the lanes on top, one card
     split down the middle (what Claude and ChatGPT run now, then each one's queue, which opens and
     closes and is remembered; open, a window three rows tall that scrolls, so the card never
     grows), and the efforts below in four tabs, a line under the head saying what each is for.
@@ -33,8 +33,9 @@
     the whole box inside its list. Take 19: the held box follows the pointer anywhere, and where
     it lands is its shadow, the rows sliding aside. Take 20: the cursor is the hitbox (past the
     middle of the row under it, the shadow moves). Take 21: Progress reads like the live page, with
-    a switch for what its bars show (done only, done and moving, every state with a key). Take 20
-    is earlier/take-20.html.
+    a switch for what its bars show. Take 22: the default bar is done and yours; done tickets
+    stay hidden behind a line that opens them; a small number before each effort. Take 21 is
+    earlier/take-21.html.
   - The Overview only summarises, in three cards read top to bottom: what's on your plate (the
     Inbox in counts by kind, and the ask that's first in line), what's running (a line per lane,
     with its Stop button and the one thing it takes up next), and what's next (a bar per
@@ -1369,6 +1370,20 @@ body.q-dragging .can-drop { outline: none; }
 /* c: every state, and the sentence is the bar's key. */
 .pg-say .ky { display: inline-flex; align-items: center; gap: 7px; margin-right: 18px; white-space: nowrap; color: var(--ink-2); }
 .pg-say .ky .sg { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+/* ---------------------------------------------------------------- take 22 (PROTOTYPE, #30) */
+/* b: done and yours. Green is done, blue is what waits on you; the rest, moving included, is track. */
+.pbar-b .sg.yours { background: color-mix(in srgb, var(--you) 55%, var(--surface)); }
+.pbar-b .sg.merged, .pbar-b .sg.building, .pbar-b .sg.pr { background: var(--line); }
+.pbar-b .pg-say .mine { color: var(--you); font-weight: 600; }
+/* An effort's place in the build order: a small number in front of its name. */
+.pg-ord { display: inline-block; min-width: 22px; margin-right: 6px; color: var(--dim); font-weight: 500; font-size: 14px; font-variant-numeric: tabular-nums; }
+/* The done line opens its rows. */
+.pg-done { all: unset; display: inline-flex; align-items: center; gap: 7px; margin: 8px 0 2px 4px; padding: 2px 6px; border-radius: 6px; font-size: 13.5px; color: var(--mute); cursor: pointer; }
+.pg-done .i { width: 14px; height: 14px; color: var(--ok); }
+.pg-done span { color: var(--dim); margin-left: 4px; }
+.pg-done:hover { background: var(--hover); color: var(--ink); }
+.pg-done:focus-visible { outline: 2px solid var(--you); outline-offset: 2px; }
+.pg-donelist .et { opacity: .7; }
 </style>
 </head>
 <body>
@@ -2257,7 +2272,7 @@ const qOpen = new Set((() => { try { return JSON.parse(recall("qopen") || "[]");
 // The sample addresses can open efforts and pick a view (?qopen=id,id&qview=board), for screenshots.
 { const q = new URLSearchParams(location.search); if (q.get("qopen")) q.get("qopen").split(",").forEach((id) => qOpen.add(id)); if (q.get("qview")) ui.qview = q.get("qview"); }
 // Take 21: how much Progress's bars show, three ways to judge (?pbar=a|b|c, remembered).
-const PBARS = [["a", "Done only"], ["b", "Done and moving"], ["c", "Every state"]];
+const PBARS = [["a", "Done only"], ["b", "Done and yours"], ["c", "Every state"]];   // take 22: b shows yours, not moving
 { const q = new URLSearchParams(location.search).get("pbar"), r = recall("pbar"); ui.pbar = PBARS.some((x) => x[0] === q) ? q : PBARS.some((x) => x[0] === r) ? r : "b"; }
 function toggleOpen(id) { if (qOpen.has(id)) qOpen.delete(id); else qOpen.add(id); remember("qopen", JSON.stringify([...qOpen])); }
 const qMore = new Set();   // board columns shown whole
@@ -2371,7 +2386,7 @@ const perRepo = (W, list) => {
 function qProgress(W) {
   return `<div class="pg-wrap pbar-${esc(ui.pbar)}">${perRepo(W, (root, r) => {
     const nodes = root.order.map((k) => W.nodes.get(k)), loose = nodes.filter((n) => n.t === "ticket");
-    return `<ol class="pg-list">${nodes.filter((n) => n.t !== "ticket").map((n) => pgRow(n, W, null)).join("")}${loose.length ? pgLoose(loose, W, r) : ""}</ol>`;
+    return `<ol class="pg-list">${nodes.filter((n) => n.t !== "ticket").map((n, x) => pgRow(n, W, null, x + 1)).join("")}${loose.length ? pgLoose(loose, W, r) : ""}</ol>`;
   })}</div>`;
 }
 function pbarPick() {
@@ -2384,6 +2399,13 @@ function keySay(v) {
   const done = v.loose ? 0 : v.its.length - v.left;
   const parts = [["done", done, "done"], ...LEFT.map(([seg, one, many]) => { const n = v.its.filter((i) => SEGMENTS[segmentOf(i)][0] === seg).length; return [seg, n, n === 1 ? one : many || one]; })].filter((x) => x[1]);
   return parts.map(([seg, n, label]) => `<span class="ky"><i class="sg ${seg}" aria-hidden="true"></i>${n} ${esc(label)}</span>`).join("");
+}
+// Take 22: what's done is the bar's green and a line you can open; its rows only when you ask.
+function doneToggle(n, W, shut) {
+  const id = `done:${n.id}`, open = qOpen.has(id);
+  const its = n.closed.flatMap((k) => W.tickets(k)).sort((a, b) => a.n - b.n);
+  return `<button class="pg-done" data-act="q-open" data-id="${esc(id)}" aria-expanded="${open}">${ICON.check}${esc(shut)}<span>${open ? "Hide" : "Show"}</span></button>
+    ${open ? `<ol class="pg-kids pg-donelist">${its.map((i) => etRow({ i, id: key(i) }, W)).join("")}</ol>` : ""}`;
 }
 const pgSay = (v) => (ui.pbar === "c" ? keySay(v) : leftSay(v));
 function pgLoose(loose, W, r) {
@@ -2398,7 +2420,7 @@ function pgLoose(loose, W, r) {
 }
 // Take 17: the number is a badge on the title line, not a column of its own, so the bar and the
 // sentence under it run the card's whole width. The caret is at the line's end, as a dropdown's.
-function pgRow(n, W, rank) {
+function pgRow(n, W, rank, ord = 0) {
   const num = rank ? `<span class="qn rk">${rank}</span>` : "", nr = rank ? "" : " nr";
   if (n.t === "ticket") {   // a ticket with no effort: a lighter row of its own
     const i = n.i;
@@ -2407,13 +2429,14 @@ function pgRow(n, W, rank) {
       <span class="pg-count">${stateTag(i)}</span><span class="pg-say">${esc(whyOf(i, W))}</span></div></li>`;
   }
   const open = qOpen.has(n.id), s = effortSum(n, W), shut = closedSay(n, W);
-  const title = n.t === "none" ? "No effort" : esc(n.title);   // take 21: no kind tag
+  // Take 22: its place in the build order, a small number in front of its name (not a column).
+  const title = `${ord ? `<span class="pg-ord">${ord}</span>` : ""}${n.t === "none" ? "No effort" : esc(n.title)}`;
   const kids = open ? n.order.map((k) => { const c = W.nodes.get(k); return c.t === "ticket" ? etRow(c, W) : pgRow(c, W, null); }).join("") : "";
   return `<li class="pg${open ? " open" : ""}${nr}"><div class="pg-head">${num}
       <button class="pg-name" data-act="q-open" data-id="${esc(n.id)}">${title}</button><span class="pg-count" title="Done means live">${esc(s.count)}</span>
       <button class="er-caret" data-act="q-open" data-id="${esc(n.id)}" aria-expanded="${open}" aria-label="${open ? "Close" : "Open"} ${esc(nameOf(n))}">${ICON.chevron}</button>
       <span class="pg-bar">${s.bar}</span><span class="pg-say">${pgSay(s.v)}</span></div>
-    ${open ? `<div class="pg-body"><ol class="pg-kids">${kids}</ol>${shut ? `<p class="eq-shut">${ICON.check}${esc(shut)}</p>` : ""}</div>` : ""}</li>`;
+    ${open ? `<div class="pg-body"><ol class="pg-kids">${kids}</ol>${shut ? doneToggle(n, W, shut) : ""}</div>` : ""}</li>`;
 }
 
 // ---- Order, for moving: a line per effort, the efforts inside one a step in, and every line
