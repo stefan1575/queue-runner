@@ -1,7 +1,9 @@
 // T3's projects, kept from T3's events (#151; #68: the runner reacts to T3's events, no polling):
 // `subscribeShell` on the WebSocket sends a snapshot of every project, then each one added,
 // changed or removed (docs/app.md, The WebSocket API). Its thread items are ignored here. A stream
-// that ends or fails is opened again after a wait, and its new snapshot replaces the list.
+// that ends or fails is opened again after a wait, and its new snapshot replaces the list; one
+// whose T3 says `snapshot-required` (it can't send what changed) is opened again at once. An
+// archived project isn't one of the runner's repos: T3 hides it, so it goes here too.
 import type { T3Ws } from './ws.ts';
 
 /** A T3 project: the runner's repos are T3's projects. */
@@ -27,6 +29,7 @@ const project = (p: any): T3Project | null =>
   (typeof p?.id === 'string' && typeof p.workspaceRoot === 'string'
     ? { id: p.id, title: typeof p.title === 'string' ? p.title : p.id, folder: p.workspaceRoot }
     : null);
+const archived = (p: any) => p?.archivedAt != null;
 
 export class T3ProjectFeed implements ProjectFeed {
   private projects: Map<string, T3Project> | null = null;
@@ -68,10 +71,17 @@ export class T3ProjectFeed implements ProjectFeed {
 
   private open() {
     if (this.stopped) return;
-    const sub = this.ws.subscribe('orchestration.subscribeShell', {}, (item) => this.take(item));
+    let replaced = false;
+    const sub = this.ws.subscribe('orchestration.subscribeShell', {}, (item) => {
+      if (item?.kind !== 'snapshot-required') return this.take(item);
+      // T3 can't send what changed since: a new stream starts from a whole snapshot
+      replaced = true;
+      sub.close();
+      this.open();
+    });
     this.close = () => sub.close();
     const ended = (why: string) => {
-      if (this.stopped) return;
+      if (this.stopped || replaced) return;
       this.down = why;
       this.tell();
       const cancel = this.retry(() => this.open());
@@ -83,24 +93,28 @@ export class T3ProjectFeed implements ProjectFeed {
   private take(item: any) {
     switch (item?.kind) {
       case 'snapshot': {
-        const list = (item.snapshot?.projects ?? []).map(project).filter(Boolean) as T3Project[];
+        const all: any[] = item.snapshot?.projects ?? [];
+        const list = all.filter((p) => !archived(p)).map(project).filter(Boolean) as T3Project[];
         // A snapshot naming the roots whose GitHub identity T3 just resolved holds only those
         // projects; one without is every project.
         if (item.resolvedRepositoryIdentityRoots === undefined || !this.projects) this.projects = new Map();
+        for (const p of all) if (archived(p) && typeof p?.id === 'string') this.projects.delete(p.id);
         for (const p of list) this.projects.set(p.id, p);
         break;
       }
       case 'project.updated': {
         const p = project(item.project);
         if (!p || !this.projects) return;
-        this.projects.set(p.id, p);
+        if (archived(item.project)) {
+          if (!this.projects.delete(p.id)) return;
+        } else this.projects.set(p.id, p);
         break;
       }
       case 'project.removed':
         if (!this.projects?.delete(item.projectId)) return;
         break;
       default:
-        return; // threads, and the stream's own markers
+        return; // threads, and `synchronized` (caught up: nothing to do)
     }
     this.down = null;
     this.tell();

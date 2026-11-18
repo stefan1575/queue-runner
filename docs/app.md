@@ -231,7 +231,9 @@ is a T3Error with its `code: message`. Projects: `t3_project_list {cursor, limit
   projects, no threads), then `thread.updated` items. From T3's schema: `project.updated
   {project}`, `project.removed {projectId}`, `thread.updated`, `thread.removed`, and
   `synchronized`/`snapshot-required` markers. A project has `id`, `title`, `workspaceRoot`,
-  `repositoryIdentity`, `archivedAt`, `scripts` and more.
+  `repositoryIdentity`, `archivedAt`, `scripts` and more. The app (`src/t3/project-feed.ts`)
+  opens the stream again at once on `snapshot-required`, so its whole snapshot replaces what was
+  missed, and leaves out a project whose `archivedAt` is set, as T3 hides it.
 - **`subscribeServerConfig`** (scope `orchestration:read`). Its payload's flags are all optional
   (`environmentThemes`, `usageLimitSources`, `usageLimitsCommand`, `workspaceSnapshotsOnDemand`,
   `providerCatalogsOnDemand`). With `{}` T3 sent one Chunk of 726,605 bytes with one value,

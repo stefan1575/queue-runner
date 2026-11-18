@@ -9,7 +9,7 @@ type Session = {
   token: string; scopes: string[]; revoked: boolean;
 };
 
-export type FakeProject = { id: string; title: string; workspaceRoot: string };
+export type FakeProject = { id: string; title: string; workspaceRoot: string; archivedAt?: string | null };
 
 type ShellStream = { send(item: unknown): void; end(): void; ended: boolean };
 
@@ -70,6 +70,18 @@ export class FakeT3 {
   removeProject(id: string) {
     this.projects = this.projects.filter((p) => p.id !== id);
     this.tell({ kind: 'project.removed', sequence: ++this.n, projectId: id });
+  }
+
+  /** A project archived (`archived: true`) or brought back in T3. */
+  archiveProject(id: string, archived: boolean) {
+    const p = this.projects.find((x) => x.id === id)!;
+    p.archivedAt = archived ? '2026-11-19T00:00:00.000Z' : null;
+    this.tell({ kind: 'project.updated', sequence: ++this.n, project: { ...p, scripts: [] } });
+  }
+
+  /** T3 says every shell stream must start again from a snapshot. */
+  requireSnapshot() {
+    this.tell({ kind: 'snapshot-required' });
   }
 
   /** T3 ends every shell stream (a restart, say). */

@@ -73,6 +73,27 @@ describe("T3's projects", () => {
     expect(t3.shellCount).toBe(1);
   });
 
+  test("a stream T3 says needs a new snapshot is opened again at once, and isn't counted as down", async () => {
+    const f = feed();
+    await vi.waitFor(() => expect(ids(f)).toEqual(['p1']));
+    t3.projects.push({ id: 'p2', title: 'blog', workspaceRoot: 'C:/blog' }); // missed by the stream
+    t3.requireSnapshot();
+    await vi.waitFor(() => expect(ids(f)).toEqual(['p1', 'p2']));
+    expect(retries).toEqual([]);
+    expect(f.error()).toBeNull();
+    expect(t3.frames.filter((m) => m._tag === 'Request').map((m) => m.tag)).toEqual(['orchestration.subscribeShell', 'orchestration.subscribeShell']);
+  });
+
+  test('an archived project is left out, and comes back when T3 brings it back', async () => {
+    t3.projects.push({ id: 'p2', title: 'old', workspaceRoot: 'C:/old', archivedAt: '2026-11-01T00:00:00.000Z' });
+    const f = feed();
+    await vi.waitFor(() => expect(ids(f)).toEqual(['p1']));
+    t3.archiveProject('p1', true);
+    await vi.waitFor(() => expect(ids(f)).toEqual([]));
+    t3.archiveProject('p2', false);
+    await vi.waitFor(() => expect(ids(f)).toEqual(['p2']));
+  });
+
   test('T3 not running leaves no list and says why, and is tried again', async () => {
     await rm(join(dir, 'server-runtime.json'));
     const f = feed();
