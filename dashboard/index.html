@@ -15,18 +15,16 @@
     it builds first, is it up. The column between them is centred in the space they leave.
   - Three pages do three jobs. Overview is the first glance. Inbox is what waits on you. Queue is
     the work.
-  - PROTOTYPE, with sample data only (#30, take 13): the Queue as the lanes on top (what Claude
-    and ChatGPT run now, then their next three, opening to the whole queue), and the efforts below
-    in three views: List, Board and Graph. Two questions, each with its own pill at the foot of
-    the sidebar. How is an effort moved without dragging a block taller than the screen? A: every
-    effort folds to one line the moment a drag starts and opens again on the drop. B: a narrow
-    Build order column beside the efforts is the only thing dragged. C: tracks, an effort as one
-    line with its tickets left to right, so a row is never tall. And how much colour says the
-    state at a glance? Four steps, from one tone (done or not) up to every state. In all of them
-    an open effort reads like the live page's feature card (what's left in a sentence, a row per
-    ticket), and a ticket with no effort is a lighter row of its own (take 12's variant A).
-    The right-hand rail is not this prototype's: it's take 12's here, and prototyped on its own
-    branch, prototype/rail. Take 12 is earlier/take-12.html.
+  - PROTOTYPE, with sample data only (#30, take 14): the Queue as the lanes on top (what Claude
+    and ChatGPT run now, then their whole queue in a window three rows tall that scrolls, so a
+    card never grows), and the efforts below in four tabs. Progress is for reading: each effort as
+    the live page's feature card (its bar, what's left in a sentence), opened and closed like a
+    dropdown. Order is for moving: a line per effort that never folds or unfolds, the only place
+    you drag. Board and Graph as before. The card is as tall as its tallest tab, so switching tabs
+    never moves the page. Colour is take 13's step 3: done, moving, and what waits on you. The
+    pill at the foot of the sidebar switches the lanes: A, two cards; B, one card split down the
+    middle, as the live page has it. The right-hand rail is not this prototype's: it's take 12's
+    here, and prototyped on its own branch, prototype/rail. Take 13 is earlier/take-13.html.
   - The Overview only summarises, in three cards read top to bottom: what's on your plate (the
     Inbox in counts by kind, and the ask that's first in line), what's running (a line per lane,
     with its Stop button and the one thing it takes up next), and what's next (a bar per
@@ -1107,87 +1105,105 @@ button.er-name:hover { text-decoration: underline; text-underline-offset: 3px; }
 /* ---------------------------------------------------------------- take 13 (PROTOTYPE, #30) */
 /* The Queue page only. The rail is prototyped on its own branch (prototype/rail). */
 
-/* A lane's queue opens and closes. */
-.ln-more { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; }
-.ln-all { display: inline-flex; align-items: center; gap: 4px; background: none; border: 0; padding: 2px 0; color: var(--ink-2); font: 600 14px var(--sans); cursor: pointer; }
-.ln-all:hover { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
-.ln-all .i { width: 15px; height: 15px; transition: transform .15s; }
-.ln-all[aria-expanded="true"] .i { transform: rotate(90deg); }
+/* ---------------------------------------------------------------- take 14 (PROTOTYPE, #30) */
+/* Nothing on this page changes size on its own: not a drag, not a tab, not a lane's queue. */
 
-/* An effort is a block of its own shade; a ticket with no effort is a lighter row between them. */
-.er { border-color: var(--line); background: var(--sunk); }
-.er.er-loose { border-color: transparent; background: none; }
-.er.er-loose:hover { border-color: var(--line); }
+/* The lanes. The provider is what the card is; what it's doing is a dot and a time, not a wash of
+   colour down its side. */
+.ln.on { border-left: 1px solid var(--line); padding-left: 16px; }
+.ln-for.run { color: var(--mute); font-weight: 500; }
+.ln-now { font-weight: 400; }
+.ln-now b { font-weight: 600; }
+/* Its queue: a window three rows tall, the rest a scroll away. Quiet until you're over it. */
+.ln-q { display: grid; gap: 4px; border-top: 1px solid var(--line-soft); padding-top: 8px; }
+.ln-qhead { font-size: 13px; color: var(--dim); display: flex; gap: 8px; }
+.ln-qhead span + span::before { content: "·"; margin-right: 8px; }
+.ln-q .ln-then { border-top: 0; padding-top: 0; gap: 0; height: 144px; overflow-y: auto; overscroll-behavior: contain;
+  scroll-snap-type: y proximity; scrollbar-width: thin; scrollbar-color: transparent transparent;
+  background:
+    linear-gradient(var(--surface), var(--surface)) 0 0 / 100% 14px no-repeat local,
+    linear-gradient(var(--surface), var(--surface)) 0 100% / 100% 14px no-repeat local,
+    linear-gradient(to bottom, color-mix(in srgb, var(--ink) 6%, transparent), transparent) 0 0 / 100% 12px no-repeat scroll,
+    linear-gradient(to top, color-mix(in srgb, var(--ink) 6%, transparent), transparent) 0 100% / 100% 12px no-repeat scroll; }
+.ln-q .ln-then:hover, .ln-q .ln-then:focus-within { scrollbar-color: var(--btn-line) transparent; }
+.ln-q .ln-then::-webkit-scrollbar { width: 6px; }
+.ln-q .ln-then::-webkit-scrollbar-thumb { background: transparent; border-radius: 3px; }
+.ln-q .ln-then:hover::-webkit-scrollbar-thumb { background: var(--btn-line); }
+.ln-q .ln-then li { height: 48px; padding: 0 4px 0 0; align-content: center; scroll-snap-align: start; }
+.ln-q .ln-none { height: 144px; border-top: 0; padding-top: 2px; }
+/* B: both lanes in one card, split down the middle. */
+.q12-now.one { gap: 0; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+.q12-now.one .ln, .q12-now.one .ln.on { border: 0; border-radius: 0; padding-left: 20px; padding-right: 20px; }
+.q12-now.one .ln + .ln { border-left: 1px solid var(--line-soft); }
+
+/* What a move did: a note that floats over the page, so nothing under it moves. */
+.q-moved { position: fixed; top: auto; bottom: 20px; left: 50%; transform: translateX(-50%); width: min(760px, calc(100vw - 32px)); z-index: 80; }
+
+/* The efforts card: every tab drawn in the same place, only one seen; the card is the tallest. */
+.q12-head { flex-wrap: nowrap; }
+.q12-hint { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.q12-pick.off { visibility: hidden; }
+.q12-views { display: grid; }
+.q12-views > .qv { grid-area: 1 / 1; min-width: 0; align-self: start; }
+.q12-views > .qv[inert] { visibility: hidden; }
 .grip.none { cursor: default; opacity: 0; }
-.q12.v-b .er-head { grid-template-columns: 0 22px 24px minmax(0, 1fr) 150px 84px; }
-/* Open, it reads as the live page's feature card does: what's left, then a row per ticket. */
-.er-body { padding: 2px 12px 12px 58px; }
-.er-left { font-size: 14.5px; color: var(--ink-2); margin: 0 0 6px 46px; }
-.er-left b { font-weight: 600; color: var(--ink); }
-.er-left .mine { color: var(--you); font-weight: 600; }
-.er-kids { gap: 0; }
+
+/* Progress: an effort as the live page's feature card. Its bar, what's left, opened like a dropdown. */
+.pg-list, .pg-kids { display: grid; gap: 8px; align-content: start; }
+.pg { border: 1px solid var(--line); border-radius: 12px; background: var(--sunk); }
+.pg.solo { background: none; border-color: var(--line-soft); }
+.pg .pg { background: var(--surface); }
+.pg-head { display: grid; grid-template-columns: 22px 24px minmax(0, 1fr) max-content; grid-template-areas: "r c n k" ". . b b" ". . s s"; column-gap: 8px; row-gap: 8px; align-items: center; padding: 12px 16px 12px 8px; }
+.pg.solo > .pg-head { grid-template-areas: "r c n k" ". . s s"; row-gap: 2px; padding-top: 9px; padding-bottom: 9px; }
+.pg-head .er-rank { grid-area: r; }
+.pg-head .er-caret { grid-area: c; }
+.pg.open > .pg-head .er-caret .i { transform: rotate(90deg); }
+.pg-name { grid-area: n; min-width: 0; text-align: left; background: none; border: 0; padding: 0; color: inherit; font: 600 16.5px/1.3 var(--sans); cursor: pointer; }
+.pg.solo .pg-name { font-weight: 500; font-size: 15.5px; cursor: default; }
+.pg-name .link, .pg-name .pr-ref { margin-left: 8px; font-size: 14px; font-weight: 400; color: var(--mute); }
+.pg-count { grid-area: k; color: var(--mute); font-size: 14px; white-space: nowrap; justify-self: end; }
+.pg-bar { grid-area: b; }
+.pg-bar .fbar { height: 12px; }
+.pg-say { grid-area: s; font-size: 14.5px; color: var(--ink-2); min-width: 0; }
+.pg-say b { font-weight: 600; color: var(--ink); }
+.pg-say .mine { color: var(--you); font-weight: 600; }
+.pg.solo .pg-say { font-size: 14px; color: var(--mute); }
+.pg-body { padding: 0 16px 12px 62px; }
+.pg-kids { gap: 0; }
+.pg-kids > .pg { margin: 6px 0; }
 .et { grid-template-columns: 26px minmax(0, 1fr) minmax(0, 46%); grid-template-areas: none; column-gap: 12px; align-items: baseline; padding: 8px 8px; border-radius: 0; }
 .et + .et { border-top: 1px solid var(--line-soft); }
 .et > .sg { width: 26px; height: 10px; align-self: center; }
 .et-name { grid-area: auto; white-space: normal; }
 .et-say { min-width: 0; display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; }
 .et-why { grid-area: auto; }
-.er-kids > .er { margin: 6px 0; }
 
-/* A and C: while a row is held, every effort is its one line, so the whole order is on screen. */
-body.q-dragging .q12:not(.v-b) .er:not(.keep-open) > .er-body { display: none; }
-body.q-dragging .q12:not(.v-b) .er-list .er-say { display: none; }
-body.q-dragging .q12:not(.v-b) .er { background: var(--surface); }
+/* Board: its five columns fit the card, so it needs neither a wider page nor a sideways scroll. */
+.kboard { grid-template-columns: repeat(4, minmax(0, 1fr)) minmax(0, .62fr); gap: 10px; padding: 14px 12px; overflow-x: visible; }
+.kcol { padding: 8px; }
+
+/* Order: a line per effort, always one line. The only place you drag, so nothing folds. */
+.or-list, .or-kids { display: grid; gap: 4px; align-content: start; }
+.or-row > .grip, .or-row > .er-rank { grid-area: auto; }
+.or-kids { margin: 4px 0 0 46px; }
+.or { position: relative; border-radius: 10px; }
+.or-row { display: grid; grid-template-columns: 16px 22px minmax(0, 1fr) 150px 84px; column-gap: 8px; align-items: center; height: 44px; padding: 0 12px 0 6px; border-radius: 10px; border: 1px solid var(--line); background: var(--sunk); }
+.or[draggable="true"] > .or-row { cursor: grab; }
+.or-kids .or-row { grid-template-columns: 16px 0 minmax(0, 1fr) 130px 84px; height: 40px; background: var(--surface); }
+.or.solo > .or-row { background: none; border-color: var(--line-soft); }
+.or-name { min-width: 0; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.or.solo .or-name { font-weight: 500; }
+.or-bar .fbar { height: 8px; gap: 2px; }
+.or-count { font-size: 13px; color: var(--mute); text-align: right; white-space: nowrap; }
+.or-st { grid-column: 4 / 6; justify-self: end; display: inline-flex; }
+.or-hint { margin: 10px 4px 0; font-size: 13.5px; color: var(--dim); }
 .drag-chip { position: fixed; top: -200px; left: 0; max-width: 360px; padding: 8px 14px; border-radius: 9px; background: var(--ink); color: var(--page); font: 600 15px/1.3 var(--sans); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-/* B: the order beside the work. The column is all that's dragged, and stays in view. */
-.ob { display: grid; grid-template-columns: 236px minmax(0, 1fr); gap: 16px; align-items: start; }
-.ob-order { position: sticky; top: 84px; max-height: calc(100vh - 108px); overflow-y: auto; scrollbar-width: thin; border: 1px solid var(--line); border-radius: 11px; padding: 10px 6px 8px; }
-.ob-title { font: 600 14px/1.2 var(--sans); color: var(--mute); margin: 0 8px 6px; }
-.ob-list, .ob-kids { display: grid; gap: 1px; }
-.ob-kids { margin-left: 26px; }
-.ob-item { border-radius: 8px; position: relative; }
-.ob-row { display: grid; grid-template-columns: 16px 20px minmax(0, 1fr) max-content; align-items: center; column-gap: 6px; padding: 5px 8px 5px 4px; border-radius: 8px; }
-.ob-kids .ob-row { grid-template-columns: 16px 0 minmax(0, 1fr) max-content; }
-.ob-row:hover { background: var(--hover); }
-.ob-row > .grip, .ob-row > .er-rank { grid-area: auto; }
-.ob-name { min-width: 0; text-align: left; background: none; border: 0; padding: 0; color: inherit; font: 600 14.5px/1.3 var(--sans); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
-.ob-item.loose > .ob-row .ob-name { font-weight: 400; color: var(--ink-2); }
-.ob-name .t-n { margin-right: 5px; }
-.ob-count { font-size: 12.5px; color: var(--mute); font-variant-numeric: tabular-nums; }
-.ob-row .sg { width: 14px; height: 8px; }
-.ob-item.dragging { opacity: .4; }
-@media (max-width: 1180px) { .ob { grid-template-columns: 1fr; } .ob-order { position: static; max-height: none; } }
-
-/* C: tracks. An effort is one line: its name, then its tickets left to right until it's usable. */
-.q12.v-c .er:not(.er-loose) > .er-head { grid-template-columns: 16px 22px 24px minmax(120px, 210px) minmax(0, 1fr) 84px; grid-template-areas: "g r c n b k" ". . . s s s"; }
-.q12.v-c .er-body .er:not(.er-loose) > .er-head { grid-template-columns: 16px 0 24px minmax(120px, 188px) minmax(0, 1fr) 84px; }
-.track { display: flex; flex-wrap: wrap; align-items: center; row-gap: 4px; }
-.tc { display: inline-flex; align-items: center; gap: 4px; font: 500 12.5px/1 var(--sans); color: var(--mute); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.tc + .tc::before { content: ""; width: 8px; height: 1px; background: var(--btn-line); margin: 0 4px; }
-.tc .sg { width: 13px; height: 10px; }
-.tc.end { color: var(--dim); }
-.tc.end.ok { color: var(--ok); font-weight: 600; }
-
-/* How much colour says the state. 4 is every state, as before; each step down says less in
-   colour and leaves the rest to the words. */
-.proto.two { bottom: 120px; }
-/* 3: done, moving, yours. No hatching: what's merged or building is moving; ready and blocked are just not started. */
-.q12.c3 .sg.merged, .q12.c3 .sg.building, .q12.c3 .sg.pr { background: var(--run-fill); box-shadow: none; }
-.q12.c3 .sg.ready, .q12.c3 .sg.blocked { background: var(--line); box-shadow: none; }
-.q12.c3 .st.ready, .q12.c3 .st.blocked { color: var(--mute); border-style: solid; }
-/* 2: only what waits on you has a colour. */
-.q12.c2 .sg.done, .q12.c1 .sg.done { background: var(--ink-2); }
-.q12.c2 .sg.merged, .q12.c2 .sg.building, .q12.c2 .sg.pr, .q12.c2 .sg.ready, .q12.c2 .sg.blocked,
-.q12.c1 .sg.merged, .q12.c1 .sg.building, .q12.c1 .sg.pr, .q12.c1 .sg.ready, .q12.c1 .sg.blocked { background: var(--line); box-shadow: none; }
-.q12.c2 .st.run, .q12.c2 .st.ok, .q12.c2 .st.ready, .q12.c2 .st.blocked,
-.q12.c1 .st { background: none; border: 1px solid var(--line); color: var(--ink-2); }
-.q12.c2 .es.run, .q12.c2 .es.ok, .q12.c1 .es, .q12.c1 .es.you, .q12.c1 .es.run { color: var(--ink); }
-.q12.c2 .fix-ref, .q12.c1 .fix-ref { color: var(--mute); }
-.q12.c2 .ln-for.run, .q12.c1 .ln-for.run { color: var(--ink-2); }
-/* 1: one tone. Done is filled, everything else is not. */
-.q12.c1 .sg.yours { background: var(--line); }
-.q12.c1 .er-left .mine, .q12.c1 .tc.end.ok { color: var(--ink); }
+/* Colour (take 13's step 3, Stefan's pick): done, moving, and what waits on you. No hatching:
+   merged or building is moving; ready and blocked are just not started. */
+.q12 .sg.merged, .q12 .sg.building, .q12 .sg.pr { background: var(--run-fill); box-shadow: none; }
+.q12 .sg.ready, .q12 .sg.blocked { background: var(--line); box-shadow: none; }
+.q12 .st.ready, .q12 .st.blocked { color: var(--mute); border-style: solid; }
 </style>
 </head>
 <body>
@@ -1255,10 +1271,8 @@ let fault = null;    // why the snapshot couldn't be read: "server", "missing", 
 let faultStart = ""; // with "missing": how to start the runner, as the server says it
 const PAGES = [["overview", "Overview"], ["inbox", "Inbox"], ["queue", "Queue"], ["activity", "Activity"], ["usage", "Usage"], ["settings", "Settings"]];
 const UNBUILT = [];   // pages still as they were before the split
-// PROTOTYPE (ticket 21): the Queue page's three arrangements, ?variant=a|b|c
-const VARIANTS = [["a", "Fold while dragging"], ["b", "Order beside the work"], ["c", "Tracks"]];   // take 13 (#30)
-// How much colour says a ticket's state: each step adds to the one before.
-const COLOURS = [["1", "One tone"], ["2", "Plus what waits on you"], ["3", "Plus what's moving"], ["4", "Every state"]];
+// PROTOTYPE (#30, take 14): the lanes on the Queue page, two ways, ?variant=a|b
+const VARIANTS = [["a", "Lanes as two cards"], ["b", "Lanes in one card"]];
 const sampleName = new URLSearchParams(location.search).get("sample");
 const ui = { page: "overview", repo: "", view: "list", pr: null, ask: null, hold: null, sel: null, pop: null, nav: false, rail: false,
   variant: "a", feature: "", open: [], qview: "", qeffort: "" };   // qview, qeffort: the Queue (take 12)   // the Queue: which arrangement, the feature it's narrowed to (A), the features unfolded (B)
@@ -2072,50 +2086,46 @@ const repoHead = (r, W, extra = "") => {
 // by state, and the graph of what waits on what. An effort is closed until you open it, and stays
 // as you left it. Variant A: a ticket with no effort is a row of its own in the order. Variant B:
 // they're one "No effort" row.
-const QVIEWS = [["list", "List"], ["board", "Board"], ["graph", "Graph"]];
+// Take 14: reading and moving are two tabs. Progress is read; Order is the one you drag.
+const QVIEWS = [["progress", "Progress"], ["order", "Order"], ["board", "Board"], ["graph", "Graph"]];
 const qOpen = new Set((() => { try { return JSON.parse(recall("qopen") || "[]"); } catch { return []; } })());
 // The sample addresses can open efforts and pick a view (?qopen=id,id&qview=board), for screenshots.
-{ const q = new URLSearchParams(location.search); if (q.get("qopen")) q.get("qopen").split(",").forEach((id) => qOpen.add(id)); if (q.get("qview")) ui.qview = q.get("qview"); if (q.get("fold")) document.body.classList.add("q-dragging"); }
+{ const q = new URLSearchParams(location.search); if (q.get("qopen")) q.get("qopen").split(",").forEach((id) => qOpen.add(id)); if (q.get("qview")) ui.qview = q.get("qview"); }
 function toggleOpen(id) { if (qOpen.has(id)) qOpen.delete(id); else qOpen.add(id); remember("qopen", JSON.stringify([...qOpen])); }
 const qMore = new Set();   // board columns shown whole
-const qLane = new Set((() => { try { return JSON.parse(recall("qlane") || "[]"); } catch { return []; } })());   // lanes showing their whole queue
-let qColour = COLOURS.some((c) => c[0] === recall("qcolour")) ? recall("qcolour") : "4";
-{ const q = new URLSearchParams(location.search); if (COLOURS.some((c) => c[0] === q.get("colour"))) qColour = q.get("colour"); if (q.get("qlane")) q.get("qlane").split(",").forEach((id) => qLane.add(id)); }   // for screenshots
 
 function queue() {
-  if (!QVIEWS.some((v) => v[0] === ui.qview)) ui.qview = QVIEWS.some((v) => v[0] === recall("qview")) ? recall("qview") : "list";
+  if (!QVIEWS.some((v) => v[0] === ui.qview)) ui.qview = QVIEWS.some((v) => v[0] === recall("qview")) ? recall("qview") : "progress";
   const W = work();
   if (ui.qeffort && !(W.nodes.has(ui.qeffort) && W.repos.includes(W.nodes.get(ui.qeffort).repo))) ui.qeffort = "";
-  const view = { list: qList, board: qBoard, graph: qGraph }[ui.qview];
-  const hint = { list: { a: "In the order they're built. Drag an effort to build it sooner or later: the list folds while you drag.", b: "Drag in Build order to build an effort sooner or later. Pick one there to open it.", c: "In the order they're built, each effort's tickets left to right. Drag a row to build it sooner or later." }[ui.variant], board: "Every open ticket by where it stands.", graph: "A blocker above what it blocks." }[ui.qview];
-  return `<div class="q12 v-${ui.variant} c${qColour}">${moveNote()}${qNow(W)}
-    <section class="card q12-work" aria-label="Efforts"><header class="q12-head"><h2>Efforts</h2><span class="q12-hint">${hint}</span>
-      ${ui.qview === "list" ? "" : effortPick(W)}
+  const views = { progress: qProgress, order: qOrder, board: qBoard, graph: qGraph };
+  const hint = { progress: "In the order they're built. Open one to see its tickets.", order: "Drag an effort to build it sooner or later. What it waits on comes up with it.",
+    board: "Every open ticket by where it stands.", graph: "A blocker above what it blocks." }[ui.qview];
+  // Every tab is drawn in the same cell and only one is seen, so the card is always as tall as
+  // the tallest: switching tabs never moves what's under it.
+  const tabs = QVIEWS.map(([k]) => `<div class="qv"${k === ui.qview ? "" : ' inert aria-hidden="true"'}>${views[k](W)}</div>`).join("");
+  return `<div class="q12 v-${ui.variant}">${moveNote()}${qNow(W)}
+    <section class="card q12-work" aria-label="Efforts"><header class="q12-head"><h2>Efforts</h2><span class="q12-hint" title="${esc(hint)}">${hint}</span>
+      ${effortPick(W, ui.qview === "board" || ui.qview === "graph")}
       <span class="seg" role="tablist" aria-label="View">${QVIEWS.map(([k, label]) => `<button role="tab" aria-selected="${ui.qview === k}" data-act="q-view" data-view="${k}">${label}</button>`).join("")}</span></header>
-      ${view(W)}</section></div>${protoBar()}`;
+      <div class="q12-views">${tabs}</div></section></div>${protoBar()}`;
 }
 
 // ---- the lanes: what each provider runs now, then what it takes up next.
 function qNow(W) {
   const lanes = snap.lanes || [];
-  return `<div class="q12-now">${lanes.map((l) => (l.provider === "claude" ? claudeLane(l, W) : reviewLane(l, W))).join("")}</div>`;
+  return `<div class="q12-now${ui.variant === "b" ? " one" : ""}">${lanes.map((l) => (l.provider === "claude" ? claudeLane(l, W) : reviewLane(l, W))).join("")}</div>`;
 }
-function laneCard(l, doing, then, more) {
+// Take 14: a lane's whole queue sits in a window three rows tall that scrolls, so the card is the
+// same size whatever it holds. `note` is the line over it; `none`, what it says when it's empty.
+function laneCard(l, doing, then, note, none) {
   const { how, moving } = laneSays(l);
   return `<article class="ln${moving ? " on" : ""}" aria-label="${esc(l.name)}">
     <header class="ln-head">${who(l.provider, l.name)}<span class="ln-does">${esc(l.does || "")}</span>
       <span class="ln-for${moving ? " run" : ""}">${moving ? `<i class="dot run"></i>` : ""}${how}</span><span class="ln-stop">${stopButton(l)}</span></header>
     <div class="ln-doing">${doing}</div>
-    ${then.length ? `<ol class="ln-then">${then.join("")}</ol>` : `<p class="ln-none">Nothing waits for it${ui.repo ? ` in ${esc(ui.repo)}` : ""}.</p>`}
-    ${more ? `<p class="ln-more">${more}</p>` : ""}</article>`;
-}
-// A lane shows its next three; the line under them opens the whole queue, and closes it again.
-const LANE_SHOWS = 3;
-function laneFold(l, rows, note = "") {
-  const whole = qLane.has(l.id), rest = rows.length - LANE_SHOWS;
-  if (rest <= 0) return [rows, note];
-  const btn = `<button class="ln-all" data-act="q-lane" data-lane="${esc(l.id)}" aria-expanded="${whole}">${ICON.right}${whole ? "Show the next three only" : `Show all ${rows.length}`}</button>`;
-  return [whole ? rows : rows.slice(0, LANE_SHOWS), `${btn}${note ? `<span>${note}</span>` : ""}`];
+    <div class="ln-q"><p class="ln-qhead">${note.map((x) => `<span>${x}</span>`).join("")}</p>
+      ${then.length ? `<ol class="ln-then" tabindex="0" aria-label="What ${esc(l.name)} takes up next">${then.join("")}</ol>` : `<p class="ln-none">${none || `Nothing waits for it${ui.repo ? ` in ${esc(ui.repo)}` : ""}.`}</p>`}</div></article>`;
 }
 const thenRow = (x, label, title, why, repo) => `<li><span class="qn">${x}</span><span class="ln-j"><b>${esc(label)}</b> ${esc(title)}${repo ? ` <span class="ln-repo">${esc(repo)}</span>` : ""}</span><span class="ln-why">${esc(why || "")}</span></li>`;
 function doingLine(j) {
@@ -2129,21 +2139,20 @@ function claudeLane(l, W) {
   const doing = jobs.length ? jobs.map(doingLine).join("")
     : elsewhere.length ? `<p class="ln-now quiet">Nothing running in ${esc(W.repos.join(", "))}<span class="ln-meta">It's on ${esc(elsewhere.join(", "))} now.${one && one.starts ? ` ${esc(one.starts)}` : ""}</span></p>`
     : `<p class="ln-now quiet">${s.head}${s.sub ? `<span class="ln-meta">${s.sub}</span>` : ""}</p>`;
-  let then = [], more = "";
+  let then, note, none = "";
   if (W.repos.length === 1) {
     const q = W.queues.get(W.repos[0]);
-    [then, more] = laneFold(l, q.jobs.map((j, x) => thenRow(x + 1, jobLabel(j), j.title, j.why)));
-    if (!q.jobs.length && !elsewhere.length) more = esc(q.starts || "");
+    then = q.jobs.map((j, x) => thenRow(x + 1, jobLabel(j), j.title, j.why));
+    note = ["Next", q.jobs.length ? `${q.jobs.length} in line` : ""].filter(Boolean);
+    if (!q.jobs.length && !elsewhere.length) none = esc(q.starts || "");
   } else {
-    // A job per repository at once (#50): each repository's next; opened, each one's whole queue,
-    // repository by repository, numbered within its own.
+    // A job per repository at once (#50): each repository's queue, one after the other, numbered
+    // within its own.
     const qs = W.repos.map((r) => W.queues.get(r)).filter((q) => q.jobs.length);
-    then = qLane.has(l.id) ? qs.flatMap((q) => q.jobs.map((j, x) => thenRow(x + 1, jobLabel(j), j.title, j.why, q.repo)))
-      : qs.map((q, x) => thenRow(x + 1, jobLabel(q.jobs[0]), q.jobs[0].title, q.jobs[0].why, q.repo));
-    const all = qs.reduce((n, q) => n + q.jobs.length, 0), whole = qLane.has(l.id);
-    more = `${all > qs.length ? `<button class="ln-all" data-act="q-lane" data-lane="${esc(l.id)}" aria-expanded="${whole}">${ICON.right}${whole ? "Show each repository's next only" : `Show all ${all}`}</button>` : ""}<span>One job per repository at once.</span>`;
+    then = qs.flatMap((q) => q.jobs.map((j, x) => thenRow(x + 1, jobLabel(j), j.title, j.why, q.repo)));
+    note = ["Next in each repository", "one job per repository at once"];
   }
-  return laneCard(l, doing, then, more);
+  return laneCard(l, doing, then, note, none);
 }
 function reviewLane(l, W) {
   const s = laneSays(l), job = l.job && W.repos.includes(l.job.repo) ? l.job : null;
@@ -2151,8 +2160,8 @@ function reviewLane(l, W) {
   const rank = new Map((snap.repos || []).map((r, n) => [r.name, n]));
   const waiting = (snap.issues || []).filter((i) => W.repos.includes(i.repo) && i.state === "review" && i.pr && !(l.job && l.job.repo === i.repo && l.job.pr === i.pr))
     .sort((a, b) => (rank.get(a.repo) ?? 99) - (rank.get(b.repo) ?? 99) || a.pr - b.pr);
-  const [then, more] = laneFold(l, waiting.map((i, x) => thenRow(x + 1, `Review PR #${i.pr}`, i.title, i.note, W.repos.length > 1 ? i.repo : "")));
-  return laneCard(l, doing, then, more);
+  const then = waiting.map((i, x) => thenRow(x + 1, `Review PR #${i.pr}`, i.title, i.note, W.repos.length > 1 ? i.repo : ""));
+  return laneCard(l, doing, then, ["Next", waiting.length ? `${waiting.length} waiting` : ""].filter(Boolean), "Nothing waits for its review.");
 }
 
 // ---- where an effort stands, in a line: what's moving, what's next, what waits on you.
@@ -2175,63 +2184,55 @@ function effortStatus(n, W) {
   return `${lead}${youSay ? ` · ${youSay}` : ""}`;
 }
 
-// ---- List: the order itself. Efforts closed until opened; a ticket isn't dragged on its own.
-function qList(W) {
+// ---- Progress, for reading: each effort in build order as the live page's feature card, its bar
+// and what's left, opened like a dropdown to its tickets. Nothing here is dragged.
+const perRepo = (W, list) => {
   if (!W.repos.length) return `<p class="empty">No repository.</p>`;
-  const side = ui.variant === "b";
   return W.repos.map((r) => {
     const root = W.nodes.get(`repo:${r}`);
     const head = W.repos.length > 1 ? `<h3 class="q12-repo">${repoLogo(r)}${esc(r)}${offTag(r)}</h3>` : "";
-    if (!root.order.length) return `<div class="q12-sec">${head}<p class="empty small">Nothing open.</p>${finished(r, W)}</div>`;
-    const cards = `<ol class="er-list">${root.order.map((k, x) => erRow(W.nodes.get(k), W, x + 1)).join("")}</ol>`;
-    // B: the order is its own narrow column, the only thing dragged; it stays in view as you read.
-    const rows = side ? `<div class="ob"><nav class="ob-order" aria-label="Build order of ${esc(r)}"><p class="ob-title">Build order</p>
-        <ol class="ob-list">${root.order.map((k, x) => obRow(W.nodes.get(k), W, x + 1)).join("")}</ol></nav>${cards}</div>` : cards;
-    return `<div class="q12-sec">${head}${rows}${finished(r, W)}</div>`;
+    return `<div class="q12-sec">${head}${root.order.length ? list(root, r) : `<p class="empty small">Nothing open.</p>`}${finished(r, W)}</div>`;
   }).join("");
+};
+function qProgress(W) {
+  return perRepo(W, (root) => `<ol class="pg-list">${root.order.map((k, x) => pgRow(W.nodes.get(k), W, x + 1)).join("")}</ol>`);
 }
-// C: an effort's tickets as one line, left to right in the bar's order, ending where it's usable.
-function track(n, W) {
-  const its = W.tickets(n.id).sort((a, b) => segmentOf(a) - segmentOf(b) || a.n - b.n), left = its.filter((i) => i.state !== "done").length;
-  return `<span class="track" role="img" aria-label="${esc(nameOf(n))}: ${its.length - left} of ${its.length} done">${its.map((i) =>
-    `<span class="tc" title="#${i.n} ${esc(i.title)}: ${esc(stateOf(i)[0])}"><i class="sg ${SEGMENTS[segmentOf(i)][0]}"></i>${i.n}</span>`).join("")}<span class="tc end${left ? "" : " ok"}">Usable</span></span>`;
-}
-// An effort, or a ticket with no effort, as a row. A and C: the row itself is dragged. B: it's read.
-function erRow(n, W, rank) {
-  const drag = ui.variant === "b" ? "" : dragAttrs(n), grip = drag ? GRIP : `<span class="grip none"></span>`;
-  const flash = isFlash(n.id) ? " flash" : "", num = rank ? `<span class="er-rank">${rank}</span>` : "";
-  if (n.t === "ticket") {   // a ticket with no effort: a lighter row of its own in the order
+function pgRow(n, W, rank) {
+  const num = `<span class="er-rank">${rank || ""}</span>`;
+  if (n.t === "ticket") {   // a ticket with no effort: a lighter row of its own
     const i = n.i;
-    return `<li class="er er-loose${flash}" data-er="${esc(n.id)}" ${drag}><div class="er-head">${grip}${num}<span class="er-caret dot-only"><i></i></span>
-      <span class="er-name"><span class="t-n">#${i.n}</span>${esc(i.title)}<span class="kind">Ticket</span>${prText(i)}</span>
-      <span class="er-st">${stateTag(i)}</span><span class="er-say">${esc(whyOf(i, W))}</span></div></li>`;
+    return `<li class="pg solo"><div class="pg-head">${num}<span class="er-caret dot-only"><i></i></span>
+      <span class="pg-name"><span class="t-n">#${i.n}</span>${esc(i.title)}<span class="kind">Ticket</span>${prText(i)}</span>
+      <span class="pg-count">${stateTag(i)}</span><span class="pg-say">${esc(whyOf(i, W))}</span></div></li>`;
   }
   const open = qOpen.has(n.id), s = effortSum(n, W), shut = closedSay(n, W);
   const title = n.t === "none" ? `No effort<span class="kind">Tickets</span>` : `${esc(n.title)}<span class="kind">${esc(KINDNAME[n.kind] || "Effort")}</span>`;
-  const kids = open ? n.order.map((k) => { const c = W.nodes.get(k); return c.t === "ticket" ? etRow(c, W) : erRow(c, W, null); }).join("") : "";
-  return `<li class="er${open ? " open" : ""}${n.t === "none" ? " none" : ""}${flash}" data-er="${esc(n.id)}" ${drag}>
-    <div class="er-head">${grip}${num}<button class="er-caret" data-act="q-open" data-id="${esc(n.id)}" aria-expanded="${open}" aria-label="${open ? "Close" : "Open"} ${esc(nameOf(n))}">${ICON.right}</button>
-      <button class="er-name" data-act="q-open" data-id="${esc(n.id)}">${title}</button>
-      <span class="er-bar">${ui.variant === "c" ? track(n, W) : s.bar}</span><span class="er-count">${esc(s.count)}</span>
-      <span class="er-say">${effortStatus(n, W)}</span></div>
-    ${open ? `<div class="er-body"><p class="er-left">${s.say}</p><ol class="er-kids">${kids}</ol>${shut ? `<p class="eq-shut">${ICON.check}${esc(shut)}</p>` : ""}</div>` : ""}</li>`;
+  const kids = open ? n.order.map((k) => { const c = W.nodes.get(k); return c.t === "ticket" ? etRow(c, W) : pgRow(c, W, null); }).join("") : "";
+  return `<li class="pg${open ? " open" : ""}"><div class="pg-head">${num}<button class="er-caret" data-act="q-open" data-id="${esc(n.id)}" aria-expanded="${open}" aria-label="${open ? "Close" : "Open"} ${esc(nameOf(n))}">${ICON.right}</button>
+      <button class="pg-name" data-act="q-open" data-id="${esc(n.id)}">${title}</button><span class="pg-count" title="Done means live">${esc(s.count)}</span>
+      <span class="pg-bar">${s.bar}</span><span class="pg-say">${leftSay(s.v)}</span></div>
+    ${open ? `<div class="pg-body"><ol class="pg-kids">${kids}</ol>${shut ? `<p class="eq-shut">${ICON.check}${esc(shut)}</p>` : ""}</div>` : ""}</li>`;
 }
-// B's order column: a line per effort, its efforts inside it a step in. Picking one opens it.
-function obRow(n, W, rank) {
-  const flash = isFlash(n.id) ? " flash" : "";
-  let name, st, kids = "";
+
+// ---- Order, for moving: a line per effort, the efforts inside one a step in, and every line
+// always one line, so nothing opens, folds or moves while you drag. A ticket inside an effort
+// isn't dragged: it goes where its effort and what it waits on put it.
+function qOrder(W) {
+  return perRepo(W, (root) => `<ol class="or-list">${root.order.map((k, x) => orRow(W.nodes.get(k), W, x + 1)).join("")}</ol>`);
+}
+function orRow(n, W, rank) {
+  const drag = dragAttrs(n), grip = drag ? GRIP : `<span class="grip none"></span>`, flash = isFlash(n.id) ? " flash" : "";
+  const num = `<span class="er-rank">${rank || ""}</span>`;
   if (n.t === "ticket") {
-    name = `<span class="t-n">#${n.i.n}</span>${esc(n.i.title)}`;
-    st = `<i class="sg ${SEGMENTS[segmentOf(n.i)][0]}" title="${esc(stateOf(n.i)[0])}"></i>`;
-  } else {
-    const its = W.tickets(n.id), done = its.filter((i) => i.state === "done").length;
-    name = esc(nameOf(n));
-    st = `<span class="ob-count" title="${done} of ${its.length} done">${done}/${its.length}</span>`;
-    const inner = n.order.map((k) => W.nodes.get(k)).filter((c) => c.t !== "ticket");
-    if (inner.length) kids = `<ol class="ob-kids">${inner.map((c) => obRow(c, W, null)).join("")}</ol>`;
+    const i = n.i;
+    return `<li class="or solo${flash}" ${drag}><div class="or-row">${grip}${num}<span class="or-name"><span class="t-n">#${i.n}</span>${esc(i.title)}<span class="kind">Ticket</span></span>
+      <span class="or-st">${stateTag(i)}</span></div></li>`;
   }
-  return `<li class="ob-item${n.t === "ticket" ? " loose" : ""}${flash}" ${dragAttrs(n)}><div class="ob-row">${GRIP}<span class="er-rank">${rank || ""}</span>
-    <button class="ob-name" data-act="q-go" data-id="${esc(n.id)}" title="${esc(nameOf(n))}">${name}</button>${st}</div>${kids}</li>`;
+  const s = effortSum(n, W), inner = n.order.map((k) => W.nodes.get(k)).filter((c) => c.t !== "ticket");
+  const title = n.t === "none" ? `No effort<span class="kind">Tickets</span>` : `${esc(n.title)}<span class="kind">${esc(KINDNAME[n.kind] || "Effort")}</span>`;
+  return `<li class="or${flash}" ${drag}><div class="or-row">${grip}${num}<span class="or-name">${title}</span>
+      <span class="or-bar">${s.bar}</span><span class="or-count">${esc(s.count)}</span></div>
+    ${inner.length ? `<ol class="or-kids">${inner.map((c) => orRow(c, W, null)).join("")}</ol>` : ""}</li>`;
 }
 function etRow(n, W) {
   const i = n.i, seg = SEGMENTS[segmentOf(i)][0];
@@ -2241,11 +2242,11 @@ function etRow(n, W) {
 }
 
 // ---- the efforts to narrow the board and the graph to: a dropdown, however many there are.
-function effortPick(W) {
+function effortPick(W, on = true) {
   const opts = [];
   const walk = (id, depth) => { const n = W.nodes.get(id); for (const k of n.order) { const c = W.nodes.get(k); if (c.t === "ticket") continue; opts.push([k, `${"   ".repeat(depth)}${nameOf(c)}`]); walk(k, depth + 1); } };
   for (const r of W.repos) { if (W.repos.length > 1) opts.push([`repo:${r}`, r, true]); walk(`repo:${r}`, W.repos.length > 1 ? 1 : 0); }
-  return `<select class="q12-pick" data-change="q-effort" aria-label="Narrow to an effort"><option value="">All efforts</option>${opts.map(([v, label, grp]) =>
+  return `<select class="q12-pick${on ? "" : " off"}" data-change="q-effort" aria-label="Narrow to an effort"><option value="">All efforts</option>${opts.map(([v, label, grp]) =>
     `<option value="${esc(v)}"${ui.qeffort === v ? " selected" : ""}${grp ? ' class="grp"' : ""}>${esc(label)}</option>`).join("")}</select>`;
 }
 const effortSet = (W) => (ui.qeffort ? new Set(W.tickets(ui.qeffort).map(key)) : null);
@@ -2353,16 +2354,14 @@ document.addEventListener("dragstart", (e) => {
   chip.textContent = nameOf(work().nodes.get(dragging.id));
   document.body.appendChild(chip);
   if (e.dataTransfer.setDragImage) e.dataTransfer.setDragImage(chip, 14, 18);
-  const top = el.getBoundingClientRect().top;
   setTimeout(() => {   // after the drag has begun: a change made inside dragstart can end it
     chip.remove();
     if (!dragging) return;
-    for (let p = el.parentElement.closest(".er"); p; p = p.parentElement.closest(".er")) p.classList.add("keep-open");
-    document.body.classList.add("q-dragging");   // A and C: every effort folds to its one line
+    // Take 14: nothing folds or opens. The row held dims, its siblings get an outline, and the
+    // drop line is drawn over the gap, so not one row moves until you let go.
+    document.body.classList.add("q-dragging");
     el.classList.add("dragging");
     document.querySelectorAll("[data-drag]").forEach((x) => { if (x.dataset.parent === dragging.parent && x !== el) x.classList.add("can-drop"); });
-    const moved = el.getBoundingClientRect().top - top;   // keep the row held under the pointer
-    if (moved) scrollBy(0, moved);
   }, 0);
 });
 document.addEventListener("dragover", (e) => {
@@ -2405,20 +2404,11 @@ document.addEventListener("keydown", (e) => {
 // ---- the switcher between the three. Sample data only, so it can never reach the real page.
 function protoBar() {
   if (!snap.sample) return "";
-  const [k, name] = VARIANTS.find((v) => v[0] === ui.variant), [c, cname] = COLOURS.find((x) => x[0] === qColour);
-  return `<div class="proto two" role="group" aria-label="Prototype: how much colour says the state" title="Prototype: how much colour says a ticket's state. Keys [ and ]">
-    <button data-act="colour" data-by="-1" aria-label="Less colour" title="[ key">${ICON.left}</button>
-    <span class="proto-name"><b>${c}</b>${esc(cname)}</span>
-    <button data-act="colour" data-by="1" aria-label="More colour" title="] key">${ICON.right}</button></div>
-  <div class="proto" role="group" aria-label="Prototype: the Queue page's variants" title="Prototype: three ways to arrange and move the efforts. Left and right arrow keys">
+  const [k, name] = VARIANTS.find((v) => v[0] === ui.variant);
+  return `<div class="proto" role="group" aria-label="Prototype: the lanes, two ways" title="Prototype: the lanes as two cards or one. Left and right arrow keys">
     <button data-act="variant" data-by="-1" aria-label="Previous variant" title="Left arrow key">${ICON.left}</button>
     <span class="proto-name"><b>${k.toUpperCase()}</b>${esc(name)}</span>
     <button data-act="variant" data-by="1" aria-label="Next variant" title="Right arrow key">${ICON.right}</button></div>`;
-}
-function turnColour(by) {
-  const at = COLOURS.findIndex((x) => x[0] === qColour);
-  qColour = COLOURS[(at + by + COLOURS.length) % COLOURS.length][0];
-  remember("qcolour", qColour);
 }
 function turnVariant(by) {
   const at = VARIANTS.findIndex((v) => v[0] === ui.variant);
@@ -2727,7 +2717,9 @@ function beat() {
 
 function draw() {
   if (dragging) return;   // a row is held (the Queue, take 11): redrawing would drop it
-  document.body.classList.toggle("page-wide", ui.page === "queue" && ui.qview === "board");
+  // Take 14: the Board no longer widens the page; every tab keeps the same width, and the board
+  // scrolls sideways inside its card when it needs to.
+  document.body.classList.remove("page-wide");
   document.body.classList.toggle("nav-open", ui.nav);
   document.body.classList.toggle("rail-open", ui.rail);
   document.body.classList.toggle("page-inbox", ui.page === "inbox");
@@ -2821,15 +2813,6 @@ document.addEventListener("click", (e) => {
     case "open": ui.open = ui.open.includes(d.id) ? ui.open.filter((x) => x !== d.id) : [...ui.open, d.id]; break;   // the Queue, B
     case "variant": turnVariant(Number(d.by)); break;   // PROTOTYPE
     case "q-open": toggleOpen(d.id); break;   // PROTOTYPE (#30, take 12)
-    case "q-lane": if (qLane.has(d.lane)) qLane.delete(d.lane); else qLane.add(d.lane); remember("qlane", JSON.stringify([...qLane])); break;
-    case "colour": turnColour(Number(d.by)); break;   // PROTOTYPE (take 13)
-    case "q-go": {   // B: pick an effort in the order: it opens, and comes into view
-      if (work().nodes.get(d.id).t !== "ticket" && !qOpen.has(d.id)) toggleOpen(d.id);
-      draw();
-      const card = [...document.querySelectorAll("[data-er]")].find((x) => x.dataset.er === d.id);
-      if (card) { card.scrollIntoView({ block: "center", behavior: "smooth" }); card.classList.add("flash"); }
-      return;
-    }
     case "q-view": ui.qview = d.view; remember("qview", d.view); break;
     case "q-more": if (qMore.has(d.col)) qMore.delete(d.col); else qMore.add(d.col); break;
     case "q-undo": { const was = JSON.parse(undo.pop() || "null"); if (was) { ord.kids = was.kids; ord.touched = new Set(was.touched); } lastMove = null; break; }
@@ -2895,7 +2878,6 @@ document.addEventListener("change", (e) => {
 document.addEventListener("keydown", (e) => {
   if (ui.page !== "queue" || !snap || !snap.sample || ui.pr || e.ctrlKey || e.metaKey || e.altKey) return;
   if (e.target.closest?.("input, textarea, select, [contenteditable]")) return;
-  if (e.key === "[" || e.key === "]") { e.preventDefault(); turnColour(e.key === "]" ? 1 : -1); draw(); return; }
   const turn = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
   if (!turn) return;
   e.preventDefault();
