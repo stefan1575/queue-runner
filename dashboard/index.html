@@ -12,7 +12,7 @@
   How it is laid out, and why:
   - The left is for getting around: the repository switcher and the pages. The right is the
     machine's readings, in view however far the page is scrolled: how much usage is left, what
-    it builds first, is it up. The column between them is centred in the space they leave.
+    each repository is doing, is it up (Usage, Repositories, Health). The column between them is centred in the space they leave.
   - Three pages do three jobs. Overview is the first glance. Inbox is what waits on you. Queue is
     the work.
   - PROTOTYPE, with sample data only (ticket 21): the Queue is three arrangements of the same
@@ -42,7 +42,8 @@
     at the foot of the list, each folding to one line: Snoozed (out of the list until a time
     you chose) and Decided (until the runner is through with it: "Runner's turn" until a lane
     takes it up, then "Working").
-  - A point in time is written whole, as he asked: November 15, 2026 Sunday 1:14pm.
+  - A point in time is written whole, as he asked: November 15, 2026 Sunday 1:14pm. The rail
+    shortens it ("3:53pm" today, "Friday 4:35pm" this week), the whole time on hover.
   - Nothing moves by itself.
   - Colour is state and nothing else: blue is yours, amber is working, green is done or healthy,
     red is broken. Claude's clay and OpenAI's black or white are on their marks and names only.
@@ -830,7 +831,7 @@ dialog.sheet::backdrop { background: rgba(4, 6, 10, .55); }
     <header class="top" id="top"></header>
     <div class="stage">
       <main id="main"></main>
-      <aside class="rail" id="rail" aria-label="Usage, build order and status"></aside>
+      <aside class="rail" id="rail" aria-label="Usage, repositories and health"></aside>
     </div>
   </div>
 </div>

@@ -116,9 +116,27 @@ python3 -m dashboard    # http://queue.localhost/ is the runner's; http://localh
   since #61 (and a `repo_order` already in the file is dropped, #50);
   each write keeps what the others wrote. The page shows a request as asked until
   `control_read_at` reaches its time.
-- **Usage** (ticket 42): the Usage card's head has Refresh (an icon, "Refresh" on hover), and
-  Details beside it again (Stefan, 2026-11-16, liking the prototype's floating card), which opens
-  the Usage page; the page stays in the sidebar too. It posts `{"usage": "refresh"}`; the
+- **The rail** (#141; Stefan, 2026-11-18, after takes 14 to 19 of its prototype on
+  `prototype/rail`, the agreed state `dashboard/earlier/rail-take-19.png` there): three cards,
+  Usage, Repositories and Health, each with an equal title and its icon (`cardHead`,
+  `HEAD_ICON`): line-only marks, a gauge, a git branch and a pulse, each across the full 24px
+  square, since a closed shape (take 14's folder) looks bigger than open strokes and a ring
+  around each bent the marks. The cards keep their heads and padding (take 18's tighter cards
+  were rejected); only the items inside a list sit closer: the repositories, and Health's rows.
+  **Usage** (`railPlan`, `railWindow`, `railMeta`): Session, Weekly and Weekly, Fable are equal,
+  the same row at the same size and spacing, none ranked above another: its name, a bar and "N%
+  left", and under the name its own "resets ..." line, even when two reset together. Every bar
+  has the same solid outline with the share left inside (amber at 15% left or less, the blue
+  share kept for you at its left end); an empty one is the outline alone, no red, which made it
+  look a different size. The figure's column has a fixed width, so a 0% bar is as long as a 62%
+  one, and the figures are regular weight, 0% the plain colour. Each provider's line is its
+  plan, its reset credits left (0 too; nothing when the snapshot has no count), when it was read
+  and "reconnecting" while it is: "Pro · 2 resets · read 3:15pm". **Times on the rail**
+  (`when`) are Stefan's format shortened: "3:53pm" today, "Friday 4:35pm" within the week,
+  "November 25 Wednesday 12:10am" further out, the whole `stamp()` on hover. **Repositories** and
+  **Health** are below. `tests/test_rail.py` runs the rail's code in node on the sample's states.
+- **Refresh** (ticket 42): the Usage card's head has Refresh (an icon, "Refresh" on hover); the
+  Usage page is in the sidebar (the Details link beside Refresh is gone with take 19). It posts `{"usage": "refresh"}`; the
   publisher's next fresh tick (30 seconds at most) takes it whatever `READ_EVERY` says, and the
   snapshot's `usage_refresh.asked_at` names the request it took. **It doesn't force Claude's
   call** (issue 66): ChatGPT is read; Claude's reader asks its endpoint only if its 5-minute
@@ -161,16 +179,20 @@ python3 -m dashboard    # http://queue.localhost/ is the runner's; http://localh
   `initialized`, the read, about a second, 20 at most; Codex reads its own login. Starting it
   rewrites Codex's shared `~/.codex/models_cache.json` (seen 2026-11-16; T3's own check writes it
   again). A plan
-  says "2 resets left" on its line, and nothing when it has none. **Redeeming one isn't on the
+  says "2 resets" on its line, "0 resets" too, and nothing when the read gave no count. **Redeeming one isn't on the
   page:** it spends the credit, so it stays Stefan's, in T3.
 - **The Repositories card** (#61, Stefan 2026-11-16: "just stop and resume") was the Build order
   card: no numbers or arrows, the repos in config.toml's order (the snapshot's `repos`), on every
-  page; Settings has no copy of it. Each row says what that repo is doing now (#50, `repoRows`):
-  "Building #212, 35 min in.", "Waiting: <why>.", or "Idle.", then who merges; a stopped one
-  "Stopped since <clock>" and the job it still finishes. No note under the list (Stefan,
-  2026-11-16). Each row starts with the repo's mark and ends with Stop or Resume as an icon
-  (pause, play; named on hover and for a screen reader). **A repo's mark** (`repoLogo`, also on
-  Inbox rows): its favicon, else its first two letters on a plain tile ("Le", "Qu"). The runner
+  page; Settings has no copy of it. Under each name is one plain line, the same size whatever it
+  says (#141, `railRepos`): what its lanes are doing ("Building #212 · Reviewing PR #210": Claude
+  builds and fixes, ChatGPT reviews, so the verb says which, and no provider marks), else
+  "Waiting: <why>", "Stopped since <when>" or "Idle". Who, the title and how long are on hover,
+  and a stopped one's hover names what it still finishes. Who merges isn't on the rail. No note
+  under the list (Stefan, 2026-11-16). Each row starts with the repo's mark and ends with Stop or
+  Resume as an icon (pause, play; named on hover and for a screen reader). **A repo's mark**
+  (`repoLogo`, also on Inbox rows): its favicon, else two capitals on a plain tile, a word's first
+  letter each ("LD", "QR", "GB"; a one-word name's first two). The sample has no favicon (its
+  made-up one for leads-dashboard read as a bug). The runner
   finds the favicon as T3 Code finds a project's (`favicon.py`: T3's well-known paths in order,
   then a `<link rel="icon">` in index.html or a root route, under `public/` then the root; read
   from T3 Code's server bundle 2026-11-16), and the snapshot carries it as a data: URL, so the
@@ -178,20 +200,19 @@ python3 -m dashboard    # http://queue.localhost/ is the runner's; http://localh
   out, and so is any file outside the repo, by `..` or through a link (a symlink or junction:
   each path is resolved before it's compared with the resolved root; PR #103's review 1, F1).
   An answer is kept 10 minutes, a miss 1, as T3 keeps them (`tests/test_favicon.py`).
-  `tests/test_repo_rows.py` runs `repoRows()` in node on the
-  sample's states. A lane running several jobs says "2 at once" and lists each with its thread
+  A lane running several jobs says "2 at once" and lists each with its thread
   (`laneSays`); `laneOn` finds an ask's job among a lane's `jobs`. The sample's `side-by-side`
   state runs a build in each repo.
 - **What's left** (#60, Stefan 2026-11-16: "71% left as opposed to the current usage"): each
-  usage window says `100 - used` as "N% left", on the Usage card and page, with when it resets
-  under its bar, short ("Resets 22:56", "Resets Wed 23:38"; the whole stamp on hover); the
-  card is laid out as the prototype's floating card Stefan liked (label, bar, bold figure; "read
-  21:55" by the plan's name), a little roomier; the bar holds what's
+  usage window says `100 - used` as "N% left", on the Usage card (The rail, above) and page. On
+  the Usage page (`meter()`) when it resets is under its bar, short ("Resets 22:56", "Resets Wed
+  23:38"; the whole stamp on hover), and the bar holds what's
   left, amber at 15% left or less and red at none, and the share kept for you is blue at its left
   end, never wider than what's left (none at 0% left: PR #62's F1, `tests/test_meter.py` runs the
   page's `meter()` in node). The snapshot still carries `used`.
 - **A stopped repo on the page** (ticket 37): each row of the Repositories card has Stop or Resume
-  and says "Stopped since ..." (or "Asked to stop/resume: the runner hasn't read it yet"); its
+  and says "Stopped since ..." (or "Asked to stop" or "Asked to resume", "the runner hasn't read it
+  yet" on hover); its
   work reads as stopped wherever it's listed: a dashed "Stopped" tag beside its name on Inbox rows
   and repo tags, "Stopped." in the repository switcher, and "Its repository is stopped" as an
   unfinished ticket's standing on the Queue (`repoOff`, `offTag`, `standing`). The sample's
@@ -380,10 +401,14 @@ python3 -m dashboard    # http://queue.localhost/ is the runner's; http://localh
   holding a snoozed ask's toast isn't built.
 - **A point in time is written whole** (Stefan, 2026-11-15): `stamp()` gives "November 15, 2026
   Sunday 1:14pm", for when an ask began waiting, a usage window's reset, the runner's start and
-  a snooze's end. A list row keeps the short age ("2 h") with the whole time on hover. Choosing
+  a snooze's end. A list row keeps the short age ("2 h") with the whole time on hover, and the
+  rail shortens it (`when()`: The rail, above) with the whole time on hover. Choosing
   the format is pinned (ticket 22).
-- **The runner's status lists its sources by group,** in his order: Providers (Claude, ChatGPT),
-  Local (T3 Code), External (GitHub). **Only what the runner depends on** (ticket 43): the
+- **Health** (`status()`, the rail's last card) lists the runner and its sources by group, in
+  Stefan's order: Providers (Claude, ChatGPT), Local (Queue runner, T3 Code), External (GitHub).
+  Each is a dot and a name, the runner too; since when it's been running is on hover only (#141).
+  A source failing is red with its note under the rows; a silent runner turns its own dot and the
+  whole card red. **Only what the runner depends on** (ticket 43): the
   sample's sources are `snapshot.SOURCES` (a test holds them), and whether Stop now is available
   shows on the lane's Stop button (`stop_now.note`), not here.
   Nothing on the page moves by itself (Stefan). Colour is state only: blue is Stefan's, amber

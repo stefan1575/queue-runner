@@ -169,6 +169,6 @@ what every job template may say (no skill, slash command or `~/` path; screensho
 `pr-<number>/`, the folder the review reads): `tests/test_templates.py`; `scripts/evidence.py`'s
 desktop capture (a path with spaces reaches PowerShell whole): `tests/test_evidence_script.py`;
 no bare `mkdtemp(` in the tests: `tests/test_no_temp_leftovers.py`
-(`docs/reviews.md`, Sol runs tests); the dashboard's favicons, meter and repository rows:
-`tests/test_favicon.py`, `tests/test_meter.py` and `tests/test_repo_rows.py`
+(`docs/reviews.md`, Sol runs tests); the dashboard's favicons, the Usage page's meter and the rail:
+`tests/test_favicon.py`, `tests/test_meter.py` and `tests/test_rail.py`
 (`docs/dashboard.md`).

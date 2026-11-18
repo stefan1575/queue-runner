@@ -222,9 +222,10 @@ class SampleTest(unittest.TestCase):
         self.assertEqual(datetime.datetime.fromisoformat(claude['next_read_at']),
                          datetime.datetime.fromisoformat(claude['read_at']) + datetime.timedelta(minutes=5))
 
-    def test_one_plan_has_reset_credits_and_one_has_none(self):
+    def test_both_plans_have_reset_credits(self):
+        # Stefan, 2026-11-18 (#141): the sample's ChatGPT has 2 resets too
         resets = [p['resets'] for p in sample.build('busy')['usage']]
-        self.assertEqual(resets, [{'available': 2}, None])
+        self.assertEqual(resets, [{'available': 2}, {'available': 2}])
 
 
 if __name__ == '__main__':
