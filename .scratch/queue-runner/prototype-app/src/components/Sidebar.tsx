@@ -2,8 +2,7 @@
 // and what it's connected to, and a footer row where T3 Code has its own: Settings and Usage on the
 // left, Update on the right (T3's Pull requests button has no counterpart here). Settings and Usage
 // open as pop-ups over the page you're on. Update is greyed until updates are specced.
-import * as Popover from "@radix-ui/react-popover";
-import { Activity, CircleArrowUp, ExternalLink, Gauge, History, LayoutDashboard, Settings } from "lucide-react";
+import { Activity, CircleArrowUp, Gauge, LayoutDashboard, Settings } from "lucide-react";
 import { navigate, useUrl } from "@/lib/router";
 import { cn } from "@/lib/cn";
 import { useScoped, useStore } from "@/store";
@@ -43,7 +42,6 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
         })}
       </nav>
       <Health onNavigate={() => go("/settings")} />
-      <Rounds />
       <div className="flex items-center gap-1 border-t border-line px-3 py-2">
         {PAGES.filter((x) => FOOTER.includes(x.path)).reverse().map(({ path: p, label, icon: Icon }) => {
           const on = path.startsWith(p);
@@ -85,37 +83,5 @@ function Health({ onNavigate }: { onNavigate: () => void }) {
       </ul>
       {down.length > 0 && <p className="mt-2 text-[14px] text-bad">{down.map((c) => `${c.name}: ${c.status}`).join(". ")}</p>}
     </button>
-  );
-}
-
-// The prototype's own history: each earlier round, built from git by scripts/build_history.py.
-const ROUNDS: [string, string, string][] = [
-  ["/history/r3/index.html", "Round 3", "First sidebar with usage floating right, full width"],
-  ["/history/r2/index.html", "Round 2", "One dense page, no sidebar, usage in a right column"],
-  ["/history/r1/index.html", "Round 1", "Sidebar with six pages, airier"],
-  ["/history/r0/app.html", "Round 0, app", "Single-file first app"],
-  ["/history/r0/index.html", "Round 0, variants", "Three layouts A, B, C (arrows switch)"],
-];
-
-function Rounds() {
-  return (
-    <Popover.Root>
-      <Popover.Trigger className="mx-3 mb-2 flex items-center gap-2 rounded-lg px-2 py-1.5 text-[14px] text-mute hover:bg-surface/60 hover:text-ink">
-        <History className="size-4" />Prototype round 4 · earlier rounds
-      </Popover.Trigger>
-      <Popover.Portal>
-        <Popover.Content side="top" align="start" sideOffset={6} className="z-50 w-[340px] rounded-xl border border-line bg-surface p-1.5 shadow-lg">
-          {ROUNDS.map(([href, name, what]) => (
-            <a key={href} href={href} target="_blank" rel="noreferrer" className="flex items-start gap-2 rounded-lg px-2.5 py-2 hover:bg-sunk">
-              <span className="min-w-0 flex-1">
-                <span className="block text-[15px] font-semibold">{name}</span>
-                <span className="block text-[14px] text-mute">{what}</span>
-              </span>
-              <ExternalLink className="mt-1 size-4 shrink-0 text-faint" />
-            </a>
-          ))}
-        </Popover.Content>
-      </Popover.Portal>
-    </Popover.Root>
   );
 }
