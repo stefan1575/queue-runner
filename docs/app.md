@@ -150,8 +150,16 @@ is killed is code -1 with Node's reason in stderr, never a gh exit code (so is t
 
 ## Live checks
 
-- `app/live/sign-in.ts` (`pnpm --dir app live:sign-in`): acts on no project. Notes today's
-  runner's sessions, starts the app twice, and checks the app holds one session of each kind and
-  the runner's sessions are all still active; records what `/ws` does with an MCP token and the
-  frames `subscribeServerConfig` sent; revokes the app's sessions. **Run 2026-11-18:** all ok;
-  the Python runner's session `1a581ed0` stayed active through both starts.
+- `app/live/sign-in.ts` (`pnpm --dir app live:sign-in`): the app acts on no project. The check
+  first starts today's runner's own MCP client (`scripts/live_runner_settle.py`, Python, the
+  "queue-runner sandbox" project only), which signs in as the runner does and launches an idle
+  thread. Then it starts the app twice; checks the app holds one session of each kind, gh failed
+  for no project and the runner's sessions are all still active; and has the runner client
+  settle its thread with the token it signed in with before the app did, which must work with
+  no new sign-in. It records what `/ws` does with an MCP token and the frames
+  `subscribeServerConfig` sent, and revokes the app's sessions (the runner client archives its
+  thread and revokes its own). The runner client's sign-in revokes a running runner's older
+  session, as `scripts/live_mcp.py` does: that runner signs in again on its next settle.
+  **Run 2026-11-18, twice:** all ok; 10 projects, 6 on GitHub, gh failed for none; the runner
+  client (session `d92c0baf`) settled thread `mcp:9a2c1fad` after both app starts with no new
+  sign-in.

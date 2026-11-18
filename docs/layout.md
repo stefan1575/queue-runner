@@ -83,7 +83,8 @@ What each module and script is for.
   server and the control file), `sample.py` (the snapshot's shape, in every state), `earlier/`
   (the page before each rework, until its look is agreed).
 - `scripts/live_sandbox.py`, `scripts/live_review.py`, `scripts/live_fix_brief.py`,
-  `scripts/live_merge.py` and `scripts/live_mcp.py`: the live checks.
+  `scripts/live_merge.py` and `scripts/live_mcp.py`: the live checks. `scripts/live_runner_settle.py`
+  is today's runner's MCP client for the app's live check (`app/live/sign-in.ts`), not run on its own.
 - `scripts/shoot.py`: screenshots of the dashboard's sample states at any commit, for a PR's
   evidence (`docs/dashboard.md`, Screenshots).
 - `scripts/codex-sol.sh`: runs one Sol review in Codex at the effort it's given (`queue_runner/sol.py`).
