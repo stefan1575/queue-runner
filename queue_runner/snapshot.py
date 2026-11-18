@@ -35,7 +35,7 @@ READ_EVERY = 300    # seconds: the snapshot reads usage itself no more often tha
 
 CLAUDE_KINDS = ('build', 'fix', 'decision', 'live')   # the Claude lane's jobs (gate.CLAUDE_KINDS)
 SOL_KINDS = ('review', 'merge')                       # the reviewing lane's
-SOL_MODEL = 'GPT-6.1 Sol'   # codex-sol.sh's model
+SOL_MODEL = 'GPT-6.2 Sol'   # codex-sol.sh's model
 # A job whose `issue` is a PR (a live run's: its batch's newest).
 ON_PR = ('fix', 'review', 'merge', 'live')
 NO_STOP_NOW = {'available': False, 'note': "Stop now isn't built yet: stop after the job instead.",

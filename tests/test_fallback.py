@@ -115,7 +115,7 @@ class FallbackTest(unittest.TestCase):
         self.assertEqual(n, 20)
         self.assertTrue(body.startswith(f'## Sol review 1 · Clean · {LABEL}\n'), body[:120])
         self.assertIn(f"Reviewed by {LABEL}: Claude reviewed in Sol's place", body)
-        self.assertNotIn('GPT-6.1 Sol', body)
+        self.assertNotIn('GPT-6.2 Sol', body)
         self.assertIn(f'sol-pr-review round=1 verdict=clean sha={H2}', body)   # read as any
         [(_, sha, state, description, _)] = self.posted('status')
         self.assertEqual((sha, state), (H2, 'success'))
@@ -137,7 +137,7 @@ class FallbackTest(unittest.TestCase):
         r.review_pass()
         [(_, _, body)] = self.posted('comment')
         self.assertTrue(body.startswith('## Sol review 1 · Clean\n'))
-        self.assertIn('GPT-6.1 Sol at effort high', body)
+        self.assertIn('GPT-6.2 Sol at effort high', body)
         self.assertEqual(self.t3.starts, [])
         [job] = self.reviews()
         self.assertIsNone(job.reviewer)

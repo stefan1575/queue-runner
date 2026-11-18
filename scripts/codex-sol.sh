@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run Codex on GPT-6.1 Sol, read-only (or --write), from a brief file; succeed only on a fresh reply.
+# Run Codex on GPT-6.2 Sol, read-only (or --write), from a brief file; succeed only on a fresh reply.
 #   codex-sol.sh [--job J] [--effort E] [--worker] [--act] [--write] [--writable-root DIR]...
 #                [--resume SESSION] <brief.md> <reply.md> [workdir]
 # Jobs set the reasoning effort and web search. Agreed by Claude and Sol on 2026-10-14
@@ -138,7 +138,7 @@ if [ -n "$act" ] && ! grep -q '^# Authorised actions' "$brief"; then
   echo "codex-sol: --act needs a '# Authorised actions' section in the brief" >&2; exit 1
 fi
 
-# The standalone CLI first (`codex update` keeps it current, and it runs gpt-6.1-sol and the
+# The standalone CLI first (`codex update` keeps it current, and it runs gpt-6.2-sol and the
 # playwright browser). Else a bundled copy: globs, not ls, which appends * to
 # executables here; the last match is the newest extension version.
 cx=
@@ -226,7 +226,7 @@ if [ -n "$write" ]; then
 fi
 
 # Codex refuses to start outside a git repo unless told otherwise; read-only makes it safe.
-opts=(-m gpt-6.1-sol -c model_reasoning_effort=$effort -c "web_search=\"$web\""
+opts=(-m gpt-6.2-sol -c model_reasoning_effort=$effort -c "web_search=\"$web\""
       "${mcp_opts[@]}" --skip-git-repo-check -o "$reply")
 prompt() { printf '%s\n\n' "$rules"; cat "$brief"; [ -z "$session" ] && printf '%s\n' "$contract"; }
 rm -f "$reply"
