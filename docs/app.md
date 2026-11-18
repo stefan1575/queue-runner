@@ -5,8 +5,9 @@ pnpm, Vitest. It grows ticket by ticket beside the Python runner (`queue_runner/
 serving Stefan's repos until the cutover ticket. So far it signs in to T3 and lists the repos it
 could serve (#149), opens as a desktop window that keeps running in the tray, with Settings
 (#150; The desktop app, below), keeps its repositories in step with T3's projects (#151;
-Repositories, below), and knows which model does each kind of job and launches it (#152; Job
-models, below).
+Repositories, below), knows which model does each kind of job and launches it (#152; Job
+models, below), and has a Setup page that says what's missing before it can work (#162; Setup,
+below).
 
 ## Run it
 
@@ -106,7 +107,7 @@ Code both sides use (`display.ts`, `settings-search.ts`) touches no Node. The wi
 - **Settings** are `settings.json` in the state folder (`src/settings.ts`): Name (null follows
   the `gh` account: `gh api user`, its name, else its login), the date style (default
   `month-first`, "November 16, 2026 Monday"), Start with Windows (on) and each repo's choices
-  (`repos`; Repositories, below). Each change is checked,
+  (`repos`; Repositories, below) and whether Setup has been shown (`setupSeen`; Setup, below). Each change is checked,
   saved at once (written aside and renamed over) and sent to the window; there's no Save button.
   The state folder's location is the only thing in a machine file, `machine.json` in Electron's
   userData (`%APPDATA%\Queue runner`); a first start writes `%APPDATA%\Queue runner\state`
@@ -126,11 +127,13 @@ Code both sides use (`display.ts`, `settings-search.ts`) touches no Node. The wi
 
 `pnpm --dir app desktop:shoot <absolute dir>` renders the real window on a fresh state in a temp
 folder (never the real state, lock or logon entry), on the sample T3 catalog
-(`test/fixtures/server-config.json`, never the real T3): `window`, `settings-name`,
+(`test/fixtures/server-config.json`, never the real T3): `window`, `setup` (every check passed),
+`setup-failing` (T3 not running, gh signed out), `settings-name`,
 `settings-repos`, `settings-models` (a new install), `settings-models-chosen` (the sample choices in
 `test/fixtures/shoot-jobs.json`), `settings-display`, `settings-machine` and `settings-search` (a
 typo, "windos"), each `-light.png` and `-dark.png`, at 1440x900. The page's address opens Settings for it:
-`#settings=<page>` or `#q=<search>`. Repositories is shot from a sample (`src/desktop/sample.ts`:
+`#settings=<page>` or `#q=<search>`, and Setup: `#setup`. Setup's samples are the real checks run
+on fixed answers (`sampleSetup` in `src/desktop/sample.ts`). Repositories is shot from a sample (`src/desktop/sample.ts`:
 two served repos, one New and one with no GitHub remote), which reaches neither T3 nor GitHub.
 
 ## Repositories
@@ -202,6 +205,34 @@ Which model does each kind of job (#152: #120's shape on #36's page, as the 2026
   list while Default follows T3's. Stefan's values (Opus 5.5 at medium for every kind, review on
   Sol at high with Opus 5.5 at high as its fallback, as `config.toml` has them) are set at the
   cutover, not in code.
+
+## Setup
+
+What the runner needs from the PC before it can work, checked (#162; #68 story 16, without
+skills). `src/setup.ts` runs the checks in the main process through the app's own seams; the
+window (`renderer/src/Setup.tsx`) shows each one passed, waiting, or missing with how to fix it
+and what T3 or gh said.
+
+- **T3 Code:** installed (its CLI is at `~/.t3/bin/t3.cmd`), running (`server-runtime.json` names
+  an origin), and reachable with the app signed in: `subscribeServerConfig` answers on the
+  WebSocket and `t3_project_list` on MCP, so both of the app's sign-ins are tried. A refused
+  pairing code or OAuth step is "couldn't sign in"; anything else is "isn't answering".
+- **Providers:** from that same server config; connected is `enabled` and `status: ready`, as the
+  catalog counts it. Each connected one is listed; with none, each one switched on but not ready
+  is shown with T3's message.
+- **GitHub:** `gh auth status --hostname github.com --json hosts`: signed in names the login, a
+  host whose `state` isn't `success` is a sign-in that no longer works, no hosts is signed out,
+  and a gh that can't start is not installed. T3 runs the same gh, so its sign-in is T3's: T3
+  serves no GitHub account of its own (`sourceControlHosts` was empty, seen live 2026-11-19
+  against T3 0.1.9).
+- **Resume after usage limits:** T3's `autoResumeLimitedThreads` (in the config's `settings`) must
+  be off, since it would race the runner's own resumes. A T3 without the key passes.
+- Providers and Resume wait while T3 can't be reached; gh is checked beside T3.
+- **When:** the checks run at start and again on **Check again** (`runner:setup`; a run asked for
+  during one is that run). Setup opens by itself on the first start only (`setupSeen` is then
+  saved), and later from the sidebar's Setup button, which carries a red mark while a check wants
+  fixing: it stands in for Health's link until Health is built. No skills are checked (#68,
+  2026-11-18).
 
 ## Signing in
 

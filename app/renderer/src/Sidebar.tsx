@@ -1,13 +1,19 @@
 // The sidebar, as #36's prototype has it: the repo switcher on top, and a footer row where T3 Code
-// has its own: Settings and Usage on the left, Update on the right. Usage stays greyed until #35
+// has its own: Settings, Usage and Setup on the left, Update on the right. Setup carries a red mark
+// while a check wants fixing (#162), standing in for Health's link until Health is built. Usage stays greyed until #35
 // settles its page, Update until updates are specced. The switcher lists the served repositories
 // (Settings / Repositories); picking one waits for the pages that show a repo's work.
 import * as Popover from '@radix-ui/react-popover';
-import { Check, ChevronsUpDown, CircleArrowUp, FolderGit2, Gauge, Layers, Settings } from 'lucide-react';
+import { Check, ChevronsUpDown, CircleArrowUp, ClipboardCheck, FolderGit2, Gauge, Layers, Settings } from 'lucide-react';
+import type { View } from '../../src/desktop/view.ts';
 import type { Repo } from '../../src/repos.ts';
 import { cn } from './cn.ts';
+import { toFix } from './Setup.tsx';
 
-export function Sidebar({ onSettings, settingsOpen, repos }: { onSettings: () => void; settingsOpen: boolean; repos: Repo[] | null }) {
+export function Sidebar({ onSettings, settingsOpen, repos, onSetup, setupOpen, view }: {
+  onSettings: () => void; settingsOpen: boolean; repos: Repo[] | null; onSetup: () => void; setupOpen: boolean; view: View | null;
+}) {
+  const bad = toFix(view);
   return (
     <div className="flex h-full flex-col">
       <div className="p-3"><RepoSwitcher served={(repos ?? []).filter((r) => r.served)} /></div>
@@ -19,6 +25,11 @@ export function Sidebar({ onSettings, settingsOpen, repos }: { onSettings: () =>
         </button>
         <button type="button" disabled aria-label="Usage" title="Usage: coming soon" className="grid size-9 cursor-not-allowed place-items-center rounded-lg text-faint opacity-60">
           <Gauge className="size-[18px]" />
+        </button>
+        <button type="button" onClick={onSetup} aria-label={bad ? `Setup: ${bad} to fix` : 'Setup'} title={bad ? `Setup: ${bad} to fix` : 'Setup'} aria-expanded={setupOpen}
+          className={cn('relative grid size-9 place-items-center rounded-lg', setupOpen ? 'bg-surface text-ink shadow-sm ring-1 ring-line' : 'text-ink-2 hover:bg-surface/60 hover:text-ink')}>
+          <ClipboardCheck className="size-[18px]" />
+          {bad > 0 && <span data-mark className="absolute right-1.5 top-1.5 size-2.5 rounded-full bg-bad ring-2 ring-side" />}
         </button>
         <button type="button" disabled aria-label="Update" title="Updates: coming soon" className="ml-auto grid size-9 cursor-not-allowed place-items-center rounded-lg text-faint opacity-60">
           <CircleArrowUp className="size-[18px]" />
