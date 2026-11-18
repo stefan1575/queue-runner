@@ -3,7 +3,8 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, test } from 'vitest';
-import { CostLog, CostLogError, DEFAULT_COSTS, expectedCost, spentOf, type CostKey, type UsageRecord } from '../src/costs.ts';
+import { CostLog, CostLogError } from '../src/cost-log.ts';
+import { DEFAULT_COSTS, expectedCost, spentOf, type CostKey, type UsageRecord } from '../src/costs.ts';
 
 const WINDOWS = [{ id: 'five_hour', kind: 'session' as const }, { id: 'seven_day', kind: 'weekly' as const }];
 const opusMedium: CostKey = { provider: 'claudeAgent', model: 'claude-opus-5-5', effort: 'medium', kind: 'build' };
