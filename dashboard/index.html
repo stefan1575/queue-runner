@@ -15,7 +15,7 @@
     it builds first, is it up. The column between them is centred in the space they leave.
   - Three pages do three jobs. Overview is the first glance. Inbox is what waits on you. Queue is
     the work.
-  - PROTOTYPE, with sample data only (#30, take 20): the Queue as the lanes on top, one card
+  - PROTOTYPE, with sample data only (#30, take 21): the Queue as the lanes on top, one card
     split down the middle (what Claude and ChatGPT run now, then each one's queue, which opens and
     closes and is remembered; open, a window three rows tall that scrolls, so the card never
     grows), and the efforts below in four tabs, a line under the head saying what each is for.
@@ -32,7 +32,9 @@
     Take 18: the lanes two cards again, the page 1480px, quieter bars, and a drag where you hold
     the whole box inside its list. Take 19: the held box follows the pointer anywhere, and where
     it lands is its shadow, the rows sliding aside. Take 20: the cursor is the hitbox (past the
-    middle of the row under it, the shadow moves). Take 19 is earlier/take-19.html.
+    middle of the row under it, the shadow moves). Take 21: Progress reads like the live page, with
+    a switch for what its bars show (done only, done and moving, every state with a key). Take 20
+    is earlier/take-20.html.
   - The Overview only summarises, in three cards read top to bottom: what's on your plate (the
     Inbox in counts by kind, and the ask that's first in line), what's running (a line per lane,
     with its Stop button and the one thing it takes up next), and what's next (a bar per
@@ -1341,6 +1343,32 @@ body.q-dragging .can-drop { outline: none; }
 /* The held box's place is its shadow: a soft blue slot the size of the box, where it will land. */
 .or.lifted { background: color-mix(in srgb, var(--you) 7%, transparent); border: 1.5px dashed color-mix(in srgb, var(--you) 45%, var(--line)); }
 .drop-line { display: none; }
+/* ---------------------------------------------------------------- take 21 (PROTOTYPE, #30) */
+/* Progress reads like the live page: a name and its count, one bar, one sentence. The caret is
+   quiet until you're over the effort. */
+.qv-hint { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 30px; }
+.pbar-pick { display: inline-flex; align-items: center; gap: 10px; font-size: 13px; color: var(--dim); }
+.pbar-pick .seg button { height: 28px; padding: 0 10px; font-size: 13px; }
+.pg-wrap .pg-head .er-caret { opacity: .45; }
+.pg-wrap .pg:hover > .pg-head .er-caret, .pg-wrap .pg-head .er-caret:focus-visible { opacity: 1; }
+.pg-wrap .pg-name { font-size: 16.5px; }
+.pg-wrap .pg-say { color: var(--mute); }
+.pg-wrap .pg-say b { color: var(--ink-2); }
+.pg.pg-none { background: none; border-style: dashed; }
+/* A ticket's state, a word: yours in blue, moving in ink, the rest quiet. */
+.et-word { font-size: 13.5px; color: var(--mute); white-space: nowrap; }
+.et-word.yours { color: var(--you); font-weight: 600; }
+.et-word.moving { color: var(--ink-2); font-weight: 600; }
+.et-word.done { color: var(--dim); }
+/* a: done only. Green is done; everything else is the track. The detail is the sentence. */
+.pbar-a .sg:not(.done) { background: var(--line); }
+/* b: done and moving. Amber is what's being built or reviewed; what waits or is blocked is track. */
+.pbar-b .sg.yours, .pbar-b .sg.ready, .pbar-b .sg.blocked { background: var(--line); }
+/* a and b: the sentence is words, not a blue link. */
+.pbar-a .pg-say .mine, .pbar-b .pg-say .mine { color: var(--ink-2); font-weight: 600; text-decoration: none; }
+/* c: every state, and the sentence is the bar's key. */
+.pg-say .ky { display: inline-flex; align-items: center; gap: 7px; margin-right: 18px; white-space: nowrap; color: var(--ink-2); }
+.pg-say .ky .sg { width: 10px; height: 10px; border-radius: 3px; flex: none; }
 </style>
 </head>
 <body>
@@ -2228,6 +2256,9 @@ const QVIEWS = [["progress", "Progress"], ["order", "Order"], ["board", "Board"]
 const qOpen = new Set((() => { try { return JSON.parse(recall("qopen") || "[]"); } catch { return []; } })());
 // The sample addresses can open efforts and pick a view (?qopen=id,id&qview=board), for screenshots.
 { const q = new URLSearchParams(location.search); if (q.get("qopen")) q.get("qopen").split(",").forEach((id) => qOpen.add(id)); if (q.get("qview")) ui.qview = q.get("qview"); }
+// Take 21: how much Progress's bars show, three ways to judge (?pbar=a|b|c, remembered).
+const PBARS = [["a", "Done only"], ["b", "Done and moving"], ["c", "Every state"]];
+{ const q = new URLSearchParams(location.search).get("pbar"), r = recall("pbar"); ui.pbar = PBARS.some((x) => x[0] === q) ? q : PBARS.some((x) => x[0] === r) ? r : "b"; }
 function toggleOpen(id) { if (qOpen.has(id)) qOpen.delete(id); else qOpen.add(id); remember("qopen", JSON.stringify([...qOpen])); }
 const qMore = new Set();   // board columns shown whole
 // Take 15: the lanes whose queue is closed, remembered.
@@ -2243,7 +2274,7 @@ function queue() {
     board: "Every open ticket by where it stands.", graph: "A blocker above what it blocks." };
   // Every tab is drawn in the same cell and only one is seen, so the card is always as tall as
   // the tallest: switching tabs never moves what's under it.
-  const tabs = QVIEWS.map(([k]) => `<div class="qv"${k === ui.qview ? "" : ' inert aria-hidden="true"'}><p class="qv-hint">${hint[k]}</p>${views[k](W)}</div>`).join("");
+  const tabs = QVIEWS.map(([k]) => `<div class="qv"${k === ui.qview ? "" : ' inert aria-hidden="true"'}><div class="qv-hint"><span>${hint[k]}</span>${k === "progress" ? pbarPick() : ""}</div>${views[k](W)}</div>`).join("");
   return `<div class="q12 v-${ui.variant}">${moveNote()}${qNow(W)}
     <section class="card q12-work" aria-label="Efforts"><header class="q12-head"><h2>Efforts</h2><span class="q12-hint"></span>
       ${effortPick(W, ui.qview === "board" || ui.qview === "graph")}
@@ -2334,8 +2365,36 @@ const perRepo = (W, list) => {
     return `<div class="q12-sec">${head}${root.order.length ? list(root, r) : `<p class="empty small">Nothing open.</p>`}${finished(r, W)}</div>`;
   }).join("");
 };
+// Take 21: Progress reads like the live page. No numbers (the order is Order's), no kind tags; the
+// efforts, then the tickets with no effort in one card at the end. How much the bars show is the
+// switch on the hint line.
 function qProgress(W) {
-  return perRepo(W, (root) => `<ol class="pg-list">${root.order.map((k, x) => pgRow(W.nodes.get(k), W, x + 1)).join("")}</ol>`);
+  return `<div class="pg-wrap pbar-${esc(ui.pbar)}">${perRepo(W, (root, r) => {
+    const nodes = root.order.map((k) => W.nodes.get(k)), loose = nodes.filter((n) => n.t === "ticket");
+    return `<ol class="pg-list">${nodes.filter((n) => n.t !== "ticket").map((n) => pgRow(n, W, null)).join("")}${loose.length ? pgLoose(loose, W, r) : ""}</ol>`;
+  })}</div>`;
+}
+function pbarPick() {
+  return `<span class="pbar-pick">Bars show<span class="seg" role="tablist" aria-label="What the bars show">${PBARS.map(([k, label]) =>
+    `<button role="tab" aria-selected="${ui.pbar === k}" data-act="q-pbar" data-pbar="${k}">${label}</button>`).join("")}</span></span>`;
+}
+// Every state (c): the sentence is the bar's key, each count after a dot of its colour.
+function keySay(v) {
+  if (!v.left) return leftSay(v);
+  const done = v.loose ? 0 : v.its.length - v.left;
+  const parts = [["done", done, "done"], ...LEFT.map(([seg, one, many]) => { const n = v.its.filter((i) => SEGMENTS[segmentOf(i)][0] === seg).length; return [seg, n, n === 1 ? one : many || one]; })].filter((x) => x[1]);
+  return parts.map(([seg, n, label]) => `<span class="ky"><i class="sg ${seg}" aria-hidden="true"></i>${n} ${esc(label)}</span>`).join("");
+}
+const pgSay = (v) => (ui.pbar === "c" ? keySay(v) : leftSay(v));
+function pgLoose(loose, W, r) {
+  const id = `loose:${r}`, open = qOpen.has(id);
+  const its = loose.map((n) => n.i).sort((a, b) => segmentOf(a) - segmentOf(b) || a.n - b.n);
+  const v = { its, left: its.filter((i) => i.state !== "done").length, loose: true };
+  return `<li class="pg nr pg-none${open ? " open" : ""}"><div class="pg-head">
+      <button class="pg-name" data-act="q-open" data-id="${esc(id)}">No effort</button><span class="pg-count">${esc(plural(v.left, "open ticket", "open tickets"))}</span>
+      <button class="er-caret" data-act="q-open" data-id="${esc(id)}" aria-expanded="${open}" aria-label="${open ? "Close" : "Open"} No effort">${ICON.chevron}</button>
+      <span class="pg-bar">${ticketBar("No effort", its)}</span><span class="pg-say">${pgSay(v)}</span></div>
+    ${open ? `<div class="pg-body"><ol class="pg-kids">${loose.map((n) => etRow(n, W)).join("")}</ol></div>` : ""}</li>`;
 }
 // Take 17: the number is a badge on the title line, not a column of its own, so the bar and the
 // sentence under it run the card's whole width. The caret is at the line's end, as a dropdown's.
@@ -2348,12 +2407,12 @@ function pgRow(n, W, rank) {
       <span class="pg-count">${stateTag(i)}</span><span class="pg-say">${esc(whyOf(i, W))}</span></div></li>`;
   }
   const open = qOpen.has(n.id), s = effortSum(n, W), shut = closedSay(n, W);
-  const title = n.t === "none" ? `No effort<span class="kind">Tickets</span>` : `${esc(n.title)}<span class="kind">${esc(KINDNAME[n.kind] || "Effort")}</span>`;
+  const title = n.t === "none" ? "No effort" : esc(n.title);   // take 21: no kind tag
   const kids = open ? n.order.map((k) => { const c = W.nodes.get(k); return c.t === "ticket" ? etRow(c, W) : pgRow(c, W, null); }).join("") : "";
   return `<li class="pg${open ? " open" : ""}${nr}"><div class="pg-head">${num}
       <button class="pg-name" data-act="q-open" data-id="${esc(n.id)}">${title}</button><span class="pg-count" title="Done means live">${esc(s.count)}</span>
       <button class="er-caret" data-act="q-open" data-id="${esc(n.id)}" aria-expanded="${open}" aria-label="${open ? "Close" : "Open"} ${esc(nameOf(n))}">${ICON.chevron}</button>
-      <span class="pg-bar">${s.bar}</span><span class="pg-say">${leftSay(s.v)}</span></div>
+      <span class="pg-bar">${s.bar}</span><span class="pg-say">${pgSay(s.v)}</span></div>
     ${open ? `<div class="pg-body"><ol class="pg-kids">${kids}</ol>${shut ? `<p class="eq-shut">${ICON.check}${esc(shut)}</p>` : ""}</div>` : ""}</li>`;
 }
 
@@ -2387,7 +2446,7 @@ function etRow(n, W) {
     <span class="et-name"><span class="t-n">#${i.n}</span>${esc(i.title)}${filedTag(i)}</span>
     <span class="et-about" title="${esc(i.about || "")}">${esc(i.about || "")}</span>
     <span class="et-pr">${prText(i)}</span>
-    <span class="et-st" title="${esc(whyOf(i, W))}">${stateTag(i)}</span></li>`;
+    <span class="et-st" title="${esc(whyOf(i, W))}"><span class="et-word ${esc(stateOf(i)[1])}">${esc(stateOf(i)[0])}</span></span></li>`;
 }
 
 // ---- the efforts to narrow the board and the graph to: a dropdown, however many there are.
@@ -3028,6 +3087,7 @@ document.addEventListener("click", (e) => {
     case "q-lane": if (qShut.has(d.lane)) qShut.delete(d.lane); else qShut.add(d.lane); remember("qshut", JSON.stringify([...qShut])); break;   // take 15
     case "q-open": toggleOpen(d.id); break;   // PROTOTYPE (#30, take 12)
     case "q-view": ui.qview = d.view; remember("qview", d.view); break;
+    case "q-pbar": ui.pbar = d.pbar; remember("pbar", d.pbar); break;   // take 21
     case "q-more": if (qMore.has(d.col)) qMore.delete(d.col); else qMore.add(d.col); break;
     case "q-undo": { const was = JSON.parse(undo.pop() || "null"); if (was) { ord.kids = was.kids; ord.touched = new Set(was.touched); } lastMove = null; break; }
     case "q-reset": undo.push(JSON.stringify({ kids: ord.kids, touched: [...ord.touched] })); ord.kids = {}; ord.touched = new Set(); lastMove = null; break;
