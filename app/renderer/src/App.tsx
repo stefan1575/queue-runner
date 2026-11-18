@@ -27,7 +27,7 @@ export function App() {
   return (
     <div className="flex h-full">
       <aside className="flex w-[272px] shrink-0 flex-col border-r border-line bg-side">
-        <Sidebar onSettings={() => setOpen({ page: 'name', query: '' })} settingsOpen={!!open} />
+        <Sidebar onSettings={() => setOpen({ page: 'name', query: '' })} settingsOpen={!!open} repos={view?.repos ?? null} />
       </aside>
       <main className="min-w-0 flex-1" aria-label="Main" />
       {open && view && <Settings view={view} open={open} onOpen={setOpen} onClose={() => setOpen(null)} />}

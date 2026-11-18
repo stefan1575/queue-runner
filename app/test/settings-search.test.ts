@@ -17,6 +17,11 @@ const view: View = {
   settings: { ...DEFAULT_SETTINGS, name: 'Stefan', jobs: { ...DEFAULT_JOBS, review: { own: { provider: 'p2', model: 'm2', effort: 'low' }, fallback: null } } },
   account: { login: 'stefan1575', name: 'Stefan B' },
   timeFormat: '24-hour',
+  repos: [
+    { id: 'p1', title: 'sandbox', folder: 'C:/Code/sandbox', github: 'ana/sandbox', checking: false, served: true, merge: 'runner', isNew: false },
+    { id: 'p2', title: 'notes', folder: 'C:/notes', github: null, checking: false, served: false, merge: 'me', isNew: true },
+  ],
+  reposError: null,
   catalog,
 };
 const now = new Date(2026, 10, 16, 15, 5);
@@ -49,6 +54,15 @@ describe('Search', () => {
   test('every word must match, and an empty search finds nothing', () => {
     expect(find('windows banana')).toEqual([]);
     expect(find('  ')).toEqual([]);
+  });
+
+  test('finds a repository by its name, its GitHub repo, its folder and what it lacks', () => {
+    expect(find('sandbox')).toEqual(['repo:p1']);
+    expect(find('ana/sandbox')).toEqual(['repo:p1']);
+    expect(find('no github remote')).toEqual(['repo:p2']);
+    expect(find('new')).toEqual(['repo:p2']);
+    expect(find('merges')).toEqual(['repo:p1', 'repo:p2', 'job-conflict']);
+    expect(searchSettings(view, now, 'notes').map((s) => s.page)).toEqual(['repos']);
   });
 
   test('each hit names its page', () => {

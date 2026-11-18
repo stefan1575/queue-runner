@@ -3,7 +3,7 @@
 // on the left with Search and "/" on top, a "Settings / Page" header, one page at a time, each
 // setting a row in a bordered card (a medium title over a smaller grey line, the control on the
 // right). A change saves the moment it's made; there's no Save button.
-import { CalendarClock, Check, Cpu, Monitor, Search, User, X, type LucideIcon } from 'lucide-react';
+import { CalendarClock, Check, Cpu, FolderGit2, Monitor, Search, User, X, type LucideIcon } from 'lucide-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { View } from '../../src/desktop/view.ts';
 import { DATE_STYLES, clock, formatDate, isTwelveHour, TIME_FORMATS, type DateStyle } from '../../src/display.ts';
@@ -14,9 +14,10 @@ import type { Open } from './App.tsx';
 import { cn } from './cn.ts';
 import { NameField, Pick, Toggle } from './controls.tsx';
 import { defaultRow, kindRow } from './Models.tsx';
+import { AddRepo, RepoRow, ReposPage, type Done } from './Repos.tsx';
 import { runner, useNow } from './runner.ts';
 
-const ICONS: Record<PageId, LucideIcon> = { name: User, models: Cpu, display: CalendarClock, machine: Monitor };
+const ICONS: Record<PageId, LucideIcon> = { name: User, repos: FolderGit2, models: Cpu, display: CalendarClock, machine: Monitor };
 
 function Row({ title, desc, children, below }: { title: ReactNode; desc?: ReactNode; children?: ReactNode; below?: ReactNode }) {
   return (
@@ -49,6 +50,10 @@ export function Settings({ view, open, onOpen, onClose }: { view: View; open: No
   const tf = view.timeFormat;
   const { settings: s, account } = view;
 
+  const done: Done = (e) => {
+    setError(e);
+    if (!e) setSavedAt(new Date());
+  };
   const save = (patch: SettingsPatch) => {
     setError(null);
     runner().set(patch).then(() => setSavedAt(new Date()), (e: Error) => setError(e.message.replace(/^Error invoking remote method '[^']+': (\w*Error: )?/, '')));
@@ -74,8 +79,7 @@ export function Settings({ view, open, onOpen, onClose }: { view: View; open: No
     return () => removeEventListener('keydown', onKey);
   }, [onClose]);
 
-  const wants = wantsChoice(view);
-  const rows: Record<SettingId, ReactNode> = {
+  const fixed: Record<string, ReactNode> = {
     name: (
       <Row title="Your name" desc={account
         ? <>The runner uses it in the briefs it writes. From your GitHub account, {account.login}, unless you type another.</>
@@ -103,7 +107,17 @@ export function Settings({ view, open, onOpen, onClose }: { view: View; open: No
       </Row>
     ),
   };
+  const rows = (id: SettingId): ReactNode => {
+    if (id.startsWith('repo:')) {
+      const r = view.repos?.find((x) => `repo:${x.id}` === id);
+      return r ? <RepoRow repo={r} onDone={done} /> : null;
+    }
+    return fixed[id];
+  };
   const onPage = (id: PageId) => settingEntries(view, now).filter((e) => e.page === id).map((e) => e.id);
+  // Pages that want a choice: Default left on T3's own, and repos new from T3.
+  const newRepos = (view.repos ?? []).filter((r) => r.isNew).length;
+  const wants: Partial<Record<PageId, number>> = { ...wantsChoice(view), ...(newRepos ? { repos: newRepos } : {}) };
 
   return (
     <div className="fixed inset-0 z-[36] bg-black/55 px-3 pb-[78px] pt-3 sm:px-[5vw] sm:pt-[4vh]"
@@ -129,7 +143,7 @@ export function Settings({ view, open, onOpen, onClose }: { view: View; open: No
                   <Icon className="size-[18px] shrink-0 opacity-80" />
                   <span className="flex-1 max-md:hidden">{p.label}</span>
                   {q && count > 0 && <span className="text-[13.5px] tabular-nums max-md:hidden">{count}</span>}
-                  {want ? <span className="rounded-full bg-you px-1.5 text-[12.5px] font-semibold leading-5 text-white tabular-nums max-md:hidden" title="Wants a choice">{want}</span> : null}
+                  {want ? <span className="rounded-full bg-you px-1.5 text-[12.5px] font-semibold leading-5 text-white tabular-nums max-md:hidden" title={p.id === 'repos' ? `${want} new from T3` : 'Wants a choice'}>{want}</span> : null}
                 </button>
               );
             })}
@@ -143,8 +157,9 @@ export function Settings({ view, open, onOpen, onClose }: { view: View; open: No
             <b className="truncate font-semibold">{q ? 'Search' : page.label}</b>
             <div className="ml-auto flex shrink-0 items-center gap-2">
               <span className={cn('inline-flex items-center gap-1.5 text-[14.5px] max-sm:hidden', error ? 'text-bad' : 'text-mute')} role="status" aria-live="polite">
-                {error ? <>Not saved: {error}</> : savedAt ? <><Check className="size-4 text-ok" />Saved {clock(savedAt, tf)}</> : 'Changes save as you make them'}
+                {error ? <>Not done: {error}</> : savedAt ? <><Check className="size-4 text-ok" />Saved {clock(savedAt, tf)}</> : 'Changes save as you make them'}
               </span>
+              {!q && page.id === 'repos' && <AddRepo onDone={done} />}
               <button type="button" onClick={onClose} className="grid size-9 place-items-center rounded-lg text-mute hover:bg-sunk hover:text-ink" aria-label="Close settings" title="Close"><X className="size-[18px]" /></button>
             </div>
           </header>
@@ -159,13 +174,15 @@ export function Settings({ view, open, onOpen, onClose }: { view: View; open: No
                       <h2 className="px-5 pb-2.5 text-[18.5px] font-semibold">
                         <button type="button" onClick={() => onOpen({ page: p.id, query: '' })} className="hover:underline">{p.label}</button>
                       </h2>
-                      <Card>{hits.filter((h) => h.page === p.id).map((h) => <div key={h.id}>{rows[h.id]}</div>)}</Card>
+                      <Card>{hits.filter((h) => h.page === p.id).map((h) => <div key={h.id}>{rows(h.id)}</div>)}</Card>
                     </section>
                   ))}
                 </>
               ) : (
                 <section aria-label={page.label}>
-                  <Card>{onPage(page.id).map((id) => <div key={id}>{rows[id]}</div>)}</Card>
+                  {page.id === 'repos'
+                    ? <ReposPage view={view} onDone={done} />
+                    : <Card>{onPage(page.id).map((id) => <div key={id}>{rows(id)}</div>)}</Card>}
                 </section>
               )}
             </div>

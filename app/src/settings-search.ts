@@ -6,15 +6,17 @@ import type { View } from './desktop/view.ts';
 import { DATE_STYLES, formatDate, TIME_FORMATS } from './display.ts';
 import { defaultModel, JOB_KINDS, kindModels, model, provider, type Catalog, type JobKind, type ModelChoice } from './jobs.ts';
 
-export type PageId = 'name' | 'models' | 'display' | 'machine';
+export type PageId = 'name' | 'repos' | 'models' | 'display' | 'machine';
 export const PAGES: { id: PageId; label: string }[] = [
   { id: 'name', label: 'Name' },
+  { id: 'repos', label: 'Repositories' },
   { id: 'models', label: 'Models' },
   { id: 'display', label: 'Display' },
   { id: 'machine', label: 'Machine' },
 ];
 
-export type SettingId = 'name' | 'job-default' | `job-${JobKind}` | 'date' | 'clock' | 'startup';
+/** A repository's row is `repo:<T3 project id>`. */
+export type SettingId = 'name' | `repo:${string}` | 'job-default' | `job-${JobKind}` | 'date' | 'clock' | 'startup';
 export type SettingEntry = { id: SettingId; page: PageId; words: string };
 
 const MODEL_WORDS = 'model models provider effort reasoning thinking agent ai job jobs';
@@ -35,9 +37,14 @@ export function wantsChoice(view: View): Partial<Record<PageId, number>> {
  *  what it's set to now. */
 export function settingEntries(view: View, now: Date): SettingEntry[] {
   const { settings: s, account, timeFormat: tf } = view;
+  const repos = (view.repos ?? []).map((r): SettingEntry => ({
+    id: `repo:${r.id}`, page: 'repos',
+    words: `${r.title} ${r.github ?? 'no github remote warning cannot'} ${r.folder} repository repositories repo project folder served serve on off merge merges who github t3 ${r.isNew ? 'new' : ''}`,
+  }));
   const dates = DATE_STYLES.map((d) => `${formatDate(now, d.id, tf)} ${formatDate(now, d.id, tf, true)} ${d.label}`).join(' ');
   return [
     { id: 'name', page: 'name', words: `your name you me call called briefs github account user who ${s.name ?? ''} ${account?.name ?? ''} ${account?.login ?? ''}` },
+    ...repos,
     { id: 'job-default', page: 'models', words: `default every all ${MODEL_WORDS} t3 ${view.catalog ? choiceWords(defaultModel(s.jobs, view.catalog).choice, view.catalog) : ''}` },
     ...JOB_KINDS.map((k) => {
       const m = view.catalog ? kindModels(s.jobs, k.id, view.catalog) : null;
