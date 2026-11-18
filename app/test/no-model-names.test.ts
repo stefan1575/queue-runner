@@ -7,6 +7,10 @@ import { describe, expect, it } from 'vitest';
 
 const APP = join(import.meta.dirname, '..');
 const CODE = ['src', 'renderer/src', 'live', 'renderer/index.html'];
+// Names that aren't a model choice but what's on GitHub or in a repo, kept as today's runner has
+// them (docs/app.md, Rules): the job branch prefix and a repo's own instructions file. Each
+// literal, quotes included, is allowed; the bare word still isn't.
+const GITHUB_FACING = ["'claude/'", "'CLAUDE.md'"];
 const NAMES = /\b(?:claude\w*|codex|opus|sonnet|haiku|fable|gpt[\w.-]*|anthropic|openai|chatgpt|gemini|grok)\b/gi;
 
 export function modelNames(source: string): string[] {
@@ -38,7 +42,8 @@ describe('no model or provider name in the code', () => {
 
   it("the app's code names none", () => {
     expect(CODE.flatMap(files).length).toBeGreaterThan(20);
-    const found = CODE.flatMap(files).flatMap((f) => modelNames(readFileSync(join(APP, f), 'utf8')).map((n) => `${f}: ${n}`));
+    const source = (f: string) => GITHUB_FACING.reduce((s, name) => s.split(name).join("''"), readFileSync(join(APP, f), 'utf8'));
+    const found = CODE.flatMap(files).flatMap((f) => modelNames(source(f)).map((n) => `${f}: ${n}`));
     expect(found).toEqual([]);
   });
 });

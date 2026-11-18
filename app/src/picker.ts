@@ -1,8 +1,8 @@
 // Which ticket a served repo builds next (#154; today's `queue_runner/picker.py`, docs/layout.md):
 // an open issue labelled `ready-for-agent`, every blocker closed (GitHub's native blocked-by, and
 // `#N`, `owner/name#N` or issue URLs on a `Blocked by:` line or under a `## Blocked by` heading),
-// not already in flight (a `claude/*-<issue>` branch, an open PR on one, or an open PR that closes
-// it or that GitHub links to it), not a spec with open sub-issues (its children are the work), and
+// not already in flight (a job branch, an open PR on one, or an open PR that closes it or that
+// GitHub links to it), not a spec with open sub-issues (its children are the work), and
 // not held by the app's job log. Lowest number first.
 import type { GitHubWork, Issue } from './github.ts';
 
@@ -14,7 +14,11 @@ const BLOCKED_BY = /^[\s>*_#-]*blocked by\b/i;
 // An issue reference: a github.com URL, `owner/name#N`, or `#N` (this repo).
 const REF = String.raw`(?:https://github\.com/(?<urlRepo>[\w.-]+/[\w.-]+)/issues/(?<urlN>\d+)|(?<![\w/#.-])(?:(?<repo>[\w.-]+/[\w.-]+))?#(?<n>\d+)\b)`;
 const CLOSES = String.raw`\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?):?\s+` + REF;
-const JOB_BRANCH = /^claude\/.+-(\d+)$/;
+/** Every job branch starts with this, `<prefix><slug>-<issue>`: a GitHub-facing name, kept as
+ *  today's runner has it, since a branch it left counts as in flight across the cutover
+ *  (docs/app.md, Rules). */
+export const JOB_BRANCH_PREFIX = 'claude/';
+const JOB_BRANCH = new RegExp(String.raw`^${JOB_BRANCH_PREFIX}.+-(\d+)$`);
 
 export type Ref = [repo: string, n: number];
 
@@ -57,12 +61,12 @@ export function blockers(body: string, here: string): Ref[] {
   return sorted(found);
 }
 
-/** Issues something is already building: a `claude/*-<issue>` branch, or an open PR on one or
+/** Issues something is already building: a job branch, or an open PR on one or
  *  with a closing keyword for the issue in this repo. PRs GitHub links to an issue are counted on
  *  the issue itself (`openLinkedPulls`). */
 export async function inFlight(github: GitHubWork, repo: string): Promise<Set<number>> {
   const here = repo.toLowerCase();
-  const [branches, pulls] = await Promise.all([github.branches(repo, 'claude/'), github.openPulls(repo)]);
+  const [branches, pulls] = await Promise.all([github.branches(repo, JOB_BRANCH_PREFIX), github.openPulls(repo)]);
   const taken = new Set<number>();
   for (const b of [...branches, ...pulls.map((p) => p.branch)]) {
     const m = JOB_BRANCH.exec(b);
@@ -87,7 +91,7 @@ export async function* pickable(github: GitHubWork, repo: string, base: string, 
   for (const issue of issues.sort((a, b) => a.number - b.number)) {
     if (held.has(issue.number) || taken.has(issue.number) || issue.openLinkedPulls || issue.openSubIssues) continue;
     if (await unblocked(github, repo, issue)) {
-      yield { issue, base: `origin/${base}`, branch: `claude/${slug(issue.title)}-${issue.number}` };
+      yield { issue, base: `origin/${base}`, branch: `${JOB_BRANCH_PREFIX}${slug(issue.title)}-${issue.number}` };
     }
   }
 }
