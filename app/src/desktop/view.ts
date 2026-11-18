@@ -8,6 +8,7 @@ import type { Catalog } from '../jobs.ts';
 import { NotEmpty, RepoError, type Repo } from '../repos.ts';
 import { SettingsError, type Merger, type Settings, type SettingsPatch, type SettingsStore } from '../settings.ts';
 import type { CatalogSource } from '../t3/catalog-source.ts';
+import type { SetupSource, SetupState } from '../setup.ts';
 import { T3Error } from '../t3/seams.ts';
 
 export type View = {
@@ -25,6 +26,8 @@ export type View = {
   repos: Repo[] | null;
   /** Why T3's projects can't be had right now, or null. */
   reposError: string | null;
+  /** Setup's checks: the last report and whether they're running again (#162). */
+  setup: SetupState;
 };
 
 /** What the window asks of Repositories. */
@@ -93,6 +96,7 @@ export class RunnerView {
   private view: View;
   private settings: SettingsStore;
   private repos: RepoSource | null = null;
+  private setupSource: SetupSource | null = null;
   private listeners = new Set<(v: View) => void>();
 
   private constructor(settings: SettingsStore, view: View) {
@@ -100,7 +104,7 @@ export class RunnerView {
     this.view = view;
   }
 
-  static async start(settings: SettingsStore, github: GitHubAccount, timeFormat: TimeFormatSource, catalog: CatalogSource, repos: RepoSource): Promise<RunnerView> {
+  static async start(settings: SettingsStore, github: GitHubAccount, timeFormat: TimeFormatSource, catalog: CatalogSource, repos: RepoSource, setup: SetupSource): Promise<RunnerView> {
     let account: Account | null = null;
     let accountError: string | undefined;
     try {
@@ -112,9 +116,11 @@ export class RunnerView {
     const view = new RunnerView(settings, {
       settings: settings.get(), account, ...(accountError ? { accountError } : {}), timeFormat: timeFormat.current(),
       ...catalogPart(catalog.current()),
-      repos: repos.list(), reposError: repos.error(),
+      repos: repos.list(), reposError: repos.error(), setup: setup.current(),
     });
     view.repos = repos;
+    view.setupSource = setup;
+    setup.onChange((st) => view.update({ setup: st }));
     settings.onChange((s) => view.update({ settings: s }));
     repos.onChange(() => view.update({ repos: repos.list(), reposError: repos.error() }));
     timeFormat.onChange((f) => view.update({ timeFormat: f }));
@@ -156,6 +162,17 @@ export class RunnerView {
       if (e instanceof RepoError || e instanceof GitHubError || e instanceof T3Error || e instanceof SettingsError) return { error: e.message };
       throw e;
     }
+  }
+
+  /** Runs Setup's checks again; the view that follows carries the new report. A check that
+   *  fails to run says why in the view's `setup.error`, never thrown to the window. */
+  async checkSetup(): Promise<View> {
+    try {
+      await this.setupSource!.check();
+    } catch {
+      // in the view's setup.error
+    }
+    return this.view;
   }
 
   onChange(listener: (v: View) => void): () => void {

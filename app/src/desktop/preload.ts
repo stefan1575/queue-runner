@@ -7,6 +7,7 @@ const bridge: Bridge = {
   view: () => ipcRenderer.invoke(CHANNELS.view),
   set: (patch) => ipcRenderer.invoke(CHANNELS.set, patch),
   repo: (action) => ipcRenderer.invoke(CHANNELS.repo, action),
+  checkSetup: () => ipcRenderer.invoke(CHANNELS.setup),
   onView: (listener) => {
     const on = (_: unknown, view: any) => listener(view);
     ipcRenderer.on(CHANNELS.changed, on);
