@@ -19,12 +19,25 @@ const POLL_MS = 500;
 /** The Time format in T3's client settings; System default (T3's own default) when the file is
  *  missing or unreadable, or holds no such key or a value T3 doesn't offer. */
 export async function readTimeFormat(file: string = CLIENT_SETTINGS): Promise<TimeFormat> {
+  return (await read(file)) ?? 'locale';
+}
+
+/** As readTimeFormat, but undefined for a file that's there and isn't JSON: most often one caught
+ *  mid-write (emptied, not yet filled). */
+async function read(file: string): Promise<TimeFormat | undefined> {
+  let text: string;
   try {
-    const value = JSON.parse(await readFile(file, 'utf8'))?.timestampFormat;
-    return FORMATS.includes(value) ? value : 'locale';
+    text = await readFile(file, 'utf8');
   } catch {
     return 'locale';
   }
+  let value: unknown;
+  try {
+    value = JSON.parse(text)?.timestampFormat;
+  } catch {
+    return undefined;
+  }
+  return FORMATS.includes(value as TimeFormat) ? (value as TimeFormat) : 'locale';
 }
 
 export class T3TimeFormat implements TimeFormatSource {
@@ -66,8 +79,10 @@ export class T3TimeFormat implements TimeFormatSource {
   }
 
   private async reread() {
-    const format = await readTimeFormat(this.file);
-    if (format === this.format) return;
+    // A file that isn't JSON keeps the format it had: it is most often T3 caught mid-write, and
+    // the write's end changes the file again, so the next poll reads it whole.
+    const format = await read(this.file);
+    if (format === undefined || format === this.format) return;
     this.format = format;
     for (const l of this.listeners) l(format);
   }

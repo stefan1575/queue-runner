@@ -102,6 +102,19 @@ describe('following T3', () => {
     await vi.waitFor(() => expect(seen).toEqual(['12-hour']), { timeout: 5000 });
   });
 
+  test('a file caught mid-write (emptied, not yet filled) tells no one, and its end is read', async () => {
+    const d = await userdata();
+    await t3Writes(d, { timestampFormat: '24-hour' });
+    const source = await start(d);
+    const seen: TimeFormat[] = [];
+    source.onChange((f) => seen.push(f));
+    await writeFile(settingsFile(d), '');
+    await new Promise((r) => setTimeout(r, 1200)); // past two polls of the empty file
+    expect(source.current()).toBe('24-hour');
+    await t3Writes(d, { timestampFormat: '12-hour' });
+    await vi.waitFor(() => expect(seen).toEqual(['12-hour']), { timeout: 3000 });
+  });
+
   test("no T3 folder at all is System default, and the start doesn't fail", async () => {
     const d = await userdata();
     const source = await start(join(d, 'no-such-userdata'));
