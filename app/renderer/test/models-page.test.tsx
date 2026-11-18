@@ -10,7 +10,7 @@ import { DEFAULT_JOBS, type Jobs } from '../../src/jobs.ts';
 import { DEFAULT_SETTINGS, type SettingsPatch } from '../../src/settings.ts';
 import { catalogFromConfig } from '../../src/t3/catalog.ts';
 import { Settings } from '../src/Settings.tsx';
-import fixture from '../../test/fixtures/server-config.json';
+import fixture from '../../test/fixtures/server-config.json' with { type: 'json' };
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 Element.prototype.scrollTo ??= () => {};
