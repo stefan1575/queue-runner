@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import type { Gh } from '../src/github.ts';
-import { checkSetup, type SetupDoors, type SetupReport } from '../src/setup.ts';
+import { checkSetup, SetupChecks, type SetupDoors, type SetupReport } from '../src/setup.ts';
 import { T3Mcp } from '../src/t3/mcp.ts';
 import { runtimeAddress } from '../src/t3/real.ts';
 import { T3Ws } from '../src/t3/ws.ts';
@@ -139,5 +139,36 @@ describe('Setup names what is missing and how to fix it', () => {
     const r = await checkSetup(doors());
     expect(check(r, 'github')).toMatchObject({ state: 'bad', summary: "GitHub's CLI, gh, isn't installed." });
     expect(check(r, 'github').fix).toMatch(/cli\.github\.com/);
+  });
+});
+
+describe('Setup checks again on demand', () => {
+  test('runs once at start, again when asked, one run at a time, and tells each change', async () => {
+    const seen: [boolean, boolean | undefined][] = [];
+    const s = SetupChecks.start(() => checkSetup(doors()));
+    s.onChange((st) => seen.push([st.checking, st.report?.ok]));
+    expect(s.current()).toEqual({ report: null, checking: true });
+    await s.check();
+    expect(s.current().report?.ok).toBe(true);
+
+    gh = { code: 1, stdout: '', stderr: 'You are not logged into any GitHub hosts.\n' };
+    const a = s.check(), b = s.check();
+    expect(a).toBe(b);
+    expect(s.current().checking).toBe(true);
+    const r = await a;
+    expect(r.ok).toBe(false);
+    expect(s.current()).toEqual({ report: r, checking: false });
+    expect(ghArgs).toHaveLength(2);
+    expect(seen).toEqual([[false, true], [true, true], [false, false]]);
+  });
+
+  test('a check that throws leaves the last report and says why', async () => {
+    let fail = false;
+    const s = SetupChecks.start(async () => { if (fail) throw new Error('boom'); return checkSetup(doors()); });
+    await s.check();
+    fail = true;
+    await expect(s.check()).rejects.toThrow('boom');
+    expect(s.current()).toMatchObject({ checking: false, error: 'boom' });
+    expect(s.current().report?.ok).toBe(true);
   });
 });

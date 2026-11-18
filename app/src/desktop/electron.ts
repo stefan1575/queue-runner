@@ -6,11 +6,11 @@
 //                   PNGs, on a fresh state in a temp folder with the sample T3 catalog in
 //                   test/fixtures, and quits (docs/app.md, Screenshots)
 import { app, BrowserWindow, dialog, ipcMain, nativeTheme } from 'electron';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { GhGitHub } from '../github.ts';
+import { GhGitHub, ghCli } from '../github.ts';
 import { windowsPlatform } from '../platform/windows.ts';
 import { checkJobs, DEFAULT_JOBS } from '../jobs.ts';
 import { Repositories } from '../repos.ts';
@@ -19,9 +19,10 @@ import { catalogFromConfig } from '../t3/catalog.ts';
 import { fixedCatalog, T3Catalog } from '../t3/catalog-source.ts';
 import { T3Mcp } from '../t3/mcp.ts';
 import { T3ProjectFeed } from '../t3/project-feed.ts';
-import { fetchHttp, nodeConnect, runtimeAddress, t3Cli } from '../t3/real.ts';
+import { fetchHttp, nodeConnect, runtimeAddress, T3_CLI, t3Cli } from '../t3/real.ts';
 import { T3Ws } from '../t3/ws.ts';
-import { sampleRepos } from './sample.ts';
+import { sampleRepos, sampleSetup } from './sample.ts';
+import { checkSetup, SetupChecks, shownSetup, type SetupReport, type SetupSource } from '../setup.ts';
 import { stateFolder } from '../state-folder.ts';
 import { CHANNELS } from './bridge.ts';
 import { startDesktop, type Shell } from './shell.ts';
@@ -54,6 +55,9 @@ function openWindow(show: boolean): BrowserWindow {
   return win;
 }
 
+/** A shoot's Setup samples, and the way to show one. */
+let shooting: { passing: SetupReport; failing: SetupReport; show(report: SetupReport): void } | null = null;
+
 const page = (hash = '') => ({ file: join(here, 'renderer', 'index.html'), hash });
 
 async function main() {
@@ -68,26 +72,35 @@ async function main() {
     return r.canceled ? null : r.filePaths[0] ?? null;
   };
   const github = new GhGitHub();
-  // What T3 offers each job and T3's projects, kept current from its WebSocket; a shoot shows a
-  // sample of each instead (docs/app.md, Screenshots).
-  const { catalog, repos } = shootTo
-    ? { catalog: fixedCatalog(catalogFromConfig(fixture('server-config.json').config)), repos: await sampleRepos(settings) }
+  // What T3 offers each job, T3's projects and Setup's checks, kept current from T3; a shoot
+  // shows a sample of each instead (docs/app.md, Screenshots).
+  const { catalog, repos, setup } = shootTo
+    ? await (async () => {
+      const config = fixture('server-config.json').config;
+      const samples = await sampleSetup(config);
+      const setup = shownSetup(samples.passing);
+      shooting = { ...samples, show: setup.show };
+      return { catalog: fixedCatalog(catalogFromConfig(config)), repos: await sampleRepos(settings), setup: setup as SetupSource };
+    })()
     : (() => {
       const address = runtimeAddress();
       const cli = t3Cli();
       const ws = new T3Ws(address, cli, fetchHttp, nodeConnect);
+      const mcp = new T3Mcp(address, cli, fetchHttp);
       const feed = T3ProjectFeed.start(ws);
       return {
         catalog: T3Catalog.start(ws),
-        repos: Repositories.start({ feed, github, settings, mcp: new T3Mcp(address, cli, fetchHttp), pickFolder }),
+        repos: Repositories.start({ feed, github, settings, mcp, pickFolder }),
+        setup: SetupChecks.start(() => checkSetup({ t3Installed: async () => existsSync(T3_CLI), address, ws, mcp, gh: ghCli })) as SetupSource,
       };
     })();
   // The clock follows T3's Time format, read from T3's client settings (docs/app.md, The desktop app).
-  const view = await RunnerView.start(settings, github, await T3TimeFormat.start(), catalog, repos);
+  const view = await RunnerView.start(settings, github, await T3TimeFormat.start(), catalog, repos, setup);
 
   ipcMain.handle(CHANNELS.view, () => view.get());
   ipcMain.handle(CHANNELS.set, (_e, patch) => view.set(patch));
   ipcMain.handle(CHANNELS.repo, (_e, action) => view.repo(action));
+  ipcMain.handle(CHANNELS.setup, () => view.checkSetup());
 
   if (shootTo) return shoot(shootTo, settings);
 
@@ -124,14 +137,18 @@ async function main() {
   app.on('window-all-closed', () => {});
 }
 
-/** The window and each Settings page, light and dark, as PNGs in `dir`. */
+/** The window, Setup and each Settings page, light and dark, as PNGs in `dir`. */
 async function shoot(dir: string, settings: SettingsStore) {
   mkdirSync(dir, { recursive: true });
   // The Models page twice: a new install (T3's default, the nudge) and with a sample of chosen
-  // values (test/fixtures/shoot-jobs.json).
+  // values (test/fixtures/shoot-jobs.json). Setup twice: every check passed, and T3 down with
+  // gh signed out. Setup opens by its address only: the shoot's state has it seen.
   const chosen = checkJobs(fixture('shoot-jobs.json'))!;
-  const states: [string, string, boolean?][] = [
+  const { passing, failing, show } = shooting!;
+  const states: [string, string, boolean?, SetupReport?][] = [
     ['window', ''],
+    ['setup', 'setup'],
+    ['setup-failing', 'setup', false, failing],
     ['settings-name', 'settings=name'],
     ['settings-repos', 'settings=repos'],
     ['settings-models', 'settings=models'],
@@ -144,8 +161,9 @@ async function shoot(dir: string, settings: SettingsStore) {
   win.setContentSize(1440, 900);
   for (const theme of ['light', 'dark'] as const) {
     nativeTheme.themeSource = theme;
-    for (const [name, hash, withChoices] of states) {
-      await settings.set({ jobs: withChoices ? chosen : DEFAULT_JOBS });
+    for (const [name, hash, withChoices, setupReport] of states) {
+      await settings.set({ jobs: withChoices ? chosen : DEFAULT_JOBS, setupSeen: true });
+      show(setupReport ?? passing);
       // The same address again would keep the page (and the view it holds): load it fresh.
       await win.loadURL('about:blank');
       const p = page(hash);

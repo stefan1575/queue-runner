@@ -174,3 +174,69 @@ export async function checkSetup(d: SetupDoors, now: () => Date = () => new Date
   ];
   return { checks, ok: checks.every((c) => c.state === 'ok'), at: now().toISOString() };
 }
+
+/** The last report (null until the first run ends), whether a run is under way, and why the last
+ *  run failed, if it did. */
+export type SetupState = { report: SetupReport | null; checking: boolean; error?: string };
+
+export interface SetupSource {
+  current(): SetupState;
+  /** Checks again; a run already under way is the one returned. */
+  check(): Promise<SetupReport>;
+  onChange(listener: (state: SetupState) => void): () => void;
+}
+
+/** Setup's checks in the main process: run once at start, then whenever the window asks. */
+export class SetupChecks implements SetupSource {
+  private state: SetupState = { report: null, checking: false };
+  private running: Promise<SetupReport> | null = null;
+  private listeners = new Set<(s: SetupState) => void>();
+  private run: () => Promise<SetupReport>;
+
+  private constructor(run: () => Promise<SetupReport>) {
+    this.run = run;
+  }
+
+  static start(run: () => Promise<SetupReport>): SetupChecks {
+    const s = new SetupChecks(run);
+    s.check().catch(() => {}); // its error is in the state
+    return s;
+  }
+
+  current(): SetupState {
+    return this.state;
+  }
+
+  check(): Promise<SetupReport> {
+    if (this.running) return this.running;
+    this.set({ report: this.state.report, checking: true });
+    const run = this.run().then(
+      (report) => { this.running = null; this.set({ report, checking: false }); return report; },
+      (e: unknown) => { this.running = null; this.set({ report: this.state.report, checking: false, error: why(e) }); throw e; },
+    );
+    this.running = run;
+    return run;
+  }
+
+  onChange(listener: (s: SetupState) => void): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
+  private set(state: SetupState) {
+    this.state = state;
+    for (const l of this.listeners) l(state);
+  }
+}
+
+/** A report the shoot sets (the screenshots' samples): checking again keeps it. */
+export function shownSetup(first: SetupReport): SetupSource & { show(report: SetupReport): void } {
+  let state: SetupState = { report: first, checking: false };
+  const listeners = new Set<(s: SetupState) => void>();
+  return {
+    current: () => state,
+    check: async () => state.report!,
+    onChange: (l) => { listeners.add(l); return () => listeners.delete(l); },
+    show: (report) => { state = { report, checking: false }; for (const l of listeners) l(state); },
+  };
+}

@@ -46,7 +46,7 @@ describe('the settings', () => {
   test('a new install has the defaults', async () => {
     const store = await SettingsStore.open(await temp());
     expect(store.get()).toEqual(DEFAULT_SETTINGS);
-    expect(DEFAULT_SETTINGS).toEqual({ name: null, dateStyle: 'month-first', startWithWindows: true, jobs: DEFAULT_JOBS, repos: null });
+    expect(DEFAULT_SETTINGS).toEqual({ name: null, dateStyle: 'month-first', startWithWindows: true, jobs: DEFAULT_JOBS, repos: null, setupSeen: false });
   });
 
   test('a change is saved at once and survives a restart', async () => {

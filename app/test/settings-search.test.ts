@@ -21,7 +21,7 @@ const view: View = {
     { id: 'p1', title: 'sandbox', folder: 'C:/Code/sandbox', github: 'ana/sandbox', checking: false, served: true, merge: 'runner', isNew: false },
     { id: 'p2', title: 'notes', folder: 'C:/notes', github: null, checking: false, served: false, merge: 'me', isNew: true },
   ],
-  reposError: null,
+  reposError: null, setup: { report: null, checking: false },
   catalog,
 };
 const now = new Date(2026, 10, 16, 15, 5);
