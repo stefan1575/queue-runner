@@ -191,14 +191,27 @@ def _lasting(stale: dict, now) -> dict:
 def _repos(facts: Facts) -> list[dict]:
     """In config.toml's order, each with `stopped` (ticket 37): when Stefan stopped it, or None;
     and what it's doing now (#50): `doing`, the Claude job running in it (as a lane's `job`), or
-    None, and `wait`, why the Claude lane starts none in it now, or None; and `icon`, its favicon
-    as a data: URL, or None, for its mark on the page (`favicon.py`)."""
+    None, and `wait`, why the Claude lane starts none in it now, or None; `icon`, its favicon
+    as a data: URL, or None, for its mark on the page (`favicon.py`); and on a train repo only,
+    `train` (#179)."""
     jobs = {j.repo: j for j in _open_jobs(facts, CLAUDE_KINDS)}
     return [{'name': r.name, 'github': f'https://github.com/{r.github}' if r.github else None,
              'icon': repo_icon(r.path), 'merge': r.merge, 'stopped': _repo_stopped(facts, r.name),
              'doing': _job(facts, jobs[r.name]) if r.name in jobs else None,
-             'wait': None if r.name in jobs else _repo_wait(facts, r.name)}
+             'wait': None if r.name in jobs else _repo_wait(facts, r.name),
+             **({'train': _train(facts, r)} if r.train else {})}
             for r in facts.repos]
+
+
+def _train(facts: Facts, repo) -> dict | None:
+    """A train repo (#179) with an open PR, as the last read of the work found it: `front`, the
+    PR that moves (`PR #N`), and `paused`, why a stop or hold on it pauses the repo, or None.
+    None while it has no open PR, or hasn't been read yet."""
+    read = (facts.work or {}).get(repo.name)
+    if read is None or read.train is None:
+        return None
+    n, why = read.train
+    return {'front': f'PR #{n}', 'paused': _sentence(why) if why else None}
 
 
 def _repo_wait(facts: Facts, name: str) -> dict | None:

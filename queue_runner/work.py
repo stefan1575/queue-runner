@@ -114,6 +114,9 @@ class RepoRead:
     # ('merge', n), ('reviews', n), 'decisions', 'live', 'pending', 'builds', 'in_flight',
     # 'findings'.
     failed: frozenset = frozenset()
+    # A train repo (#179): (its front PR, why it's paused, or None), or None (no open PR, or the
+    # repo isn't a train).
+    train: tuple | None = None
 
 
 _FROM_BRANCH = re.compile(r'\bfrom \S+?/claude/\S+-(\d+)\b')
@@ -199,7 +202,15 @@ def read_repo(config, github, git, jobs, repo, now=None) -> RepoRead:
             pending_issues = tuple(int(m[1]) for c in commits
                                    if (m := _FROM_BRANCH.search(c['subject'])))
     from .stops import red_base
-    picked = () if red_base(jobs, repo.name, repo.base) else part('builds', lambda: tuple(
+    from .train import build_hold, front, paused
+    train = None
+    if repo.train and (first := front(pulls)) is not None:
+        stop = paused(jobs, repo, pulls)
+        train = (first.number, stop[1] if stop else None)
+    # As the Claude lane holds them (#179): no build ahead of a train.
+    live_steps = steps if repo.live_doc and git is not None else None
+    hold = part('builds', lambda: build_hold(repo, pulls, jobs, live_steps), None, 'builds')
+    picked = () if red_base(jobs, repo.name, repo.base) or hold else part('builds', lambda: tuple(
         (b.issue.number, b.issue.title)
         for b in pickable(repo, github, held=jobs.held_issues(repo.name))), (), 'builds')
     flying = part('what is in flight', lambda: frozenset(in_flight(repo, github)), frozenset(),
@@ -211,7 +222,8 @@ def read_repo(config, github, git, jobs, repo, now=None) -> RepoRead:
     return RepoRead(at=None, issues=issues, prs=tuple(prs), decisions=decisions, live=live,
                     findings=found,
                     pending=pending, pending_issues=pending_issues, builds=picked,
-                    in_flight=flying, errors=tuple(errors), failed=frozenset(failed))
+                    in_flight=flying, errors=tuple(errors), failed=frozenset(failed),
+                    train=train)
 
 
 _PARTS = ('decisions', 'live', 'builds', 'in_flight', 'findings')
@@ -613,8 +625,14 @@ def _pr_status(v: View, repo, p: PrRead, cq: list, sq: list) -> tuple[str, str, 
     if repo.name in v.off:
         return ('Its repository is stopped',
                 f'Neither lane takes up its work until you resume {repo.name}.', REVIEW)
+    train = v.reads[repo.name].train if repo.name in v.reads else None
+    if train and train[0] != n:
+        return ('Waiting in the train', f'The train moves one PR at a time: it waits behind '
+                f'PR #{train[0]}' + (', which is held for you.' if train[1] else '.'), REVIEW)
     if p.held:
-        return 'Held for you', _sentence(p.held), YOU
+        return 'Held for you', _sentence(p.held) + (
+            ' The train is paused on it: nothing behind it moves, and no build starts.'
+            if train else ''), YOU
     if p.merge is not None and not (p.fix and p.fix[0] == 'conflict'):
         why = next((w for _, w in p.merge if w), None)
         if why is None and repo.stefan_merges:

@@ -93,6 +93,9 @@ def build(name: str = DEFAULT, base: datetime | None = None, control: dict | Non
             # `doing`: the Claude job running in it (as a lane's `job`), and `wait`: why none
             # starts in it now (#50; both filled in by `_doing`, below). `icon`: its favicon as a
             # data: URL, or null (the page draws its first two letters).
+            # A repo that runs as a train (#179) also has `train`: null while it has no open PR,
+            # else `front`, the PR that moves ("PR #N"), and `paused`, why a stop on it pauses
+            # the repo, or null. No sample repo is a train.
             {"name": LD, "github": GH[LD], "icon": LD_ICON, "merge": "stefan", "stopped": None},
             {"name": QR, "github": GH[QR], "icon": None, "merge": "runner", "stopped": None},
         ],

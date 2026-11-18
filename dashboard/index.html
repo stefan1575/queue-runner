@@ -1869,15 +1869,19 @@ function repoRows() {
     const name = r.name, a = (ctl.repos || {})[name], pending = a && !wasRead(a.at) && !!a.stop !== !!r.stopped;
     const off = pending ? !!a.stop : !!r.stopped;
     // What it's doing now (#50: each runs its own Claude job): the job, else why none starts.
+    // A train (#179): only its front PR moves; a stop on it pauses the repo.
     const now = r.doing ? `${kind(r.doing.kind)[0]} ${r.doing.ref}, ${ago(r.doing.started_at)} in`
+      : r.train && r.train.paused ? `Train paused on ${r.train.front}`
       : r.wait ? `Waiting: ${r.wait.reason.replace(/\.$/, "")}` : "Idle";
+    const line = r.train && !r.train.paused ? ` One PR at a time: ${r.train.front} moves.` : "";
     const sub = pending ? (a.stop ? "Asked to stop: the runner hasn't read it yet" : "Asked to resume: the runner hasn't read it yet")
       : r.stopped ? `Stopped${r.stopped.at ? ` since ${clock(r.stopped.at)}` : ""}${r.doing ? `; ${now.replace(/^./, (c) => c.toLowerCase())}` : ""}`
-      : `${now}. ${r.merge === "stefan" ? "You merge" : "The runner merges"}.`;
+      : `${now}.${line} ${r.merge === "stefan" ? "You merge" : "The runner merges"}.`;
     const btn = stale ? "" : off
       ? `<button class="btn sm icon solid" data-act="repostop" data-repo="${esc(name)}" data-how="" aria-label="Resume ${esc(name)}" title="Resume: both lanes take up its work again">${ICON.play}</button>`
       : `<button class="btn sm icon" data-act="repostop" data-repo="${esc(name)}" data-how="after-job" aria-label="Stop ${esc(name)}" title="Stop: a job running on it finishes; then neither lane takes up its work">${ICON.pause}</button>`;
-    return `<li${r.stopped ? ' class="off"' : ""}>${repoLogo(name)}<span class="name">${esc(name)}<span>${esc(sub)}</span></span>${btn}</li>`;
+    const why = r.train && r.train.paused ? ` title="${esc(r.train.paused)}"` : "";
+    return `<li${r.stopped ? ' class="off"' : ""}${why}>${repoLogo(name)}<span class="name">${esc(name)}<span>${esc(sub)}</span></span>${btn}</li>`;
   }).join("");
   return `<ul class="order">${rows}</ul>`;
 }

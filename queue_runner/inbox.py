@@ -79,6 +79,9 @@ class Inbox:
     # read to keep): their asks aren't known, so the snapshot lists none to go by (PR #104's
     # review 1, F1). None means `failed`: a lone collection has no earlier read.
     never: frozenset | None = None
+    # Each train repo paused on its front PR (#179, `train.paused`): repo name -> (PR, why), as
+    # its read found it.
+    trains: dict = field(default_factory=dict)
 
     @property
     def unread(self) -> frozenset:
@@ -99,12 +102,14 @@ def key(w: Waiting) -> tuple:
 # --- the collection -----------------------------------------------------------------------------
 
 def collect(config, github, jobs) -> Inbox:
-    """What waits on Stefan now, in `ORDER`, each kind in its repo's order and then by number."""
+    """What waits on Stefan now, in `ORDER`, each kind in its repo's order and then by number;
+    and each train paused on its front PR."""
     items, answered, errors, failed, unfilled = [], [], [], set(), set()
+    trains = {}
     all_jobs = jobs.jobs()
     for repo in config.repos:
         try:
-            got, done = _repo(config, github, jobs, all_jobs, repo, errors, unfilled)
+            got, done = _repo(config, github, jobs, all_jobs, repo, errors, unfilled, trains)
         except Exception as e:   # GitHub down: said, and the rest still listed
             errors.append(f"{repo.name}: couldn't read its PRs ({type(e).__name__}: {e})")
             failed.add(repo.name)
@@ -116,7 +121,7 @@ def collect(config, github, jobs) -> Inbox:
     items.sort(key=lambda w: (rank[w.kind], names[w.repo], w.number))
     return Inbox(items, answered, errors, frozenset(failed),
                  reviews(all_jobs, {(w.repo, w.number) for w in items + answered if w.on_pr}),
-                 frozenset(unfilled))
+                 frozenset(unfilled), trains=trains)
 
 
 def reviews(all_jobs, prs) -> dict:
@@ -142,10 +147,14 @@ def _offline(jobs, all_jobs, repo) -> list[Waiting]:
             + _threads(jobs, repo))
 
 
-def _repo(config, github, jobs, all_jobs, repo, errors, unfilled=None) -> tuple[list, list]:
+def _repo(config, github, jobs, all_jobs, repo, errors, unfilled=None,
+          trains=None) -> tuple[list, list]:
     if not repo.github:
         return _offline(jobs, all_jobs, repo), []
     pulls = {p.number: p for p in github.open_pulls(repo)}
+    from .train import paused
+    if trains is not None and (stop := paused(jobs, repo, pulls.values())):
+        trains[repo.name] = stop
     issues = {i.number: i for i in github.open_issues(repo)}
     reader = _Reader(github, repo, pulls, issues, errors, unfilled)
     ready = []
@@ -377,8 +386,16 @@ TITLES = {'base': 'A base branch fails its checks', 'ready': 'Ready for you to m
           'build': 'Stops (needs-info)', 'thread': 'Threads waiting for your answer'}
 
 
+def train_line(repo: str, n: int, why: str) -> str:
+    """One paused train, for `--inbox`."""
+    return (f'{repo}: paused on PR #{n} ({why}): nothing behind it moves, and no build starts '
+            'until you answer or release it')
+
+
 def text(inbox: Inbox) -> str:
     sections: dict[str, list[str]] = {}
+    if inbox.trains:
+        sections['Trains paused'] = [train_line(r, *t) for r, t in inbox.trains.items()]
     for w in inbox.items:
         sections.setdefault(TITLES[w.kind], []).append(line(w))
     out = [f'{title}:\n' + '\n'.join(f'  {l}' for l in lines) for title, lines in sections.items()]
@@ -444,7 +461,7 @@ class Reader:
             never = frozenset(r.name for r in self.config.repos
                               if r.name in got.failed and r.name not in self._good)
             self._last = Inbox(items, answered, got.errors, got.failed, dict(self._reviews),
-                               never=never)
+                               never=never, trains=dict(got.trains))
             return self._last
 
     def last(self) -> Inbox | None:
