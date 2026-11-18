@@ -1,0 +1,5 @@
+#!/bin/sh
+# Main is tested before it moves (#172): scripts/pre_push.py runs the tests when a push updates
+# main and refuses the push if they fail. Installed by scripts/install_hooks.py (docs/tests.md).
+py=$(command -v python3 || command -v python)
+exec "$py" scripts/pre_push.py "$@"
