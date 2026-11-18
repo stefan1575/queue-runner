@@ -6,7 +6,7 @@ import tempfile
 import unittest
 
 from queue_runner.cli import main
-from queue_runner.config import DEFAULT_CONFIG, load_config
+from queue_runner.config import load_config
 from queue_runner.github import Issue
 from queue_runner.state import JobLog
 from tests.fakes import FakeGitHubForReviews, FakeUsage, full_pr
@@ -119,9 +119,17 @@ class NeedsMeTest(InboxCase):
 
 
 class MergeConfigTest(unittest.TestCase):
-    def test_leads_dashboard_is_merged_by_stefan_and_the_default_is_the_runner(self):
-        repos = {r.name: r for r in load_config(DEFAULT_CONFIG).repos}
-        self.assertTrue(repos['leads-dashboard'].stefan_merges)
+    def test_merge_stefan_is_read_and_the_default_is_the_runner(self):
+        # A temp config, not config.toml: which repo Stefan merges is his to change there.
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, 'config.toml')
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(f'state_dir = "{d}/s"\nlog_dir = "{d}/l"\n'
+                        f'[[repos]]\nname = "mine"\npath = "{d}"\nmerge = "stefan"\n'
+                        f'[[repos]]\nname = "theirs"\npath = "{d}"\n'.replace('\\', '/'))
+            repos = {r.name: r for r in load_config(path).repos}
+        self.assertTrue(repos['mine'].stefan_merges)
+        self.assertFalse(repos['theirs'].stefan_merges)
         from queue_runner.config import Repo
         self.assertEqual(Repo(name='x', github=None, path='.').merge, 'runner')
 
