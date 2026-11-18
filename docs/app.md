@@ -69,7 +69,7 @@ bundles the main process and its preload with esbuild and the window's page (`re
 and Tailwind, the prototype app's stack) with Vite, into `desktop-dist/` (not committed);
 `pnpm --dir app desktop` builds and runs it. The window's only door to the main process is the
 preload's `window.runner` (`src/desktop/bridge.ts`: the view, its changes, saving a setting).
-Code both sides use (`display.ts`, `settings-search.ts`) touches no Node.
+Code both sides use (`display.ts`, `settings-search.ts`) touches no Node. The window's own tests are under `renderer/test/`, in jsdom (`// @vitest-environment jsdom`), run by `pnpm --dir app test` with the rest.
 
 - **The frame** (`src/desktop/shell.ts`, under test with Electron and the platform faked): one
   app at a time (a second start shows the first app's window and quits); closing the window hides

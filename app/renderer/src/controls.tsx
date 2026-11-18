@@ -2,7 +2,7 @@
 import * as Popover from '@radix-ui/react-popover';
 import * as Switch from '@radix-ui/react-switch';
 import { Check, ChevronDown } from 'lucide-react';
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { cn } from './cn.ts';
 
 export interface Opt<T extends string> { id: T; label: string; hint?: string; node?: ReactNode }
@@ -47,22 +47,31 @@ export function Toggle({ checked, onChange, label }: { checked: boolean; onChang
   );
 }
 
-/** The name saves when you leave the field or press Enter, not on every key. Emptied, it goes
- *  back to the GitHub account's name (`fallback`). Escape puts back what was saved. */
+/** The name saves when you leave the field or press Enter, not on every key, and when the field
+ *  goes away with typing not yet saved (Settings closed by a click on the backdrop, which takes
+ *  the field away before it hears a blur). Emptied, it goes back to the GitHub account's name
+ *  (`fallback`). Escape puts back what was saved. */
 export function NameField({ value, fallback, onSave }: { value: string | null; fallback: string | null; onSave: (name: string | null) => void }) {
   const shown = value ?? fallback ?? '';
   const [text, setText] = useState(shown);
-  useEffect(() => setText(shown), [shown]);
+  // Typing not yet saved; the commit on going away reads it after the last render.
+  const typed = useRef<string | null>(null);
+  useEffect(() => { typed.current = null; setText(shown); }, [shown]);
   const commit = () => {
-    const t = text.trim();
+    if (typed.current === null) return;
+    const t = typed.current.trim();
+    typed.current = null;
     if (!t) { if (value !== null) onSave(null); else setText(shown); return; }
     if (t !== shown || (value === null && t !== fallback)) onSave(t);
   };
+  const latest = useRef(commit);
+  latest.current = commit;
+  useEffect(() => () => latest.current(), []);
   return (
     <input
       aria-label="Your name" value={text} spellCheck={false} autoComplete="off" placeholder={fallback ?? 'Your name'}
-      onChange={(e) => setText(e.target.value)} onBlur={commit}
-      onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape') { e.preventDefault(); setText(shown); } }}
+      onChange={(e) => { typed.current = e.target.value; setText(e.target.value); }} onBlur={commit}
+      onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape') { e.preventDefault(); typed.current = null; setText(shown); } }}
       className="h-9 w-[240px] max-w-full rounded-lg border border-line bg-surface px-3 text-[15.5px] placeholder:text-faint"
     />
   );
