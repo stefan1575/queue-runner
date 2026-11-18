@@ -2,8 +2,9 @@
 
 The TypeScript rebuild of the runner (spec #68), in `app/`: one package, TypeScript on Node 24,
 pnpm, Vitest. It grows ticket by ticket beside the Python runner (`queue_runner/`), which keeps
-serving Stefan's repos until the cutover ticket. So far (#149) it signs in to T3 and lists the
-repos it could serve.
+serving Stefan's repos until the cutover ticket. So far it signs in to T3 and lists the repos it
+could serve (#149), and opens as a desktop window that keeps running in the tray, with Settings
+(#150; The desktop app, below).
 
 ## Run it
 
@@ -11,6 +12,7 @@ repos it could serve.
 pnpm --dir app install
 pnpm --dir app start -- --list    # every T3 project, its folder and GitHub remote; changes nothing
 pnpm --dir app live:sign-in       # the live sign-in check (Live checks, below)
+pnpm --dir app desktop            # builds and opens the desktop app (The desktop app, below)
 ```
 
 Node runs the `.ts` files as they are (type stripping): no build step, so the code uses only
@@ -45,6 +47,10 @@ the settings tickets export as `SETTINGS_PATH` (`test/real-settings.ts` lists th
 - **T3 and GitHub only.** No reads of T3's database or settings, of Claude's or Codex's files,
   of `~/.claude` or `~/.codex`. No personal scripts. `gh` for GitHub. Starting T3's CLI is
   allowed only for signing in (pairing codes, and listing and revoking the app's own sessions).
+  **The one exception:** T3's Time format, `timestampFormat` in T3's
+  `~/.t3/userdata/client-settings.json`, which T3's server doesn't serve (The desktop app, The
+  clock). The app reads that one setting, never writes the file, and watches it. The exception
+  goes once T3's server serves client settings.
 - **Seams, faked in tests:** T3 (MCP and WebSocket; `src/t3/seams.ts`: HTTP, the socket, the
   CLI, the address), GitHub (`src/github.ts`), and the platform (Windows: tray, notifications,
   start at logon, wake). Tests never touch the network, T3, GitHub or the Task Scheduler
@@ -64,6 +70,59 @@ the settings tickets export as `SETTINGS_PATH` (`test/real-settings.ts` lists th
   (today's `tests/test_templates.py` rule, ported with the templates).
 - **Live checks** are scripts under `app/live/` that refuse any project but the sandboxes, like
   today's `scripts/live_*.py`. One that acts on no project says so at its top.
+
+## The desktop app
+
+Electron (#68 stories 33 and 34, #36), one process for the runner: the runner runs in the main
+process (`src/desktop/electron.ts`), and the window shows it. `pnpm --dir app desktop:build`
+bundles the main process and its preload with esbuild and the window's page (`renderer/`, React
+and Tailwind, the prototype app's stack) with Vite, into `desktop-dist/` (not committed);
+`pnpm --dir app desktop` builds and runs it. The window's only door to the main process is the
+preload's `window.runner` (`src/desktop/bridge.ts`: the view, its changes, saving a setting).
+Code both sides use (`display.ts`, `settings-search.ts`) touches no Node. The window's own tests are under `renderer/test/`, in jsdom (`// @vitest-environment jsdom`), run by `pnpm --dir app test` with the rest.
+
+- **The frame** (`src/desktop/shell.ts`, under test with Electron and the platform faked): one
+  app at a time (a second start shows the first app's window and quits); closing the window hides
+  it into the tray; Quit in the tray menu stops the app. `--hidden` (the logon entry's start)
+  stays in the tray.
+- **The platform module** (`src/platform/`): the tray and start at logon, Windows only
+  (`windows.ts`, Electron's Tray and login item). Later tickets add notifications and wake. The
+  logon entry is `Queue runner` under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`,
+  running the app as it was started, with `--hidden`. Electron's `openAtLogin` only looks under
+  its default name, so the entry is found in `launchItems` by its own. It follows Start with
+  Windows on every start and every change (checked live 2026-11-18, both ways).
+- **The window**, as #36's layout prototype settled it (branch `prototype/settings-layout-36`,
+  variant B): a sidebar with the repo switcher and a footer row (Settings and a greyed Usage on
+  the left, a greyed Update on the right); the main area is empty until later tickets fill it.
+  Settings opens as a pop-up over the page, closed by its X, Escape or a click outside, in T3
+  Code's look (a skin on while it's open); the rest of the window keeps the prototype's look until
+  Stefan decides whether the whole app takes T3's (#36, open). Search matches other words for a
+  setting, its current value and a typo (`src/settings-search.ts`).
+- **Settings** are `settings.json` in the state folder (`src/settings.ts`): Name (null follows
+  the `gh` account: `gh api user`, its name, else its login), the date style (default
+  `month-first`, "November 16, 2026 Monday") and Start with Windows (on). Each change is checked,
+  saved at once (written aside and renamed over) and sent to the window; there's no Save button.
+  The state folder's location is the only thing in a machine file, `machine.json` in Electron's
+  userData (`%APPDATA%\Queue runner`); a first start writes `%APPDATA%\Queue runner\state`
+  there.
+- **The clock** follows T3's Time format (`timestampFormat`: System default, 12-hour, 24-hour;
+  #68 story 36). It is a setting of T3's own window, kept in `~/.t3/userdata/client-settings.json`
+  (`T3CODE_HOME` moves it); T3's server doesn't hold it (`subscribeServerConfig`'s `settings` has
+  no such key, checked live 2026-11-18 against T3 0.1.9, and no WebSocket method serves client
+  settings). So, as Stefan settled on #150, the app reads it there: the one exception to "No
+  reads of T3's database or settings" (Rules). `src/t3/time-format.ts` reads only that key, never
+  writes the file, and polls it (`fs.watchFile`, every 500 ms: it sees a file that's missing or
+  replaced by a rename), telling the window when the format changes. A file that's missing or
+  unreadable, or has no such key or a value T3 doesn't offer, is System default. It goes once
+  T3's server serves client settings. The app has no Time format setting of its own.
+
+### Screenshots
+
+`pnpm --dir app desktop:shoot <absolute dir>` renders the real window on a fresh state in a temp
+folder (never the real state, lock or logon entry): `window`, `settings-name`,
+`settings-display`, `settings-machine` and `settings-search` (a typo, "windos"), each
+`-light.png` and `-dark.png`, at 1440x900. The page's address opens Settings for it:
+`#settings=<page>` or `#q=<search>`.
 
 ## Signing in
 

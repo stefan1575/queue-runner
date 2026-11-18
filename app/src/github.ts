@@ -1,6 +1,7 @@
 // GitHub, through `gh` (the CLI T3 itself uses for GitHub). A seam the tests fake.
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
+import { homedir } from 'node:os';
 
 export type Remote = { nameWithOwner: string; url: string };
 
@@ -11,6 +12,14 @@ export interface GitHub {
   /** The GitHub repo a folder's git remote points at, or null when it has none (not a git
    *  folder, no remote on GitHub, or the folder is gone). A GitHubError when gh fails. */
   remoteOf(folder: string): Promise<Remote | null>;
+}
+
+export type Account = { login: string; name: string | null };
+
+export interface GitHubAccount {
+  /** The account gh is signed in as: its login and the name set on it (null when none is). A
+   *  GitHubError when gh fails. */
+  account(): Promise<Account>;
 }
 
 /** One gh run: its exit code and both streams. A gh that can't be started (not installed) or
@@ -35,7 +44,7 @@ const NO_REPO = [
   /no git remotes found/,
 ];
 
-export class GhGitHub implements GitHub {
+export class GhGitHub implements GitHub, GitHubAccount {
   private gh: Gh;
   private exists: (folder: string) => boolean;
   constructor(gh: Gh = ghCli, exists: (folder: string) => boolean = existsSync) {
@@ -59,5 +68,18 @@ export class GhGitHub implements GitHub {
     }
     if (typeof repo?.nameWithOwner !== 'string') throw new GitHubError(`gh repo view named no repo in ${folder}`);
     return { nameWithOwner: repo.nameWithOwner, url: repo.url };
+  }
+
+  async account(): Promise<Account> {
+    const { code, stdout, stderr } = await this.gh(['api', 'user'], homedir());
+    if (code !== 0) throw new GitHubError(`gh api user failed (${code}): ${stderr.trim().split('\n')[0] || 'no message'}`);
+    let user: any;
+    try {
+      user = JSON.parse(stdout);
+    } catch {
+      throw new GitHubError(`gh api user printed no JSON: ${stdout.slice(0, 200)}`);
+    }
+    if (typeof user?.login !== 'string') throw new GitHubError('gh api user named no login');
+    return { login: user.login, name: typeof user.name === 'string' && user.name.trim() ? user.name.trim() : null };
   }
 }

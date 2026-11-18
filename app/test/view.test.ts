@@ -1,0 +1,94 @@
+// What the window shows (#150): the settings, the `gh` account the name comes from, and T3's Time
+// format, kept up to date as any of them changes.
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, describe, expect, test } from 'vitest';
+import { briefName, RunnerView, type TimeFormatSource, type View } from '../src/desktop/view.ts';
+import type { TimeFormat } from '../src/display.ts';
+import { GhGitHub, GitHubError, type Gh } from '../src/github.ts';
+import { SettingsStore } from '../src/settings.ts';
+
+let dirs: string[] = [];
+afterEach(async () => {
+  await Promise.all(dirs.map((d) => rm(d, { recursive: true, force: true })));
+  dirs = [];
+});
+async function store() {
+  const d = await mkdtemp(join(tmpdir(), 'qr-view-'));
+  dirs.push(d);
+  return SettingsStore.open(d);
+}
+
+class FakeTimeFormat implements TimeFormatSource {
+  format: TimeFormat = 'locale';
+  private listeners = new Set<(f: TimeFormat) => void>();
+  current() { return this.format; }
+  onChange(l: (f: TimeFormat) => void) { this.listeners.add(l); return () => this.listeners.delete(l); }
+  /** T3's Time format changed. */
+  change(f: TimeFormat) { this.format = f; for (const l of this.listeners) l(f); }
+}
+
+const account = (login: string, name: string | null) => ({ account: async () => ({ login, name }) });
+
+describe("the gh account's name", () => {
+  test('gh api user gives the login and the name', async () => {
+    const calls: string[][] = [];
+    const gh: Gh = async (args) => {
+      calls.push(args);
+      return { code: 0, stdout: JSON.stringify({ login: 'ana-k', name: 'Ana K', id: 1 }), stderr: '' };
+    };
+    expect(await new GhGitHub(gh).account()).toEqual({ login: 'ana-k', name: 'Ana K' });
+    expect(calls).toEqual([['api', 'user']]);
+  });
+
+  test('an account with no name set has a null name', async () => {
+    const gh: Gh = async () => ({ code: 0, stdout: JSON.stringify({ login: 'ana-k', name: null }), stderr: '' });
+    expect(await new GhGitHub(gh).account()).toEqual({ login: 'ana-k', name: null });
+  });
+
+  test('gh not signed in is a GitHubError with what gh said', async () => {
+    const gh: Gh = async () => ({ code: 4, stdout: '', stderr: 'To get started with GitHub CLI, please run:  gh auth login\n' });
+    await expect(new GhGitHub(gh).account()).rejects.toThrow(GitHubError);
+    await expect(new GhGitHub(gh).account()).rejects.toThrow(/gh api user failed \(4\): To get started/);
+  });
+});
+
+describe('the view', () => {
+  test('the name for the briefs is yours, else the account name, else its login', async () => {
+    const view = await RunnerView.start(await store(), account('ana-k', 'Ana K'), new FakeTimeFormat());
+    expect(briefName(view.get())).toBe('Ana K');
+    await view.set({ name: 'Ana' });
+    expect(briefName(view.get())).toBe('Ana');
+    const noName = await RunnerView.start(await store(), account('ana-k', null), new FakeTimeFormat());
+    expect(briefName(noName.get())).toBe('ana-k');
+  });
+
+  test("gh failing leaves the name yours to type, and says why", async () => {
+    const failing = { account: async () => { throw new GitHubError('gh api user failed (4): not signed in'); } };
+    const view = await RunnerView.start(await store(), failing, new FakeTimeFormat());
+    expect(view.get().account).toBeNull();
+    expect(view.get().accountError).toBe('gh api user failed (4): not signed in');
+    expect(briefName(view.get())).toBeNull();
+  });
+
+  test("the clock follows T3's Time format, and a change in T3 changes the window's", async () => {
+    const t3 = new FakeTimeFormat();
+    t3.format = '24-hour';
+    const view = await RunnerView.start(await store(), account('ana-k', null), t3);
+    expect(view.get().timeFormat).toBe('24-hour');
+    const seen: View[] = [];
+    view.onChange((v) => seen.push(v));
+    t3.change('12-hour');
+    expect(view.get().timeFormat).toBe('12-hour');
+    expect(seen.map((v) => v.timeFormat)).toEqual(['12-hour']);
+  });
+
+  test('a saved change reaches the window', async () => {
+    const view = await RunnerView.start(await store(), account('ana-k', null), new FakeTimeFormat());
+    const seen: View[] = [];
+    view.onChange((v) => seen.push(v));
+    await view.set({ dateStyle: 'iso' });
+    expect(seen.map((v) => v.settings.dateStyle)).toEqual(['iso']);
+  });
+});
