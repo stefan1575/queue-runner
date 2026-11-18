@@ -37,7 +37,7 @@ describe('launching a job', () => {
   test("each kind launches on the choice it's given: the kind's own, else Default's, as kindModels resolves them", async () => {
     const def = last(b), own = last(a);
     const jobs: Jobs = { ...DEFAULT_JOBS, default: { provider: def.provider, model: def.model, effort: def.effort }, review: { own: { provider: own.provider, model: own.model, effort: own.effort }, fallback: null } };
-    for (const k of JOB_KINDS) await launchJob(mcp, catalog, { ...job, kind: k.id, choice: kindModels(jobs, k.id, catalog).choice! });
+    for (const k of JOB_KINDS) await launchJob(mcp, catalog, { ...job, kind: k.id, choice: kindModels(jobs, k.id, catalog).choice!, toolFree: [own.provider] });
     const sel = (x: typeof def) => ({ instanceId: x.provider, model: x.model, options: [{ id: x.option, value: x.effort }] });
     expect(t3.launches.map((l) => l.modelSelection)).toEqual(JOB_KINDS.map((k) => (k.id === 'review' ? sel(own) : sel(def))));
     expect(t3.launches[0]).toEqual({ projectId: 'p1', title: 'Build #7', message: 'Build issue #7.', runtimeMode: 'full-access', modelSelection: sel(def) });
@@ -75,17 +75,28 @@ describe('launching a job', () => {
   test("a kind's fallback, given, is what launches", async () => {
     const f = last(a);
     const jobs: Jobs = { ...DEFAULT_JOBS, review: { own: null, fallback: { provider: f.provider, model: f.model, effort: f.effort } } };
-    const got = await launchJob(mcp, catalog, { ...job, kind: 'review', choice: kindModels(jobs, 'review', catalog).fallback! });
+    const got = await launchJob(mcp, catalog, { ...job, kind: 'review', choice: kindModels(jobs, 'review', catalog).fallback!, toolFree: [f.provider] });
     expect(t3.launches[0].modelSelection).toEqual({ instanceId: f.provider, model: f.model, options: [{ id: f.option, value: f.effort }] });
     expect(got).toMatchObject({ threadId: 'thread-1', runId: 'run-1', choice: { provider: f.provider, model: f.model, effort: f.effort } });
   });
 
   test("a choice T3 can't run now launches nothing, never another model in its place", async () => {
     const x = last(a);
-    await expect(launchJob(mcp, catalog, { ...job, kind: 'review', choice: { provider: 'gone', model: x.model, effort: x.effort } })).rejects.toThrow(JobError);
-    await expect(launchJob(mcp, catalog, { ...job, kind: 'review', choice: { provider: x.provider, model: 'gone', effort: x.effort } })).rejects.toThrow(JobError);
-    await expect(launchJob(mcp, catalog, { ...job, kind: 'review', choice: { provider: x.provider, model: x.model, effort: 'gone' } })).rejects.toThrow(JobError);
+    await expect(launchJob(mcp, catalog, { ...job, kind: 'fix', choice: { provider: 'gone', model: x.model, effort: x.effort } })).rejects.toThrow(JobError);
+    await expect(launchJob(mcp, catalog, { ...job, kind: 'fix', choice: { provider: x.provider, model: 'gone', effort: x.effort } })).rejects.toThrow(JobError);
+    await expect(launchJob(mcp, catalog, { ...job, kind: 'fix', choice: { provider: x.provider, model: x.model, effort: 'gone' } })).rejects.toThrow(JobError);
     await expect(launchJob(mcp, { providers: [], t3Default: null }, { ...job, kind: 'build', choice: { provider: x.provider, model: x.model, effort: x.effort } })).rejects.toThrow(/can't run/);
     expect(t3.launches).toEqual([]);
+  });
+
+  test('a review launches only on an instance named as set up without outside tools; with none named, nothing', async () => {
+    const x = last(a), y = last(b);
+    const choice = { provider: x.provider, model: x.model, effort: x.effort };
+    await expect(launchJob(mcp, catalog, { ...job, kind: 'review', choice })).rejects.toThrow(/set up without outside tools/);
+    await expect(launchJob(mcp, catalog, { ...job, kind: 'review', choice, toolFree: [] })).rejects.toThrow(JobError);
+    await expect(launchJob(mcp, catalog, { ...job, kind: 'review', choice, toolFree: [y.provider] })).rejects.toThrow(JobError);
+    expect(t3.launches).toEqual([]);
+    await launchJob(mcp, catalog, { ...job, kind: 'review', choice, toolFree: [y.provider, x.provider] });
+    expect(t3.launches.map((l) => l.modelSelection.instanceId)).toEqual([x.provider]);
   });
 });

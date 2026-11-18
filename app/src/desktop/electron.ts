@@ -130,7 +130,7 @@ async function main() {
   const reviews = new ReviewLane({
     repos: () => servedRepos(repos.list()), github, git: new GitCli(), deps: new Deps(join(state, 'deps')),
     mcp: t3Doors!.mcp, ws: t3Doors!.ws, gate, catalog: () => catalog.current().catalog, jobs: () => settings.get().jobs,
-    user, log, stateDir: state, say,
+    toolFree: () => settings.get().toolFreeInstances, user, log, stateDir: state, say,
   });
 
   const shell: Shell = {

@@ -4,6 +4,12 @@
 // **The launch runs on the choice it's given**, the one the usage gate let in (its own model or
 // its fallback, `src/usage-gate.ts`), never on the settings read again: a setting changed between
 // the gate's answer and the launch would put the job on a model nobody let in.
+//
+// **A review has no outside tools** (docs/reviews.md): the app can't see an instance's tools
+// without naming its driver, so the user names the instances set up without them
+// (`toolFreeInstances`, src/settings.ts), and a review launches only on one of those. That is
+// checked here, at the one launch every review goes through (the lane and the live check alike),
+// and it fails closed: no list, or an instance not on it, launches nothing.
 import { model, usable, type Catalog, type JobKind, type ModelChoice } from './jobs.ts';
 import type { T3Mcp } from './t3/mcp.ts';
 
@@ -20,6 +26,8 @@ export type Job = {
   worktree?: { baseRef: string; branch: string };
   /** What it runs on: the choice the gate let in. */
   choice: ModelChoice;
+  /** A review's: the instances set up without outside tools. A review on any other launches nothing. */
+  toolFree?: readonly string[];
 };
 
 export type Launched = { threadId: string; runId: string | null; link: string | null; choice: ModelChoice };
@@ -33,7 +41,12 @@ export function modelSelection(choice: ModelChoice, catalog: Catalog) {
   };
 }
 
+/** Why a review won't run on this instance. */
+export const toolsHeld = (instance: string) =>
+  `the review would run on ${instance}, which isn't one of the instances set up without outside tools (toolFreeInstances in the settings; docs/reviews.md)`;
+
 export async function launchJob(mcp: Pick<T3Mcp, 'call'>, catalog: Catalog, job: Job): Promise<Launched> {
+  if (job.kind === 'review' && !job.toolFree?.includes(job.choice.provider)) throw new JobError(toolsHeld(job.choice.provider));
   const choice = usable(job.choice, catalog);
   // never another model in its place: a choice T3 can't run now launches nothing
   if (!choice || choice.effort !== job.choice.effort) {

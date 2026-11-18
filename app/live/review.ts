@@ -1,15 +1,24 @@
 // Live check of a review (#155), dry run, like today's scripts/live_review.py: one real review of
-// one real PR in the GitHub sandbox `stefan1575/queue-runner-sandbox` (it refuses any other repo),
+// one open PR in the GitHub sandbox `stefan1575/queue-runner-sandbox` (it refuses any other repo),
 // through the review lane's own `review`, with a poster that posts nothing. It says what adoption
 // would decide, then reviews anyway (the sandbox has no CI, so its checks never pass).
 //
 // The PR's clone is a fresh one in a temp folder. The review's thread runs in the "queue-runner
 // sandbox" T3 project (it refuses to run without exactly one), the only T3 project a live check
-// may use: T3 starts a thread only in a project, and the brief sends it to the checkout. Without
-// `--pr`, it opens a small PR of its own in the sandbox (a branch with one flawed function) and
-// closes it, branch deleted, at the end. Costs one review thread.
+// may use: T3 starts a thread only in a project, and the brief sends it to the checkout. Costs one
+// review thread.
 //
-//     pnpm --dir app live:review [-- --pr N] [-- --run <instance>:<model>]
+// `--pr N` names the PR, and the check writes nothing to GitHub. With no PR open to review,
+// `--open-pr` instead opens a small one of its own (a branch with one flawed function), which
+// **writes to GitHub**: it pushes the branch and opens the PR, then closes it and deletes the
+// branch at the end. It runs with neither only to print this.
+//
+// `--run <instance>:<model>` names the instance and model, and the instance must be one set up
+// without outside tools (docs/reviews.md): naming it here is the check's `toolFreeInstances`, and
+// launchJob refuses any other. There's no default: T3's own may have every tool.
+//
+//     pnpm --dir app live:review -- --pr N --run <instance>:<model>
+//     pnpm --dir app live:review -- --open-pr --run <instance>:<model>
 import { execFileSync } from 'node:child_process';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -42,13 +51,23 @@ const check = (label: string, ok: boolean, detail = '') => {
 };
 const run = (cwd: string, program: string, ...args: string[]) => execFileSync(program, args, { cwd, encoding: 'utf8' }).trim();
 
+const asked = arg('--pr');
+const openPr = process.argv.includes('--open-pr');
+if (!arg('--run') || (asked === undefined) === !openPr) {
+  console.log('usage: live:review -- (--pr N | --open-pr) --run <instance>:<model>\n'
+    + '  --pr N      review open PR N in the sandbox; writes nothing to GitHub\n'
+    + '  --open-pr   open a small PR of its own to review (pushes a branch and opens a PR, closed and deleted at the end)\n'
+    + '  --run      an instance set up without outside tools, and a model on it');
+  process.exit(2);
+}
+
 const projects: any[] = (await mcp.call('t3_project_list', { cursor: 0, limit: 100 })).projects;
 const sandbox = projects.filter((p) => p.title === SANDBOX);
 if (sandbox.length !== 1) throw new Error(`expected one T3 project called "${SANDBOX}", found ${sandbox.length}: refusing`);
 const project = sandbox[0];
 
 const catalog: Catalog = catalogFromConfig((await ws.first('subscribeServerConfig', { workspaceSnapshotsOnDemand: true })).config);
-const [provider, ...rest] = (arg('--run') ?? `${catalog.t3Default?.provider}:${catalog.t3Default?.model}`).split(':');
+const [provider, ...rest] = arg('--run')!.split(':');
 const m = model(catalog, { provider: provider!, model: rest.join(':') });
 if (!m) throw new Error(`T3 has no model ${rest.join(':')} on ${provider}`);
 const choice: ModelChoice = { provider: provider!, model: m.id, effort: m.efforts[0]?.id ?? null };
@@ -59,8 +78,9 @@ run(state, 'gh', 'repo', 'clone', GITHUB, clone, '--', '--quiet');
 if (run(clone, 'gh', 'repo', 'view', '--json', 'nameWithOwner', '-q', '.nameWithOwner') !== GITHUB) throw new Error(`the clone isn't ${GITHUB}: refusing`);
 
 let opened: { number: number; branch: string } | null = null;
-let n = Number(arg('--pr') ?? 0);
-if (!n) {
+let n = Number(asked ?? 0);
+if (asked !== undefined && !(Number.isInteger(n) && n > 0)) throw new Error(`--pr ${asked} is not a PR number`);
+if (openPr) {
   // a PR of its own: one function with a bug a review should find
   const branch = `live-review-${Date.now()}`;
   run(clone, 'git', 'checkout', '-q', '-b', branch);
@@ -84,7 +104,7 @@ try {
   const jobs = { ...DEFAULT_JOBS, review: { own: choice, fallback: null } };
   const lane = new ReviewLane({
     repos: () => [], github, git: new GitCli(), deps: new Deps(join(state, 'deps')), mcp, ws, gate: noGate as any,
-    catalog: () => catalog, jobs: () => jobs,
+    catalog: () => catalog, jobs: () => jobs, toolFree: () => [choice.provider],
     user: async () => 'the live check', log, stateDir: state, poster: new DryRunPoster((l) => said.push(l)),
     say: (l) => { said.push(l); console.log(`  ${l}`); },
   });

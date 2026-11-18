@@ -46,7 +46,13 @@ describe('the settings', () => {
   test('a new install has the defaults', async () => {
     const store = await SettingsStore.open(await temp());
     expect(store.get()).toEqual(DEFAULT_SETTINGS);
-    expect(DEFAULT_SETTINGS).toEqual({ name: null, dateStyle: 'month-first', startWithWindows: true, jobs: DEFAULT_JOBS, shares: {}, repos: null, setupSeen: false });
+    expect(DEFAULT_SETTINGS).toEqual({ name: null, dateStyle: 'month-first', startWithWindows: true, jobs: DEFAULT_JOBS, shares: {}, repos: null, setupSeen: false, toolFreeInstances: [] });
+  });
+
+  test('the tool-free instances are a list of instance ids; anything else is refused', async () => {
+    const store = await SettingsStore.open(await temp());
+    expect((await store.set({ toolFreeInstances: [' reviewer ', 'reviewer', 'other'] })).toolFreeInstances).toEqual(['reviewer', 'other']);
+    for (const bad of ['reviewer', [''], [3], null]) await expect(store.set({ toolFreeInstances: bad as any })).rejects.toThrow(SettingsError);
   });
 
   test('a change is saved at once and survives a restart', async () => {

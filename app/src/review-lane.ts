@@ -14,10 +14,12 @@
 //   ->  post (src/review/post.ts): follow-ups, the comment, sol-review on H, the Review row
 //   ->  the end recorded, the checkout removed, the thread settled
 //
-// **No outside tools** (docs/reviews.md): a review runs on a T3 provider instance set up without
-// them, as today's fallback reviews run (#127). The app can't see an instance's tools without
-// naming its driver, so it holds today's rule: a review never runs on the instance the build kind
-// runs on, which has the build's tools. Such a review waits, and says why.
+// **No outside tools** (docs/reviews.md): a review runs only on a T3 provider instance the user
+// named as set up without them (`toolFreeInstances`), as today's fallback reviews run on the one
+// instance its config names (#127). The app can't see an instance's tools without
+// naming its driver, so the list is the user's word, and launchJob refuses any instance not on it.
+// The lane asks first, so such a review waits and says why instead of failing; nor does one run on
+// the instance builds run on, which has their tools, whatever the list says.
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { reviewBrief, said } from './briefs/review.ts';
@@ -26,7 +28,7 @@ import type { GitHubReview, ReviewPull } from './github.ts';
 import { prRef, type ReviewGit } from './git.ts';
 import { REVIEWED, type Job, type JobEnd, type JobLog } from './job-log.ts';
 import { kindModels, model, provider, type Catalog, type Jobs, type ModelChoice } from './jobs.ts';
-import { launchJob } from './launch.ts';
+import { launchJob, toolsHeld } from './launch.ts';
 import { closedIssues } from './picker.ts';
 import type { Deps } from './review/deps.ts';
 import { testsNote } from './review/deps.ts';
@@ -55,6 +57,8 @@ export type ReviewLaneDoors = {
   gate: Pick<UsageGate, 'pick' | 'check' | 'started' | 'finished' | 'dropped' | 'forget'>;
   catalog: () => Catalog | null;
   jobs: () => Jobs;
+  /** The instances set up without outside tools (the `toolFreeInstances` setting). */
+  toolFree: () => readonly string[];
   /** The user's name, for the comment's byline and the stop notes. */
   user: () => Promise<string>;
   log: JobLog;
@@ -231,7 +235,8 @@ export class ReviewLane {
     else if (!catalog) held = "T3's providers aren't known yet";
     else {
       const build = kindModels(this.d.jobs(), 'build', catalog).choice;
-      if (build && build.provider === v.choice.provider) {
+      if (!this.d.toolFree().includes(v.choice.provider)) held = toolsHeld(provider(catalog, v.choice.provider)?.label ?? v.choice.provider);
+      else if (build && build.provider === v.choice.provider) {
         held = `the review would run on ${provider(catalog, v.choice.provider)?.label ?? v.choice.provider}, the instance builds run on, which has their tools: a review needs an instance set up without outside tools (docs/reviews.md)`;
       }
     }
@@ -297,7 +302,7 @@ export class ReviewLane {
         });
         await write('brief.md', brief);
         this.d.say(`${name}: ${reviewer} reviews ${h.slice(0, 7)} (review ${round}) in ${runDir}`);
-        const launched = await launchJob(this.d.mcp, catalog, { kind: 'review', projectId: repo.id, title, brief, choice: letIn.choice });
+        const launched = await launchJob(this.d.mcp, catalog, { kind: 'review', projectId: repo.id, title, brief, choice: letIn.choice, toolFree: this.d.toolFree() });
         const thread = { threadId: launched.threadId, runId: launched.runId, link: launched.link };
         ran_.thread = thread;
         await this.d.log.thread(job.id, thread);

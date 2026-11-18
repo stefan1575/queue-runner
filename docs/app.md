@@ -375,13 +375,18 @@ every open PR in a served repo without a review on its newest commit gets one, w
   no room (#69); held, it says the gate's reason once and the pass ends. A pass runs at start (after
   an open review is watched to its end), on T3's usage and the repos changing, after each review
   (but not after one whose head moved, so a stale list can't loop it), and every minute.
-- **No outside tools** (`docs/reviews.md`, A review has no outside tools): a review runs on a T3
-  provider instance set up without them, as today's fallback reviews run (#127: `claudeReviewer`).
-  T3 serves each instance's launch arguments (`subscribeServerConfig`'s
-  `settings.providerInstances`, seen live 2026-11-19), but checking them would name a driver in
-  code, so the app keeps today's rule instead: a review never runs on the instance the build kind
-  runs on. Such a review waits and says why. A Codex instance for reviews needs its MCP servers off
-  in T3 (codex-sol.sh did that); setting one up is the cutover's.
+- **No outside tools** (`docs/reviews.md`, A review has no outside tools): a review runs only on
+  a T3 provider instance the user named as set up without them, the `toolFreeInstances` setting
+  (instance ids; empty on a new install, so no review runs until one is named), as today's
+  fallback reviews run only on the instance `[review]` names (#127: `claudeReviewer`). T3 serves
+  each instance's launch arguments (`subscribeServerConfig`'s `settings.providerInstances`, seen
+  live 2026-11-19), but reading them would name a driver in code, so the list is the user's word.
+  `launchJob` enforces it for every review, the lane's and the live check's alike, and fails
+  closed: a review on an instance not listed launches nothing. The lane asks first, so such a
+  review waits and says why rather than failing; nor does one run on the instance builds run on,
+  which has their tools, whatever the list says. The setting is in `settings.json` only, not yet
+  on the Settings page; a Codex instance for reviews needs its MCP servers off in T3 (codex-sol.sh
+  did that). Setting one up and listing it is the cutover's.
 - **The checkout:** the PR's head is fetched into `refs/queue-runner/pr<n>` with `origin/<base>`
   (a head that moved since listing is `head-moved`, nothing counts), and checked out detached at
   `<state>/checkouts/<repo>-pr<n>`, its dependencies linked in from `<state>/deps/`
@@ -593,13 +598,17 @@ is killed is code -1 with Node's reason in stderr, never a gh exit code (so is t
   asked. It checks the end was `done`, the branch is on `origin`, the thread ran in its own
   worktree on the job branch on the asked model, and it was settled. **Run 2026-11-19** on Haiku
   5.5 at low: all ok, in about 20 seconds.
-- `app/live/review.ts` (`pnpm --dir app live:review [-- --pr N] [-- --run <instance>:<model>]`):
-  today's `scripts/live_review.py` for the app, dry run. One real review of one real PR in
-  `stefan1575/queue-runner-sandbox` only (it refuses another clone), through `ReviewLane.review`
-  with a `DryRunPoster`, after saying what adoption would decide (the sandbox has no CI, so it
-  reviews anyway). The PR's clone is fresh in a temp folder; the thread runs in the "queue-runner
-  sandbox" T3 project, since none holds the GitHub sandbox. Without `--pr` it opens a small PR of
-  its own (one function with an off-by-one) and closes it, branch deleted, at the end. It checks a
+- `app/live/review.ts` (`pnpm --dir app live:review -- (--pr N | --open-pr) --run
+  <instance>:<model>`): today's `scripts/live_review.py` for the app, dry run. One real review of
+  one open PR in `stefan1575/queue-runner-sandbox` only (it refuses another clone), through
+  `ReviewLane.review` with a `DryRunPoster`, after saying what adoption would decide (the sandbox
+  has no CI, so it reviews anyway). The PR's clone is fresh in a temp folder; the thread runs in
+  the "queue-runner sandbox" T3 project, since none holds the GitHub sandbox. `--pr N` reviews that
+  PR and writes nothing to GitHub. `--open-pr` instead opens a small PR of its own (one function
+  with an off-by-one), which writes to GitHub: it pushes a branch and opens the PR, then closes it
+  and deletes the branch at the end. With neither (or both) it prints its usage and does nothing.
+  `--run` is required: its instance must be one set up without outside tools, and it's the check's
+  `toolFreeInstances` (T3's default may have every tool, so there's none by default). It checks a
   verdict was read from the ledger, the comment names its reviewer, nothing was posted and no
   `sol-review` set, the thread ran on the asked model and was settled, and the checkout is gone.
   **Run 2026-11-19** on `claudeReviewer` Haiku 5.5 at low: all ok, sandbox #4 reviewed blocking in

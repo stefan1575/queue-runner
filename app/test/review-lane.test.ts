@@ -85,6 +85,7 @@ let mcp: T3Mcp;
 let ws: T3Ws;
 let lines: string[];
 let jobs: Jobs;
+let toolFree: string[];
 let lane: ReviewLane;
 
 beforeEach(async () => {
@@ -104,6 +105,7 @@ beforeEach(async () => {
   log = await JobLog.open(join(dir, 'state', 'jobs.jsonl'));
   lines = [];
   jobs = { ...DEFAULT_JOBS, build: { own: BUILD, fallback: null }, review: { own: REVIEW, fallback: FALLBACK } };
+  toolFree = [REVIEW.provider, FALLBACK.provider];
 });
 afterEach(async () => {
   lane?.stop();
@@ -112,7 +114,7 @@ afterEach(async () => {
 
 function makeLane(part: Partial<ReviewLaneDoors> = {}) {
   lane = new ReviewLane({
-    repos: () => [APP], github: gh, git, deps: null, mcp, ws, gate: new RoomyGate(), catalog: () => catalog, jobs: () => jobs,
+    repos: () => [APP], github: gh, git, deps: null, mcp, ws, gate: new RoomyGate(), catalog: () => catalog, jobs: () => jobs, toolFree: () => toolFree,
     user: async () => 'Pat', log, stateDir: join(dir, 'state'), say: (l) => lines.push(l), retry: (open) => { const t = setTimeout(open, 5); return () => clearTimeout(t); },
     now: () => new Date('2026-11-19T12:00:00Z'), ...part,
   });
@@ -258,7 +260,35 @@ describe('a review', () => {
     expect(log.jobs().map((j) => j.end?.outcome)).toEqual(['head-moved']);
   });
 
-  test("never on the instance builds run on: it has the build's tools", async () => {
+  test("only on an instance named as set up without outside tools: another one, though not the build's, waits and launches nothing", async () => {
+    toolFree = [FALLBACK.provider];
+    makeLane();
+    await lane.pass();
+    expect(t3.launches).toEqual([]);
+    expect(log.jobs()).toEqual([]);
+    expect(lines.at(-1)).toMatch(/waits: the review would run on Codex, which isn't one of the instances set up without outside tools/);
+  });
+
+  test('with no instance named as set up without outside tools, no review runs', async () => {
+    toolFree = [];
+    makeLane();
+    await lane.pass();
+    expect(t3.launches).toEqual([]);
+    expect(lines.at(-1)).toMatch(/isn't one of the instances set up without outside tools/);
+  });
+
+  test('a review called directly (the live check) on an instance not named launches nothing and fails', async () => {
+    toolFree = [FALLBACK.provider];
+    makeLane();
+    const job = await lane.review(APP, pull(), { choice: REVIEW, onFallback: false, cost: {}, reviewer: 'R' });
+    expect(t3.launches).toEqual([]);
+    expect(job.end).toMatchObject({ outcome: 'failed' });
+    expect(job.end!.error).toMatch(/set up without outside tools/);
+    expect(git.calls.at(-1)).toMatch(/^removeCheckout /);
+  });
+
+  test("never on the instance builds run on: it has the build's tools, whatever the list says", async () => {
+    toolFree = [...toolFree, BUILD.provider];
     jobs = { ...jobs, review: { own: BUILD, fallback: null } };
     const gate = new RoomyGate();
     gate.pick = () => ({ fits: true as const, choice: BUILD, onFallback: false, cost: { five_hour: 15 } });
