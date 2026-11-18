@@ -1,0 +1,22 @@
+{
+  "$schema": "https://raw.githubusercontent.com/electron-userland/electron-builder/master/packages/app-builder-lib/scheme.json",
+  "appId": "com.stefan1575.queue-runner",
+  "productName": "Queue runner",
+  "directories": { "output": "installer-dist" },
+  "files": ["desktop-dist/**", "desktop/**", "package.json"],
+  "win": {
+    "target": [{ "target": "nsis", "arch": ["x64"] }],
+    "icon": "desktop/icon.png"
+  },
+  "nsis": {
+    "oneClick": true,
+    "perMachine": false,
+    "runAfterFinish": true,
+    "createStartMenuShortcut": true,
+    "createDesktopShortcut": false,
+    "shortcutName": "Queue runner",
+    "deleteAppDataOnUninstall": false,
+    "include": "installer/uninstall.nsh",
+    "artifactName": "Queue-runner-Setup-${version}.${ext}"
+  }
+}
