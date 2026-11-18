@@ -83,7 +83,8 @@ What each module and script is for.
   server and the control file), `sample.py` (the snapshot's shape, in every state), `earlier/`
   (the page before each rework, until its look is agreed).
 - `scripts/live_sandbox.py`, `scripts/live_review.py`, `scripts/live_fix_brief.py`,
-  `scripts/live_merge.py` and `scripts/live_mcp.py`: the live checks.
+  `scripts/live_merge.py` and `scripts/live_mcp.py`: the live checks. `scripts/live_runner_settle.py`
+  is today's runner's MCP client for the app's live check (`app/live/sign-in.ts`), not run on its own.
 - `scripts/shoot.py`: screenshots of the dashboard's sample states at any commit, for a PR's
   evidence (`docs/dashboard.md`, Screenshots).
 - `scripts/codex-sol.sh`: runs one Sol review in Codex at the effort it's given (`queue_runner/sol.py`).
@@ -92,3 +93,6 @@ What each module and script is for.
 - `scripts/make_shortcut.py`: makes the logon shortcuts, the runner's and the dashboard's
   (`--startup` copies both into the Startup folder); `scripts/live_wake.py`: the wake task's
   live check; `scripts/live_restart.py`: a restart onto broken code, toasted.
+- `app/`: the TypeScript rebuild (spec #68), apart from `queue_runner/`: `src/t3/` (T3's seams,
+  sign-in, MCP and WebSocket), `src/github.ts`, `src/projects.ts`, `src/app.ts` (the command
+  line), `test/` (on `test/fake-t3.ts`) and `live/` (its live checks). `docs/app.md`.

@@ -1,0 +1,19 @@
+{
+  "name": "queue-runner-app",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "start": "node src/main.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "live:sign-in": "node live/sign-in.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.2",
+    "typescript": "~5.9.3",
+    "vitest": "^3.2.7"
+  }
+}
