@@ -11,8 +11,9 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
-LD, QR = "leads-dashboard", "queue-runner"
-GH = {LD: "https://github.com/RoyalBullyAgency-RBA/leads-dashboard", QR: "https://github.com/stefan1575/queue-runner"}
+LD, QR, GB = "leads-dashboard", "queue-runner", "game-backdrop"
+GH = {LD: "https://github.com/RoyalBullyAgency-RBA/leads-dashboard", QR: "https://github.com/stefan1575/queue-runner",
+      GB: "https://github.com/stefan1575/game-backdrop"}
 # A made-up favicon for leads-dashboard, so the sample shows both marks: a favicon, and (queue-runner,
 # with none) the first two letters. The runner reads the real one from the repo (queue_runner/favicon.py).
 LD_ICON = ("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+"
@@ -40,6 +41,8 @@ DEFAULT = "busy"
 # Takes of the page before this one, kept while its look is being agreed: `serve.py` serves the
 # ones in `dashboard/earlier/` on the sample addresses, and the sidebar's sample menu links them.
 EARLIER = [
+    {"href": "/earlier/take-11.html", "label": "Take 11", "note": "The Queue as #107 and #109 decide it: repo by repo, side by side, one numbered list"},
+    {"href": "/earlier/take-10.html", "label": "Take 10", "note": "The Queue as three variants on two repos: features first, the page you land on, tracks"},
     {"href": "/earlier/take-9.html", "label": "Take 9", "note": "The Overview as three cards, the Queue still the old work list and pyramid"},
     {"href": "/earlier/take-8.html", "label": "Take 8", "note": "The Inbox as agreed, the Overview still the two lanes"},
     {"href": "/earlier/take-7.html", "label": "Take 7", "note": "Briefing layouts A, B and C, the rows before T3's shape"},
@@ -95,6 +98,7 @@ def build(name: str = DEFAULT, base: datetime | None = None, control: dict | Non
             # data: URL, or null (the page draws its first two letters).
             {"name": LD, "github": GH[LD], "icon": LD_ICON, "merge": "stefan", "stopped": None},
             {"name": QR, "github": GH[QR], "icon": None, "merge": "runner", "stopped": None},
+            {"name": GB, "github": GH[GB], "icon": None, "merge": "stefan", "stopped": None},
         ],
         # An ask is written to be picked up cold, a week later. `kind` is why it came to Stefan:
         # `stuck` (the runner tried and couldn't get it through), `decision` (a product decision
@@ -266,20 +270,29 @@ def build(name: str = DEFAULT, base: datetime | None = None, control: dict | Non
             {"job": "Live steps", "what": "After a merge, makes it live", "lane": "claude"},
             {"job": "Review", "what": "Reviews each PR head", "lane": "sol"},
         ],
-        # In build order (`_order`, below): the page shows them as they come. Each gets `tickets`,
-        # its tickets in the order they're built (`_tickets`, below).
-        "features": [
-            {"id": f"{LD}#225", "repo": LD, "n": 225, "title": "Analytics"},
-            {"id": f"{LD}#149", "repo": LD, "n": 149, "title": "Ring-to numbers"},
-            {"id": f"{LD}#220", "repo": LD, "n": 220, "title": "Client onboarding"},
-            {"id": f"{LD}#200", "repo": LD, "n": 200, "title": "Callers"},
-            {"id": f"{QR}#9", "repo": QR, "n": 9, "title": "Dashboard"},
-            {"id": f"{LD}#180", "repo": LD, "n": 180, "title": "Missed-call texts"},   # finished: every ticket is live
+        # PROTOTYPE (#30, take 11): efforts as a tree. A spec or a map, its `parent` the effort
+        # it's a sub-issue of (null at a repo's top), and `blocked_by` the effort's own blockers,
+        # which hold every ticket under it (#107). A ticket's effort is its `feature`.
+        "efforts": _efforts(),
+        # Each repo's Claude queue (#107), as the chooser takes it: what's running there, why
+        # nothing starts if nothing does, and the jobs that go before any build (decisions, live
+        # steps, fix rounds), each with the sentence that says why. The page adds the builds
+        # from the effort order, since dragging changes it (#109).
+        "repo_queues": _repo_queues(),
+        # Blockers in a repository the runner doesn't serve: named, never built (#107).
+        "outside": [
+            {"key": "fluent-icons#3", "repo": "fluent-icons", "n": 3, "title": "Export the tray icons at 16 and 20 px",
+             "url": "https://github.com/stefan1575/fluent-icons/issues/3"},
         ],
+        # The old takes read `features`: the efforts that hold tickets (`_order`, below, puts them
+        # in build order; `_tickets` gives each its tickets in the order they're built).
+        "features": [],
         "issues": _issues(),
         "prs": _prs(ago),
     }
     snap["activity"] = _activity(snap["prs"], ago)
+    held = {i["feature"] for i in snap["issues"]}
+    snap["features"] = [{k: e[k] for k in ("id", "repo", "n", "title")} for e in snap["efforts"] if e["id"] in held]
     _vary(snap, name, ago, ahead)
     for ask in snap["asks"] + snap["answered"]:
         ask.setdefault("decide", None)
@@ -360,45 +373,131 @@ _TIMELINES = {
 }
 
 
+def _efforts() -> list[dict]:
+    def e(repo, n, title, kind, parent=None, blocked_by=()):
+        return {"id": f"{repo}#{n}", "repo": repo, "n": n, "title": title, "kind": kind,
+                "parent": parent and f"{repo}#{parent}", "blocked_by": [f"{repo}#{b}" for b in blocked_by]}
+    return [
+        # leads-dashboard: a map holding two specs, then two specs of their own, and a finished one
+        e(LD, 140, "Client phone setup", "map"),
+        e(LD, 149, "Ring-to numbers", "spec", parent=140),
+        e(LD, 220, "Client onboarding", "spec", parent=140),
+        e(LD, 225, "Analytics", "spec"),
+        e(LD, 200, "Callers", "spec"),
+        e(LD, 240, "Third-party export", "spec"),
+        e(LD, 180, "Missed-call texts", "spec"),   # finished: every ticket is live
+        # queue-runner: the efforts Stefan orders it by (2026-11-17), the rebuild among them
+        e(QR, 120, "Queue page", "spec"),
+        e(QR, 121, "Inbox", "spec"),
+        e(QR, 122, "Usage", "spec"),
+        e(QR, 125, "Settings", "spec"),
+        e(QR, 68, "TypeScript rewrite", "spec", blocked_by=[30]),
+        # game-backdrop: its spec, and a second effort held by a blocker of its own
+        e(GB, 1, "Game Backdrop", "spec"),
+        e(GB, 22, "Backdrop themes", "spec", blocked_by=[4]),
+    ]
+
+
+def _repo_queues() -> list[dict]:
+    """The jobs that go before any build in each repo, as the chooser takes them (#107)."""
+    def j(kind, ref, title, why):
+        return {"kind": kind, "ref": ref, "title": title, "why": why}
+    return [
+        {"repo": LD, "jobs": [
+            j("fix", "PR #204", "Unassigned: assign several at once",
+              "A fix round comes before any build: open PRs finish first. Review 2 found one problem."),
+        ], "starts": None},
+        {"repo": QR, "jobs": [],
+         "starts": "Starts when the gate lets a second job in: leads-dashboard waited longest, so it went first."},
+        {"repo": GB, "jobs": [
+            j("decision", "PR #14", "Live changes while a game runs",
+              "A decision comes before any build: review 2 asked for a setting the spec doesn't name."),
+        ], "starts": "Starts after queue-runner's: the gate admits the repo that waited longest first."},
+    ]
+
+
 def _issues() -> list[dict]:
-    def i(repo, n, title, state, feature=None, pr=None, blocked_by=(), note=None):
+    def i(repo, n, title, state, feature=None, pr=None, blocked_by=(), note=None, fix=None, filed=False):
         return {"repo": repo, "n": n, "title": title, "state": state, "feature": feature and f"{repo}#{feature}",
-                "pr": pr, "blocked_by": [f"{repo}#{b}" for b in blocked_by], "note": note, "pick": None}
+                "pr": pr, "blocked_by": [b if isinstance(b, str) else f"{repo}#{b}" for b in blocked_by],
+                "note": note, "pick": None, "fix": fix, "runner_filed": filed}
     # `state` is where a ticket stands. Done means live: `done` once its live steps ran, `merged`
     # while it's merged and they haven't. Then `review` and `fixing` (in a PR), `building`, `you`
-    # (it waits on Stefan), `ready`, `blocked` and `not-ready`.
+    # (an ask in the Inbox), `ready-for-human` (Stefan builds it), `needs-triage` (he decides what
+    # it becomes; no label counts as this), `fixing-itself` (#108: the runner got stuck on it and
+    # filed `fix`, which it builds first), `ready` (ready-for-agent, nothing open in its way) and
+    # `blocked`. A blocker in another repo is named `repo#n`.
     return [
-        i(LD, 226, "Store call events", "ready", 225),
-        i(LD, 227, "Daily rollup of events", "blocked", 225, blocked_by=[226]),
-        i(LD, 228, "Charts page", "blocked", 225, blocked_by=[227]),
-        i(LD, 229, "Lead source report", "blocked", 225, blocked_by=[227, 196]),
-        i(LD, 230, "Export analytics as CSV", "blocked", 225, blocked_by=[228]),
-        i(LD, 196, "Lead source on every call", "done", 225),
-        i(LD, 217, "Call length on every call", "review", 225, pr=232, note="PR #232 waits for its review, after PR #210"),
+        # leads-dashboard
         i(LD, 151, "Save a Client's ring-to number", "done", 149),
         i(LD, 188, "Ring-to number in the call log", "merged", 149, pr=203,
           note="Its live steps wait for the review of PR #210"),
         i(LD, 191, "A Client's Twilio number on their page", "you", 149, pr=207, note="PR #207 is ready for you to merge"),
         i(LD, 150, "Ring-to number per Client", "you", 149, pr=152, note="PR #152 waits for your decision"),
         i(LD, 216, "Ring-to audit page", "blocked", 149, blocked_by=[150]),
+        i(LD, 233, "Register the A2P brand in Twilio", "ready-for-human", 149),
+        i(LD, 235, "Text callers from the ring-to number", "blocked", 149, blocked_by=[233]),
         i(LD, 214, "Client onboarding form", "you", 220, note="Its build waits for your answer"),
         i(LD, 215, "SEO questions on the form", "blocked", 220, blocked_by=[214]),
         i(LD, 223, "Welcome email after the form", "blocked", 220, blocked_by=[214]),
+        i(LD, 226, "Store call events", "ready", 225),
+        i(LD, 227, "Daily rollup of events", "blocked", 225, blocked_by=[226]),
+        i(LD, 228, "Charts page", "blocked", 225, blocked_by=[227]),
+        i(LD, 229, "Lead source report", "blocked", 225, blocked_by=[227, 196]),
+        i(LD, 230, "Export analytics as CSV", "blocked", 225, blocked_by=[228, 218]),
+        i(LD, 196, "Lead source on every call", "done", 225),
+        i(LD, 217, "Call length on every call", "review", 225, pr=232, note="PR #232 waits for its review, after PR #210"),
         i(LD, 193, "Caller notes on the caller's page", "done", 200),
         i(LD, 205, "Callers list: filter by tag", "review", 200, pr=210, note="Sol is reviewing PR #210"),
         i(LD, 212, "Archive view for old callers", "building", 200, note="Claude is building it"),
         i(LD, 213, "Callers list: sort by last call", "ready", 200),
-        i(LD, 218, "Export calls as CSV", "not-ready", 200, note="Not marked ready-for-agent"),
+        i(LD, 218, "Export calls as CSV", "needs-triage", 200),
         i(LD, 181, "Text the caller back when a call is missed", "done", 180),
         i(LD, 183, "A Client's own wording for the text", "done", 180),
         i(LD, 185, "Stop texting a caller who opts out", "done", 180),
         i(LD, 199, "Unassigned: assign several at once", "fixing", pr=204, note="Its fix round on PR #204 is next"),
-        i(LD, 211, "Domain health check", "ready"),
-        i(QR, 5, "Publish the snapshot the dashboard reads", "ready", 9),
-        i(QR, 6, "Read control.json: stop a lane, build order", "ready", 9),
-        i(QR, 7, "Start the dashboard at logon", "blocked", 9, blocked_by=[5]),
-        i(QR, 8, "Stop now through T3's interrupt", "blocked", 9, blocked_by=[6, 7]),
+        i(LD, 211, "Domain health check", "fixing-itself", pr=224, fix=f"{QR}#112",
+          note="PR #224's two reviews failed on one head"),
+        i(LD, 237, "Write the live-steps doc for Lovable Cloud", "ready"),
+        i(LD, 244, "Store each Client's export keys", "done", 240),
+        i(LD, 241, "Send new leads to HubSpot", "ready", 240),
+        i(LD, 242, "Field mapping per Client", "blocked", 240, blocked_by=[241]),
+        i(LD, 243, "Nightly sync with a retry log", "blocked", 240, blocked_by=[242]),
+        i(LD, 245, "Which CRMs besides HubSpot?", "needs-triage", 240),
+        # queue-runner
+        i(QR, 30, "Prototype the Queue page", "ready-for-human", 120),
+        i(QR, 107, "The queue says what each repo takes up next, and why", "needs-triage", 120, blocked_by=[30]),
+        i(QR, 109, "Order a repo's efforts by dragging them", "needs-triage", 120, blocked_by=[107]),
+        i(QR, 34, "Stop now through T3's interrupt", "blocked", 120, blocked_by=[30]),
+        i(QR, 72, "A stale ask reopens in a fresh thread", "done", 121),
+        i(QR, 92, "Ask marks survive a restart", "review", 121, pr=104, note="PR #104 waits for its review"),
+        i(QR, 131, "Snooze an ask until a time you pick", "ready", 121),
+        i(QR, 132, "Group asks by repository", "blocked", 121, blocked_by=[131]),
+        i(QR, 66, "One budgeted reader for Claude's usage", "done", 122),
+        i(QR, 111, "Usage card: back to the first prototype's look", "ready", 122),
+        i(QR, 133, "Fable's week under Weekly", "blocked", 122, blocked_by=[111]),
+        i(QR, 36, "Settings laid out as T3 Code's", "done", 125),
+        i(QR, 134, "Connections page in Settings", "ready", 125),
+        i(QR, 110, "Rebuild: the snapshot and control files", "ready", 68),
+        i(QR, 135, "Rebuild: the dashboard in React", "blocked", 68, blocked_by=[110]),
+        i(QR, 108, "The runner fixes what it gets stuck on, and carries on", "needs-triage", 68),
+        i(QR, 113, "Live steps read the repo's own doc", "blocked", 68, blocked_by=[f"{LD}#237"]),
         i(QR, 3, "Wake tasks survive DST", "review", pr=4, note="Clean; its checks are running"),
+        i(QR, 93, "A failed check names its step", "review", pr=105, note="PR #105 waits for its review, after PR #104"),
+        i(QR, 112, "A rebased head's reviews count as one", "ready", filed=True,
+          note="Filed by the runner: PR #224 in leads-dashboard got stuck on it"),
+        # game-backdrop
+        i(GB, 2, "Tray app that restyles a windowed game", "done", 1),
+        i(GB, 3, "Black backdrop bound to the game", "done", 1),
+        i(GB, 4, "Live changes while a game runs", "review", 1, pr=14, note="A decision thread settles review 2's question first"),
+        i(GB, 5, "Ctrl+Alt+B hotkey toggles the backdrop", "ready", 1),
+        i(GB, 6, "Keep the mouse inside the game", "ready", 1),
+        i(GB, 7, "Game list window", "ready", 1),
+        i(GB, 8, "Start at logon and a single .exe", "ready", 1),
+        i(GB, 9, "Games that run as administrator", "blocked", 1, blocked_by=[8]),
+        i(GB, 23, "Theme picker in the tray", "blocked", 22),
+        i(GB, 24, "Image backdrops", "blocked", 22),
+        i(GB, 19, "Tray icon in the Windows 11 style", "blocked", blocked_by=["fluent-icons#3"]),
     ]
 
 
@@ -618,9 +717,9 @@ def _vary(snap: dict, name: str, ago, ahead) -> None:
         _repo(snap, LD)["stopped"] = {"at": ago(6)}   # after the jobs on it began
     elif name == "side-by-side":   # #50: each repo runs its own Claude job
         claude = _lane(snap, "claude")
-        _issue(snap, QR, 5).update(state="building", note="Claude is building it")
+        _issue(snap, QR, 112).update(state="building", note="Claude is building it")
         claude["jobs"] = [claude["job"], {
-            "kind": "build", "repo": QR, "ref": "#5", "title": "Publish the snapshot the dashboard reads",
+            "kind": "build", "repo": QR, "ref": "#112", "title": "A rebased head's reviews count as one",
             "started_at": ago(8), "sha": None, "pr": None, "thread": T3 + "6b1d0a52-5d0e-4c7b-9f4e-2f0c0c1b8e11"}]
         claude["job"] = claude["jobs"][-1]
     elif name == "no-interrupt":
