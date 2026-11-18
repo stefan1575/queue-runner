@@ -413,9 +413,9 @@ python3 -m dashboard    # http://queue.localhost/ is the runner's; http://localh
 
 ## Screenshots
 
-A PR that changes anything the page shows (whichever module the cause is in) needs before and
-after screenshots of each sample state it touches (`templates/build.md`, Screenshots;
-Stefan, 2026-11-17). `scripts/shoot.py` runs the dashboard from the checkout, or from any commit with
+A PR that changes what the page shows gets a before and an after screenshot of the change its
+ticket asked for (`templates/build.md`, Screenshots: what a screenshot is for, and when there
+are enough). `scripts/shoot.py` runs the dashboard from the checkout, or from any commit with
 `--commit`, on a free port of its own, and shoots `?sample=STATE&page=PAGE` at 1440×900:
 
 ```
@@ -429,3 +429,47 @@ without (`--label before|after` overrides), so both land in one folder side by s
 `sample.STATES` first, so it can be shot; when the before has no such state, shoot the closest one
 and say so. Don't use the dashboard already on 5289 for this: it may be running older code. The
 review copies the PR's shots into Sol's run folder (`docs/reviews.md`).
+
+**A change to what the runner does shows only in its own data, so it's shot from a state folder**
+(issue #136). A sample state is drawn by hand in `sample.py` and never runs the runner's code, so
+a change to, say, when the Sol lane's wait ends looks the same in it before and after; and
+`localhost:<port>` only ever serves sample data (One process, above), which is how #131's before
+and after both came out as the default sample page. Build a state folder the change shows in,
+then give it to `shoot.py --state-dir`, which serves it and shoots the runner's address,
+`http://queue.localhost:<port>/?page=PAGE`, from the checkout or from `--commit`. NAME only names
+the files (`before-NAME-PAGE.png`, `after-NAME-PAGE.png`):
+
+```
+PYTHONPATH=. python3 sol_wait_state.py states/sol-wait       # the folder, from a script outside the repo
+python3 scripts/shoot.py --commit origin/main --state-dir states/sol-wait --out shots sol-wait   # before
+python3 scripts/shoot.py --state-dir states/sol-wait --out shots sol-wait                         # after
+```
+
+The script writes the job log through `state.append_record` (`JobLog`'s methods write through
+it) and then the snapshot the dashboard reads, as #131's evidence did. Sol out of usage, waiting
+three days:
+
+```python
+import dataclasses, datetime, os, sys
+from queue_runner import snapshot
+from queue_runner.config import load_config
+from queue_runner.state import OUT_OF_USAGE, JobLog
+
+state = os.path.abspath(sys.argv[1])
+now = datetime.datetime.now(datetime.timezone.utc)
+log = JobLog(os.path.join(state, 'jobs.jsonl'))
+job = log.started(kind='review', repo='queue-runner', issue=None, branch='claude/x', title='PR #1')
+log.ended(job.id, exit_code=0, outcome=OUT_OF_USAGE,
+          resume_at=(now + datetime.timedelta(days=3)).isoformat(timespec='seconds'))
+config = dataclasses.replace(load_config(), state_dir=state)
+snaps = snapshot.Snapshots(config, calls=snapshot.Calls(lambda: now), claude=None, sol=None,
+                           info=snapshot.RunnerInfo(os.getpid(), now, None), clock=lambda: now)
+snapshot.write(os.path.join(state, 'snapshot.json'), snaps.build())
+```
+
+When the change is in how the snapshot is built, write the snapshot with each checkout's code
+(run the script once from a worktree at the before commit, into its own folder) and shoot each
+folder from its own commit; when it's only in the page, one folder serves both. A build opens
+only its after shots, so `scripts/evidence.py publish` refuses a `before-X.png` and
+`after-X.png` with the same bytes, naming both: reshoot from a folder the change shows in, or write
+`Screenshot owed: <why>` in the Evidence.

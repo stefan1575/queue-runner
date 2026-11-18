@@ -47,8 +47,9 @@ The review loop's rules are `docs/flow.md`, The review loop; leads-dashboard's
    closes with its comments, `conversation.md` (comments, review threads, review bodies, earlier
    ledgers). `evidence/`: the PR's screenshots, copied from `pr-<n>/` on the repo's
    `evidence` branch (`GitCli.evidence`; origin unreadable fails the review, so it's tried
-   again, rather than reading as no screenshots); the brief's check 5 has Sol look at them and block a
-   visible change without them (the rule build jobs follow is in `templates/build.md`, Screenshots). `brief.md` (`templates/review.md`) lists them, points to `AGENTS.md`, has
+   again, rather than reading as no screenshots); the brief's check 5 has Sol look at them and block when,
+   reading only the PR, it can't see the change the ticket asked for (what build jobs are told is
+   in `templates/build.md`, Screenshots). `brief.md` (`templates/review.md`) lists them, points to `AGENTS.md`, has
    `REVIEW.md` in full and, from review 2, the open findings, the classes so far, the IDs used
    and the replies since the last review. A finding's `class` names its cause, what in the code
    lets the failure happen, not the symptom: the fix brief (`templates/fix.md`, How to work) has

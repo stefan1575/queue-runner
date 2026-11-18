@@ -87,8 +87,9 @@ no tokens. Every fixed step is the script's; an agent is started only for work t
    statuses and file issues, but not edit code.
 3. **Three tags:**
    - **Important** blocks. It needs file:line and a concrete failure, or a documented rule the
-     change breaks. So is a change to what a person sees without before and after screenshots of
-     each state it touches, or a `Visible: no` the diff contradicts.
+     change breaks. So is a change to what a person looks at that someone reading only the PR
+     can't see (`templates/build.md`, Screenshots: what a screenshot is for, and when there are
+     enough).
    - **Nit** is optional, at most five, and needs no fix round.
    - **Pre-existing** becomes a linked `needs-triage` issue, unless it loses or exposes data,
      which makes it Important.

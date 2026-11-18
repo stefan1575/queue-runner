@@ -7,7 +7,9 @@
 `shoot` renders a page in headless Edge. `screen` captures the whole desktop (a Windows app such
 as game-backdrop; it fails while the PC is locked). `publish` commits the files to the repo's
 `evidence` branch on origin, never touching the working tree or the checked-out branch, and
-prints one Markdown image line per file, pinned to that commit, for a PR body or comment.
+prints one Markdown image line per file, pinned to that commit, for a PR body or comment. It
+refuses a `before-X.png` and `after-X.png` whose bytes are the same, naming both, and publishes
+nothing: no one opens the shots before the review, so this is the check that they differ.
 
 Standard library only. Build jobs use it as `templates/build.md` says.
 """
@@ -82,7 +84,23 @@ def image_lines(slug: str, commit: str, paths: list[str]) -> list[str]:
     return [f"![{Path(p).stem}](https://github.com/{slug}/blob/{commit}/{p}?raw=true)" for p in paths]
 
 
+def identical_pairs(files: list[Path]) -> list[tuple[Path, Path]]:
+    """Each `before-X` among `files` whose `after-X` (same folder or not) has the same bytes."""
+    after = {f.name[len("after-"):]: f for f in files if f.name.startswith("after-")}
+    return [(f, after[f.name[len("before-"):]]) for f in files
+            if f.name.startswith("before-") and f.name[len("before-"):] in after
+            and f.read_bytes() == after[f.name[len("before-"):]].read_bytes()]
+
+
 def publish(repo: Path, into: str, files: list[Path]) -> list[str]:
+    if same := identical_pairs(files):
+        # Issue #136: on #131 both shots were the sample page, and it cost a review round.
+        sys.exit("evidence: nothing published; these before and after shots are byte-identical, "
+                 "so they can't show a change:\n"
+                 + "".join(f"  {b} = {a}\n" for b, a in same)
+                 + "Reshoot what the change touches (a change that shows only in the app's own "
+                   "data is shot from that data: the repo's docs say how), or write "
+                   "`Screenshot owed: <why>` in the PR's Evidence instead.")
     into = into.strip("/")
     paths = [f"{into}/{f.name}" for f in files]
     for attempt in range(4):

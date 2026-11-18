@@ -6,6 +6,7 @@ import datetime
 import os
 import tempfile
 import unittest
+from unittest import mock
 
 from queue_runner.config import Config, Repo
 from queue_runner.fallback import ThreadReviews
@@ -70,6 +71,13 @@ class SolBackTest(unittest.TestCase):
             issue_bodies={('owner/first', 5): Issue(5, 'Red widget', 'Make the widget red.')})
         self.git = FakeReviewGit(heads={20: H2}, files={'AGENTS.md': '# Agents'})
         self.clock = Clock(NOW)
+        # The job log stamps records with the wall clock; on the test's clock instead, so
+        # its fixed times stay later than a review's end whatever the real date is (these
+        # tests broke once the wall clock passed OUT_AT + 3h, on 2026-11-18).
+        stamp = mock.patch('queue_runner.state._now', lambda: self.clock().astimezone()
+                           .isoformat(timespec='seconds'))
+        stamp.start()
+        self.addCleanup(stamp.stop)
         self.sol_out()
 
     def sol_out(self, at=OUT_AT, resume=RESUME, id='out'):
