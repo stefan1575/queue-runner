@@ -98,8 +98,8 @@ Ticket 10 (`docs/flow.md`, The runner and Limits).
 ## Serving itself
 
 Ticket 14. The runner serves its own repo, `stefan1575/queue-runner` (`config.toml`, last, after
-game-backdrop and leads-dashboard; game-backdrop is first since 2026-11-15, Stefan's first run
-under the dashboard): GitHub issues, builds, Sol reviews, and it merges its own clean PRs.
+game-backdrop, first since 2026-11-15, Stefan's first run under the dashboard; leads-dashboard
+was served until 2026-11-19): GitHub issues, builds, Sol reviews, and it merges its own clean PRs.
 `.github/workflows/tests.yml` runs `python -m unittest` on Windows on every PR and on main, so
 "checks passed on H" means the tests passed on H.
 
