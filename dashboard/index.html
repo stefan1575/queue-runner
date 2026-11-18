@@ -2400,7 +2400,9 @@ document.addEventListener("dragstart", (e) => {
   if (!el) return;
   dragging = { id: el.dataset.drag, parent: el.dataset.parent };
   e.dataTransfer.effectAllowed = "move";
-  e.dataTransfer.setData("text/plain", dragging.id);
+  // Take 15: a type of its own, not text/plain, so Firefox never takes a stray drop for a link
+  // or a search; Chrome and Firefox both need some data set for the drag to start.
+  e.dataTransfer.setData("application/x-queue-effort", dragging.id);
   // What's carried is one line with the effort's name, however tall its row is.
   const chip = document.createElement("div");
   chip.className = "drag-chip";
@@ -2427,6 +2429,7 @@ document.addEventListener("dragover", (e) => {
   t.el.classList.add(t.before ? "drop-before" : "drop-after");
 });
 document.addEventListener("drop", (e) => {
+  if (dragging) e.preventDefault();   // a drop anywhere else does nothing, in every browser
   const t = dropTarget(e);
   clearMarks();
   if (!t) return;
