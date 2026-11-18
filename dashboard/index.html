@@ -1205,7 +1205,7 @@ body.q-dragging .q12:not(.v-b) .er { background: var(--surface); }
 .r14 .card-head h2 { font: 600 17px/1.2 var(--display); }
 .r14 .card-head .hi { width: 18px; height: 18px; color: var(--mute); }
 /* A bar: the share left over a plain track. Empty is just the track, the same size as every other. */
-.rb { display: block; position: relative; overflow: hidden; height: 6px; border-radius: 99px; background: var(--btn-line); }
+.rb { display: block; position: relative; overflow: hidden; height: 8px; border-radius: 99px; background: var(--sunk); border: 1px solid var(--mute); }
 .rb .fill { position: absolute; inset: 0 auto 0 0; background: var(--ink-2); border-radius: 99px; }
 .rb .kept { position: absolute; inset: 0 auto 0 0; background: var(--you); opacity: .6; border-radius: 99px; }
 .rb.near .fill { background: var(--run); }
@@ -1213,7 +1213,7 @@ body.q-dragging .q12:not(.v-b) .er { background: var(--surface); }
 .rb.t1 { height: 8px; } .rb.t2 { height: 5px; } .rb.t3 { height: 4px; }
 .pct { font-weight: 400; color: var(--ink); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .pct small { font-size: 12.5px; color: var(--mute); font-weight: 400; }
-.pct.near { color: var(--run); } .pct.out { color: var(--bad); }
+.pct.near { color: var(--run); }   /* take 17: 0% is the plain colour, like the rest */
 .r-when { font-size: 12.5px; color: var(--dim); }
 .p-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
 .p-head .who { font-size: 16px; font-weight: 600; }
@@ -1268,7 +1268,7 @@ body.q-dragging .q12:not(.v-b) .er { background: var(--surface); }
 .repo14 .doing.claude .mark { color: var(--claude); } .repo14 .doing.chatgpt .mark { color: var(--openai); }
 .repo14 .doing span { font-weight: 400; }
 .repo14 .doing .for { color: var(--dim); }
-.repo14 .idle { font-size: 13.5px; color: var(--mute); margin-top: 2px; }
+.repo14 .idle { font-size: 13.5px; color: var(--mute); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .repo14 .btn { margin-top: 1px; }
 /* Health: every item the same: a dot and a name. */
 .h14 { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 10px 16px; font-size: 15px; }
@@ -2834,14 +2834,19 @@ function repos14() {
   return `<ul class="repo14">${(snap.repos || []).map((r) => {
     const name = r.name, a = (ctl.repos || {})[name], pending = a && !wasRead(a.at) && !!a.stop !== !!r.stopped;
     const off = pending ? !!a.stop : !!r.stopped;
-    const jobs = at(name).map(([l, j]) => `<p class="doing ${esc(l.provider || "")}" title="${esc(l.name)}: ${esc(j.title || "")}">${MARK[l.provider] || ""}<span>${esc(kind(j.kind)[0])} ${esc(j.ref)}</span><span class="for">${esc(ago(j.started_at))}</span></p>`).join("");
+    // Take 17: one plain line, the same size whatever it says. What each lane is doing here (Claude
+    // builds and fixes, ChatGPT reviews, so the verb says which), else why nothing is. Who, what
+    // and for how long are on hover.
+    const here = at(name);
+    const jobs = here.map(([, j]) => `${kind(j.kind)[0]} ${j.ref}`).join(" · ");
+    const hover = here.map(([l, j]) => `${l.name}: ${kind(j.kind)[0].toLowerCase()} ${j.ref} ${j.title || ""}, ${ago(j.started_at)} in`).join(". ");
     const quiet = pending ? (a.stop ? "Asked to stop" : "Asked to resume")
       : r.stopped ? `Stopped${r.stopped.at ? ` since ${when(r.stopped.at)}` : ""}`
-      : jobs ? "" : r.wait ? `Waiting: ${r.wait.reason.replace(/\.$/, "")}` : "Idle";
+      : jobs ? jobs : r.wait ? `Waiting: ${r.wait.reason.replace(/\.$/, "")}` : "Idle";
     const btn = stale ? "" : off
       ? `<button class="btn sm icon solid" data-act="repostop" data-repo="${esc(name)}" data-how="" aria-label="Resume ${esc(name)}" title="Resume">${ICON.play}</button>`
       : `<button class="btn sm icon" data-act="repostop" data-repo="${esc(name)}" data-how="after-job" aria-label="Stop ${esc(name)}" title="Stop: a job running on it finishes; then neither lane takes up its work">${ICON.pause}</button>`;
-    return `<li${r.stopped ? ' class="off"' : ""}>${repoLogo(name)}<div class="body"><p class="nm">${esc(name)}</p>${quiet ? `<p class="idle">${esc(quiet)}</p>` : ""}${jobs}</div>${btn}</li>`;
+    return `<li${r.stopped ? ' class="off"' : ""}>${repoLogo(name)}<div class="body"><p class="nm">${esc(name)}</p><p class="idle"${hover ? ` title="${esc(hover)}"` : ""}>${esc(quiet)}</p></div>${btn}</li>`;
   }).join("")}</ul>`;
 }
 // Health: a dot and a name each, the runner one of the things on this PC. Since when is on hover only.
