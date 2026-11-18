@@ -23,6 +23,8 @@ jobs:
     defaults:
       run:
         working-directory: app
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: '1' # the tests fake Electron; only the typings are needed
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
