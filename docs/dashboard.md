@@ -413,9 +413,9 @@ python3 -m dashboard    # http://queue.localhost/ is the runner's; http://localh
 
 ## Screenshots
 
-A PR that changes anything the page shows (whichever module the cause is in) needs before and
-after screenshots of each sample state it touches (`templates/build.md`, Screenshots;
-Stefan, 2026-11-17). `scripts/shoot.py` runs the dashboard from the checkout, or from any commit with
+A PR that changes what the page shows gets a before and an after screenshot of the change its
+ticket asked for (`templates/build.md`, Screenshots: what a screenshot is for, and when there
+are enough). `scripts/shoot.py` runs the dashboard from the checkout, or from any commit with
 `--commit`, on a free port of its own, and shoots `?sample=STATE&page=PAGE` at 1440×900:
 
 ```
@@ -469,7 +469,7 @@ snapshot.write(os.path.join(state, 'snapshot.json'), snaps.build())
 
 When the change is in how the snapshot is built, write the snapshot with each checkout's code
 (run the script once from a worktree at the before commit, into its own folder) and shoot each
-folder from its own commit; when it's only in the page, one folder serves both. Nothing opens the
-shots before the review, so `scripts/evidence.py publish` refuses a `before-X.png` and
+folder from its own commit; when it's only in the page, one folder serves both. A build opens
+only its after shots, so `scripts/evidence.py publish` refuses a `before-X.png` and
 `after-X.png` with the same bytes, naming both: reshoot from a folder the change shows in, or write
 `Screenshot owed: <why>` in the Evidence.

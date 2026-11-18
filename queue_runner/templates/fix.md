@@ -66,15 +66,17 @@ $threads
   naming the finding's ID, the reason and the evidence. The best evidence is a test, committed
   and pushed, that passes now and would fail if the finding were right. Sol reconsiders a decline
   once, in the next review.
-- **A missing or wrong screenshot finding:** shoot and publish them with the runner's script
+- **A missing or wrong screenshot finding:** the shots are enough when someone reading only the
+  PR can see the change the ticket asked for, so shoot the screen the finding names. Shoot and
+  publish with the runner's script
   (`python3 -I $evidence shoot URL OUT.png --size 1440x900`, or `screen OUT.png` for the
   desktop, then `publish --repo . --into pr-$number FILE.png ...`, which prints the image lines),
-  don't open them yourself, add them to the PR body, and push (an empty commit if the
-  code didn't change, so there is a new head to review). A change that shows only in the app's
-  own data is shot from that data, not a sample page: the repo's docs say how. If `publish`
-  refuses a before and after as byte-identical, the shot missed the change: reshoot it, or
-  write `Screenshot owed: <why>`. If the screen can't be captured, say so on the PR and end
-  your turn.
+  open the new after shots once to check they show it, add them to the PR body, and push (an
+  empty commit if the code didn't change, so there is a new head to review). A change that
+  shows only in the app's own data is shot from that data, not a sample page: the repo's docs
+  say how. If `publish` refuses a before and after as byte-identical, the shot missed the
+  change: reshoot it, or write `Screenshot owed: <why>`. If the screen can't be captured, say so
+  on the PR and end your turn.
 - Commit after every step, with the decision in the commit message: what you chose and why. A
   usage limit can cut this thread off at any point, and the next job starts from your commits.
 - End the round by pushing to `$branch`. A round that ends without a push isn't reviewed again:
