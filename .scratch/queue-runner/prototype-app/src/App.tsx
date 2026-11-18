@@ -3,26 +3,29 @@
 import * as Dialog from "@radix-ui/react-dialog";
 import * as Popover from "@radix-ui/react-popover";
 import { CirclePause, Gauge, Menu, Play, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Toaster, toast } from "sonner";
 import { Lanes } from "./components/Lanes";
 import { NeedsList } from "./components/NeedsList";
+import { Popup } from "./components/Popup";
 import { PAGES, Sidebar } from "./components/Sidebar";
 import { UsageCard } from "./components/UsageCard";
 import { Work } from "./components/Work";
 import { cn } from "./lib/cn";
-import { useUrl } from "./lib/router";
+import { navigate, useUrl } from "./lib/router";
 import { ActivityPage } from "./pages/Activity";
 import { PrDrawer } from "./pages/PrDetail";
 import { SettingsPage } from "./pages/Settings";
 import { UsagePage } from "./pages/Usage";
 import { StoreProvider, useStore } from "./store";
 
+const COLUMN = "mx-auto max-w-[1180px] min-[1600px]:mr-[max(344px,calc((100%-1180px)/2))]";
+
 function TopBar({ title, onMenu, usageOpen, toggleUsage }: { title: string; onMenu: () => void; usageOpen: boolean; toggleUsage: () => void }) {
   const { live } = useStore();
   return (
     <header className="sticky top-0 z-30 border-b border-line bg-page/90 px-4 backdrop-blur md:px-6">
-      <div className="mx-auto flex h-14 max-w-[1180px] items-center gap-3 min-[1600px]:mr-[max(344px,calc((100%-1180px)/2))]">
+      <div className={cn("flex h-14 items-center gap-3", COLUMN)}>
       <button type="button" onClick={onMenu} className="-ml-1 rounded-lg p-1.5 hover:bg-sunk md:hidden" aria-label="Open menu"><Menu className="size-5" /></button>
       <h1 className="text-[20px] font-semibold tracking-[-0.01em]">{title}</h1>
       <div className="ml-auto flex items-center gap-2">
@@ -108,7 +111,12 @@ function Main() {
   const [menu, setMenu] = useState(false);
   const [usage, setUsage] = useState(false);
   useEffect(() => { document.title = `${world.asks.length ? `(${world.asks.length}) ` : ""}Queue runner`; }, [world.asks.length]);
-  const page = PAGES.find((p) => p.path === path) ?? PAGES[0];
+  // Settings and Usage are pop-ups, not pages: the page you were on stays behind them.
+  const popup = path === "/settings" || path === "/usage" ? path : null;
+  const behind = useRef("/");
+  if (!popup && PAGES.some((p) => p.path === path)) behind.current = path;
+  const page = PAGES.find((p) => p.path === (popup ? behind.current : path)) ?? PAGES[0];
+  const close = () => navigate(behind.current);
 
   return (
     <div className="flex min-h-full">
@@ -127,20 +135,20 @@ function Main() {
       <div className="flex min-w-0 flex-1 flex-col">
         <TopBar title={page.label} onMenu={() => setMenu(true)} usageOpen={usage} toggleUsage={() => setUsage(!usage)} />
         <main id="main" className={cn("flex-1 px-4 py-5 md:px-6", world.runner.process === "stopped" && "[&_section]:opacity-80")}>
-          <div className="mx-auto max-w-[1180px] space-y-4 min-[1600px]:mr-[max(344px,calc((100%-1180px)/2))]">
+          <div className={cn("space-y-4", COLUMN)}>
           <Banner />
           {page.path === "/" && <Dashboard />}
           {page.path === "/activity" && <ActivityPage />}
-          {page.path === "/usage" && <UsagePage />}
-          {page.path === "/settings" && <SettingsPage />}
           </div>
         </main>
       </div>
 
       {/* Wide windows: always in view on the right. Narrower: opened from the top bar. */}
-      {page.path !== "/usage" && <UsageCard className="fixed right-6 top-[76px] z-20 hidden min-[1600px]:block" />}
+      <UsageCard className="fixed right-6 top-[76px] z-20 hidden min-[1600px]:block" />
       {usage && <UsageCard onClose={() => setUsage(false)} className="fixed right-4 top-[64px] z-40 max-w-[calc(100vw-32px)] min-[1600px]:hidden" />}
       <PrDrawer />
+      {popup === "/settings" && <SettingsPage onClose={close} />}
+      {popup === "/usage" && <Popup title="Usage" onClose={close}><UsagePage /></Popup>}
     </div>
   );
 }

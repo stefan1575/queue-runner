@@ -12,7 +12,7 @@ export function UsageBlock({ p, m, reserve, release }: { p: Provider; m: Meter; 
   return (
     <div className="space-y-2">
       <div className="flex items-baseline justify-between">
-        <ProviderName p={p} className="text-[16px]" />
+        <ProviderName p={p} className="text-[16px] font-semibold" />
         <span className="text-[13.5px] text-faint">read {m.readAt}</span>
       </div>
       {m.error && <p className="text-[14.5px] text-bad">{m.error}</p>}
