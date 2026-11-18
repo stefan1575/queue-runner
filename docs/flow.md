@@ -29,14 +29,22 @@ no tokens. Every fixed step is the script's; an agent is started only for work t
 
 ## Labels
 
-The runner reads and applies only these, and creates the first three in a repo it serves
-(`docs/app.md`, Served):
+Every label a runner applies, removes, reads or creates. `tests/test_labels_doc.py` collects
+them from where they're used (each `add_label`, `remove_label` and `create_issue` call, each
+`.labels` check, each label query, the app's `RUNNER_LABELS`) and fails when this list and the
+code disagree.
 
-- `ready-for-agent`: the ticket is fully specified; the runner may pick and build it.
-- `needs-info`: a stop waiting on Stefan, one issue per PR (`docs/stops.md`).
-- `ready-to-merge`: a clean PR, ready to merge.
+- `ready-for-agent`: the ticket is fully specified; the runner may pick and build it. Read, never
+  applied: the work list and the picker only take an open issue that has it.
+- `needs-info`: a stop waiting on Stefan, one issue per PR (`docs/stops.md`), and a base branch
+  failing its checks. Applied when the runner files the issue.
 - `needs-triage`: a Pre-existing review finding filed as its own issue, for Stefan to sort
-  (`docs/reviews.md`).
+  (`docs/reviews.md`). Applied when the runner files the issue.
+- `ready-for-stefan`: a clean PR in a repo Stefan merges (`merge = "stefan"`), waiting for his
+  merge (`docs/claude-lane.md`, Stefan merges). Applied by the merge pass, read back so it's put
+  on once, and removed once the PR is no longer clean, is merged or is closed.
+- `ready-to-merge`: only created, by the app, in a repo it serves (`docs/app.md`, Served),
+  with `ready-for-agent` and `needs-info`. Nothing applies or reads it yet.
 
 ## Briefs are built, not kept
 
