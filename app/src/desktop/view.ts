@@ -1,12 +1,13 @@
 // What the window shows of the runner, kept in the main process (the runner runs there; the
 // window only shows it): the settings, the `gh` account Name comes from, T3's Time format and
-// T3's catalog of providers and models (#152).
+// T3's catalog of providers and models (#152) and each provider's usage (#153).
 // Every change is told to the listeners, which send it to the window.
 import type { TimeFormat } from '../display.ts';
 import { GitHubError, type Account, type GitHubAccount } from '../github.ts';
 import type { Catalog } from '../jobs.ts';
 import type { Settings, SettingsPatch, SettingsStore } from '../settings.ts';
 import type { CatalogSource } from '../t3/catalog-source.ts';
+import type { ProviderUsage } from '../usage.ts';
 
 export type View = {
   settings: Settings;
@@ -19,6 +20,8 @@ export type View = {
   catalog: Catalog | null;
   /** Why T3 can't be asked for it now, while it can't. */
   catalogError?: string;
+  /** Each connected provider's usage windows, as T3 last reported them (#153). */
+  usage: ProviderUsage[];
 };
 
 /** Where T3's Time format comes from, and word when it changes. */
@@ -34,7 +37,7 @@ export function briefName(view: View): string | null {
 }
 
 const catalogPart = (c: ReturnType<CatalogSource['current']>) =>
-  ({ catalog: c.catalog, ...(c.error ? { catalogError: c.error } : {}) });
+  ({ catalog: c.catalog, usage: c.usage, ...(c.error ? { catalogError: c.error } : {}) });
 
 export class RunnerView {
   private view: View;

@@ -17,7 +17,7 @@ Element.prototype.scrollTo ??= () => {};
 let root: Root;
 let host: HTMLElement;
 let saved: SettingsPatch[];
-const view: View = { settings: { ...DEFAULT_SETTINGS }, account: { login: 'ana-gh', name: 'Ana GH' }, timeFormat: 'locale', catalog: null };
+const view: View = { settings: { ...DEFAULT_SETTINGS }, account: { login: 'ana-gh', name: 'Ana GH' }, timeFormat: 'locale', catalog: null, usage: [] };
 
 beforeEach(() => {
   saved = [];

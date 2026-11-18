@@ -18,6 +18,7 @@ const view: View = {
   account: { login: 'stefan1575', name: 'Stefan B' },
   timeFormat: '24-hour',
   catalog,
+  usage: [],
 };
 const now = new Date(2026, 10, 16, 15, 5);
 const find = (q: string) => searchSettings(view, now, q).map((s) => s.id);
