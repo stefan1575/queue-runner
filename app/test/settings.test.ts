@@ -1,6 +1,6 @@
 // The settings the window edits: kept in the state folder, saved the moment they change, and read
 // back on the next start. Only the state folder's location is in a machine file (#36, Fixed).
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, test } from 'vitest';
@@ -81,6 +81,36 @@ describe('the settings', () => {
     await expect(store.set({ startWithWindows: 'yes' } as any)).rejects.toThrow(SettingsError);
     await expect(store.set({ colour: 'red' } as any)).rejects.toThrow(SettingsError);
     expect((await SettingsStore.open(folder)).get()).toEqual(DEFAULT_SETTINGS);
+  });
+
+  // A change whose write fails is not kept: the next change saves on top of what's on disk, so a
+  // refused Start with Windows never reaches the file or the logon entry later (PR #174, F2).
+  test("a change whose write fails isn't kept, and a later change doesn't save it", async () => {
+    const folder = await temp();
+    const store = await SettingsStore.open(folder);
+    await store.set({ startWithWindows: false });
+    const seen: unknown[] = [];
+    store.onChange((s) => seen.push(s));
+    // A folder where the write's temp file goes makes that write fail.
+    await mkdir(join(folder, 'settings.json.tmp'));
+    await expect(store.set({ startWithWindows: true })).rejects.toThrow();
+    expect(store.get().startWithWindows).toBe(false);
+    expect(seen).toEqual([]);
+    await rm(join(folder, 'settings.json.tmp'), { recursive: true });
+    await store.set({ name: 'Ana' });
+    expect(store.get()).toEqual({ ...DEFAULT_SETTINGS, name: 'Ana', startWithWindows: false });
+    expect((await SettingsStore.open(folder)).get()).toEqual({ ...DEFAULT_SETTINGS, name: 'Ana', startWithWindows: false });
+    expect(seen).toEqual([{ ...DEFAULT_SETTINGS, name: 'Ana', startWithWindows: false }]);
+  });
+
+  // Changes made together each land on the one before, in order, whichever write is slower.
+  test('changes made at once each build on the last, and the file ends on all of them', async () => {
+    const folder = await temp();
+    const store = await SettingsStore.open(folder);
+    await Promise.all([store.set({ name: 'Ana' }), store.set({ dateStyle: 'iso' }), store.set({ startWithWindows: false })]);
+    const all = { name: 'Ana', dateStyle: 'iso', startWithWindows: false };
+    expect(store.get()).toEqual(all);
+    expect((await SettingsStore.open(folder)).get()).toEqual(all);
   });
 
   test('a file with a bad value keeps the rest and defaults that one', async () => {

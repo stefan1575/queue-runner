@@ -75,21 +75,24 @@ export class SettingsStore {
   }
 
   /** Saves the change and tells the listeners. A SettingsError (nothing saved) for a value the
-   *  page never offers. */
+   *  page never offers. A change whose write fails is not kept: `get()` and the next change go on
+   *  from what was last saved. */
   async set(patch: SettingsPatch): Promise<Settings> {
     const checked = checkPatch(patch);
-    this.settings = { ...this.settings, ...checked };
-    const text = `${JSON.stringify(this.settings, null, 2)}\n`;
+    // Built on the last saved settings when its turn to write comes, and kept only once written.
     const write = this.writing.then(async () => {
+      const next = { ...this.settings, ...checked };
       // written aside and renamed over, so a crash mid-write never leaves half a file
-      await writeFile(`${this.file}.tmp`, text);
+      await writeFile(`${this.file}.tmp`, `${JSON.stringify(next, null, 2)}
+`);
       await rename(`${this.file}.tmp`, this.file);
+      this.settings = next;
+      const now = this.get();
+      for (const l of this.listeners) l(now);
+      return now;
     });
-    this.writing = write.catch(() => {});
-    await write;
-    const now = this.get();
-    for (const l of this.listeners) l(now);
-    return now;
+    this.writing = write.then(() => {}, () => {});
+    return write;
   }
 
   onChange(listener: (s: Settings) => void): () => void {
