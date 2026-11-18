@@ -9,14 +9,14 @@ export interface Opt<T extends string> { id: T; label: string; hint?: string; no
 
 const BOX = 'inline-flex h-9 items-center gap-1.5 whitespace-nowrap rounded-lg border border-line bg-surface px-3 text-[15.5px] hover:bg-sunk data-[state=open]:bg-sunk disabled:cursor-not-allowed disabled:opacity-50';
 
-export function Pick<T extends string>({ value, options, onChange, label, className }: {
-  value: T; options: Opt<T>[]; onChange: (v: T) => void; label: string; className?: string;
+export function Pick<T extends string>({ value, options, onChange, label, className, disabled }: {
+  value: T; options: Opt<T>[]; onChange: (v: T) => void; label: string; className?: string; disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const cur = options.find((o) => o.id === value);
   return (
     <Popover.Root open={open} onOpenChange={setOpen}>
-      <Popover.Trigger aria-label={`${label}: ${cur?.label ?? value}`} className={cn(BOX, className)}>
+      <Popover.Trigger disabled={disabled} aria-label={`${label}: ${cur?.label ?? value}`} className={cn(BOX, className)}>
         <span className="min-w-0 truncate">{cur?.node ?? cur?.label ?? value}</span>
         <ChevronDown className="ml-auto size-4 shrink-0 text-faint" />
       </Popover.Trigger>
