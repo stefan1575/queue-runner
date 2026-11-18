@@ -97,4 +97,4 @@ What each module and script is for.
   sign-in, MCP and WebSocket; `src/t3/thread-end.ts`, a run's end from its events),
   `src/github.ts`, `src/projects.ts`, `src/app.ts` (the command line), the build lane
   (`src/build-lane.ts`, `src/picker.ts`, `src/briefs/build.ts`, `src/job-log.ts`, `src/git.ts`), the review lane (`src/review-lane.ts`, `src/review/`,
-  `src/briefs/review.ts`, `src/t3/thread-reply.ts`), `test/` (on `test/fake-t3.ts`) and `live/` (its live checks). `docs/app.md`.
+  `src/briefs/review.ts`, `src/t3/thread-reply.ts`; an open job's thread found again, `src/t3/job-thread.ts`), `test/` (on `test/fake-t3.ts`) and `live/` (its live checks). `docs/app.md`.

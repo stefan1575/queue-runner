@@ -35,8 +35,9 @@ import { testsNote } from './review/deps.ts';
 import { decide, nextRound, readReviews, ReviewFailed, runnerPost, type Comment, type Decision } from './review/ledger.ts';
 import { GitHubPoster, PostFailed, type GitHubPosts, type Poster } from './review/post.ts';
 import type { BuildRepo } from './build-lane.ts';
-import type { Retry } from './t3/project-feed.ts';
+import { retryAfter, type Retry } from './t3/project-feed.ts';
 import type { T3Mcp } from './t3/mcp.ts';
+import { openJobThread } from './t3/job-thread.ts';
 import { watchThreadEnd, type ThreadEnd } from './t3/thread-end.ts';
 import { runReply } from './t3/thread-reply.ts';
 import type { T3Ws } from './t3/ws.ts';
@@ -53,7 +54,7 @@ export type ReviewLaneDoors = {
   /** Links a checkout's dependencies in; null installs nothing. */
   deps: Pick<Deps, 'prepare'> | null;
   mcp: Pick<T3Mcp, 'call'>;
-  ws: Pick<T3Ws, 'subscribe'>;
+  ws: Pick<T3Ws, 'subscribe' | 'first'>;
   gate: Pick<UsageGate, 'pick' | 'check' | 'started' | 'finished' | 'dropped' | 'forget'>;
   catalog: () => Catalog | null;
   jobs: () => Jobs;
@@ -403,20 +404,23 @@ export class ReviewLane {
     }
   }
 
-  /** A review left open by an app that stopped mid-review: its thread (if it got one) is
-   *  watched to its end, then the review counts as failed, nothing posted, and the thread is
-   *  settled. */
+  /** A review left open by an app that stopped mid-review: its thread (the log's, else the one
+   *  T3 has under its project and title, made since its start: the app may have stopped between
+   *  T3's launch and the log's line) is watched to its end, then the review counts as failed,
+   *  nothing posted, and the thread is settled. Until then the lane starts no review. */
   private async cutOff(job: Job): Promise<Job> {
     const name = `review ${job.title}`;
-    if (job.threadId) {
+    const thread = await openJobThread(this.d.ws, this.d.log, job, this.d.retry ?? retryAfter(30_000), () => this.stopped, this.d.say);
+    if (thread === undefined) return job; // the app stopped again: left open for the next start
+    if (thread) {
       const v = this.d.gate.check({ id: job.id, kind: 'review', choice: job.choice });
       this.d.gate.started({ id: job.id, kind: 'review', choice: job.choice }, v.fits ? v.cost : {});
-      this.d.say(`${name}: cut off with the app; its thread runs on in ${job.link ?? job.threadId}: counted as failed once it ends`);
-      await this.watch(job.title, { threadId: job.threadId, runId: job.runId ?? null });
+      this.d.say(`${name}: cut off with the app; its thread runs on in ${thread.link ?? thread.threadId}: counted as failed once it ends`);
+      await this.watch(job.title, thread);
       this.d.gate.finished(job.id);
     }
     const ended = await this.d.log.ended(job.id, { outcome: 'failed', error: 'The app stopped mid-review.' });
-    if (job.threadId) await this.settle(name, job.threadId);
+    if (thread) await this.settle(name, thread.threadId);
     this.d.say(`${name}: cut off with the app; counted as failed`);
     return ended;
   }

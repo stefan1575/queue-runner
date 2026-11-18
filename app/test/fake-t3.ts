@@ -15,7 +15,7 @@ type ShellStream = { send(item: unknown): void; end(): void; ended: boolean };
 
 /** A thread's state as `orchestration.subscribeThread` shows it: its runs, runtime requests (a
  *  question to the user is a pending one) and turn items (a failed run's error among them). */
-export type FakeThread = { id: string; projectId: string; runs: any[]; runtimeRequests: any[]; turnItems: any[]; messages?: any[] };
+export type FakeThread = { id: string; projectId: string; runs: any[]; runtimeRequests: any[]; turnItems: any[]; messages?: any[]; title?: string; createdAt?: string };
 
 export class FakeT3 {
   port = 3773;
@@ -34,6 +34,8 @@ export class FakeT3 {
   threadState: Record<string, FakeThread> = {};
   /** The open `subscribeThread` streams, by thread. */
   private threadStreams = new Map<string, Set<{ send(item: unknown): void; end(): void }>>();
+  /** How many `subscribeShell` streams fail before one answers (T3 down a while). */
+  shellFailures = 0;
   /** Answers `t3_thread_launch` with this failure instead (T3 refusing it). */
   launchFailure: { code: string; message: string } | null = null;
   /** WebSocket methods that answer once, by tag: the value T3's Exit carries. Any other
@@ -180,6 +182,11 @@ export class FakeT3 {
     for (const s of this.shells) s.send(item);
   }
 
+  /** Each thread as T3's shell lists it (docs/app.md, The WebSocket API). */
+  private shellThreads() {
+    return Object.values(this.threadState).map((t) => ({ id: t.id, projectId: t.projectId, title: t.title ?? '', createdAt: t.createdAt ?? new Date(0).toISOString(), latestRunId: t.runs.at(-1)?.id ?? null }));
+  }
+
   private tool(name: string, args: any): { result?: unknown; failure?: { code: string; message: string } } {
     this.toolCalls.push({ tool: name, args });
     if (name === 't3_project_list') {
@@ -192,7 +199,7 @@ export class FakeT3 {
       this.launches.push(args);
       const n = this.launches.length;
       this.threadState[`thread-${n}`] = {
-        id: `thread-${n}`, projectId: args.projectId, runtimeRequests: [], turnItems: [], messages: [],
+        id: `thread-${n}`, projectId: args.projectId, title: args.title, createdAt: new Date().toISOString(), runtimeRequests: [], turnItems: [], messages: [],
         runs: [{ id: `run-${n}`, threadId: `thread-${n}`, ordinal: 1, rootNodeId: `node-${n}`, status: 'running', completedAt: null }],
       };
       return { result: { threadId: `thread-${n}`, runId: `run-${n}`, link: `t3://thread/thread-${n}`, projectId: args.projectId, modelSelection: args.modelSelection, status: 'running' } };
@@ -370,7 +377,10 @@ export class FakeT3 {
           const exit = method ? { _tag: 'Success', value: method(msg.payload) } : { _tag: 'Failure', cause: { _tag: 'Die', defect: `no method ${msg.tag}` } };
           queueMicrotask(() => open && on.message(JSON.stringify({ _tag: 'Exit', requestId: msg.id, exit })));
         }
-        if (msg._tag === 'Request' && msg.tag === 'orchestration.subscribeShell') {
+        if (msg._tag === 'Request' && msg.tag === 'orchestration.subscribeShell' && this.shellFailures > 0) {
+          this.shellFailures--;
+          queueMicrotask(() => open && on.message(JSON.stringify({ _tag: 'Exit', requestId: msg.id, exit: { _tag: 'Failure', cause: { _tag: 'Die', defect: 'T3 is busy' } } })));
+        } else if (msg._tag === 'Request' && msg.tag === 'orchestration.subscribeShell') {
           // T3's shell stream: a snapshot of every project (and threads, which the app ignores),
           // then each change as it happens (docs/app.md, The WebSocket API).
           const stream: ShellStream = {
@@ -385,7 +395,7 @@ export class FakeT3 {
           };
           shell = stream;
           this.shells.push(stream);
-          stream.send({ kind: 'snapshot', snapshot: { schemaVersion: 2, snapshotSequence: this.n, projects: this.projects.map((p) => ({ ...p, scripts: [] })), threads: [{ id: 't1' }], archivedThreads: [] } });
+          stream.send({ kind: 'snapshot', snapshot: { schemaVersion: 2, snapshotSequence: this.n, projects: this.projects.map((p) => ({ ...p, scripts: [] })), threads: [{ id: 't1' }, ...this.shellThreads()], archivedThreads: [] } });
           stream.send({ kind: 'synchronized' });
           stream.send({ kind: 'thread.updated', sequence: this.n, location: 'active', thread: { id: 't1' } });
         }

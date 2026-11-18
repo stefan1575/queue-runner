@@ -23,7 +23,8 @@ import type { Catalog, Jobs } from './jobs.ts';
 import { launchJob } from './launch.ts';
 import { pick, type BuildTicket } from './picker.ts';
 import type { Repo } from './repos.ts';
-import type { Retry } from './t3/project-feed.ts';
+import { retryAfter, type Retry } from './t3/project-feed.ts';
+import { openJobThread } from './t3/job-thread.ts';
 import type { T3Mcp } from './t3/mcp.ts';
 import { watchThreadEnd, type ThreadEnd } from './t3/thread-end.ts';
 import type { T3Ws } from './t3/ws.ts';
@@ -39,7 +40,7 @@ export type BuildLaneDoors = {
   github: GitHubWork;
   git: Git;
   mcp: Pick<T3Mcp, 'call'>;
-  ws: Pick<T3Ws, 'subscribe'>;
+  ws: Pick<T3Ws, 'subscribe' | 'first'>;
   gate: Pick<UsageGate, 'pick' | 'check' | 'started' | 'finished' | 'dropped' | 'forget'>;
   catalog: () => Catalog | null;
   jobs: () => Jobs;
@@ -225,11 +226,16 @@ export class BuildLane {
     return this.watch({ ...job, threadId: launched.threadId, runId: launched.runId, link: launched.link }, repo.github);
   }
 
-  /** A build the log shows open: watched to its end if T3 named its thread, else not-started. */
-  private async resume(job: Job): Promise<Job> {
-    if (!job.threadId) {
-      return this.d.log.ended(job.id, { outcome: 'not-started', error: 'The app stopped before T3 named its thread.' });
+  /** A build the log shows open: watched to its end if it has a thread (the log's, else the one
+   *  T3 has under its project and title, made since its start: the app may have stopped between
+   *  T3's launch and the log's line), else not-started. */
+  private async resume(open: Job): Promise<Job> {
+    const thread = await openJobThread(this.d.ws, this.d.log, open, this.d.retry ?? retryAfter(30_000), () => this.stopped, this.d.say);
+    if (thread === undefined) return open; // the app stopped again: left open for the next start
+    if (!thread) {
+      return this.d.log.ended(open.id, { outcome: 'not-started', error: 'The app stopped before T3 made its thread.' });
     }
+    const job = { ...open, ...thread };
     const v = this.d.gate.check({ id: job.id, kind: job.kind, choice: job.choice });
     this.d.gate.started({ id: job.id, kind: job.kind, choice: job.choice }, v.fits ? v.cost : {});
     this.d.say(`Watching ${job.title} again: ${job.link ?? job.threadId}`);

@@ -350,8 +350,11 @@ builds (`docs/flow.md`, `docs/claude-lane.md`). `src/build-lane.ts`, `src/picker
   comes from its own launch. One waiting on a question is left for the Inbox ticket and one
   stopped by a usage limit for the limits ticket; both are recorded as such and left unsettled.
 - **An app that stopped mid-build:** on start, each build the log shows open is watched again to
-  its end before any pass (so its repo still has one build), and one T3 never named a thread for
-  is recorded `not-started`.
+  its end before any pass (so its repo still has one build). Its thread is the log's, else (the
+  app stopped after T3 took the launch but before the log's line) the one T3's shell lists in its
+  project under its title, made no earlier than 5 s before its start record, the newest
+  (`src/t3/job-thread.ts`, today's `t3.find_job_thread`); a shell that can't be read is asked
+  again, never taken as no thread. One T3 made no thread for is recorded `not-started`.
 - **The app's log** is its console for now (`say`): a line per start, hold, end and failure.
 
 ## Reviews
@@ -415,7 +418,9 @@ every open PR in a served repo without a review on its newest commit gets one, w
   `clean`, `blocking`, `stop`, `approach-note` (with `verdict`, `signals`, `link`), `failed`,
   `out-of-usage` or `head-moved`. Once the end is recorded the thread is settled, whatever the end:
   nobody answers a review thread. One the log shows open on start is watched to its end, counted
-  `failed` and settled, as today's `Reviewer.settle`.
+  `failed` and settled, as today's `Reviewer.settle`; its thread is found as a build's is (An app
+  that stopped mid-build, above), and no review starts until it ends, so a thread that runs on
+  never has its checkout replaced under it.
 - **Not yet:** merging a clean review and fix rounds (#156), conflict rounds (#157), stops (#158).
 
 ## Setup

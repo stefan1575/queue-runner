@@ -349,6 +349,60 @@ describe('a review', () => {
   });
 });
 
+describe('an app that stopped between the launch and the log', () => {
+  const started = () => log.started({ kind: 'review', repo: 'p-app', github: 'owner/app', issue: 4, branch: 'b', base: 'main', title: 'Queue runner review: app#4', choice: REVIEW, onFallback: false, sha: H, round: 1 });
+  const thread = (id: string, projectId: string, title: string, createdAt: string) => {
+    t3.threadState[id] = { id, projectId, title, createdAt, runtimeRequests: [], turnItems: [], messages: [], runs: [{ id: `${id}-run`, ordinal: 1, rootNodeId: 'n', status: 'running' }] };
+  };
+
+  test('its review thread is found in T3 by project, title and start, and no second review starts until it ends', async () => {
+    const job = await started();
+    const at = (ms: number) => new Date(Date.parse(job.startedAt) + ms).toISOString();
+    thread('older', 'p-app', job.title, at(-3_600_000)); // an earlier review of the same PR
+    thread('its-thread', 'p-app', job.title, at(700));
+    makeLane();
+    void lane.start();
+    await until(() => t3.threadStreamCount('its-thread') > 0);
+    expect(log.get(job.id)).toMatchObject({ threadId: 'its-thread', runId: 'its-thread-run' });
+    await new Promise((r) => setTimeout(r, 30));
+    expect(t3.launches).toEqual([]); // the PR waits: its first review still runs in its checkout
+    expect(git.calls).toEqual([]);
+    t3.endRun('its-thread', 'completed');
+    await until(() => t3.launches.length === 1); // then it's reviewed afresh
+    expect(log.get(job.id)!.end).toMatchObject({ outcome: 'failed', error: 'The app stopped mid-review.' });
+    expect(t3.toolCalls.filter((c) => c.tool === 't3_thread_organize').map((c) => c.args.threadId)).toContain('its-thread');
+    expect(t3.toolCalls.filter((c) => c.tool === 't3_thread_organize').map((c) => c.args.threadId)).not.toContain('older');
+    await answer(1, reply([]));
+    await lane.idle();
+  });
+
+  test("T3's threads unreadable at first: asked again until they answer, never taken as no thread", async () => {
+    const job = await started();
+    thread('its-thread', 'p-app', job.title, new Date(Date.parse(job.startedAt) + 500).toISOString());
+    t3.shellFailures = 3;
+    makeLane();
+    void lane.start();
+    await until(() => t3.threadStreamCount('its-thread') > 0);
+    expect(t3.launches).toEqual([]);
+    expect(lines.filter((l) => /couldn't be read to find its thread/.test(l))).toHaveLength(3);
+    t3.endRun('its-thread', 'completed');
+    await until(() => log.get(job.id)!.end !== undefined);
+    await answer(1, reply([]));
+    await lane.idle();
+  });
+
+  test('with no thread T3 made for it, it counts as failed at once', async () => {
+    const job = await started();
+    thread('other-pr', 'p-app', 'Queue runner review: app#5', new Date(Date.parse(job.startedAt) + 500).toISOString());
+    gh.reviewPulls['owner/app'] = [];
+    makeLane();
+    await lane.start();
+    await lane.idle();
+    expect(log.get(job.id)!.end).toMatchObject({ outcome: 'failed' });
+    expect(t3.toolCalls.filter((c) => c.tool === 't3_thread_organize')).toEqual([]);
+  });
+});
+
 describe('the fallback', () => {
   let source: T3Catalog;
   afterEach(() => source?.stop());

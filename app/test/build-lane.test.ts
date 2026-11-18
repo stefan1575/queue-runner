@@ -249,12 +249,34 @@ describe('an app that stopped mid-build', () => {
     t3.threadState['old-thread'] = { id: 'old-thread', projectId: 'p-app', runtimeRequests: [], turnItems: [], runs: [{ id: 'old-run', ordinal: 1, rootNodeId: 'n', status: 'running' }] };
     await makeLane().start();
     expect(t3.launches).toEqual([]); // app's one build is the open one
-    expect(log.get(lost.id)!.end).toMatchObject({ outcome: 'not-started' });
+    await until(() => log.get(lost.id)!.end?.outcome === 'not-started');
     await watching('old-thread');
     t3.endRun('old-thread', 'completed');
     await until(() => t3.launches.length === 1); // then app's next ticket
     expect(log.get(open.id)!.end?.outcome).toBe('done-no-pr');
     expect(organized()[0]).toEqual({ threadId: 'old-thread', action: 'settle' });
+  });
+});
+
+describe('an app that stopped between the launch and the log', () => {
+  test("an open build with no thread in the log is found in T3 by project, title and start, and watched to its end; it holds its repo meanwhile", async () => {
+    gh.ready['owner/app'] = [issue(7)];
+    const open = await log.started({ kind: 'build', repo: 'p-app', github: 'owner/app', issue: 5, branch: 'claude/x-5', base: 'origin/main', title: 'Queue runner build: app#5', choice: BUILD, onFallback: false });
+    const run = (id: string) => [{ id, ordinal: 1, rootNodeId: 'n', status: 'running' }];
+    const at = (ms: number) => new Date(Date.parse(open.startedAt) + ms).toISOString();
+    t3.threadState['older'] = { id: 'older', projectId: 'p-app', title: open.title, createdAt: at(-60_000), runtimeRequests: [], turnItems: [], runs: run('r0') };
+    t3.threadState['elsewhere'] = { id: 'elsewhere', projectId: 'p-other', title: open.title, createdAt: at(1000), runtimeRequests: [], turnItems: [], runs: run('r1') };
+    t3.threadState['its-thread'] = { id: 'its-thread', projectId: 'p-app', title: open.title, createdAt: at(800), runtimeRequests: [], turnItems: [], runs: run('r2') };
+    t3.shellFailures = 2; // T3 not answering at first: asked again, never taken as no thread
+    void makeLane().start();
+    await watching('its-thread');
+    expect(log.get(open.id)).toMatchObject({ threadId: 'its-thread', runId: 'r2' });
+    expect(log.get(open.id)!.end).toBeUndefined();
+    expect(t3.launches).toEqual([]);
+    t3.endRun('its-thread', 'completed');
+    await until(() => t3.launches.length === 1);
+    expect(log.get(open.id)!.end?.outcome).toBe('done-no-pr');
+    expect(lines.filter((l) => /couldn't be read to find its thread/.test(l))).toHaveLength(2);
   });
 });
 
