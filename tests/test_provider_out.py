@@ -57,65 +57,94 @@ class OutUntilTest(unittest.TestCase):
 
 
 
+GATE_NOW = datetime.datetime(2026, 11, 16, 8, 0, tzinfo=datetime.timezone.utc)
+WARM = '2026-11-16T07:50:00+00:00'   # its last request 10 min before GATE_NOW: in place
+COLD = '2026-11-16T05:00:00+00:00'   # 3 h before, at BIG tokens: a fresh thread
+BIG = 200_000
+
+
 class InvokedProvidersTest(Harness):
-    """F1: the gate, and whether a job's providers have usage, go by the threads its run starts
-    or continues, not by what `[jobs]` names for its kind now. Claude's 5-hour window is full,
-    so any job that runs a Claude thread is held."""
+    """F1 and F6: the gate, and whether a job's providers have usage, go by the one provider
+    each of its threads runs on: not what `[jobs]` names for its kind now, nor every provider
+    it might have run on. An earlier job is picked up in place or fresh as chosen once, when
+    it's picked (`Start.resume`), and `continue_job` acts on that choice. Claude's 5-hour
+    window is full, so any job that runs a Claude thread is gated."""
 
     def setUp(self):
         super().setUp()
         self.first = Repo(name='first', github='owner/first', path=self.dir)
 
-    def runner(self, gate=True):
+    def runner(self, gate=True, clock=None):
         self.t3 = FakeT3([(0, 'completed')])
         g = Gate(self.config.state_dir, FakeUsage(full_usage()),
-                 clock=lambda: datetime.datetime(2026, 11, 16, 8, 0, tzinfo=UTC)) if gate else None
+                 clock=lambda: GATE_NOW) if gate else None
         return Runner(self.config, github=FakeGitHubWithPulls(issues=[]), t3=self.t3,
-                      git=FakeGit(), out=io.StringIO(), log_line=self.said.append, gate=g)
+                      git=FakeGit(), out=io.StringIO(), log_line=self.said.append, gate=g,
+                      now=clock or (lambda: GATE_NOW))
 
-    def claude_build(self, outcome, **end):
-        """An earlier build in `first` on Claude, ended `outcome`."""
+    def build(self, outcome, provider='claudeAgent', last=WARM, **end):
+        """An earlier build in `first` on `provider`, ended `outcome`, its last request at
+        `last` (warm by default)."""
+        model = 'claude-opus-5-5' if provider == 'claudeAgent' else 'gpt-6.1-sol'
         job = self.jobs.started(kind='build', repo='first', issue=4, branch='claude/b-4',
-                                title='Queue runner build: first#4', provider='claudeAgent',
-                                model='claude-opus-5-5', effort='high')
-        self.jobs.ended(job.id, exit_code=1, outcome=outcome, thread_id='mcp:old', **end)
+                                title='Queue runner build: first#4', provider=provider,
+                                model=model, effort='high')
+        self.jobs.ended(job.id, exit_code=1, outcome=outcome, thread_id='mcp:old',
+                        last_request=last, context=BIG, **end)
+        # its thread, for the pass's settle to read (the runner is made first)
+        self.t3.add('mcp:old', 'Queue runner build: first#4',
+                    'waiting' if outcome == 'waiting' else 'completed')
         return self.jobs.jobs()[-1]
 
-    def a_retry_case(self, r, build):
-        """The decider has a case on `build` it may retry."""
-        case = Case(question='failed', repo=self.first, number=4, about=build)
-        r.decider.next_case = lambda repos=None: case
-        r.decider.run = lambda case, cont: self.fail('the decision ran')
-
-    def test_a_codex_decision_that_may_retry_a_claude_build_is_gated(self):
-        # Sol's scenario: the decision is on Codex, the build it may continue on Claude.
-        self.configure([self.first], decision=CODEX_BUILD)
-        r = self.runner()
-        self.a_retry_case(r, self.claude_build('failed'))
-        [start] = r.choose()
-        self.assertEqual(start.on, ('codex', 'claudeAgent', 'claudeAgent'))
-        self.assertEqual(r.run_pass(), 'gated')
-
-    def test_a_claude_build_picked_up_after_its_limit_is_gated_once_builds_are_on_codex(self):
-        # Its reset has passed, and [jobs.build] is Codex now: in place it runs on Claude.
-        self.configure([self.first], build=CODEX_BUILD)
-        r = self.runner()
-        self.claude_build('usage-limit', resume_at='2026-11-16T07:00:00+00:00')
-        [start] = r.choose()
-        self.assertEqual(start.on, ('claudeAgent', 'codex'))
-        self.assertEqual(r.run_pass(), 'gated')
-        self.assertEqual((self.t3.starts, self.t3.sends), ([], []))
-
-    def test_a_reply_to_a_waiting_claude_build_waits_while_claude_is_out(self):
-        # A second case of the class: whether a job's providers have usage. Claude is out (a
-        # live run elsewhere met its limit), builds are on Codex, and Stefan answered a
-        # waiting Claude build: continuing it in place would run on Claude.
-        self.configure([self.first], build=dataclasses.replace(CODEX_BUILD))
+    def claude_out(self):
+        """Claude is out: a live run elsewhere met its limit, its reset ahead."""
         live = self.jobs.started(kind='live', repo='second', issue=1, branch='main', title='t',
                                  provider='claudeAgent')
         self.jobs.ended(live.id, exit_code=1, outcome='usage-limit', resume_at=AHEAD)
+
+    def a_retry_case(self, r, build, run=None):
+        """The decider has a case on `build` it may retry."""
+        case = Case(question='failed', repo=self.first, number=4, about=build)
+        r.decider.next_case = lambda repos=None: case
+        r.decider.run = run or (lambda case, cont: self.fail('the decision ran'))
+
+    def restarts(self, r):
+        """Records each fresh restart `continue_job` makes, as (old job's id, in place)."""
+        made = []
+        r._restart = lambda old, choice, direction, marks=None: (
+            made.append((old.id, choice.in_place)) or 'started')
+        return made
+
+    # --- review 1's F1: a thread on Claude is gated ----------------------------------------
+
+    def test_a_codex_decision_that_may_retry_a_warm_claude_build_is_gated(self):
+        # The decision is on Codex; the build it may continue, in place, on Claude.
+        self.configure([self.first], decision=CODEX_BUILD)
+        r = self.runner()
+        self.a_retry_case(r, self.build('failed'))
+        [start] = r.choose()
+        self.assertTrue(start.resume.in_place)
+        self.assertEqual(start.on, ('codex', 'claudeAgent'))
+        self.assertEqual(r.run_pass(), 'gated')
+
+    def test_a_warm_claude_build_picked_up_after_its_limit_is_gated_once_builds_are_on_codex(self):
+        # Its reset has passed, and [jobs.build] is Codex now: in place it runs on Claude.
+        self.configure([self.first], build=CODEX_BUILD)
+        r = self.runner()
+        self.build('usage-limit', resume_at='2026-11-16T07:00:00+00:00')
+        [start] = r.choose()
+        self.assertEqual(start.on, ('claudeAgent',))
+        self.assertEqual(r.run_pass(), 'gated')
+        self.assertEqual((self.t3.starts, self.t3.sends), ([], []))
+
+    def test_a_reply_to_a_warm_claude_build_waits_while_claude_is_out(self):
+        # Builds are on Codex, and Stefan answered a waiting Claude build that's warm: it
+        # continues in place on Claude, so it waits for Claude's reset rather than starting
+        # fresh on Codex.
+        self.configure([self.first], build=CODEX_BUILD)
+        self.claude_out()
         r = self.runner(gate=False)
-        build = self.claude_build('waiting')
+        build = self.build('waiting')
         r.answers.next = lambda repos=None: (build, 'Use red.', {})
         self.assertEqual(r.choose(), 'idle')
         self.assertEqual((self.t3.starts, self.t3.sends), ([], []))
@@ -124,11 +153,69 @@ class InvokedProvidersTest(Harness):
         self.configure([self.first], decision=CODEX_BUILD)
         r = self.runner()
         case = Case(question='approach-note', repo=self.first, number=4,
-                    about=self.claude_build('failed'))
+                    about=self.build('failed'))
         r.decider.next_case = lambda repos=None: case
         r.decider.run = lambda case, cont: 'started'
         self.assertEqual(r.choose()[0].on, ('codex',))
         self.assertEqual(r.run_pass(), 'started')
+
+    # --- review 2's F6: only the provider the choice gives is checked ----------------------
+
+    def test_a_warm_codex_build_continued_in_place_is_not_gated_on_claude(self):
+        # Sol's first case: builds are on Claude now, the waiting build's thread on Codex.
+        self.configure([self.first])
+        r = self.runner()
+        build = self.build('waiting', provider='codex')
+        r.answers.next = lambda repos=None: (build, 'Use red.', {})
+        [start] = r.choose()
+        self.assertEqual(start.on, ('codex',))
+        self.assertEqual(r.run_pass(), 'started')
+        self.assertEqual([s['thread_id'] for s in self.t3.sends], ['mcp:old'])
+
+    def test_a_warm_codex_build_continued_in_place_runs_while_claude_is_out(self):
+        # Sol's second case: Claude out, as a usage limit recorded it.
+        self.configure([self.first])
+        self.claude_out()
+        r = self.runner(gate=False)
+        build = self.build('waiting', provider='codex')
+        r.answers.next = lambda repos=None: (build, 'Use red.', {})
+        self.assertEqual(r.run_pass(), 'started')
+        self.assertEqual([s['thread_id'] for s in self.t3.sends], ['mcp:old'])
+        self.assertEqual(self.t3.starts, [])
+
+    def test_a_cold_claude_build_restarting_on_codex_runs_while_claude_is_out(self):
+        # Sol's third case: its old thread's Claude is out, but a fresh thread runs on Codex.
+        self.configure([self.first], build=CODEX_BUILD)
+        self.claude_out()
+        r = self.runner(gate=False)
+        build = self.build('waiting', last=COLD)
+        r.answers.next = lambda repos=None: (build, 'Use red.', {})
+        made = self.restarts(r)
+        [start] = r.choose()
+        self.assertFalse(start.resume.in_place)
+        self.assertEqual(start.on, ('codex',))
+        self.assertEqual(r.run_pass(), 'started')
+        self.assertEqual(made, [(build.id, False)])
+
+    def test_a_decision_continues_the_build_as_chosen_when_it_was_picked(self):
+        # A second case of the cause: the decision's own thread takes an hour, so the build's
+        # thread is cold by the time it's continued. It still continues in place, on the
+        # provider the gate checked, not fresh on what [jobs.build] names now.
+        self.configure([self.first], build=CODEX_BUILD)
+        at = [GATE_NOW]
+        r = self.runner(gate=False, clock=lambda: at[0])
+        build = self.build('failed')
+
+        def decide(case, cont):
+            at[0] += datetime.timedelta(hours=1)
+            return cont(case.about, 'Retry it.')
+        self.a_retry_case(r, build, run=decide)
+        made = self.restarts(r)
+        self.assertEqual(r.run_pass(), 'started')
+        self.assertEqual(made, [])
+        self.assertEqual([s['thread_id'] for s in self.t3.sends], ['mcp:old'])
+        [again] = [j for j in self.jobs.jobs() if j.about == build.id]
+        self.assertEqual((again.provider, again.resume['how']), ('claudeAgent', 'in-place'))
 
 
 class ThreadModelTest(unittest.TestCase):

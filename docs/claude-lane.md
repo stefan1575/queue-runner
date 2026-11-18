@@ -223,7 +223,8 @@ back (`docs/stops.md`, Settling threads).
 
 **Acting:** `retry` and `answer` pick up the earlier job (A continued job, above): in its thread
 while that's warm or cold and under 120k tokens, else in a fresh thread on the same branch
-(`limits.resume_choice`; Usage limits, In place or fresh). A fresh thread's brief starts with
+(`limits.resume_choice`; Usage limits, In place or fresh), as chosen when the decision was
+picked, before its own thread ran (`Start.resume`). A fresh thread's brief starts with
 `## Direction first`: how the earlier thread stopped, for an `answer` the question it asked (its
 last message, quoted), and the decision's message; then the job's own brief and
 `templates/restart.md`. A waiting job picked up fresh ends `continued` too. A fresh start whose

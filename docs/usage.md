@@ -115,7 +115,12 @@ same limit) is started on it.
   as usual.
 - **In place or fresh** (ticket 38; `limits.resume_choice`, the one rule every caller uses: a
   limit's recovery and a decision's `retry` or `answer`). It reads only what it can measure, at
-  the moment the job resumes: when the thread's last real request started and its context.
+  the moment the job is picked: when the thread's last real request started and its context.
+  The choice is made once and kept on the job's `Start` (`Start.resume`): the usage gate and
+  whether its provider has usage check the one provider that choice runs on (its thread's in
+  place, its kind's now when fresh), and `continue_job` acts on it, even after a decision's
+  own thread ran first (PR #137's review 2, F6). A warm thread whose provider is out waits
+  for that provider's reset; it isn't restarted on another.
   - **Warm** (that request started under 55 minutes ago, `WARM_FOR`): continue in place, any
     size. Claude Code's subscription cache lasts an hour from a request's start; 55 minutes is
     the research's margin under it.
@@ -134,7 +139,7 @@ same limit) is started on it.
   `in-place` or `fresh`, `why`, `last_request`, `idle_minutes`, `context`), and the log line
   says the same (`Continuing ... in place: warm (...)`, `Restarting ... fresh after the usage
   limit (cold (...) and N tokens ...)`). The stop's own log line says what would be chosen at
-  its resume time; the recovery chooses again when it runs. T3 can't make a worktree on a branch that exists, and makes it at the same
+  its resume time; the recovery chooses again when it's picked. T3 can't make a worktree on a branch that exists, and makes it at the same
   folder (`~/.t3/worktrees/<project>/<branch>`), so `GitCli.free_branch` keeps the branch's tip
   under `refs/queue-runner/limit/<branch>` and anything uncommitted (untracked files too) as a
   `git stash create` commit under `.../<branch>-uncommitted`, removes the old worktree and
@@ -182,8 +187,8 @@ its own provider is out of usage (`Effort.spec`: `JobLog.out_until`).
   effort, whatever the T3 project's default model is, recorded in its start record and launched
   from there (`effort.asked`). A continued job (`t3 thread send`) keeps its thread's selection.
   Checked live on 2026-11-17 (`docs/t3.md`).
-- **A fallback while a provider is out** (issue #120): a provider is out while a build or fix on
-  it was cut off by a limit and nobody picked it up yet, or its newest review found it out
+- **A fallback while a provider is out** (issue #120): a provider is out while any job on it
+  met a usage limit whose reset is ahead, or its newest review found it out
   (`JobLog.out_until`). While one is, a Claude-lane kind with a `fallback` starts on it (a repo
   whose own job was cut off still waits for that job's reset); with no kind able to start, the
   lane waits as before. A job not on Claude skips the usage gate.

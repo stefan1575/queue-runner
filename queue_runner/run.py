@@ -12,6 +12,7 @@ under `<state_dir>/sol.lock`. A second runner process is kept out by a lock on
 `<state_dir>/runner.lock`.
 """
 import datetime
+import functools
 import os
 import threading
 import time
@@ -101,10 +102,13 @@ class Start:
     continue in the same pass, `run` what runs it, `label` what the log calls it, and `usage`
     the gate's read when it let the job in (what its cost is measured against). `job` is its
     kind as config.toml's `[jobs]` names it, when that isn't `kind` (an ask, a conflict round,
-    a decision Stefan's words answer: issue #120). `on` is every provider its run may start or
-    continue a thread on (`Runner._on`): an earlier job's thread runs on what it was started
-    on, whatever `[jobs]` says now; None in it, a fresh thread with nothing to run on (its
-    kind's provider and fallback both out). Empty: its kind's provider now (PR #137, F1)."""
+    a decision Stefan's words answer: issue #120). `resume` is how it picks up the earlier job it
+    continues, in place or in a fresh thread (`limits.resume_choice`), chosen once when the job
+    is picked: `continue_job` acts on it, and `on` follows from it. `on` is every provider its
+    run starts or continues a thread on (`Runner._on`): an earlier job continued in place runs
+    on what its thread was started on, whatever `[jobs]` says now, and one restarted fresh on
+    its kind's provider now; None in it, a fresh thread with nothing to run on (its kind's
+    provider and fallback both out). Empty: its kind's provider now (PR #137, F1 and F6)."""
     repo: str
     kind: str | None
     then: str | None
@@ -113,6 +117,7 @@ class Start:
     usage: object = None
     job: str | None = None
     on: tuple = ()
+    resume: object = None
 
     @property
     def spec_kind(self) -> str:
@@ -355,9 +360,14 @@ class Runner:
         return spec.provider if spec is not None else None
 
     def _continues(self, old: Job) -> tuple:
-        """The providers picking `old` up may run on: its thread's, in place (`_same_thread`),
-        or its kind's now, in a fresh thread (`_restart`): `continue_job` chooses when it runs."""
-        return (job_provider(old), self._fresh(spec_kind(old.kind, old.cause)))
+        """How picking `old` up goes, chosen now and once (`_resume_choice`), and the one
+        provider that runs it: its thread's in place (`_same_thread`), or its kind's now in a
+        fresh thread (`_restart`). A warm thread whose provider is out waits for that provider's
+        reset: it isn't restarted on another (PR #137's review 2, F6)."""
+        choice = self._resume_choice(old)
+        on = (job_provider(old) if choice.in_place else
+              self._fresh(spec_kind(old.kind, old.cause)))
+        return choice, on
 
     def _on(self, start: 'Start') -> tuple:
         """Every provider `start` may run a thread on (`Start.on`)."""
@@ -378,32 +388,40 @@ class Runner:
         self.live.wait_until = None
         if mine := [j for j in limited if j.repo == name]:
             old = mine[0]
-            return Start(name, old.kind, None, lambda: self.recover(old), self._name(old),
-                         job=spec_kind(old.kind, old.cause), on=self._continues(old))
+            choice, on = self._continues(old)
+            return Start(name, old.kind, None, lambda: self.recover(old, choice),
+                         self._name(old), job=spec_kind(old.kind, old.cause), on=(on,),
+                         resume=choice)
         if ask := self.asking.next(switch, only=only):   # Stefan's click (35)
             return Start(name, 'decision', None, lambda: self.asking.open(ask),
                          f'ask {name}#{ask.number}', job='ask')
         if answered := self.answers.next(repos=only):   # Stefan's reply on GitHub (71)
             old, text, marks = answered
+            choice, on = self._continues(old)
             return Start(name, old.kind, None,
-                         lambda: self.continue_job(old, text, marks=marks), self._name(old),
-                         on=self._continues(old))
+                         lambda: self.continue_job(old, text, choice=choice, marks=marks),
+                         self._name(old), on=(on,), resume=choice)
         if answered := self.asking.reply(repos=only):   # his answer in a fresh thread (72);
             # a GitHub reply read in the same pass goes first: answering there still counts
             old, text, marks = answered
+            choice, on = self._continues(old)
             return Start(name, old.kind, None,
-                         lambda: self.continue_job(old, text, marks=marks), self._name(old),
-                         on=self._continues(old))
+                         lambda: self.continue_job(old, text, choice=choice, marks=marks),
+                         self._name(old), on=(on,), resume=choice)
         if case := self.decider.next_case(repos=only):
             label = f'decision {name}#{case.number}'
             if self.decider.direct_answer(case):
-                return Start(name, None, None, lambda: self.decider.run(case, self.continue_job),
-                             label)
+                # Stefan's words: never a retry or an answer, so nothing is continued.
+                return Start(name, None, None,
+                             lambda: self.decider.run(case, self._no_continue), label)
             then = case.about.kind if {'retry', 'answer'} & set(case.allowed) else None
-            # Its own thread, and the earlier job's it may continue (`then`).
-            on = (self._fresh('decision'),) + (self._continues(case.about) if then else ())
+            # Its own thread, and the earlier job's it may continue (`then`), as chosen now.
+            choice, after = self._continues(case.about) if then else (None, None)
+            on = (self._fresh('decision'),) + ((after,) if then else ())
+            go = functools.partial(self.continue_job, choice=choice) if then else None
             return Start(name, 'decision', then,
-                         lambda: self.decider.run(case, self.continue_job), label, on=on)
+                         lambda: self.decider.run(case, go or self._no_continue), label, on=on,
+                         resume=choice)
         if live := self.live.next(repos=only):
             return Start(name, 'live', None, lambda: self.live.run(*live), f'live {name}')
         if fix := self.next_fix(repos=only):
@@ -840,12 +858,17 @@ class Runner:
 
     # --- a decision's retry or answer ------------------------------------------------------
 
-    def continue_job(self, old: Job, message: str, *, limit: bool = False,
-                     marks: dict | None = None) -> str:
+    def _no_continue(self, old: Job, message: str) -> str:
+        """A decision that may not retry or answer continues nothing (`Start.then` None)."""
+        raise AssertionError(f'decision continued {self._name(old)} it may not retry or answer')
+
+    def continue_job(self, old: Job, message: str, *, choice: lim.ResumeChoice,
+                     limit: bool = False, marks: dict | None = None) -> str:
         """Picks up an earlier build or fix job (a decision's retry, the answer to its question,
         or with `limit` a job cut off by a usage limit) as a new job of its kind: in place, by
-        sending `message` to its thread, or in a fresh thread, as `limits.resume_choice` decides
-        from how long ago its last request started and its context. In place, the new job
+        sending `message` to its thread, or in a fresh thread, as `choice` says: the
+        `limits.resume_choice` its Start made when the job was picked (`Runner._continues`), so
+        the gate checked the provider it runs on. In place, the new job
         carries the thread in its start record so a dead runner's settle finds it. The earlier
         job, if it was waiting, ends `continued` (with `marks`, the end record's fields that say
         who answered it, when not a decision: `waiting.py`). A Stop asked of the Claude lane
@@ -853,7 +876,6 @@ class Runner:
         the earlier job stays as it is, so the case is taken up again after Resume."""
         if self.held('claude'):
             return IDLE
-        choice = self._resume_choice(old)
         if not choice.in_place:
             return self._restart(old, choice, None if limit else message, marks)
         job = self.jobs.started(kind=old.kind, repo=old.repo, issue=old.issue, branch=old.branch,
@@ -1061,10 +1083,10 @@ class Runner:
 
     # --- recovering a job cut off by a usage limit -----------------------------------------
 
-    def recover(self, old: Job) -> str:
+    def recover(self, old: Job, choice: lim.ResumeChoice) -> str:
         """A build or fix cut off by a usage limit, once the limit has reset: continued in place
-        or in a fresh thread, as `limits.resume_choice` decides (`continue_job`)."""
-        return self.continue_job(old, lim.RESUME_MESSAGE, limit=True)
+        or in a fresh thread, as `choice` says (`continue_job`)."""
+        return self.continue_job(old, lim.RESUME_MESSAGE, choice=choice, limit=True)
 
     def _restart(self, old: Job, choice: lim.ResumeChoice, direction: str | None,
                  marks: dict | None = None) -> str:

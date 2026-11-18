@@ -55,8 +55,8 @@ says otherwise).
 `tests/test_jobs_run.py` (a build on codex end to end, a kind's fallback, a review on claudeAgent
 and on codex, the fallback's model on the PR, Sol as a Claude review's fallback) and
 `tests/test_provider_out.py` (who's out of usage, from every usage-limit end; the gate and
-usage by the providers a job's threads run on, fresh or continued; a thread named by its
-model). The effort: `tests/test_effort.py` (each kind on
+usage by the one provider each of a job's threads runs on, as the in-place-or-fresh choice
+made when it's picked gives it; a thread named by its model). The effort: `tests/test_effort.py` (each kind on
 a model of its own, `PER_KIND`; `T3Files` on a temp SQLite and
 transcript folder; the provider, model and effort named, end records and log lines through a
 real build, decision, continued job, fix round and live run with `FakeFiles`). Every kind's
