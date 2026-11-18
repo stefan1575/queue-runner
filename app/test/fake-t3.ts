@@ -18,6 +18,9 @@ export class FakeT3 {
   serverConfig: any = { version: 1, type: 'snapshot', config: { environment: { label: 'Fake', serverVersion: '0.1.9' } } };
   /** Every `t3_thread_launch` a client made: its arguments, as T3 got them. */
   launches: any[] = [];
+  /** WebSocket methods that answer once, by tag: the value T3's Exit carries. Any other
+   *  method but subscribeServerConfig ends in a Failure. */
+  wsMethods: Record<string, (payload: any) => unknown> = {};
   /** Every frame a client sent on a WebSocket. */
   frames: any[] = [];
   /** How many sign-ins finished, per subject. */
@@ -178,6 +181,10 @@ export class FakeT3 {
           this.configStreams.add(sub);
           mine.push(sub);
           queueMicrotask(() => sub(this.serverConfig));
+        } else if (msg._tag === 'Request') {
+          const method = this.wsMethods[msg.tag];
+          const exit = method ? { _tag: 'Success', value: method(msg.payload) } : { _tag: 'Failure', cause: { _tag: 'Die', defect: `no method ${msg.tag}` } };
+          queueMicrotask(() => open && on.message(JSON.stringify({ _tag: 'Exit', requestId: msg.id, exit })));
         }
       },
       close: () => {
