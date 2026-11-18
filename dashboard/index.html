@@ -15,17 +15,18 @@
     it builds first, is it up. The column between them is centred in the space they leave.
   - Three pages do three jobs. Overview is the first glance. Inbox is what waits on you. Queue is
     the work.
-  - PROTOTYPE, with sample data only (#30, take 15): take 14 with room to breathe (the Queue
-    page as wide as the Inbox, more space in every row), and a lane's queue that opens and closes
-    again, remembered. Take 14: the lanes on top (what Claude and ChatGPT run now, then their
-    whole queue in a window three rows tall that scrolls, so a card never grows), and the efforts below in four tabs. Progress is for reading: each effort as
-    the live page's feature card (its bar, what's left in a sentence), opened and closed like a
-    dropdown. Order is for moving: a line per effort that never folds or unfolds, the only place
-    you drag. Board and Graph as before. The card is as tall as its tallest tab, so switching tabs
-    never moves the page. Colour is take 13's step 3: done, moving, and what waits on you. The
-    pill at the foot of the sidebar switches the lanes: A, two cards; B, one card split down the
-    middle, as the live page has it. The right-hand rail is not this prototype's: it's take 12's
-    here, and prototyped on its own branch, prototype/rail. Take 14 is earlier/take-14.html.
+  - PROTOTYPE, with sample data only (#30, take 16): the Queue as the lanes on top, one card
+    split down the middle (what Claude and ChatGPT run now, then each one's queue, which opens and
+    closes and is remembered; open, a window three rows tall that scrolls, so the card never
+    grows), and the efforts below in four tabs, a line under the head saying what each is for.
+    Progress is for reading: each effort as the live page's feature card (its bar, what's left in
+    a sentence), opened like a dropdown. Order is for moving: an effort and the efforts inside it
+    are one box, each row with a second line saying where it stands, and nothing opens, folds or
+    moves while you drag. Board and Graph as before. The card is as tall as its tallest tab, so
+    switching tabs never moves the page, and the page keeps its old width, centred. Colour is
+    take 13's step 3: done, moving, and what waits on you. The right-hand rail is not this
+    prototype's: it's take 12's here, and settled on its own branch, prototype/rail (#141).
+    Take 15 is earlier/take-15.html.
   - The Overview only summarises, in three cards read top to bottom: what's on your plate (the
     Inbox in counts by kind, and the ask that's first in line), what's running (a line per lane,
     with its Stop button and the one thing it takes up next), and what's next (a bar per
@@ -1184,73 +1185,60 @@ button.er-name:hover { text-decoration: underline; text-underline-offset: 3px; }
 .kcol { padding: 8px; }
 
 /* Order: a line per effort, always one line. The only place you drag, so nothing folds. */
-.or-list, .or-kids { display: grid; gap: 4px; align-content: start; }
+.or-list { display: grid; gap: 6px; align-content: start; }
 .or-row > .grip, .or-row > .er-rank { grid-area: auto; }
-.or-kids { margin: 4px 0 0 46px; }
-.or { position: relative; border-radius: 10px; }
-.or-row { display: grid; grid-template-columns: 16px 22px minmax(0, 1fr) 150px 84px; column-gap: 8px; align-items: center; height: 44px; padding: 0 12px 0 6px; border-radius: 10px; border: 1px solid var(--line); background: var(--sunk); }
+/* Take 16: an effort is one box, and the efforts inside it are rows inside that box. */
+.or { position: relative; border-radius: 10px; border: 1px solid var(--line); background: var(--sunk); }
+.or.solo { background: none; border-color: var(--line-soft); }
+.or-row { display: grid; grid-template-columns: 16px 22px minmax(0, 1fr) 160px 84px; column-gap: 10px; align-items: center; height: 56px; padding: 0 14px 0 8px; }
 .or[draggable="true"] > .or-row { cursor: grab; }
-.or-kids .or-row { grid-template-columns: 16px 0 minmax(0, 1fr) 130px 84px; height: 40px; background: var(--surface); }
-.or.solo > .or-row { background: none; border-color: var(--line-soft); }
+.or-kids { display: grid; align-content: start; margin: 0 10px 8px 48px; border-radius: 8px; background: var(--surface); border: 1px solid var(--line-soft); }
+.or-kids > .or { border: 0; border-radius: 0; background: none; }
+.or-kids > .or + .or { border-top: 1px solid var(--line-soft); }
+.or-kids .or-row { grid-template-columns: 16px minmax(0, 1fr) 140px 84px; height: 50px; padding: 0 12px 0 6px; }
+.or-main { min-width: 0; display: grid; gap: 2px; }
 .or-name { min-width: 0; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .or.solo .or-name { font-weight: 500; }
+.or-sub { min-width: 0; font-size: 13.5px; color: var(--mute); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.or-sub b { font-weight: 600; color: var(--ink-2); }
+.or-sub .mine { color: var(--you); font-weight: 600; }
 .or-bar .fbar { height: 8px; gap: 2px; }
 .or-count { font-size: 13px; color: var(--mute); text-align: right; white-space: nowrap; }
 .or-st { grid-column: 4 / 6; justify-self: end; display: inline-flex; }
-.or-hint { margin: 10px 4px 0; font-size: 13.5px; color: var(--dim); }
+.or.dragging { opacity: .45; }
 .drag-chip { position: fixed; top: -200px; left: 0; max-width: 360px; padding: 8px 14px; border-radius: 9px; background: var(--ink); color: var(--page); font: 600 15px/1.3 var(--sans); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-/* ---------------------------------------------------------------- take 15 (PROTOTYPE, #30) */
-/* Room to breathe. The Queue page is as wide as the window lets it be, up to a point. */
-body.page-queue .top-col, body.page-queue main { max-width: 1480px; }
-.q12 { gap: 20px; }
-.q12-now { gap: 20px; }
+/* ---------------------------------------------------------------- take 16 (PROTOTYPE, #30) */
+/* The page keeps its old width, centred; tighter inside than take 15, roomier than take 14. */
+.q12 { gap: 16px; }
 
-/* The lanes: taller, and the head one line. The name, what the lane does, how long, and Stop all
-   sit on the same line of text, so their middles line up; what it does and how long are one size. */
-.ln, .ln.on, .q12-now.one .ln, .q12-now.one .ln.on { padding: 20px 24px 20px; gap: 16px; }
-.ln-head { align-items: center; gap: 12px; min-height: 36px; }
-.ln-head .who { font-size: 18px; }
-/* One line-height ratio for every text in the head: centred on one line, big and small text then
-   share a midpoint (take 14 mixed 1.2 and the body's, so the small text sat higher). */
+/* The lanes: one card, split down the middle. The head is one line with one midpoint. */
+.q12-now.one .ln, .q12-now.one .ln.on { padding: 16px 20px 14px; gap: 12px; }
+.ln-head { align-items: center; gap: 10px; min-height: 34px; }
+.ln-head .who { font-size: 17px; }
 .ln-head .who, .ln-does, .ln-for, .ln-for.run { line-height: 1.2; }
-.ln-does, .ln-for, .ln-for.run { font-size: 15px; font-weight: 400; color: var(--mute); }
+.ln-does, .ln-for, .ln-for.run { font-size: 14.5px; font-weight: 400; color: var(--mute); }
 .ln-for { gap: 7px; }
-.ln-doing { gap: 4px; }
-.ln-now { font-size: 16.5px; }
-.ln-now .ln-meta { margin-top: 3px; }
 /* Its queue opens and closes from the line over it, and stays as you left it. Open, it's a
-   window three rows tall; each row has room around it and a line between. */
-.ln-q { gap: 6px; padding-top: 14px; }
-.ln-qhead { all: unset; display: inline-flex; align-items: center; gap: 8px; justify-self: start; padding: 2px 6px 2px 2px; margin-left: -2px; border-radius: 6px; font-size: 14px; color: var(--mute); cursor: pointer; }
+   window three rows tall; a line between rows keeps them apart. */
+.ln-q { gap: 4px; padding-top: 10px; }
+.ln-qhead { all: unset; display: inline-flex; align-items: center; gap: 8px; justify-self: start; padding: 2px 6px 2px 2px; margin-left: -2px; border-radius: 6px; font-size: 13.5px; color: var(--mute); cursor: pointer; }
 .ln-qhead:hover { color: var(--ink); background: var(--hover); }
 .ln-qhead:focus-visible { outline: 2px solid var(--you); outline-offset: 2px; }
-.ln-qhead .i { width: 16px; height: 16px; transition: transform .15s; }
+.ln-qhead .i { width: 15px; height: 15px; transition: transform .15s; }
 .ln-qhead[aria-expanded="true"] .i { transform: rotate(90deg); }
-.ln-q .ln-then { height: 198px; }
-.ln-q .ln-then li { height: 66px; column-gap: 12px; }
+.ln-q .ln-then { height: 162px; }
+.ln-q .ln-then li { height: 54px; }
 .ln-q .ln-then li + li { border-top: 1px solid var(--line-soft); }
-.ln-q .ln-then .ln-j { font-size: 16px; }
-.ln-q .ln-then .ln-why { margin-top: 3px; }
-.ln-q .ln-none { height: 198px; }
+.ln-q .ln-then .ln-why { margin-top: 1px; }
+.ln-q .ln-none { height: 162px; }
 
-/* The efforts: more room around and between the rows. */
-.q12-head { padding: 12px 20px 12px 24px; min-height: 64px; }
-.q12-sec { padding: 20px 24px 24px; }
-.pg-list { gap: 12px; }
-.pg-head { padding: 16px 20px 16px 12px; row-gap: 10px; }
-.pg-body { padding: 0 20px 16px 66px; }
-.or-list { gap: 8px; }
-.or-kids { gap: 8px; margin: 8px 0 0 50px; }
-.or-row { height: 54px; padding: 0 18px 0 10px; column-gap: 12px; grid-template-columns: 16px 22px minmax(0, 1fr) 180px 90px; }
-.or-kids .or-row { height: 48px; grid-template-columns: 16px 0 minmax(0, 1fr) 160px 90px; }
-.kboard { gap: 16px; padding: 20px 24px 24px; }
-.kcol { padding: 12px; }
-.kcol h3 { margin: 2px 4px 12px; }
-.kcol ol { gap: 10px; }
-.kc { padding: 12px 13px; gap: 7px; }
+/* The efforts: the head is the title and the tabs; what the tab is for is a line under it. */
+.qv-hint { margin: 12px 16px 0; font-size: 14px; color: var(--mute); }
+.q12-views > .qv .q12-sec:first-of-type, .q12-views > .qv > .kboard, .q12-views > .qv > .q12-graph { padding-top: 10px; }
+.q12-graph .pyramid { padding-top: 6px; }
 
-/* Colour (take 13's step 3, Stefan's pick): done, moving, and what waits on you. No hatching:
+/* Colour (take 13's step 3/* Colour (take 13's step 3, Stefan's pick): done, moving, and what waits on you. No hatching:
    merged or building is moving; ready and blocked are just not started. */
 .q12 .sg.merged, .q12 .sg.building, .q12 .sg.pr { background: var(--run-fill); box-shadow: none; }
 .q12 .sg.ready, .q12 .sg.blocked { background: var(--line); box-shadow: none; }
@@ -2152,13 +2140,14 @@ function queue() {
   const W = work();
   if (ui.qeffort && !(W.nodes.has(ui.qeffort) && W.repos.includes(W.nodes.get(ui.qeffort).repo))) ui.qeffort = "";
   const views = { progress: qProgress, order: qOrder, board: qBoard, graph: qGraph };
+  // Take 16: what each tab is for is a line at the top of the tab, not in the card's head.
   const hint = { progress: "In the order they're built. Open one to see its tickets.", order: "Drag an effort to build it sooner or later. What it waits on comes up with it.",
-    board: "Every open ticket by where it stands.", graph: "A blocker above what it blocks." }[ui.qview];
+    board: "Every open ticket by where it stands.", graph: "A blocker above what it blocks." };
   // Every tab is drawn in the same cell and only one is seen, so the card is always as tall as
   // the tallest: switching tabs never moves what's under it.
-  const tabs = QVIEWS.map(([k]) => `<div class="qv"${k === ui.qview ? "" : ' inert aria-hidden="true"'}>${views[k](W)}</div>`).join("");
+  const tabs = QVIEWS.map(([k]) => `<div class="qv"${k === ui.qview ? "" : ' inert aria-hidden="true"'}><p class="qv-hint">${hint[k]}</p>${views[k](W)}</div>`).join("");
   return `<div class="q12 v-${ui.variant}">${moveNote()}${qNow(W)}
-    <section class="card q12-work" aria-label="Efforts"><header class="q12-head"><h2>Efforts</h2><span class="q12-hint" title="${esc(hint)}">${hint}</span>
+    <section class="card q12-work" aria-label="Efforts"><header class="q12-head"><h2>Efforts</h2><span class="q12-hint"></span>
       ${effortPick(W, ui.qview === "board" || ui.qview === "graph")}
       <span class="seg" role="tablist" aria-label="View">${QVIEWS.map(([k, label]) => `<button role="tab" aria-selected="${ui.qview === k}" data-act="q-view" data-view="${k}">${label}</button>`).join("")}</span></header>
       <div class="q12-views">${tabs}</div></section></div>${protoBar()}`;
@@ -2167,7 +2156,7 @@ function queue() {
 // ---- the lanes: what each provider runs now, then what it takes up next.
 function qNow(W) {
   const lanes = snap.lanes || [];
-  return `<div class="q12-now${ui.variant === "b" ? " one" : ""}">${lanes.map((l) => (l.provider === "claude" ? claudeLane(l, W) : reviewLane(l, W))).join("")}</div>`;
+  return `<div class="q12-now one">${lanes.map((l) => (l.provider === "claude" ? claudeLane(l, W) : reviewLane(l, W))).join("")}</div>`;
 }
 // Take 14: a lane's whole queue sits in a window three rows tall that scrolls, so the card is the
 // same size whatever it holds. `note` is the line over it; `none`, what it says when it's empty.
@@ -2275,17 +2264,19 @@ function qOrder(W) {
 }
 function orRow(n, W, rank) {
   const drag = dragAttrs(n), grip = drag ? GRIP : `<span class="grip none"></span>`, flash = isFlash(n.id) ? " flash" : "";
-  const num = `<span class="er-rank">${rank || ""}</span>`;
+  const num = rank ? `<span class="er-rank">${rank}</span>` : "";
   if (n.t === "ticket") {
     const i = n.i;
-    return `<li class="or solo${flash}" ${drag}><div class="or-row">${grip}${num}<span class="or-name"><span class="t-n">#${i.n}</span>${esc(i.title)}<span class="kind">Ticket</span></span>
-      <span class="or-st">${stateTag(i)}</span></div></li>`;
+    return `<li class="or solo${flash}" ${drag}><div class="or-row">${grip}${num}<span class="or-main"><span class="or-name"><span class="t-n">#${i.n}</span>${esc(i.title)}<span class="kind">Ticket</span></span>
+      <span class="or-sub">${esc(whyOf(i, W))}</span></span><span class="or-st">${stateTag(i)}</span></div></li>`;
   }
+  // Take 16: the row says where the effort stands, so you know what you're moving; the efforts
+  // inside it are rows inside its box.
   const s = effortSum(n, W), inner = n.order.map((k) => W.nodes.get(k)).filter((c) => c.t !== "ticket");
   const title = n.t === "none" ? `No effort<span class="kind">Tickets</span>` : `${esc(n.title)}<span class="kind">${esc(KINDNAME[n.kind] || "Effort")}</span>`;
-  return `<li class="or${flash}" ${drag}><div class="or-row">${grip}${num}<span class="or-name">${title}</span>
-      <span class="or-bar">${s.bar}</span><span class="or-count">${esc(s.count)}</span></div>
-    ${inner.length ? `<ol class="or-kids">${inner.map((c) => orRow(c, W, null)).join("")}</ol>` : ""}</li>`;
+  return `<li class="or${inner.length ? " has-kids" : ""}${flash}" ${drag}><div class="or-row">${grip}${num}<span class="or-main"><span class="or-name">${title}</span>
+      <span class="or-sub">${leftSay(s.v, false)}</span></span><span class="or-bar">${s.bar}</span><span class="or-count">${esc(s.count)}</span></div>
+    ${inner.length ? `<ol class="or-kids" aria-label="Inside ${esc(nameOf(n))}">${inner.map((c) => orRow(c, W, null)).join("")}</ol>` : ""}</li>`;
 }
 function etRow(n, W) {
   const i = n.i, seg = SEGMENTS[segmentOf(i)][0];
@@ -2458,14 +2449,8 @@ document.addEventListener("keydown", (e) => {
 });
 
 // ---- the switcher between the three. Sample data only, so it can never reach the real page.
-function protoBar() {
-  if (!snap.sample) return "";
-  const [k, name] = VARIANTS.find((v) => v[0] === ui.variant);
-  return `<div class="proto" role="group" aria-label="Prototype: the lanes, two ways" title="Prototype: the lanes as two cards or one. Left and right arrow keys">
-    <button data-act="variant" data-by="-1" aria-label="Previous variant" title="Left arrow key">${ICON.left}</button>
-    <span class="proto-name"><b>${k.toUpperCase()}</b>${esc(name)}</span>
-    <button data-act="variant" data-by="1" aria-label="Next variant" title="Right arrow key">${ICON.right}</button></div>`;
-}
+// Take 16: nothing left to switch (the lanes are one card, Stefan's pick).
+function protoBar() { return ""; }
 function turnVariant(by) {
   const at = VARIANTS.findIndex((v) => v[0] === ui.variant);
   ui.variant = VARIANTS[(at + by + VARIANTS.length) % VARIANTS.length][0];
@@ -2779,7 +2764,6 @@ function draw() {
   document.body.classList.toggle("nav-open", ui.nav);
   document.body.classList.toggle("rail-open", ui.rail);
   document.body.classList.toggle("page-inbox", ui.page === "inbox");
-  document.body.classList.toggle("page-queue", ui.page === "queue");   // take 15: wider
   if (snap && ui.repo && !(snap.repos || []).some((r) => r.name === ui.repo)) ui.repo = "";
   put("side", side());
   put("top", topBar());
