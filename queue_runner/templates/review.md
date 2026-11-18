@@ -11,12 +11,12 @@ Review independently (the only files you change are tests you add to show a prob
 2. **Spec fit:** does it do what the issue asks, and is anything it asks missing?
 3. **Standards:** does it follow this repo's $agents and `docs/agents/`?
 4. **Tests:** do the tests cover the behaviour it changes? $tests
-5. **Screenshots:** does the change alter anything a person sees, wherever its cause is (a
-   backend fix that turns a dot grey counts)? Then the PR needs a before and an after screenshot of
-   each state it touches; look at each one and check it shows what the PR and the ticket say. A
-   visible change without them, shots that don't show the change, or a `Visible: no` the diff
-   contradicts is **important** (`rule`: "a visible change needs screenshots"). A PR that says
-   `Screenshot owed` is important too, until they're added.
+5. **Screenshots:** a screenshot lets a reader see a change instead of taking the builder's word
+   for it, and leaves a record of how the screen got this way. Behaviour is proved by its tests;
+   screenshots are for a ticket that changes what a person looks at. You are their reader: look
+   at each shot the PR gives. They are enough when, reading only the PR, you can see the change
+   the ticket asked for, and the shots show what the PR says. When you can't, that is
+   **important** (`rule`: "a visible change needs screenshots"): name the screen you need to see.
 $again$guide
 Tag every finding:
 - **important** blocks the merge. It needs `file` and `line`, plus either a `scenario` (a failure

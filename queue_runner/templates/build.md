@@ -59,15 +59,17 @@ Visible: <yes, what changes on screen | no, why nothing does>
 
 ## Screenshots
 
-When something a person sees changes, wherever the cause is, the PR needs a before and after
-screenshot of each state the change touches. A new screen has no before: show each of its states.
-A visible PR without them doesn't merge.
+A screenshot lets a reader see a change instead of taking your word for it, and leaves a record
+of how the screen got this way. Take them when the issue changes what a person looks at;
+behaviour is proved by its tests. They are enough when someone reading only the PR can see the
+change the issue asked for: a before and an after of it (a new screen has no before).
 
 The repo's docs say how to render each of its states. A change that shows only in the app's own
 data, not in a sample state it can render, is shot from that data: the repo's docs say how to
 build it and shoot it (a sample page shot instead is the same before and after). Take and publish
-them with the runner's script, and don't open the images yourself (they cost tokens on every
-later turn; the reviewer looks):
+them with the runner's script. Open your after shots once, when the work is done, to check they
+show what you built; the reviewer looks at them all, and an image costs tokens on every later
+turn:
 
 ```
 python3 -I $evidence shoot URL OUT.png --size 1440x900   # a page, in headless Edge
