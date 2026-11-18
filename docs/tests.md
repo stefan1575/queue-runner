@@ -6,6 +6,29 @@ What each test file covers, and the fakes.
 python3 -m unittest
 ```
 
+## Main is tested before a push
+
+GitHub can't require checks before a push to this private repo (branch protection answers 403 on
+the free plan), so a commit pushed straight to main was only tested by CI after it landed
+(#169). A `pre-push` hook tests it first. Install it once per clone (it covers every worktree):
+
+```
+python3 scripts/install_hooks.py   # sets core.hooksPath to hooks/
+```
+
+A push that updates `main` then runs `python3 -m unittest`, `pnpm --dir app typecheck` and
+`pnpm --dir app test` in the checkout pushing, and is refused when one fails
+(`scripts/pre_push.py`). The commit pushed must be the one checked out, with no changed, staged
+or untracked files (the checks run every file in the checkout, so one the commit lacks would be
+tested in its place; ignored files are dependencies and build output), or the push is refused
+untested. A push to any other branch isn't checked, so
+build and fix threads aren't slowed. `tests/test_pre_push.py` covers it: the decision on fakes,
+then a real push from a temp repo with a failing test, refused to main and let through to a branch,
+and a commit missing a file the checkout has untracked, refused untested.
+
+## What each file covers
+
+
 Standard library only (Python 3.15 from scoop; `python3` is its shim). Tests never touch the
 network: GitHub is the `GhCli` adapter in `queue_runner/github.py`, faked in tests with
 `tests/fakes.py` (`FakeGitHub`) or with canned `gh api` JSON (`tests/test_github.py`). T3 is the
