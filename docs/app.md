@@ -4,8 +4,9 @@ The TypeScript rebuild of the runner (spec #68), in `app/`: one package, TypeScr
 pnpm, Vitest. It grows ticket by ticket beside the Python runner (`queue_runner/`), which keeps
 serving Stefan's repos until the cutover ticket. So far it signs in to T3 and lists the repos it
 could serve (#149), opens as a desktop window that keeps running in the tray, with Settings
-(#150; The desktop app, below), and knows which model does each kind of job and launches it
-(#152; Job models, below).
+(#150; The desktop app, below), knows which model does each kind of job and launches it
+(#152; Job models, below), and gates every job on its provider's usage, keeping your share of
+each week (#153; Usage, below).
 
 ## Run it
 
@@ -14,6 +15,7 @@ pnpm --dir app install
 pnpm --dir app start -- --list    # every T3 project, its folder and GitHub remote; changes nothing
 pnpm --dir app live:sign-in       # the live sign-in check (Live checks, below)
 pnpm --dir app live:launch        # the live launch check, sandbox only (Live checks, below)
+pnpm --dir app live:usage         # each provider's usage as the app reads it; acts on no project
 pnpm --dir app desktop            # builds and opens the desktop app (The desktop app, below)
 ```
 
@@ -126,7 +128,10 @@ Code both sides use (`display.ts`, `settings-search.ts`) touches no Node. The wi
 folder (never the real state, lock or logon entry), on the sample T3 catalog
 (`test/fixtures/server-config.json`, never the real T3): `window`, `settings-name`,
 `settings-models` (a new install), `settings-models-chosen` (the sample choices in
-`test/fixtures/shoot-jobs.json`), `settings-display`, `settings-machine` and `settings-search` (a
+`test/fixtures/shoot-jobs.json`), `settings-share` (a new install) and `settings-share-kept` (the
+sample share in `test/fixtures/shoot-shares.json`), on the fixture's usage moved so T3 read it a
+minute before the shoot, with one sample provider T3 reads no usage for
+(`shoot-unread-provider.json`, its row Coming soon), `settings-display`, `settings-machine` and `settings-search` (a
 typo, "windos"), each `-light.png` and `-dark.png`, at 1440x900. The page's address opens Settings for it:
 `#settings=<page>` or `#q=<search>`.
 
@@ -164,6 +169,61 @@ Which model does each kind of job (#152: #120's shape on #36's page, as the 2026
   widths, so changing a provider moves nothing (#36). Models carries a blue count in the page
   list while Default follows T3's. Stefan's values (Opus 5.5 at medium for every kind, review on
   Sol at high with Opus 5.5 at high as its fallback, as `config.toml` has them) are set at the
+  cutover, not in code.
+
+## Usage
+
+The usage gate (#153: #68 stories 20 and 29, #122's design, today's `docs/usage.md` ported per
+provider). `src/usage.ts`, `src/shares.ts`, `src/costs.ts`, `src/cost-log.ts`, `src/gate.ts` (the
+decision, pure) and `src/usage-gate.ts` (the state around it). The lanes that call it are later
+tickets; the tests drive it on fake T3's events.
+
+- **Where each number comes from in T3** (found live 2026-11-19, T3 0.1.9; `pnpm --dir app
+  live:usage`): every provider in `subscribeServerConfig`'s `providers` has `usageLimits`:
+  `checkedAt` (when T3 read it), `windows` (each `{id, kind: session | weekly | monthly | other,
+  label, usedPercent: 0-100, resetsAt, windowDurationMins}`), `resetCredits {availableCount,
+  nextExpiresAt, options?}` when there are any, and `unavailable {reason: unsupported |
+  probeFailed}` when T3 has no windows (it keeps the last good ones after a failed read). Seen:
+  Claude's `five_hour` (session, 300 minutes), `seven_day` (weekly) and `seven_day_fable` (weekly,
+  labelled `Weekly · Fable`: only that family's models); Codex's `primary` (session) and
+  `secondary` (weekly), with 2 reset credits. T3 reads each instance's usage itself, about every
+  5 minutes (its provider health refresh, `DEFAULT_PROVIDER_HEALTH_REFRESH_INTERVAL`, and a 5-minute
+  probe cache), and also merges what a running session reports; each change is a
+  `providerStatuses` event carrying every provider (seen: one per instance per read, the two
+  Claude instances a few seconds apart). The app asks no provider and polls nothing: it follows
+  the stream it already holds for the catalog (`src/t3/catalog-source.ts`). `usageLimitSources`
+  (T3's hub accounts, `usageLimitSourcesUpdated`) is another thing, unused here.
+- **A login** is T3's `auth.workspaceId` (else `continuation.groupKey`, else the instance): two
+  instances on one login (seen: `claudeAgent` and `claudeReviewer`) show the same windows, and a
+  job running on either counts against both. Its name, in every reason and share row, is the
+  shortest of its instances' names.
+- **The gate** (`checkJob`), before any job, reviews included (#106): each window of the job's
+  provider that counts its model (a `<kind> · <family>` window counts only models whose id or
+  name holds the family) must fit used + the expected cost of every job running on the same
+  login (counted whole until it ends) + this job's, under 100 minus your share; a window with
+  nothing used takes any job. Held, it waits for the jobs running there to end (no time), for
+  the share's release, or for the window's reset plus 2 minutes; the longest timed wait is its
+  one reason (`holdText`: "Claude's 5-hour window resets at 14:20; this build needs about 60%").
+  No reading to decide on (none, one from before the last job on that login ended, or one over 30
+  minutes old) holds it until T3's next. A provider T3 reports `unsupported` for is ungated, as
+  #122 had it.
+- **Which model** (`UsageGate.pick`): the kind's own; while that doesn't fit, its fallback if it
+  has one and that fits (#152); else held with its own model's reason. `holds()` keeps each held
+  job's reason and since when, for the dashboard.
+- **Learned costs** (#122): per provider instance, model, effort and kind, in percent of each
+  window by its id; the cautious default (build 60 of the 5 hours and 15 of the week, fix and
+  conflict 40/10, decision, review and ask 15/4; any longer window takes the weekly figure) until
+  3 solo records measured that window, then the largest of the last 5. A job's record (`usage.jsonl`
+  in the state folder) is the reading it was let in on and T3's first reading of its provider
+  after it ended, with `spent` per window (null for one that reset meanwhile) and `sharedWith`
+  when another job ran on the same login meanwhile (then it teaches nothing). A torn last line is
+  cut off; a bad line before it is an error. No plan setting: #118 closed it, the costs being
+  percents that follow a plan change.
+- **Your share** (Settings, Your share; `shares`, keyed `<driver>/<window id>`): one row per
+  provider per weekly window, the percent kept (0% by default) and how many hours before the
+  window's reset it's released (24 by default, at most 168). A connected provider T3 reads no
+  usage for shows one row greyed, Coming soon. A provider that isn't connected shows no row (#36's
+  open question 8): its jobs can't run anyway. Stefan's 5% of Claude's week is set at the
   cutover, not in code.
 
 ## Signing in
@@ -287,3 +347,7 @@ is killed is code -1 with Node's reason in stderr, never a gh exit code (so is t
   `effort: low` on their runs; Codex's `gpt-6-astra` run carried `reasoningEffort: low` but failed
   on ChatGPT's usage limit, so a completed Codex run is owed (the Python check ran one at
   `reasoningEffort: high` on 2026-11-17, docs/t3.md).
+- `app/live/usage.ts` (`pnpm --dir app live:usage [-- --minutes N]`): acts on no project. It
+  subscribes to T3's server config and prints each connected provider's windows as the app reads
+  them, then each `providerStatuses` event that changes one, for N minutes (5 by default). **Run
+  2026-11-19:** three providers, each read again about every 5 minutes (Usage, above).
