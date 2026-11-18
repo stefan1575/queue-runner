@@ -56,7 +56,7 @@ export function checkJob(i: GateInput): Verdict {
   const checked = u?.checkedAt ? new Date(u.checkedAt) : null;
   if (!u || !checked || !u.windows.length || (i.lastEnd && checked < i.lastEnd) || now.getTime() - checked.getTime() > STALE_AFTER_MS) {
     const stale = !checked || !u?.windows.length ? 'none' : i.lastEnd && checked < i.lastEnd ? 'before-end' : 'old';
-    return { fits: false, until: null, hold: { why: 'reading', provider: u?.label ?? job.choice.provider, checkedAt: u?.checkedAt ?? null, stale } };
+    return { fits: false, until: null, hold: { why: 'reading', provider: u?.name ?? job.choice.provider, checkedAt: u?.checkedAt ?? null, stale } };
   }
   const windows = u.windows.filter((w) => windowCounts(w, i.model));
   const { cost } = expectedCost(i.records, { ...job.choice, kind: job.kind }, windows);
@@ -68,7 +68,7 @@ export function checkJob(i: GateInput): Verdict {
     const share = shareOf(i.shares, u.driver, w.id);
     const kept = w.kind === 'weekly' ? heldPercent(share, w, now) : 0;
     const used = w.usedPercent;
-    const window = windowName(u.label, w);
+    const window = windowName(u.name, w);
     if ((used === 0 && others === 0) || used + others + need <= 100 - kept) continue;
     if (used + need <= 100 - kept) {
       holds.push({ until: null, hold: { why: 'running', kind: job.kind, window, running: others, need, jobs: beside.filter((r) => r.cost[w.id]).map((r) => r.id) } });

@@ -109,7 +109,7 @@ describe('the view', () => {
     expect(view.get().catalog).toBeNull();
     expect(view.get().usage).toEqual([]);
     const catalog: Catalog = { providers: [{ id: 'p', label: 'P', models: [] }], t3Default: null };
-    const usage: ProviderUsage[] = [{ provider: 'p', driver: 'p', account: 'p:p', label: 'P', checkedAt: null, windows: [], resetCredits: null, unavailable: 'unsupported' }];
+    const usage: ProviderUsage[] = [{ provider: 'p', driver: 'p', account: 'p:p', label: 'P', name: 'P', checkedAt: null, windows: [], resetCredits: null, unavailable: 'unsupported' }];
     t3.change({ catalog, usage });
     expect(view.get()).toMatchObject({ catalog, usage });
     t3.change({ catalog, usage, error: 'T3 is down' });

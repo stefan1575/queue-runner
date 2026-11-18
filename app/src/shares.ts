@@ -56,13 +56,13 @@ export type ShareRow = {
 };
 
 /** The page's rows: each connected provider's weekly windows, once per driver (instances on one
- *  driver show the same windows), named by the shortest of its instances' names. A provider T3
+ *  driver show the same windows), named by the shortest of their logins' names. A provider T3
  *  reads no usage for gets one row for its week, not enforced. */
 export function shareRows(usage: ProviderUsage[], shares: Shares): ShareRow[] {
   const drivers = [...new Set(usage.map((u) => u.driver))];
   return drivers.flatMap((driver): ShareRow[] => {
     const all = usage.filter((u) => u.driver === driver);
-    const label = all.map((u) => u.label).reduce((a, b) => (b.length < a.length ? b : a));
+    const label = all.map((u) => u.name).reduce((a, b) => (b.length < a.length ? b : a));
     const read = all.find((u) => u.windows.length > 0);
     if (!read) {
       const key = shareKey(driver, 'weekly');

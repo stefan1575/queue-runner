@@ -15,7 +15,8 @@
     "typecheck": "tsc --noEmit && tsc --noEmit -p renderer",
     "test": "vitest run",
     "live:sign-in": "node live/sign-in.ts",
-    "live:launch": "node live/launch.ts"
+    "live:launch": "node live/launch.ts",
+    "live:usage": "node live/usage.ts"
   },
   "devDependencies": {
     "@tailwindcss/vite": "4.3.5",

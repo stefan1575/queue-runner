@@ -8,7 +8,7 @@ const NOW = new Date('2026-11-19T12:00:00Z');
 const win = (id: string, kind: UsageWindow['kind'], used: number, resetsAt: string, label = kind === 'session' ? 'Session' : 'Weekly'): UsageWindow =>
   ({ id, kind, label, usedPercent: used, resetsAt, minutes: kind === 'session' ? 300 : 10080 });
 const claude = (five: number, week: number, extra: UsageWindow[] = []): ProviderUsage => ({
-  provider: 'claudeAgent', driver: 'claudeAgent', account: 'claudeAgent:w1', label: 'Claude',
+  provider: 'claudeAgent', driver: 'claudeAgent', account: 'claudeAgent:w1', label: 'Claude', name: 'Claude',
   checkedAt: '2026-11-19T11:58:00Z', resetCredits: null, unavailable: null,
   windows: [win('five_hour', 'session', five, '2026-11-19T14:20:00Z'), win('seven_day', 'weekly', week, '2026-11-23T11:00:00Z'), ...extra],
 });

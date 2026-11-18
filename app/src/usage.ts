@@ -27,6 +27,9 @@ export type ProviderUsage = {
   account: string;
   /** T3's name for the provider. */
   label: string;
+  /** The login's name, for what the app says about its windows: the shortest of its
+   *  instances' names (one instance may be named for what it's for). */
+  name: string;
   /** When T3 last read these windows (ISO), or null when it never has. */
   checkedAt: string | null;
   windows: UsageWindow[];
@@ -55,7 +58,7 @@ function windowOf(w: any): UsageWindow | null {
 
 /** The usage of each provider T3 can start a thread on now, from T3's `providers`. */
 export function usageFromProviders(providers: unknown): ProviderUsage[] {
-  return (Array.isArray(providers) ? providers : []).filter(connected).map((p: any): ProviderUsage => {
+  const all = (Array.isArray(providers) ? providers : []).filter(connected).map((p: any): ProviderUsage => {
     const u = p.usageLimits;
     const windows = (Array.isArray(u?.windows) ? u.windows : []).map(windowOf).filter((w: UsageWindow | null): w is UsageWindow => w !== null);
     const login = p.auth?.workspaceId ?? p.continuation?.groupKey;
@@ -64,12 +67,17 @@ export function usageFromProviders(providers: unknown): ProviderUsage[] {
       driver: String(p.driver ?? p.instanceId),
       account: `${p.driver ?? p.instanceId}:${typeof login === 'string' && login ? login : p.instanceId}`,
       label: String(p.displayName ?? p.instanceId),
+      name: '',
       checkedAt: iso(u?.checkedAt),
       windows,
       resetCredits: typeof u?.resetCredits?.availableCount === 'number' ? u.resetCredits.availableCount : null,
       unavailable: windows.length ? null : String(u?.unavailable?.reason ?? (u ? 'probeFailed' : 'unsupported')),
     };
   });
+  return all.map((u) => ({
+    ...u,
+    name: all.filter((o) => o.account === u.account).map((o) => o.label).reduce((a, b) => (b.length < a.length ? b : a)),
+  }));
 }
 
 /** The models a window counts: a window labelled `<kind> · <family>` counts only the models

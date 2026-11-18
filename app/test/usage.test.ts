@@ -19,6 +19,8 @@ describe("T3's usage windows", () => {
     expect(usage[2]!.account).toBe(claude.account);
     expect(usage[0]!.account).not.toBe(claude.account);
     expect(usage[0]!.resetCredits).toBe(2);
+    // the login's name is its instances' shortest
+    expect(usage.map((u) => u.name)).toEqual(['Codex', 'Claude', 'Claude']);
   });
 
   test("a provider T3 can't read usage for has no windows and says why", () => {
