@@ -43,7 +43,7 @@ describe("T3's projects", () => {
     expect(f.current()).toBeNull();
     await vi.waitFor(() => expect(f.current()).not.toBeNull());
     expect(f.current()).toEqual([{ id: 'p1', title: 'sandbox', folder: 'C:/sandbox' }]);
-    expect(t3.frames.filter((m) => m._tag === 'Request').map((m) => m.tag)).toEqual(['subscribeShell']);
+    expect(t3.frames.filter((m) => m._tag === 'Request').map((m) => m.tag)).toEqual(['orchestration.subscribeShell']);
   });
 
   test('a project added or removed in T3 shows up or goes, and each change is told', async () => {

@@ -208,7 +208,7 @@ export class FakeT3 {
         if (msg._tag === 'Request' && msg.tag === 'subscribeServerConfig') {
           queueMicrotask(() => open && on.message(JSON.stringify({ _tag: 'Chunk', requestId: msg.id, values: [this.serverConfig] })));
         }
-        if (msg._tag === 'Request' && msg.tag === 'subscribeShell') {
+        if (msg._tag === 'Request' && msg.tag === 'orchestration.subscribeShell') {
           // T3's shell stream: a snapshot of every project (and threads, which the app ignores),
           // then each change as it happens (docs/app.md, The WebSocket API).
           const stream: ShellStream = {

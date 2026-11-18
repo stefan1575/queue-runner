@@ -68,7 +68,7 @@ export class T3ProjectFeed implements ProjectFeed {
 
   private open() {
     if (this.stopped) return;
-    const sub = this.ws.subscribe('subscribeShell', {}, (item) => this.take(item));
+    const sub = this.ws.subscribe('orchestration.subscribeShell', {}, (item) => this.take(item));
     this.close = () => sub.close();
     const ended = (why: string) => {
       if (this.stopped) return;

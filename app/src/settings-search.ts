@@ -5,23 +5,30 @@
 import type { View } from './desktop/view.ts';
 import { DATE_STYLES, formatDate, TIME_FORMATS } from './display.ts';
 
-export type PageId = 'name' | 'display' | 'machine';
+export type PageId = 'name' | 'repos' | 'display' | 'machine';
 export const PAGES: { id: PageId; label: string }[] = [
   { id: 'name', label: 'Name' },
+  { id: 'repos', label: 'Repositories' },
   { id: 'display', label: 'Display' },
   { id: 'machine', label: 'Machine' },
 ];
 
-export type SettingId = 'name' | 'date' | 'clock' | 'startup';
+/** A repository's row is `repo:<T3 project id>`. */
+export type SettingId = 'name' | 'date' | 'clock' | 'startup' | `repo:${string}`;
 export type SettingEntry = { id: SettingId; page: PageId; words: string };
 
 /** Each setting with the words Search finds it by: what it's called, other words for it, and
  *  what it's set to now. */
 export function settingEntries(view: View, now: Date): SettingEntry[] {
   const { settings: s, account, timeFormat: tf } = view;
+  const repos = (view.repos ?? []).map((r): SettingEntry => ({
+    id: `repo:${r.id}`, page: 'repos',
+    words: `${r.title} ${r.github ?? 'no github remote warning cannot'} ${r.folder} repository repositories repo project folder served serve on off merge merges who github t3 ${r.isNew ? 'new' : ''}`,
+  }));
   const dates = DATE_STYLES.map((d) => `${formatDate(now, d.id, tf)} ${formatDate(now, d.id, tf, true)} ${d.label}`).join(' ');
   return [
     { id: 'name', page: 'name', words: `your name you me call called briefs github account user who ${s.name ?? ''} ${account?.name ?? ''} ${account?.login ?? ''}` },
+    ...repos,
     { id: 'date', page: 'display', words: `date dates style format day month year weekday calendar today display ${dates}` },
     { id: 'clock', page: 'display', words: `clock time format 12 24 hour am pm t3 timestamp ${TIME_FORMATS.find((f) => f.id === tf)?.label ?? ''}` },
     { id: 'startup', page: 'machine', words: 'start with windows startup boot login logon sign in tray autostart launch open' },
