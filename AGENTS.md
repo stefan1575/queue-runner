@@ -13,6 +13,11 @@ restarts on its new code once main moves (`docs/running.md`, Serving itself).
 rebuild. The Python runner gets only the fixes that keep it serving until the cutover (#165), and
 a Python feature ticket is closed in favour of its rebuild ticket.
 
+**A served repo never knows the runner.** Everything the runner needs from a repo is in
+`config.toml` or its own briefs; it reads only the repo's `AGENTS.md`, its `REVIEW.md` if it has
+one, and the docs `config.toml` names. Nothing the runner does (who builds, who reviews, who
+merges, its PR comments' shape) goes into a served repo's files.
+
 ## Run it
 
 ```

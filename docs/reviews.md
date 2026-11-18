@@ -4,8 +4,8 @@ The Sol lane: a review pass, Sol through codex-sol.sh, the Opus reviewer, and ru
 
 ## A Sol pass
 
-The review loop's rules are `docs/flow.md`, The review loop; leads-dashboard's
-`docs/agents/review-loop.md` and `REVIEW.md` define the words.
+The review loop's rules and words are `docs/flow.md`, The review loop; a served repo's
+`REVIEW.md`, if it has one, says what to report.
 
 1. **Settle.** Under `sol.lock`, a review the log shows open was cut off with its runner: it
    counts as `failed` (an Opus review's, the fallback or config.toml's, once its thread has ended: The Opus fallback). An open merge is settled from GitHub: `merged` or `failed`.

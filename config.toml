@@ -55,7 +55,7 @@ name = "leads-dashboard"
 github = "RoyalBullyAgency-RBA/leads-dashboard"
 path = "~/Code/Work/leads-dashboard"
 base = "main"
-review_table = true   # docs/agents/review-loop.md: each review adds a row to the PR body's `## Review` table
+review_table = true   # the runner's own output: each review adds a row to the PR body's `## Review` table
 # Live steps after merges (ticket 11): one Claude thread per batch follows this doc (the Lovable
 # connector's deploy_project, query_database per migration, npm run check:live-schema).
 live_doc = "docs/agents/lovable-cloud.md"

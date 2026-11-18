@@ -2,8 +2,8 @@
 works out a review's verdict and outcome from Sol's sol-findings block, never from its prose.
 
 Ported from `~/sol-pr-review.py` (`decide()`, the marker and block parsing) without its labels,
-spend guard, token counts or session forks. leads-dashboard's `docs/agents/review-loop.md` and
-`REVIEW.md` define the words; `docs/flow.md` the loop.
+spend guard, token counts or session forks. `docs/flow.md`, The review loop,
+defines the words and the loop; a served repo's `REVIEW.md`, if it has one, what to report.
 
 A PR's state lives in its review comments. The newest one holds every finding raised so far, each
 with a status, so a review reads only the newest. Three formats are read:
