@@ -59,19 +59,22 @@ Visible: <yes, what changes on screen | no, why nothing does>
 
 ## Screenshots
 
-When something a person sees changes, wherever the cause is, the PR needs a before and after
-screenshot of each state the change touches. A new screen has no before: show each of its states.
-A visible PR without them doesn't merge.
+When the change alters what a person sees, wherever the cause is, the PR needs a before and
+after of the screens a person would notice changing: what the PR sets out to change, not every
+case its tests cover (a test is the evidence for those). A change nobody sees needs none: say
+`Visible: no` and why. A new screen has no before: show each of its states. A visible PR without
+them doesn't merge.
 
-The repo's docs say how to render each of its states. A change that shows only in the app's own
-data, not in a sample state it can render, is shot from that data: the repo's docs say how to
-build it and shoot it (a sample page shot instead is the same before and after). Take and publish
-them with the runner's script, and don't open the images yourself (they cost tokens on every
-later turn; the reviewer looks):
+Where the repo's `AGENTS.md` says how to shoot its states (its own harness, or never the whole
+desktop), do it that way. Otherwise the repo's docs say how to render each of its states. A change
+that shows only in the app's own data, not in a sample state it can render, is shot from that data:
+the repo's docs say how to build it and shoot it (a sample page shot instead is the same before and
+after). Take and publish them with the runner's script, and don't open the images yourself (they
+cost tokens on every later turn; the reviewer looks):
 
 ```
 python3 -I $evidence shoot URL OUT.png --size 1440x900   # a page, in headless Edge
-python3 -I $evidence screen OUT.png                       # the whole desktop
+python3 -I $evidence screen OUT.png                       # the whole desktop, if the repo allows it
 python3 -I $evidence publish --repo . --into pr-<the PR's number> FILE.png ...
 ```
 

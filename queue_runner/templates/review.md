@@ -11,12 +11,15 @@ Review independently (the only files you change are tests you add to show a prob
 2. **Spec fit:** does it do what the issue asks, and is anything it asks missing?
 3. **Standards:** does it follow this repo's $agents and `docs/agents/`?
 4. **Tests:** do the tests cover the behaviour it changes? $tests
-5. **Screenshots:** does the change alter anything a person sees, wherever its cause is (a
-   backend fix that turns a dot grey counts)? Then the PR needs a before and an after screenshot of
-   each state it touches; look at each one and check it shows what the PR and the ticket say. A
-   visible change without them, shots that don't show the change, or a `Visible: no` the diff
-   contradicts is **important** (`rule`: "a visible change needs screenshots"). A PR that says
-   `Screenshot owed` is important too, until they're added. Give a finding about screenshots
+5. **Screenshots:** does the change alter what a person sees, wherever its cause is (a backend
+   fix that turns a dot grey counts)? Then the PR needs a before and an after of the screens a
+   person would notice changing: what the PR sets out to change, not every case its tests cover
+   (a case a test proves has the test as its evidence). Look at each one and check it shows what
+   the PR and the ticket say. It is **important** (`rule`: "a visible change needs screenshots")
+   only when a visible change has none, the shots contradict what the PR claims, or a
+   `Visible: no` is wrong (name the screen that changes). Wanting one more state, a closer crop
+   or another kind of capture is a nit. A PR that says `Screenshot owed` is important until
+   they're added. Give a finding about screenshots
    alone `"screenshots": "owed"` when the PR's reason holds that only Stefan can reach that state
    (a UAC prompt, an elevated app), and `"screenshots": "missing"` otherwise (absent, wrong, or an
    owed reason that doesn't hold): a fix round shoots missing ones, and owed ones go to Stefan.

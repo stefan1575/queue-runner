@@ -23,7 +23,8 @@ ${direction}## What to do
 3. Run the repo's checks and tests (its `AGENTS.md` says which) on the merged result and fix
    what the merge broke, in the PR's change only.
 4. **Screenshots:** if the PR changes what a person sees and its body lacks a before and after
-   of a state it touches (a PR opened before the screenshot rule has none), shoot them now on
+   of the screens a person would notice changing (what the PR sets out to change, not every case
+   its tests cover; a PR opened before the screenshot rule has none), shoot them now on
    the merged result, the way the repo's `AGENTS.md` says (its own harness where it names one),
    publish them into `pr-$number` on the `evidence` branch and put them in the PR body
    (`gh pr edit $number --repo $github --body-file ...`). A state only Stefan can reach (a UAC
