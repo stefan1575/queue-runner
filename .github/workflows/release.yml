@@ -1,0 +1,63 @@
+# The Windows installer (#164; docs/app.md, The installer). A version tag (v0.1.0) builds it and
+# attaches it to that tag's GitHub release, creating the release with app/release-notes.md if
+# there's none yet. A PR that changes how the installer is built builds it too, without releasing,
+# so a broken build shows before a tag does.
+name: release
+on:
+  push:
+    tags: ['v*']
+  pull_request:
+    paths:
+      - .github/workflows/release.yml
+      - app/electron-builder.json
+      - app/installer/**
+      - app/package.json
+      - app/pnpm-lock.yaml
+permissions:
+  contents: write
+jobs:
+  installer:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: app
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.22.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+          cache-dependency-path: app/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm test
+      # The tag names the version (v0.1.0 is 0.1.0); a PR's build keeps package.json's.
+      - name: pnpm installer
+        run: |
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            pnpm installer -c.extraMetadata.version="${GITHUB_REF_NAME#v}"
+          else
+            pnpm installer
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installer
+          path: app/installer-dist/*.exe
+          if-no-files-found: error
+      - name: Attach to the release
+        if: github.ref_type == 'tag'
+        working-directory: .
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          exe=$(ls app/installer-dist/*.exe)
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "$exe" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" "$exe" --title "Queue runner ${GITHUB_REF_NAME#v}" --notes-file app/release-notes.md
+          fi
