@@ -15,6 +15,9 @@ export const CLIENT_SETTINGS = join(T3_HOME, 'userdata', 'client-settings.json')
 const FORMATS: TimeFormat[] = ['locale', '12-hour', '24-hour'];
 /** How often the file is looked at: a stat, not a read, until it changes. */
 const POLL_MS = 500;
+/** How long a file that isn't JSON is given to become JSON before it counts as unreadable: a
+ *  write caught midway ends well inside it, a file left broken outlasts it. */
+const SETTLE_MS = 2000;
 
 /** The Time format in T3's client settings; System default (T3's own default) when the file is
  *  missing or unreadable, or holds no such key or a value T3 doesn't offer. */
@@ -47,6 +50,8 @@ export class T3TimeFormat implements TimeFormatSource {
   private onStat: (now: Stats, before: Stats) => void;
   /** Reads run one after another, so a slow one never lands after a newer one. */
   private reading: Promise<void> = Promise.resolve();
+  /** The second look at a file that wasn't JSON, while one is pending. */
+  private settle: ReturnType<typeof setTimeout> | undefined;
 
   private constructor(file: string, format: TimeFormat) {
     this.file = file;
@@ -75,15 +80,34 @@ export class T3TimeFormat implements TimeFormatSource {
 
   close(): void {
     unwatchFile(this.file, this.onStat);
+    clearTimeout(this.settle);
+    this.settle = undefined;
     this.listeners.clear();
   }
 
-  private async reread() {
-    // A file that isn't JSON keeps the format it had: it is most often T3 caught mid-write, and
-    // the write's end changes the file again, so the next poll reads it whole.
-    const format = await read(this.file);
-    if (format === undefined || format === this.format) return;
+  private async reread(settled = false) {
+    // A file that isn't JSON is most often T3 caught mid-write: it keeps the format it had, and
+    // is looked at again once SETTLE_MS has passed. Still not JSON then, with no write in
+    // between to read it whole, it is unreadable, so System default (as readTimeFormat).
+    let format = await read(this.file);
+    if (format === undefined) {
+      if (!settled) {
+        this.lookAgain();
+        return;
+      }
+      format = 'locale';
+    }
+    if (format === this.format) return;
     this.format = format;
     for (const l of this.listeners) l(format);
+  }
+
+  private lookAgain() {
+    clearTimeout(this.settle);
+    this.settle = setTimeout(() => {
+      this.settle = undefined;
+      this.reading = this.reading.then(() => this.reread(true));
+    }, SETTLE_MS);
+    this.settle.unref?.();
   }
 }

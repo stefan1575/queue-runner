@@ -115,6 +115,25 @@ describe('following T3', () => {
     await vi.waitFor(() => expect(seen).toEqual(['12-hour']), { timeout: 3000 });
   });
 
+  test('a file replaced by one that stays unreadable is System default once it settles', async () => {
+    const d = await userdata();
+    await t3Writes(d, { timestampFormat: '24-hour' });
+    const source = await start(d);
+    const seen: TimeFormat[] = [];
+    source.onChange((f) => seen.push(f));
+    await writeFile(join(d, 'next.json'), '{invalid');
+    await rename(join(d, 'next.json'), settingsFile(d));
+    await vi.waitFor(() => expect(seen).toEqual(['locale']), { timeout: 5000 });
+  });
+
+  test('a file emptied and never filled is System default once it settles', async () => {
+    const d = await userdata();
+    await t3Writes(d, { timestampFormat: '12-hour' });
+    const source = await start(d);
+    await writeFile(settingsFile(d), '');
+    await vi.waitFor(() => expect(source.current()).toBe('locale'), { timeout: 5000 });
+  });
+
   test("no T3 folder at all is System default, and the start doesn't fail", async () => {
     const d = await userdata();
     const source = await start(join(d, 'no-such-userdata'));
