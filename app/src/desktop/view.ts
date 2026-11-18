@@ -1,10 +1,13 @@
 // What the window shows of the runner, kept in the main process (the runner runs there; the
-// window only shows it): the settings, the `gh` account Name comes from, and T3's Time format.
+// window only shows it): the settings, the `gh` account Name comes from, T3's Time format and
+// T3's catalog of providers and models (#152).
 // Every change is told to the listeners, which send it to the window.
 import type { TimeFormat } from '../display.ts';
 import { GitHubError, type Account, type GitHubAccount } from '../github.ts';
+import type { Catalog } from '../jobs.ts';
 import { NotEmpty, RepoError, type Repo } from '../repos.ts';
 import { SettingsError, type Merger, type Settings, type SettingsPatch, type SettingsStore } from '../settings.ts';
+import type { CatalogSource } from '../t3/catalog-source.ts';
 import { T3Error } from '../t3/seams.ts';
 
 export type View = {
@@ -14,6 +17,10 @@ export type View = {
   accountError?: string;
   /** T3's Time format, which the window's clock follows. */
   timeFormat: TimeFormat;
+  /** What T3 offers each job: null until T3 first answers. */
+  catalog: Catalog | null;
+  /** Why T3 can't be asked for it now, while it can't. */
+  catalogError?: string;
   /** T3's projects, each with its choices; null until T3 has first answered. */
   repos: Repo[] | null;
   /** Why T3's projects can't be had right now, or null. */
@@ -79,6 +86,9 @@ export function briefName(view: View): string | null {
   return view.settings.name ?? view.account?.name ?? view.account?.login ?? null;
 }
 
+const catalogPart = (c: ReturnType<CatalogSource['current']>) =>
+  ({ catalog: c.catalog, ...(c.error ? { catalogError: c.error } : {}) });
+
 export class RunnerView {
   private view: View;
   private settings: SettingsStore;
@@ -90,7 +100,7 @@ export class RunnerView {
     this.view = view;
   }
 
-  static async start(settings: SettingsStore, github: GitHubAccount, timeFormat: TimeFormatSource, repos: RepoSource): Promise<RunnerView> {
+  static async start(settings: SettingsStore, github: GitHubAccount, timeFormat: TimeFormatSource, catalog: CatalogSource, repos: RepoSource): Promise<RunnerView> {
     let account: Account | null = null;
     let accountError: string | undefined;
     try {
@@ -101,12 +111,14 @@ export class RunnerView {
     }
     const view = new RunnerView(settings, {
       settings: settings.get(), account, ...(accountError ? { accountError } : {}), timeFormat: timeFormat.current(),
+      ...catalogPart(catalog.current()),
       repos: repos.list(), reposError: repos.error(),
     });
     view.repos = repos;
     settings.onChange((s) => view.update({ settings: s }));
     repos.onChange(() => view.update({ repos: repos.list(), reposError: repos.error() }));
     timeFormat.onChange((f) => view.update({ timeFormat: f }));
+    catalog.onChange((c) => view.update(catalogPart(c), ['catalogError']));
     return view;
   }
 
@@ -151,8 +163,10 @@ export class RunnerView {
     return () => this.listeners.delete(listener);
   }
 
-  private update(part: Partial<View>) {
-    this.view = { ...this.view, ...part };
+  private update(part: Partial<View>, drop: (keyof View)[] = []) {
+    const next: View = { ...this.view };
+    for (const k of drop) delete next[k];
+    this.view = { ...next, ...part };
     for (const l of this.listeners) l(this.view);
   }
 }

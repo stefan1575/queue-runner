@@ -9,7 +9,9 @@ import { NotEmpty, RepoError, type Repo } from '../src/repos.ts';
 import { SettingsError } from '../src/settings.ts';
 import type { TimeFormat } from '../src/display.ts';
 import { GhGitHub, GitHubError, type Gh } from '../src/github.ts';
+import type { Catalog } from '../src/jobs.ts';
 import { SettingsStore } from '../src/settings.ts';
+import type { CatalogSource, CatalogState } from '../src/t3/catalog-source.ts';
 
 let dirs: string[] = [];
 afterEach(async () => {
@@ -51,6 +53,14 @@ class FakeRepos implements RepoSource {
   remove(id: string, withThreads?: boolean) { return this.ask('remove', id, withThreads); }
 }
 
+class FakeCatalog implements CatalogSource {
+  state: CatalogState = { catalog: null };
+  private listeners = new Set<(s: CatalogState) => void>();
+  current() { return this.state; }
+  onChange(l: (s: CatalogState) => void) { this.listeners.add(l); return () => this.listeners.delete(l); }
+  change(s: CatalogState) { this.state = s; for (const l of this.listeners) l(s); }
+}
+
 const account = (login: string, name: string | null) => ({ account: async () => ({ login, name }) });
 
 describe("the gh account's name", () => {
@@ -78,17 +88,17 @@ describe("the gh account's name", () => {
 
 describe('the view', () => {
   test('the name for the briefs is yours, else the account name, else its login', async () => {
-    const view = await RunnerView.start(await store(), account('ana-k', 'Ana K'), new FakeTimeFormat(), new FakeRepos());
+    const view = await RunnerView.start(await store(), account('ana-k', 'Ana K'), new FakeTimeFormat(), new FakeCatalog(), new FakeRepos());
     expect(briefName(view.get())).toBe('Ana K');
     await view.set({ name: 'Ana' });
     expect(briefName(view.get())).toBe('Ana');
-    const noName = await RunnerView.start(await store(), account('ana-k', null), new FakeTimeFormat(), new FakeRepos());
+    const noName = await RunnerView.start(await store(), account('ana-k', null), new FakeTimeFormat(), new FakeCatalog(), new FakeRepos());
     expect(briefName(noName.get())).toBe('ana-k');
   });
 
   test("gh failing leaves the name yours to type, and says why", async () => {
     const failing = { account: async () => { throw new GitHubError('gh api user failed (4): not signed in'); } };
-    const view = await RunnerView.start(await store(), failing, new FakeTimeFormat(), new FakeRepos());
+    const view = await RunnerView.start(await store(), failing, new FakeTimeFormat(), new FakeCatalog(), new FakeRepos());
     expect(view.get().account).toBeNull();
     expect(view.get().accountError).toBe('gh api user failed (4): not signed in');
     expect(briefName(view.get())).toBeNull();
@@ -97,7 +107,7 @@ describe('the view', () => {
   test("the clock follows T3's Time format, and a change in T3 changes the window's", async () => {
     const t3 = new FakeTimeFormat();
     t3.format = '24-hour';
-    const view = await RunnerView.start(await store(), account('ana-k', null), t3, new FakeRepos());
+    const view = await RunnerView.start(await store(), account('ana-k', null), t3, new FakeCatalog(), new FakeRepos());
     expect(view.get().timeFormat).toBe('24-hour');
     const seen: View[] = [];
     view.onChange((v) => seen.push(v));
@@ -107,11 +117,24 @@ describe('the view', () => {
   });
 
   test('a saved change reaches the window', async () => {
-    const view = await RunnerView.start(await store(), account('ana-k', null), new FakeTimeFormat(), new FakeRepos());
+    const view = await RunnerView.start(await store(), account('ana-k', null), new FakeTimeFormat(), new FakeCatalog(), new FakeRepos());
     const seen: View[] = [];
     view.onChange((v) => seen.push(v));
     await view.set({ dateStyle: 'iso' });
     expect(seen.map((v) => v.settings.dateStyle)).toEqual(['iso']);
+  });
+
+  test("T3's catalog reaches the window, and so does why T3 can't be asked, until it can", async () => {
+    const t3 = new FakeCatalog();
+    const view = await RunnerView.start(await store(), account('ana-k', null), new FakeTimeFormat(), t3, new FakeRepos());
+    expect(view.get().catalog).toBeNull();
+    const catalog: Catalog = { providers: [{ id: 'p', label: 'P', models: [] }], t3Default: null };
+    t3.change({ catalog });
+    expect(view.get().catalog).toEqual(catalog);
+    t3.change({ catalog, error: 'T3 is down' });
+    expect(view.get()).toMatchObject({ catalog, catalogError: 'T3 is down' });
+    t3.change({ catalog });
+    expect(view.get()).not.toHaveProperty('catalogError');
   });
 });
 
@@ -120,7 +143,7 @@ describe('repositories in the view', () => {
 
   test("the view holds T3's projects and why they can't be had, kept up to date", async () => {
     const repos = new FakeRepos();
-    const view = await RunnerView.start(await store(), account('ana-k', null), new FakeTimeFormat(), repos);
+    const view = await RunnerView.start(await store(), account('ana-k', null), new FakeTimeFormat(), new FakeCatalog(), repos);
     expect(view.get()).toMatchObject({ repos: null, reposError: null });
     const seen: View[] = [];
     view.onChange((v) => seen.push(v));
@@ -131,7 +154,7 @@ describe('repositories in the view', () => {
 
   test('what the window asks reaches Repositories, and a refusal comes back as words', async () => {
     const repos = new FakeRepos();
-    const view = await RunnerView.start(await store(), account('ana-k', null), new FakeTimeFormat(), repos);
+    const view = await RunnerView.start(await store(), account('ana-k', null), new FakeTimeFormat(), new FakeCatalog(), repos);
     expect(await view.repo({ do: 'add' })).toEqual({ added: 'C:/blog' });
     expect(await view.repo({ do: 'serve', id: 'p1', on: true })).toEqual({});
     expect(await view.repo({ do: 'merge', id: 'p1', merge: 'runner' })).toEqual({});
@@ -146,7 +169,7 @@ describe('repositories in the view', () => {
 
   test('an action with a field of the wrong kind is refused before Repositories hears of it', async () => {
     const repos = new FakeRepos();
-    const view = await RunnerView.start(await store(), account('ana-k', null), new FakeTimeFormat(), repos);
+    const view = await RunnerView.start(await store(), account('ana-k', null), new FakeTimeFormat(), new FakeCatalog(), repos);
     const bad = [
       { do: 'serve', id: 'p1', on: 'yes' }, { do: 'serve', on: true }, { do: 'merge', id: 'p1', merge: 'sideways' },
       { do: 'seen', ids: 'p1' }, { do: 'remove', id: 7 }, { do: 'remove', id: 'p1', withThreads: 'please' }, { do: 'explode' }, null,
@@ -156,7 +179,7 @@ describe('repositories in the view', () => {
   });
 
   test("a repo's choices can't be saved as a plain setting, past what switching one on does", async () => {
-    const view = await RunnerView.start(await store(), account('ana-k', null), new FakeTimeFormat(), new FakeRepos());
+    const view = await RunnerView.start(await store(), account('ana-k', null), new FakeTimeFormat(), new FakeCatalog(), new FakeRepos());
     await expect(view.set({ repos: { p1: { served: true, merge: 'runner', seen: true } } })).rejects.toThrow(SettingsError);
   });
 });

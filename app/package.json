@@ -14,7 +14,8 @@
     "desktop:shoot": "pnpm desktop:build && electron . --shoot",
     "typecheck": "tsc --noEmit && tsc --noEmit -p renderer",
     "test": "vitest run",
-    "live:sign-in": "node live/sign-in.ts"
+    "live:sign-in": "node live/sign-in.ts",
+    "live:launch": "node live/launch.ts"
   },
   "devDependencies": {
     "@tailwindcss/vite": "4.3.5",

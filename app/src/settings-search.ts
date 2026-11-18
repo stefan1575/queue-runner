@@ -4,18 +4,34 @@
 // Node.
 import type { View } from './desktop/view.ts';
 import { DATE_STYLES, formatDate, TIME_FORMATS } from './display.ts';
+import { defaultModel, JOB_KINDS, kindModels, model, provider, type Catalog, type JobKind, type ModelChoice } from './jobs.ts';
 
-export type PageId = 'name' | 'repos' | 'display' | 'machine';
+export type PageId = 'name' | 'repos' | 'models' | 'display' | 'machine';
 export const PAGES: { id: PageId; label: string }[] = [
   { id: 'name', label: 'Name' },
   { id: 'repos', label: 'Repositories' },
+  { id: 'models', label: 'Models' },
   { id: 'display', label: 'Display' },
   { id: 'machine', label: 'Machine' },
 ];
 
 /** A repository's row is `repo:<T3 project id>`. */
-export type SettingId = 'name' | 'date' | 'clock' | 'startup' | `repo:${string}`;
+export type SettingId = 'name' | `repo:${string}` | 'job-default' | `job-${JobKind}` | 'date' | 'clock' | 'startup';
 export type SettingEntry = { id: SettingId; page: PageId; words: string };
+
+const MODEL_WORDS = 'model models provider effort reasoning thinking agent ai job jobs';
+/** A choice's words: its provider's, model's and effort's names as T3 gives them. */
+function choiceWords(c: ModelChoice | null, catalog: Catalog | null): string {
+  if (!c || !catalog) return '';
+  const m = model(catalog, c);
+  return `${provider(catalog, c.provider)?.label ?? c.provider} ${m?.label ?? c.model} ${m?.efforts.find((e) => e.id === c.effort)?.label ?? c.effort ?? ''}`;
+}
+
+/** The settings that want a choice, per page: Default left on T3's own (#36's blue counts). */
+export function wantsChoice(view: View): Partial<Record<PageId, number>> {
+  const c = view.catalog;
+  return c && c.providers.length && defaultModel(view.settings.jobs, c).followsT3 ? { models: 1 } : {};
+}
 
 /** Each setting with the words Search finds it by: what it's called, other words for it, and
  *  what it's set to now. */
@@ -29,6 +45,14 @@ export function settingEntries(view: View, now: Date): SettingEntry[] {
   return [
     { id: 'name', page: 'name', words: `your name you me call called briefs github account user who ${s.name ?? ''} ${account?.name ?? ''} ${account?.login ?? ''}` },
     ...repos,
+    { id: 'job-default', page: 'models', words: `default every all ${MODEL_WORDS} t3 ${view.catalog ? choiceWords(defaultModel(s.jobs, view.catalog).choice, view.catalog) : ''}` },
+    ...JOB_KINDS.map((k) => {
+      const m = view.catalog ? kindModels(s.jobs, k.id, view.catalog) : null;
+      return {
+        id: `job-${k.id}` as SettingId, page: 'models' as PageId,
+        words: `${k.label} ${k.does} ${MODEL_WORDS} fallback usage ${m ? `${choiceWords(m.choice, view.catalog)} ${choiceWords(m.fallback, view.catalog)}` : ''}`,
+      };
+    }),
     { id: 'date', page: 'display', words: `date dates style format day month year weekday calendar today display ${dates}` },
     { id: 'clock', page: 'display', words: `clock time format 12 24 hour am pm t3 timestamp ${TIME_FORMATS.find((f) => f.id === tf)?.label ?? ''}` },
     { id: 'startup', page: 'machine', words: 'start with windows startup boot login logon sign in tray autostart launch open' },

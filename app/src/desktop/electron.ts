@@ -3,16 +3,20 @@
 //
 //   --hidden        a start at logon: the app stays in the tray
 //   --shoot <dir>   renders the window and each Settings page, light and dark, into <dir> as
-//                   PNGs, on a fresh state in a temp folder, and quits (docs/app.md, Screenshots)
+//                   PNGs, on a fresh state in a temp folder with the sample T3 catalog in
+//                   test/fixtures, and quits (docs/app.md, Screenshots)
 import { app, BrowserWindow, dialog, ipcMain, nativeTheme } from 'electron';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { GhGitHub } from '../github.ts';
 import { windowsPlatform } from '../platform/windows.ts';
+import { checkJobs, DEFAULT_JOBS } from '../jobs.ts';
 import { Repositories } from '../repos.ts';
 import { SettingsStore } from '../settings.ts';
+import { catalogFromConfig } from '../t3/catalog.ts';
+import { fixedCatalog, T3Catalog } from '../t3/catalog-source.ts';
 import { T3Mcp } from '../t3/mcp.ts';
 import { T3ProjectFeed } from '../t3/project-feed.ts';
 import { fetchHttp, nodeConnect, runtimeAddress, t3Cli } from '../t3/real.ts';
@@ -26,6 +30,8 @@ import { RunnerView } from './view.ts';
 
 const here = dirname(fileURLToPath(import.meta.url)); // desktop-dist/
 const assets = join(here, '..', 'desktop');
+const fixtures = join(here, '..', 'test', 'fixtures');
+const fixture = (name: string) => JSON.parse(readFileSync(join(fixtures, name), 'utf8'));
 const shootAt = process.argv.indexOf('--shoot');
 const shootTo = shootAt > 0 ? process.argv[shootAt + 1] : undefined;
 
@@ -62,21 +68,28 @@ async function main() {
     return r.canceled ? null : r.filePaths[0] ?? null;
   };
   const github = new GhGitHub();
-  // T3's projects, from T3's events; a shoot shows a sample of them instead (docs/app.md, Screenshots).
-  const repos = shootTo ? await sampleRepos(settings) : (() => {
-    const address = runtimeAddress();
-    const cli = t3Cli();
-    const feed = T3ProjectFeed.start(new T3Ws(address, cli, fetchHttp, nodeConnect));
-    return Repositories.start({ feed, github, settings, mcp: new T3Mcp(address, cli, fetchHttp), pickFolder });
-  })();
+  // What T3 offers each job and T3's projects, kept current from its WebSocket; a shoot shows a
+  // sample of each instead (docs/app.md, Screenshots).
+  const { catalog, repos } = shootTo
+    ? { catalog: fixedCatalog(catalogFromConfig(fixture('server-config.json').config)), repos: await sampleRepos(settings) }
+    : (() => {
+      const address = runtimeAddress();
+      const cli = t3Cli();
+      const ws = new T3Ws(address, cli, fetchHttp, nodeConnect);
+      const feed = T3ProjectFeed.start(ws);
+      return {
+        catalog: T3Catalog.start(ws),
+        repos: Repositories.start({ feed, github, settings, mcp: new T3Mcp(address, cli, fetchHttp), pickFolder }),
+      };
+    })();
   // The clock follows T3's Time format, read from T3's client settings (docs/app.md, The desktop app).
-  const view = await RunnerView.start(settings, github, await T3TimeFormat.start(), repos);
+  const view = await RunnerView.start(settings, github, await T3TimeFormat.start(), catalog, repos);
 
   ipcMain.handle(CHANNELS.view, () => view.get());
   ipcMain.handle(CHANNELS.set, (_e, patch) => view.set(patch));
   ipcMain.handle(CHANNELS.repo, (_e, action) => view.repo(action));
 
-  if (shootTo) return shoot(shootTo);
+  if (shootTo) return shoot(shootTo, settings);
 
   const shell: Shell = {
     singleInstance(onSecondStart) {
@@ -112,13 +125,18 @@ async function main() {
 }
 
 /** The window and each Settings page, light and dark, as PNGs in `dir`. */
-async function shoot(dir: string) {
+async function shoot(dir: string, settings: SettingsStore) {
   mkdirSync(dir, { recursive: true });
-  const states: [string, string][] = [
+  // The Models page twice: a new install (T3's default, the nudge) and with a sample of chosen
+  // values (test/fixtures/shoot-jobs.json).
+  const chosen = checkJobs(fixture('shoot-jobs.json'))!;
+  const states: [string, string, boolean?][] = [
     ['window', ''],
     ['settings-name', 'settings=name'],
-    ['settings-display', 'settings=display'],
     ['settings-repos', 'settings=repos'],
+    ['settings-models', 'settings=models'],
+    ['settings-models-chosen', 'settings=models', true],
+    ['settings-display', 'settings=display'],
     ['settings-machine', 'settings=machine'],
     ['settings-search', 'q=windos'],
   ];
@@ -126,7 +144,10 @@ async function shoot(dir: string) {
   win.setContentSize(1440, 900);
   for (const theme of ['light', 'dark'] as const) {
     nativeTheme.themeSource = theme;
-    for (const [name, hash] of states) {
+    for (const [name, hash, withChoices] of states) {
+      await settings.set({ jobs: withChoices ? chosen : DEFAULT_JOBS });
+      // The same address again would keep the page (and the view it holds): load it fresh.
+      await win.loadURL('about:blank');
       const p = page(hash);
       await win.loadFile(p.file, { hash: p.hash });
       await win.webContents.executeJavaScript('document.fonts.ready.then(() => new Promise((r) => setTimeout(r, 400)))');

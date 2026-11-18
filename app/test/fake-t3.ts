@@ -24,10 +24,17 @@ export class FakeT3 {
   toolCalls: { tool: string; args: any }[] = [];
   /** The open `subscribeShell` streams. */
   private shells: ShellStream[] = [];
+  /** Every `t3_thread_launch` a client made: its arguments, as T3 got them. */
+  launches: any[] = [];
+  /** WebSocket methods that answer once, by tag: the value T3's Exit carries. Any other
+   *  method but subscribeServerConfig ends in a Failure. */
+  wsMethods: Record<string, (payload: any) => unknown> = {};
   /** Every frame a client sent on a WebSocket. */
   frames: any[] = [];
   /** How many sign-ins finished, per subject. */
   signIns: Record<string, number> = {};
+  private configStreams = new Set<(v: any) => void>();
+  private closers = new Set<() => void>();
   private pairings = new Map<string, string[]>();
   private clients = new Map<string, string>(); // client id -> its name
   private codes = new Map<string, { challenge: string; label: string }>();
@@ -39,6 +46,17 @@ export class FakeT3 {
   addSession(subject: string, label: string): Session {
     const s = this.newSession(subject, label, []);
     return s;
+  }
+
+  /** A later `subscribeServerConfig` event (`{version: 1, type, payload}`), sent to every open stream. */
+  pushConfig(type: string, payload: unknown) {
+    for (const s of this.configStreams) s({ version: 1, type, payload });
+  }
+
+  /** T3 stops: every open WebSocket closes. */
+  dropSockets() {
+    for (const c of this.closers) c();
+    this.closers.clear();
   }
 
   /** T3 forgets every token it gave the app (a restart, say): the next use is refused. */
@@ -103,6 +121,11 @@ export class FakeT3 {
       const { cursor, limit } = args;
       const next = cursor + limit < this.projects.length ? cursor + limit : null;
       return { result: { projects: this.projects.slice(cursor, cursor + limit), nextCursor: next } };
+    }
+    if (name === 't3_thread_launch') {
+      this.launches.push(args);
+      const n = this.launches.length;
+      return { result: { threadId: `thread-${n}`, runId: `run-${n}`, link: `t3://thread/thread-${n}`, projectId: args.projectId, modelSelection: args.modelSelection, status: 'running' } };
     }
     if (name === 't3_project_create') {
       if (this.projects.some((p) => p.workspaceRoot === args.workspaceRoot)) {
@@ -213,12 +236,23 @@ export class FakeT3 {
     let open = !refused;
     let shell: ShellStream | null = null;
     queueMicrotask(() => (refused ? on.closed(false, 'refused') : on.open()));
+    const mine: ((v: any) => void)[] = [];
+    const forget = () => { for (const m of mine) this.configStreams.delete(m); };
+    const drop = () => { if (open) { open = false; forget(); on.closed(true, 'T3 stopped'); } };
+    if (!refused) this.closers.add(drop);
     return {
       send: (text) => {
         const msg = JSON.parse(text);
         this.frames.push(msg);
         if (msg._tag === 'Request' && msg.tag === 'subscribeServerConfig') {
-          queueMicrotask(() => open && on.message(JSON.stringify({ _tag: 'Chunk', requestId: msg.id, values: [this.serverConfig] })));
+          const sub = (v: any) => { if (open) on.message(JSON.stringify({ _tag: 'Chunk', requestId: msg.id, values: [v] })); };
+          this.configStreams.add(sub);
+          mine.push(sub);
+          queueMicrotask(() => sub(this.serverConfig));
+        } else if (msg._tag === 'Request' && msg.tag !== 'orchestration.subscribeShell') {
+          const method = this.wsMethods[msg.tag];
+          const exit = method ? { _tag: 'Success', value: method(msg.payload) } : { _tag: 'Failure', cause: { _tag: 'Die', defect: `no method ${msg.tag}` } };
+          queueMicrotask(() => open && on.message(JSON.stringify({ _tag: 'Exit', requestId: msg.id, exit })));
         }
         if (msg._tag === 'Request' && msg.tag === 'orchestration.subscribeShell') {
           // T3's shell stream: a snapshot of every project (and threads, which the app ignores),
@@ -243,6 +277,7 @@ export class FakeT3 {
       close: () => {
         if (!open) return;
         open = false;
+        forget();
         if (shell) this.shells = this.shells.filter((x) => x !== shell);
         queueMicrotask(() => on.closed(true, ''));
       },

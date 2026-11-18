@@ -4,12 +4,15 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { DATE_STYLES, type DateStyle } from './display.ts';
+import { checkJobs, DEFAULT_JOBS, type Jobs } from './jobs.ts';
 
 export type Settings = {
   /** Your name for the briefs; null follows the `gh` account's name. */
   name: string | null;
   dateStyle: DateStyle;
   startWithWindows: boolean;
+  /** Which model does each kind of job (#152; `src/jobs.ts`). */
+  jobs: Jobs;
   /** Each repo's choices, by T3 project id (#151). null until T3's projects were first seen: that
    *  first sight is a new install, where no project is marked New. */
   repos: Record<string, RepoChoice> | null;
@@ -22,7 +25,7 @@ export type Merger = 'runner' | 'me';
 export type RepoChoice = { served: boolean; merge: Merger; seen: boolean };
 export type SettingsPatch = Partial<Settings>;
 
-export const DEFAULT_SETTINGS: Settings = { name: null, dateStyle: 'month-first', startWithWindows: true, repos: null };
+export const DEFAULT_SETTINGS: Settings = { name: null, dateStyle: 'month-first', startWithWindows: true, jobs: DEFAULT_JOBS, repos: null };
 
 /** A change the page never offers: an unknown key or a value of the wrong kind. */
 export class SettingsError extends Error {}
@@ -46,6 +49,7 @@ const CHECKS: { [K in keyof Settings]: (v: unknown) => Settings[K] | undefined }
   name: (v) => (v === null ? null : typeof v === 'string' ? (v.trim() || null) : undefined),
   dateStyle: (v) => (DATE_STYLES.some((d) => d.id === v) ? (v as DateStyle) : undefined),
   startWithWindows: (v) => (typeof v === 'boolean' ? v : undefined),
+  jobs: checkJobs,
   repos: (v) => repoChoices(v, false),
 };
 const KEYS = Object.keys(CHECKS) as (keyof Settings)[];
