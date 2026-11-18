@@ -15,7 +15,7 @@ type ShellStream = { send(item: unknown): void; end(): void; ended: boolean };
 
 /** A thread's state as `orchestration.subscribeThread` shows it: its runs, runtime requests (a
  *  question to the user is a pending one) and turn items (a failed run's error among them). */
-export type FakeThread = { id: string; projectId: string; runs: any[]; runtimeRequests: any[]; turnItems: any[] };
+export type FakeThread = { id: string; projectId: string; runs: any[]; runtimeRequests: any[]; turnItems: any[]; messages?: any[] };
 
 export class FakeT3 {
   port = 3773;
@@ -133,6 +133,15 @@ export class FakeT3 {
 
   private run(threadId: string) { return this.threadState[threadId]!.runs.at(-1); }
 
+  /** How many characters of an item's text `t3_thread_read` gives at once. */
+  textChunk = 1_000_000;
+
+  /** The thread's run says something: an `assistant_message` item, as `t3_thread_read` lists it. */
+  say(threadId: string, text: string) {
+    const t = this.threadState[threadId]!;
+    (t.messages ??= []).push({ itemId: `msg-${++this.n}`, type: 'assistant_message', runId: this.run(threadId).id, text });
+  }
+
   /** The thread's run ends: `completed`, `failed`, `interrupted`, `cancelled`... */
   endRun(threadId: string, status: string) {
     this.threadEvent(threadId, 'run', { ...this.run(threadId), status, completedAt: '2026-11-19T12:00:00.000Z' });
@@ -183,10 +192,29 @@ export class FakeT3 {
       this.launches.push(args);
       const n = this.launches.length;
       this.threadState[`thread-${n}`] = {
-        id: `thread-${n}`, projectId: args.projectId, runtimeRequests: [], turnItems: [],
+        id: `thread-${n}`, projectId: args.projectId, runtimeRequests: [], turnItems: [], messages: [],
         runs: [{ id: `run-${n}`, threadId: `thread-${n}`, ordinal: 1, rootNodeId: `node-${n}`, status: 'running', completedAt: null }],
       };
       return { result: { threadId: `thread-${n}`, runId: `run-${n}`, link: `t3://thread/thread-${n}`, projectId: args.projectId, modelSelection: args.modelSelection, status: 'running' } };
+    }
+    if (name === 't3_thread_read') {
+      // `view: messages` pages of `limit` items from `afterPosition`; `itemId` + `textOffset` reads
+      // one item's text on, `textChunk` characters at a time (T3 truncates long text)
+      const t = this.threadState[args.threadId];
+      if (!t) return { failure: { code: 'not_found', message: 'The thread was not found.' } };
+      const cut = (item: any, from: number) => {
+        const text = String(item.text).slice(from, from + this.textChunk);
+        const more = from + this.textChunk < String(item.text).length;
+        return { ...item, text, textTruncated: more, nextTextOffset: more ? from + this.textChunk : null };
+      };
+      if (args.itemId) {
+        const item = (t.messages ?? []).find((m) => m.itemId === args.itemId);
+        return { result: { items: item ? [cut(item, args.textOffset ?? 0)] : [] } };
+      }
+      const from = args.afterPosition ?? 0;
+      const page = (t.messages ?? []).slice(from, from + args.limit).map((m) => cut(m, 0));
+      const more = from + args.limit < (t.messages ?? []).length;
+      return { result: { items: page, hasMore: more, nextPosition: more ? from + args.limit : null } };
     }
     if (name === 't3_thread_organize') {
       if (!this.threadState[args.threadId]) return { failure: { code: 'not_found', message: 'The thread was not found.' } };

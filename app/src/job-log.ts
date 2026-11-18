@@ -12,7 +12,12 @@ import { appendFile, mkdir, readFile, truncate } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import type { JobKind, ModelChoice } from './jobs.ts';
 
-export type Outcome = 'done' | 'done-no-pr' | 'waiting' | 'usage-limit' | 'failed' | 'branch-exists' | 'not-started';
+export type Outcome = 'done' | 'done-no-pr' | 'waiting' | 'usage-limit' | 'failed' | 'branch-exists' | 'not-started'
+  // a review's (#155): H reviewed (its decision), or nothing counts
+  | ReviewedOutcome | 'out-of-usage' | 'head-moved';
+/** A review whose comment is on the PR: its head was reviewed. */
+export type ReviewedOutcome = 'clean' | 'blocking' | 'stop' | 'approach-note';
+export const REVIEWED: readonly Outcome[] = ['clean', 'blocking', 'stop', 'approach-note'];
 
 export type JobStart = {
   kind: JobKind;
@@ -26,6 +31,10 @@ export type JobStart = {
   title: string;
   choice: ModelChoice;
   onFallback: boolean;
+  /** A review's: the commit it reviews, its round, and who reviews as its comment names them. */
+  sha?: string;
+  round?: number;
+  reviewer?: string;
 };
 export type JobThread = { threadId: string; runId: string | null; link: string | null };
 export type JobEnd = {
@@ -38,6 +47,11 @@ export type JobEnd = {
   resetAt?: string | null;
   /** The question's kind (a waiting end). */
   request?: string;
+  /** A review's: its verdict, why it stops, its comment and its run folder. */
+  verdict?: 'clean' | 'blocking';
+  signals?: string[];
+  link?: string | null;
+  runDir?: string;
 };
 export type Job = JobStart & { id: string; startedAt: string } & Partial<JobThread> & { end?: JobEnd & { at: string } };
 
