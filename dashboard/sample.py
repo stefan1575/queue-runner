@@ -41,6 +41,7 @@ DEFAULT = "busy"
 # Takes of the page before this one, kept while its look is being agreed: `serve.py` serves the
 # ones in `dashboard/earlier/` on the sample addresses, and the sidebar's sample menu links them.
 EARLIER = [
+    {"href": "/earlier/take-25.html", "label": "Take 25", "note": "The Overview four ways: the plate first, a table by effort, a roadmap track, written out"},
     {"href": "/earlier/take-24.html", "label": "Take 24", "note": "The Queue as settled (#30), the Overview still take 9's three cards"},
     {"href": "/earlier/take-11.html", "label": "Take 11", "note": "The Queue as #107 and #109 decide it: repo by repo, side by side, one numbered list"},
     {"href": "/earlier/take-10.html", "label": "Take 10", "note": "The Queue as three variants on two repos: features first, the page you land on, tracks"},
