@@ -34,6 +34,12 @@ the stop is open and the base's new head is still running its checks, its last f
 count. A check that fails on H but passes on the base is the PR's, as before. Only a PR into the
 repo's own base (`base` in config.toml) is compared: a stacked PR's failure is its own.
 
+**A failed check, checked again once the base moved** (issue #199): a failed-check stop records
+its base's head. Once the base has moved, the PR (no writer, no conflict, no other stop) is
+updated from it with update-branch, once per base head; its checks passing on the new head
+settle the stop (its issue commented on and closed) and the PR goes back to review, and a
+failure there is #93's re-run and a stop, as on any head.
+
 Filing is an automated post in the repo's own issues and PRs, which needs no go-ahead
 (`docs/flow.md`, Who runs it).
 """

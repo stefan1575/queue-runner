@@ -15,7 +15,11 @@ base branch failing its checks, `stops.py`, issue #98: `issue` null, `branch` th
 passed) and `base-hold` (a PR held on H because the base fails the
 same checks: `held`, then `updated`, `update-failed` (GitHub refused: a conflict) or `moved`,
 or `own-failure` (a check the base doesn't fail failed on H too) or `cleared` (nothing fails
-on H any more)) and `decision` (a one-off Claude decision thread, or Stefan's reply read directly, on a case the flow
+on H any more)) and `recheck` (a PR stopped for a failed check on H, updated from its base
+once the base moved, issue #199: `sha` H, `base` the base's head it was updated from, `about`
+the stop; `updated`, then `passed` (`head` the new head, the stop answered
+`passed-after-update`) or `failed-again`; `update-failed` (GitHub refused) or `not-started`
+(GitHub didn't answer: tried again)) and `decision` (a one-off Claude decision thread, or Stefan's reply read directly, on a case the flow
 doesn't cover: `about` the job it decides on, its outcome the action taken) and `live` (a repo's
 live steps after merges, `live.py`: `sha` where the last live run reached, `head` the base's
 commit this one brings live).
@@ -149,7 +153,8 @@ class Job:
     resume: dict | None = None     # a job picking up an earlier one: in place or fresh, and why
     effort: str | None = None      # a Claude job: the effort its run used, read back (ticket 39)
     reviewer: str | None = None    # a review: `opus-fallback` when Opus reviewed in Sol's place
-    base: str | None = None        # a conflict round: the sha of origin/<base> it merged (#91)
+    base: str | None = None        # a conflict round: the sha of origin/<base> it merged (#91);
+                                   # a failed-check stop or a recheck: the base's head then (#199)
     runs: list = field(default_factory=list)   # a rerun: [{id, attempt, url}], each failed
                                                # Actions run and the attempt that failed (#93)
 

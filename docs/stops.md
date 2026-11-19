@@ -103,6 +103,32 @@ tried again next pass, and one already there, by its hidden `rerun passed sha=H 
 isn't posted twice). A new head gets its own re-run. The PR's timeline and the
 activity list say each.
 
+**A failed check is checked again once the base moves** (issue #199; `Stopper.recheck`,
+`_after_update`; on 2026-11-19 one flaky test, fixed on main in #198, stopped #188, #191 and #196
+as `failed-check`, and `--release` only re-ran their old checks, which test the old merge commit
+and failed again). A `failed-check` stop records `base`, the head of the PR's base when it was
+filed (`branch_head`; None if GitHub didn't say). Each Sol pass, first in a PR's stop check, a PR
+whose open stops are all `failed-check`, the newest on its head H, with its base's head B now
+not the stop's `base` (a stop filed before #199 has none, so counts as moved, as a conflict
+round's record without one does), is brought up to date with its base: GitHub's update-branch
+with `expected_head_sha` H, as for a base hold. A `recheck` job (`sha` H, `base` B, `about` the
+stop, `link` its issue), **once per PR and base head**, so a PR failing on every main never
+loops. **Left alone, said once each:** another kind of stop open on the PR (Stefan's anyway),
+the PR moved from H, a Claude job writing to it (`JobLog.writer`: waits for that job), a
+conflict (`has_conflict`: the conflict round's, as today), the repo's base red (the base hold's,
+above), or B already the stop's base or a recheck's. GitHub refusing (HTTP 422) is
+`update-failed`, left for Stefan; GitHub not answering is `not-started`, tried again next pass.
+Then `updated`, and the stop still holds the PR while **the new head's checks** run: once they
+pass, the stop's `needs-info` issue gets a comment (main moved, the checks pass on the new head;
+hidden `recheck passed pr=N sha=H'` line, so a retry doesn't post it twice) and is closed as
+completed (left open if a stop of another kind shares it), the PR's open `failed-check` stops
+end `answered` with `answer` `passed-after-update`, the recheck `passed` (`head` the new head),
+and the PR goes back to review. A comment or close that fails is tried again next pass. A check
+failing on the new head is the new head's like any: #93's one re-run, then a `failed-check` stop
+on it (recording B), which ends the recheck `failed-again`, so Stefan sees only a failure that
+survived the fix. The Inbox doesn't list a stop settled so as answered (it's the runner's, not
+his), and the PR's timeline says each step as the runner's.
+
 **Toasts** (`toast.py`): a native Windows toast under the runner's own name and icon. The runner
 registers its AppUserModelID `Stefan.QueueRunner` under
 `HKCU\Software\Classes\AppUserModelId\` (display name "Queue runner", `IconUri`
