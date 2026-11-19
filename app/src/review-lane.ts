@@ -303,7 +303,7 @@ export class ReviewLane {
         });
         await write('brief.md', brief);
         this.d.say(`${name}: ${reviewer} reviews ${h.slice(0, 7)} (review ${round}) in ${runDir}`);
-        const launched = await launchJob(this.d.mcp, catalog, { kind: 'review', projectId: repo.id, title, brief, choice: letIn.choice, toolFree: this.d.toolFree() });
+        const launched = await launchJob(this.d.mcp, catalog, { kind: 'review', projectId: repo.id, title, brief, choice: letIn.choice, toolFree: this.d.toolFree(), jobId: job.id });
         const thread = { threadId: launched.threadId, runId: launched.runId, link: launched.link };
         ran_.thread = thread;
         await this.d.log.thread(job.id, thread);
@@ -405,12 +405,12 @@ export class ReviewLane {
   }
 
   /** A review left open by an app that stopped mid-review: its thread (the log's, else the one
-   *  T3 has under its project and title, made since its start: the app may have stopped between
-   *  T3's launch and the log's line) is watched to its end, then the review counts as failed,
+   *  T3 has whose message carries the job's mark: the app may have stopped between T3's launch
+   *  and the log's line) is watched to its end, then the review counts as failed,
    *  nothing posted, and the thread is settled. Until then the lane starts no review. */
   private async cutOff(job: Job): Promise<Job> {
     const name = `review ${job.title}`;
-    const thread = await openJobThread(this.d.ws, this.d.log, job, this.d.retry ?? retryAfter(30_000), () => this.stopped, this.d.say);
+    const thread = await openJobThread(this.d.ws, this.d.mcp, this.d.log, job, this.d.retry ?? retryAfter(30_000), () => this.stopped, this.d.say);
     if (thread === undefined) return job; // the app stopped again: left open for the next start
     if (thread) {
       const v = this.d.gate.check({ id: job.id, kind: 'review', choice: job.choice });

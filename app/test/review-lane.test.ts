@@ -3,6 +3,7 @@
 // of that commit; the reply's ledger decides; the comment, sol-review on that commit, follow-ups
 // and the Review row are posted; the thread is settled. With the review provider out of usage the
 // fallback reviews, named in the comment and the row.
+import { jobMark } from '../src/launch.ts';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -351,15 +352,62 @@ describe('a review', () => {
 
 describe('an app that stopped between the launch and the log', () => {
   const started = () => log.started({ kind: 'review', repo: 'p-app', github: 'owner/app', issue: 4, branch: 'b', base: 'main', title: 'Queue runner review: app#4', choice: REVIEW, onFallback: false, sha: H, round: 1 });
-  const thread = (id: string, projectId: string, title: string, createdAt: string) => {
-    t3.threadState[id] = { id, projectId, title, createdAt, runtimeRequests: [], turnItems: [], messages: [], runs: [{ id: `${id}-run`, ordinal: 1, rootNodeId: 'n', status: 'running' }] };
+  /** A thread in T3; `of` is the job whose launch made it (its message carries that job's mark). */
+  const thread = (id: string, projectId: string, title: string, createdAt: string, of?: string) => {
+    const messages = [{ itemId: `${id}-msg`, type: 'user_message', runId: `${id}-run`, text: `${of ? `${jobMark(of)}
+
+` : ''}Review PR #4.` }];
+    t3.threadState[id] = { id, projectId, title, createdAt, runtimeRequests: [], turnItems: [], messages, runs: [{ id: `${id}-run`, ordinal: 1, rootNodeId: 'n', status: 'running' }] };
   };
+
+  test("a later thread with the same title isn't taken for it: only the one whose message carries its job's mark", async () => {
+    const job = await started();
+    const at = (ms: number) => new Date(Date.parse(job.startedAt) + ms).toISOString();
+    thread('its-thread', 'p-app', job.title, at(700), job.id);
+    thread('later', 'p-app', job.title, at(60_000), 'review-another-job'); // another job's, same PR
+    thread('by-hand', 'p-app', job.title, at(90_000)); // made in T3 by hand, same title
+    makeLane();
+    void lane.start();
+    await until(() => t3.threadStreamCount('its-thread') > 0);
+    expect(log.get(job.id)).toMatchObject({ threadId: 'its-thread' });
+    expect(t3.threadStreamCount('later') + t3.threadStreamCount('by-hand')).toBe(0);
+    t3.endRun('later', 'completed'); // the other thread ending starts nothing: its own still runs
+    await new Promise((r) => setTimeout(r, 30));
+    expect(t3.launches).toEqual([]);
+    expect(log.get(job.id)!.end).toBeUndefined();
+    t3.endRun('its-thread', 'completed');
+    await until(() => t3.launches.length === 1);
+    await answer(1, reply([]));
+    await lane.idle();
+  });
+
+  test("only same-titled threads without its mark: none is its, so it counts as failed", async () => {
+    const job = await started();
+    thread('by-hand', 'p-app', job.title, new Date(Date.parse(job.startedAt) + 500).toISOString());
+    gh.reviewPulls['owner/app'] = [];
+    makeLane();
+    await lane.start();
+    await lane.idle();
+    expect(log.get(job.id)).toMatchObject({ end: { outcome: 'failed' } });
+    expect(log.get(job.id)!.threadId).toBeUndefined();
+  });
+
+  test("a launch heads its message with the job's mark", async () => {
+    makeLane();
+    const passed = lane.pass();
+    await answer(1, reply([]));
+    await passed;
+    await lane.idle();
+    expect(t3.launches[0].message.startsWith(`${jobMark(log.jobs()[0]!.id)}
+
+`)).toBe(true);
+  });
 
   test('its review thread is found in T3 by project, title and start, and no second review starts until it ends', async () => {
     const job = await started();
     const at = (ms: number) => new Date(Date.parse(job.startedAt) + ms).toISOString();
-    thread('older', 'p-app', job.title, at(-3_600_000)); // an earlier review of the same PR
-    thread('its-thread', 'p-app', job.title, at(700));
+    thread('older', 'p-app', job.title, at(-3_600_000), 'review-older'); // an earlier review of the same PR
+    thread('its-thread', 'p-app', job.title, at(700), job.id);
     makeLane();
     void lane.start();
     await until(() => t3.threadStreamCount('its-thread') > 0);
@@ -378,7 +426,7 @@ describe('an app that stopped between the launch and the log', () => {
 
   test("T3's threads unreadable at first: asked again until they answer, never taken as no thread", async () => {
     const job = await started();
-    thread('its-thread', 'p-app', job.title, new Date(Date.parse(job.startedAt) + 500).toISOString());
+    thread('its-thread', 'p-app', job.title, new Date(Date.parse(job.startedAt) + 500).toISOString(), job.id);
     t3.shellFailures = 3;
     makeLane();
     void lane.start();

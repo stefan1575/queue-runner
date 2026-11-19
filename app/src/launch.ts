@@ -28,7 +28,13 @@ export type Job = {
   choice: ModelChoice;
   /** A review's: the instances set up without outside tools. A review on any other launches nothing. */
   toolFree?: readonly string[];
+  /** The job log's id: its mark heads the message, so the thread is known as this job's
+   *  (`src/t3/job-thread.ts`) even when the app stops before it logs the thread's id. */
+  jobId?: string;
 };
+
+/** The first line of a job's message: whose thread it is, unseen in T3's rendered message. */
+export const jobMark = (jobId: string) => `<!-- queue-runner job ${jobId} -->`;
 
 export type Launched = { threadId: string; runId: string | null; link: string | null; choice: ModelChoice };
 
@@ -53,7 +59,7 @@ export async function launchJob(mcp: Pick<T3Mcp, 'call'>, catalog: Catalog, job:
     throw new JobError(`T3 can't run ${job.choice.provider} ${job.choice.model}${job.choice.effort ? ` at ${job.choice.effort}` : ''} now`);
   }
   const launched = await mcp.call('t3_thread_launch', {
-    projectId: job.projectId, title: job.title, message: job.brief, runtimeMode: 'full-access',
+    projectId: job.projectId, title: job.title, message: job.jobId ? `${jobMark(job.jobId)}\n\n${job.brief}` : job.brief, runtimeMode: 'full-access',
     modelSelection: modelSelection(choice, catalog),
     ...(job.worktree ? { workspaceStrategy: { type: 'worktree', ...job.worktree } } : {}),
   });

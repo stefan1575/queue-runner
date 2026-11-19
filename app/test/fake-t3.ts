@@ -201,7 +201,8 @@ export class FakeT3 {
       this.launches.push(args);
       const n = this.launches.length;
       this.threadState[`thread-${n}`] = {
-        id: `thread-${n}`, projectId: args.projectId, title: args.title, createdAt: new Date().toISOString(), runtimeRequests: [], turnItems: [], messages: [],
+        id: `thread-${n}`, projectId: args.projectId, title: args.title, createdAt: new Date().toISOString(), runtimeRequests: [], turnItems: [],
+        messages: [{ itemId: `msg-${++this.n}`, type: 'user_message', runId: `run-${n}`, text: args.message }],
         branch: args.workspaceStrategy?.branch ?? null,
         runs: [{ id: `run-${n}`, threadId: `thread-${n}`, ordinal: 1, rootNodeId: `node-${n}`, status: 'running', completedAt: null }],
       };

@@ -242,7 +242,9 @@ Which model does each kind of job (#152: #120's shape on #36's page, as the 2026
   value}]}, workspaceStrategy?: {type: worktree, baseRef, branch}}`, on the choice the usage gate
   let in (the kind's model or its fallback), never the settings read again: a setting changed
   after the gate answered can't move the job. A choice T3 can't run by then launches nothing
-  (docs/t3.md: Codex ignores `effort`, so the id matters).
+  (docs/t3.md: Codex ignores `effort`, so the id matters). Given the job's id (a review's), the
+  message starts with its mark, `<!-- queue-runner job <id> -->`, so its thread is known as that
+  job's even if the app stops before it logs the thread.
 - **The page** (Settings, Models): Default, then one row per kind, each "Follows Default" until
   set (an undo goes back), with its fallback under its model. The three dropdowns are fixed
   widths, so changing a provider moves nothing (#36). Models carries a blue count in the page
@@ -430,10 +432,11 @@ every open PR in a served repo without a review on its newest commit gets one, w
   `out-of-usage` or `head-moved`. Once the end is recorded the thread is settled, whatever the end:
   nobody answers a review thread. One the log shows open on start is watched to its end, counted
   `failed` and settled, as today's `Reviewer.settle`. Its thread is the log's, else (the app
-  stopped after T3 took the launch but before the log's line) the one T3's shell lists in its
-  project under its title, made no earlier than 5 s before its start record, the newest
-  (`src/t3/job-thread.ts`, today's `t3.find_job_thread`; a review has no branch to match, so not a
-  build's title and branch); a shell that can't be read is asked again, never taken as no thread.
+  stopped after T3 took the launch but before the log's line) the one whose first message starts
+  with the job's mark, among those T3's shell lists in its project under its title made no
+  earlier than 5 s before its start record (`src/t3/job-thread.ts`). Never the newest with the
+  title: every review of a PR has the same one, so a later thread could be taken for it. Threads
+  that can't be read are asked again, never taken as no thread.
   No review starts until it ends, so a thread that runs on never has its checkout replaced under it.
 - **Not yet:** merging a clean review and fix rounds (#156), conflict rounds (#157), stops (#158).
 
