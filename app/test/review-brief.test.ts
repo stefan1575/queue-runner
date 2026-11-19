@@ -34,6 +34,14 @@ describe('reviewBrief', () => {
     expect(b).not.toContain('This is review');
   });
 
+  test('what blocks: a bug that comes up in real use; a made-up situation and a missing screenshot are nits, a wrong one is important', () => {
+    const b = reviewBrief(input).replace(/\s+/g, ' ');
+    expect(b).toContain('a `scenario`: how it comes up in real use (who does what in ordinary use, and the wrong result)');
+    expect(b).toContain('a bug that comes up only in a made-up situation (someone setting it up on purpose, a state nothing in real use reaches) is a nit.');
+    expect(b).toContain('Text-only output (a CLI, a log, GitHub) needs none. A missing or thin screenshot is a **nit**');
+    expect(b).toContain('A shot that shows the screen wrong (not as the change leaves it, or not what the PR says it shows) is **important**');
+  });
+
   test('review 2: the earlier findings, classes, IDs and replies, and REVIEW.md in full', () => {
     const r1 = decide({ repo: 'owner/app', sha: SHA, round: 1, earlier: [], hasReviewMd: false, reviewer: 'M', user: 'Pat',
       reply: '```sol-findings\n{"findings":[{"id":"F1","tag":"important","class":"unchecked input","file":"src/a.ts","line":3,"scenario":"crash"}]}\n```' });

@@ -34,7 +34,7 @@ export type Finding = {
   id: string; tag: Tag; class: string; file: string; line: number | null;
   scenario: string; cost: string; rule: string;
   status: Status; raised: number;
-  closed?: number; issue?: string; unfiled?: boolean; reopened?: Status; was?: string; again?: boolean;
+  closed?: number; issue?: string; unfiled?: boolean; reopened?: Status; was?: string; again?: boolean; shots?: boolean;
 };
 export type Review = { round: number; verdict: 'clean' | 'blocking'; sha: string; findings: any[]; at: string };
 export type Comment = { author: string; createdAt: string; body: string; path?: string | null; line?: number | null };
@@ -161,8 +161,14 @@ export function repoPath(file: string, line: number | null, roots: string[] = []
   return [file, line];
 }
 
-/** What an Important finding needs to block: file and line, and a scenario or a cost and rule. */
+/** What an Important finding needs to block: file and line, and how it comes up in real use (its
+ *  scenario) or, for a problem that isn't a bug, a cost and the rule it breaks. */
 export const evidence = (f: Raw) => Boolean(f.file && f.line && (f.scenario || (f.cost && f.rule)));
+
+/** A finding about screenshots missing, thin or owed: a nit, whatever its tag (#155). A shot that
+ *  shows the screen wrong is another finding, and blocks. */
+const SHOTS_MISSING = /\b(?:no|missing|thin|owed|too few|needs?|without)\b[^.]{0,40}\bscreenshots?\b|\bscreenshots?\b[^.]{0,40}\b(?:missing|owed|thin|too few|omitted)\b/i;
+export const shotsMissing = (f: Raw) => SHOTS_MISSING.test(f.rule ?? '') || SHOTS_MISSING.test(f.class ?? '');
 
 // --- the comment ------------------------------------------------------------------------------
 
@@ -240,14 +246,18 @@ export function decide(i: DecideInput): Decision {
   const found: Finding[] = raw.map((f) => {
     const [file, line] = repoPath(f.file, f.line, roots);
     const g = { ...f, file, line };
-    const down = g.tag === 'important' && !evidence(g);
-    return { ...g, tag: (down ? 'nit' : g.tag) as Tag, ...(down ? { was: 'important' } : {}), status: 'open', raised: rnd };
+    const shots = g.tag === 'important' && shotsMissing(g);
+    const down = g.tag === 'important' && (shots || !evidence(g));
+    return { ...g, tag: (down ? 'nit' : g.tag) as Tag, ...(down ? { was: 'important' } : {}), ...(shots ? { shots: true } : {}), status: 'open', raised: rnd };
   });
-  const down = found.filter((f) => f.was).map((f) => f.id);
-  if (down.length) {
-    const one = down.length === 1;
-    notes.push(`${down.join(', ')} ${one ? 'was' : 'were'} tagged Important without a file and line plus a failure scenario, or a later cost and the rule it breaks, so ${one ? 'it counts' : 'they count'} as a nit.`);
-  }
+  const said = (ids: string[], why: (one: boolean) => string) => {
+    if (!ids.length) return;
+    const one = ids.length === 1;
+    notes.push(`${ids.join(', ')} ${one ? 'was' : 'were'} tagged Important ${why(one)}, so ${one ? 'it counts' : 'they count'} as a nit.`);
+  };
+  said(found.filter((f) => f.was && !f.shots).map((f) => f.id), () => 'without a file and line plus how it comes up in real use, or a later cost and the rule it breaks');
+  said(found.filter((f) => f.shots).map((f) => f.id), () => 'for screenshots that are missing or thin, which never block on their own');
+  for (const f of found) delete f.shots;
   // An unchanged finding isn't reposted as new: a new ID with the same tag, class, file and line
   // as one still open (or filed), given no status, is that finding.
   const prior = state(earlier);

@@ -452,7 +452,12 @@ every open PR in a served repo without a review on its newest commit gets one, w
   usage limit is `out-of-usage` and the next review waits on the gate.
 - **Decide and post** (`src/review/ledger.ts`, `src/review/post.ts`, today's `ledger.py` and
   `post.py`): the verdict from the reply's last `sol-findings` block; clean means no Important
-  finding open. Then each new Pre-existing finding filed once as a `needs-triage` issue, the
+  finding open. **What blocks** (#155): an Important finding needs its file and line and how it
+  comes up in real use (its `scenario`), or, for a problem that isn't a bug, a cost and the rule
+  it breaks; one without is read as a nit. The brief tells the reviewer a bug that needs a made-up
+  situation is a nit. A missing or thin screenshot is a nit (an Important one whose rule or class
+  says screenshots are missing, thin, too few or owed is read as one), a shot that shows the screen
+  wrong is Important, and text-only output needs none. Then each new Pre-existing finding filed once as a `needs-triage` issue, the
   comment (its visible ledger and hidden marker), `sol-review` on H only, and a row in the app's
   Review table in the PR body, on every repo (#36): Step (the comment's link), Reviewer, Time,
   Commit, Verdict. The comment and the Reviewer cell name who reviewed: the model and effort as T3 labels

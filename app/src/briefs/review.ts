@@ -58,15 +58,19 @@ Review independently (the only files you change are tests you add to show a prob
 5. **Screenshots:** a screenshot lets a reader see a change instead of taking the builder's word
    for it, and leaves a record of how the screen got this way. Behaviour is proved by its tests;
    screenshots are for a ticket that changes what a person looks at. You are their reader: look
-   at each shot the PR gives. They are enough when, reading only the PR, you can see the change
-   the ticket asked for, and the shots show what the PR says. When you can't, that is
-   **important** (\`rule\`: "a visible change needs screenshots"): name the screen you need to see.
+   at each shot the PR gives. Text-only output (a CLI, a log, GitHub) needs none. A missing or
+   thin screenshot is a **nit**: name the screen you'd want to see. A shot that shows the screen
+   wrong (not as the change leaves it, or not what the PR says it shows) is **important**
+   (\`rule\`: "a screenshot shows the screen as it is", and a \`cost\`: what it would mislead a
+   reader about).
 $again$guide
 Tag every finding:
-- **important** blocks the merge. It needs \`file\` and \`line\`, plus either a \`scenario\` (a failure
-  concrete enough to become a failing test: this input or state, this wrong result) or a \`cost\` and
-  a \`rule\` (the named later cost, and the spec line or documented standard it breaks). A finding
-  without that evidence is a nit at most.
+- **important** blocks the merge. It needs \`file\` and \`line\`, plus either a \`scenario\`: how
+  it comes up in real use (who does what in ordinary use, and the wrong result), concrete enough
+  to become a failing test; or, for a problem that isn't a bug, a \`cost\` and a \`rule\` (the named
+  later cost, and the spec line or documented standard it breaks). Not every problem is worth
+  solving: a bug that comes up only in a made-up situation (someone setting it up on purpose, a
+  state nothing in real use reaches) is a nit. A finding without that evidence is a nit at most.
 - **nit** never blocks. Give at most five.
 - **pre-existing** is a problem in code this PR didn't change; it is filed as a follow-up issue.
   One that loses or exposes data is important instead.

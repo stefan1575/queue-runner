@@ -42,6 +42,25 @@ describe('decide', () => {
     expect(d.findings[0]).toMatchObject({ tag: 'nit', was: 'important' });
   });
 
+  test("an Important finding that doesn't say how it comes up in real use is read as a nit and doesn't block", () => {
+    const d = decide(input({ reply: reply([important('F1', { scenario: '' })]) }));
+    expect(d).toMatchObject({ verdict: 'clean', outcome: 'merge' });
+    expect(d.findings[0]).toMatchObject({ tag: 'nit', was: 'important' });
+    expect(d.body).toContain('F1 was tagged Important without a file and line plus how it comes up in real use');
+  });
+
+  test('a missing or thin screenshot never blocks on its own; a wrong one does', () => {
+    const missing = important('F1', { class: 'visible change without screenshots', scenario: '', cost: 'a reader cannot see the new table', rule: 'a visible change needs screenshots' });
+    const thin = important('F2', { class: 'screenshots too few for the states changed', scenario: '', cost: 'the empty state is unseen', rule: 'docs/flow.md' });
+    const d = decide(input({ reply: reply([missing, thin]) }));
+    expect(d.verdict).toBe('clean');
+    expect(d.findings.map((f) => [f.id, f.tag, f.was])).toEqual([['F1', 'nit', 'important'], ['F2', 'nit', 'important']]);
+    expect(d.body).toContain('F1, F2 were tagged Important for screenshots that are missing or thin, which never block on their own, so they count as a nit.');
+    expect(JSON.stringify(d.findings)).not.toContain('"shots"');
+    const wrong = important('F3', { class: 'screenshot taken before the change', scenario: '', cost: 'a reader is told the old table is the new one', rule: 'a screenshot shows the screen as it is' });
+    expect(decide(input({ reply: reply([wrong]) }))).toMatchObject({ verdict: 'blocking', findings: [{ id: 'F3', tag: 'important' }] });
+  });
+
   test('a fixed finding clears the block in review 2', () => {
     const r1 = posted(decide(input({ reply: reply([important('F1')]) })).body);
     const d = decide(input({ round: 2, sha: SHA2, earlier: [r1], reply: reply([], [{ id: 'F1', status: 'fixed' }]) }));
