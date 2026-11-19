@@ -447,8 +447,9 @@ every open PR in a served repo without a review on its newest commit gets one, w
   from T3's thread events (Builds); its reply is the run's last assistant message, read whole
   through `t3_thread_read` (`view: messages`, paged, then `textOffset` while truncated; T3's CLI's
   `runResultText`). A read that fails (T3 or GitHub busy a moment) is asked again after a wait,
-  never taken as no reply, and so is one T3 cuts short: a continuation that comes back empty, or
-  "more" with no position or offset to go on from, is read again, never taken as the reply's end; a reply that comes back empty is read again, and only three empty reads
+  never taken as no reply, and so is one T3 cuts short: a continuation or a later message page
+  that comes back empty, a page short of its limit that says there's more (T3 fills every page
+  that does, #155 F20), or "more" with no position or offset to go on from, is read again, never taken as the reply's end; a reply that comes back empty is read again, and only three empty reads
   in a row are the thread's own. A question, a failure or that empty reply fails the review; a
   usage limit is `out-of-usage` and the next review waits on the gate. A step before the launch
   that fails (a git, GitHub or T3 step, a launch T3 refused, or the repo no longer served when it's
