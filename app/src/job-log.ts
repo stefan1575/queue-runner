@@ -10,6 +10,8 @@
 // - **Open jobs:** a start with no end, left by an app that stopped mid-job.
 // - **Needing the user:** a `needs-user` end (T3 may have started a thread the app has no id of)
 //   holds its repo until an `answered` line says the user has answered.
+// - **To settle:** a job ended on a thread the app launched, that its end says to settle, with no
+//   `settled` line yet: an app that stopped between the two settles it on its next start (F9).
 import { appendFile, mkdir, readFile, truncate } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import type { Cost, Reading } from './costs.ts';
@@ -51,9 +53,13 @@ export type JobEnd = {
   request?: string;
 };
 export type Job = JobStart & { id: string; startedAt: string } & Partial<JobThread>
-  & { end?: JobEnd & { at: string }; answeredAt?: string };
+  & { end?: JobEnd & { at: string }; answeredAt?: string; settledAt?: string };
 
 export class JobLogError extends Error {}
+
+/** Whether a job's end settles its thread (#68 story 5): a question to the user and a usage limit
+ *  are later tickets' to handle, so their threads are left as they are. */
+export const settles = (outcome: Outcome) => outcome !== 'waiting' && outcome !== 'usage-limit';
 
 /** The file calls the log makes: the disk, or a test's own in-memory folder (#202 F2). A missing
  *  file is read as an error with `code` 'ENOENT', as Node's is. */
@@ -73,7 +79,8 @@ type Event =
   | ({ event: 'start'; job: string; at: string } & JobStart)
   | ({ event: 'thread'; job: string; at: string } & JobThread)
   | ({ event: 'end'; job: string; at: string } & JobEnd)
-  | { event: 'answered'; job: string; at: string };
+  | { event: 'answered'; job: string; at: string }
+  | { event: 'settled'; job: string; at: string };
 
 export class JobLog {
   private file: string;
@@ -122,6 +129,7 @@ export class JobLog {
       if (!job) return;
       if (e.event === 'thread') this.all.set(e.job, { ...job, threadId: e.threadId, runId: e.runId, link: e.link });
       else if (e.event === 'answered') this.all.set(e.job, { ...job, answeredAt: e.at });
+      else if (e.event === 'settled') this.all.set(e.job, { ...job, settledAt: e.at });
       else {
         const { event, job: _, ...end } = e;
         this.all.set(e.job, { ...job, end });
@@ -159,6 +167,12 @@ export class JobLog {
     return this.all.get(id)!;
   }
 
+  /** The job's thread is settled in T3. */
+  async settled(id: string): Promise<Job> {
+    await this.append({ event: 'settled', job: id, at: this.now().toISOString() });
+    return this.all.get(id)!;
+  }
+
   jobs(): Job[] {
     return [...this.all.values()];
   }
@@ -170,6 +184,12 @@ export class JobLog {
   /** Builds started and not ended: left by an app that stopped mid-job, or running now. */
   open(): Job[] {
     return this.jobs().filter((j) => !j.end);
+  }
+
+  /** Jobs ended on a thread the app launched whose thread isn't settled yet: a question or a usage
+   *  limit aside, which are left for the user (later tickets). */
+  toSettle(): Job[] {
+    return this.jobs().filter((j) => j.end && j.threadId && !j.settledAt && settles(j.end.outcome));
   }
 
   /** The repo's jobs that need the user and haven't had an answer: while there's one, the repo

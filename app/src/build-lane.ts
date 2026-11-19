@@ -8,11 +8,12 @@
 //   ->  the brief (src/briefs/build.ts)  ->  t3_thread_launch in a worktree from origin/<base>
 //   ->  its end from T3's thread events (src/t3/thread-end.ts)  ->  the end recorded in the job log
 //   ->  the thread settled (#68 story 5), unless it waits on a question (the Inbox ticket's) or
-//       stopped on a usage limit (the limits ticket's)
+//       stopped on a usage limit (the limits ticket's)  ->  the settle recorded in the job log
 //
 // The app settles only threads it launched (story 13): the thread id comes from its own launch,
 // never from a thread's title, branch or project. A job the log shows open, left by an app that
-// stopped mid-job, is watched again to its end on the thread id it saved. A job T3 may have
+// stopped mid-job, is watched again to its end on the thread id it saved; one whose end was
+// recorded and whose thread wasn't settled yet (or whose settle failed) is settled. A job T3 may have
 // started a thread for that the app has no id of (its launch was sent and the answer lost, or the
 // app stopped before the id was saved) needs the user (#154, After a restart, don't guess): it's
 // recorded as such and its repo starts nothing until the user answers (`answered`). A repo whose
@@ -25,7 +26,7 @@ import { reading } from './costs.ts';
 import { holdText } from './gate.ts';
 import type { GitHubWork } from './github.ts';
 import type { Git } from './git.ts';
-import type { Job, JobEnd, JobLog } from './job-log.ts';
+import { settles, type Job, type JobEnd, type JobLog } from './job-log.ts';
 import type { Catalog, Jobs } from './jobs.ts';
 import { launchJob } from './launch.ts';
 import { pick, type BuildTicket } from './picker.ts';
@@ -81,6 +82,8 @@ export class BuildLane {
   private d: BuildLaneDoors;
   private building = new Map<string, Promise<Job>>();
   private watches = new Set<{ stop(): void }>();
+  /** Settles of jobs an earlier app ended and didn't settle, under way. */
+  private settling = new Set<Promise<void>>();
   private resting = new Map<string, number>();
   private holdSaid = new Map<string, string>();
   /** The open-PR hold last said for each repo, so it's said once. */
@@ -95,11 +98,17 @@ export class BuildLane {
     this.now = doors.now ?? (() => new Date());
   }
 
-  /** Watches again each build the log shows open (an app that stopped mid-job), then passes. */
+  /** Watches again each build the log shows open and settles each one it shows ended and not
+   *  settled (an app that stopped mid-job), then passes. */
   start(): Promise<void> {
     for (const job of this.d.log.open()) {
       if (job.kind !== 'build' || this.building.has(job.repo)) continue;
       this.track(job.repo, this.resume(job));
+    }
+    for (const job of this.d.log.toSettle()) {
+      if (job.kind !== 'build') continue;
+      const s = this.settle(job).finally(() => this.settling.delete(s));
+      this.settling.add(s);
     }
     return this.pass();
   }
@@ -129,8 +138,8 @@ export class BuildLane {
 
   /** Settles once every build under way has ended and been recorded (the tests wait on it). */
   async idle(): Promise<void> {
-    while (this.building.size || this.passing) {
-      await Promise.allSettled([...this.building.values(), this.passing]);
+    while (this.building.size || this.passing || this.settling.size) {
+      await Promise.allSettled([...this.building.values(), this.passing, ...this.settling]);
     }
   }
 
@@ -319,18 +328,25 @@ export class BuildLane {
     if (end.outcome === 'waiting') record.request = end.request;
     const ended = await this.d.log.ended(job.id, record);
     this.d.say(`${job.title} ended: ${record.outcome}${record.pr ? `, PR #${record.pr.number}` : ''} ${job.link ?? job.threadId}`);
-    // recorded first, then settled (story 5); a question or a usage limit is a later ticket's
-    if (end.outcome !== 'waiting' && end.outcome !== 'usage-limit') await this.settle(job);
+    // recorded first, then settled (story 5); a question or a usage limit is a later ticket's.
+    // Stopped between the two, the next start settles it (the log has no settled line)
+    if (settles(record.outcome)) await this.settle(job);
     return ended;
   }
 
-  /** Settles a thread this app launched. A failure is said, never raised: a thread left in the
-   *  sidebar stops no lane. */
+  /** Settles a thread this app launched, and records it. A failure is said, never raised: a
+   *  thread left in the sidebar stops no lane, and the next start tries it again. */
   private async settle(job: Job) {
     try {
       await this.d.mcp.call('t3_thread_organize', { threadId: job.threadId, action: 'settle' });
     } catch (e) {
-      this.d.say(`${job.title}: settling its thread ${job.threadId} failed (${(e as Error).message}); left as it is`);
+      this.d.say(`${job.title}: settling its thread ${job.threadId} failed (${(e as Error).message}); left as it is until the app starts again`);
+      return;
+    }
+    try {
+      await this.d.log.settled(job.id);
+    } catch (e) {
+      this.d.say(`${job.title}: its settle couldn't be recorded (${(e as Error).message}); the next start settles it again`);
     }
   }
 }

@@ -267,7 +267,7 @@ describe('the end', () => {
     expect(organized()).toEqual([{ threadId: 'thread-1', action: 'settle' }]);
     expect(t3.toolCalls.at(-1)!.tool).toBe('t3_thread_organize');
     const saved = jobFiles.files.get(join(dir, 'jobs.jsonl'))!.trim().split('\n').map((l) => JSON.parse(l));
-    expect(saved.map((e) => e.event)).toEqual(['start', 'thread', 'end']);
+    expect(saved.map((e) => e.event)).toEqual(['start', 'thread', 'end', 'settled']);
     expect(gate.calls).toEqual(['pick build:owner/app#5', `started ${job!.id}`, `finished ${job!.id}`]);
     // the issue stays held: a pass after the end builds nothing more
     expect(t3.launches).toHaveLength(1);
@@ -414,6 +414,57 @@ describe('an app that stopped mid-build', () => {
     await until(() => t3.launches.length === 1); // then app's next ticket
     expect(log.get(open.id)!.end?.outcome).toBe('done-no-pr');
     expect(organized()[0]).toEqual({ threadId: 'old-thread', action: 'settle' });
+  });
+});
+
+describe('an app that stopped between recording an end and settling its thread (F9)', () => {
+  const start = (issue: number) => ({ kind: 'build' as const, repo: 'p-app', github: 'owner/app', issue, branch: `claude/x-${issue}`, base: 'origin/main', title: `Queue runner build: app#${issue}`, choice: BUILD, onFallback: false });
+  const ended = async (issue: number, outcome: 'done' | 'failed' | 'waiting' | 'usage-limit', thread: string | null = `t-${issue}`) => {
+    const job = await log.started(start(issue));
+    if (thread) {
+      await log.thread(job.id, { threadId: thread, runId: null, link: null });
+      t3.threadState[thread] = { id: thread, projectId: 'p-app', runtimeRequests: [], turnItems: [], runs: [{ id: 'r', ordinal: 1, rootNodeId: 'n', status: 'completed' }] };
+    }
+    await log.ended(job.id, { outcome });
+    return job;
+  };
+
+  test("the next start settles the thread of an ended job with no settle recorded, and only that job's", async () => {
+    const done = await ended(1, 'done');
+    const failed = await ended(2, 'failed');
+    await ended(3, 'waiting');
+    await ended(4, 'usage-limit');
+    const already = await ended(5, 'done');
+    await log.settled(already.id);
+    await log.started(start(6)).then((j) => log.ended(j.id, { outcome: 'needs-user', error: 'x' }));
+    // restarted: the log as an app that stopped before settling left it
+    log = await JobLog.open(join(dir, 'jobs.jsonl'), undefined, jobFiles);
+    await makeLane().start();
+    await lane.idle();
+    expect(organized()).toEqual([{ threadId: 't-1', action: 'settle' }, { threadId: 't-2', action: 'settle' }]);
+    expect([done, failed].map((j) => log.get(j.id)!.settledAt)).toEqual([expect.any(String), expect.any(String)]);
+    // recorded on disk, so a start after this one settles nothing again
+    log = await JobLog.open(join(dir, 'jobs.jsonl'), undefined, jobFiles);
+    lane.stop();
+    t3.toolCalls.length = 0;
+    await makeLane().start();
+    await lane.idle();
+    expect(organized()).toEqual([]);
+  });
+
+  test('a settle that fails is said and left unrecorded, so the next start tries it again', async () => {
+    const job = await ended(1, 'done', 'gone-thread');
+    delete t3.threadState['gone-thread'];
+    await makeLane().start();
+    await lane.idle();
+    expect(lines.join('\n')).toMatch(/settling its thread gone-thread failed/);
+    expect(log.get(job.id)!.settledAt).toBeUndefined();
+    lane.stop();
+    t3.threadState['gone-thread'] = { id: 'gone-thread', projectId: 'p-app', runtimeRequests: [], turnItems: [], runs: [] };
+    await makeLane().start();
+    await lane.idle();
+    expect(organized().map((a) => a.threadId)).toEqual(['gone-thread', 'gone-thread']);
+    expect(log.get(job.id)!.settledAt).toEqual(expect.any(String));
   });
 });
 

@@ -369,7 +369,7 @@ builds (`docs/flow.md`, `docs/claude-lane.md`). `src/build-lane.ts`, `src/picker
 - **The job log** is `jobs.jsonl` in the state folder (`src/job-log.ts`, today's `state.py` cut to
   a build): `start` (the model the gate let it in on, the cost it was let in at and T3's reading it
   was let in on, `cost` and `before`), `thread` (once T3 names it), `end` and, for a `needs-user`
-  end, `answered` once the user has answered.
+  end, `answered` once the user has answered; `settled` once its thread is settled.
   Every build that started holds its issue but `not-started` (releasing is a later ticket). The
   usage before and after a job are its record in the gate's `usage.jsonl`, by the same job id: the
   gate counts the job from its let-in and measures it on T3's first reading after its end; a job
@@ -378,6 +378,9 @@ builds (`docs/flow.md`, `docs/claude-lane.md`). `src/build-lane.ts`, `src/picker
   action: settle}`; #68 story 5). Only threads the app launched are settled (story 13): the id
   comes from its own launch. One waiting on a question is left for the Inbox ticket and one
   stopped by a usage limit for the limits ticket; both are recorded as such and left unsettled.
+  A settle is recorded (`settled`); an end with none (the app stopped between the two, or the
+  settle failed) is settled on the next start. A log from before `settled` lines settles its
+  ended builds' threads once more on the first start, which leaves a settled thread as it is.
 - **An app that stopped mid-build:** on start, each build the log shows open is watched again to
   its end before any pass (so its repo still has one build), reserved in the gate at its logged
   `cost` and measured from its logged `before`, never from a reading taken mid-run (a line with
