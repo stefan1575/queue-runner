@@ -584,3 +584,21 @@ describe("a fixer's question (#158 F2)", () => {
     expect(fixes()[0]!.end).toMatchObject({ question: 'Which one?' });
   });
 });
+
+describe("a failed round's retry on the same head (#158 F8)", () => {
+  test("a fresh fixer's retry gets a branch of its own when the failed round's is still there", async () => {
+    // F1 still open from review 1: every round on it is a fresh fixer, in a new worktree
+    await blocking(2, H, [finding({ raised: 1 })]);
+    makeLane();
+    await lane.pass();
+    await until(() => t3.launches.length === 1);
+    expect(t3.launches[0].workspaceStrategy).toMatchObject({ branch: 'claude/fix-pr4-abcdef1' });
+    git.branches.add('claude/fix-pr4-abcdef1');
+    await until(() => t3.threadStreamCount('thread-1') > 0);
+    t3.endRun('thread-1', 'failed');
+    await until(() => t3.launches.length === 2);
+    expect(t3.launches[1].workspaceStrategy).toMatchObject({ type: 'worktree', baseRef: H, branch: 'claude/fix-pr4-abcdef1-2' });
+    await until(() => Boolean(fixes()[1]?.made));
+    expect(fixes()[1]!.made).toEqual(['claude/fix-pr4-abcdef1-2']);
+  });
+});

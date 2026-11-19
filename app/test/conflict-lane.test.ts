@@ -237,11 +237,15 @@ describe('a conflict round', () => {
     makeLane();
     await lane.pass();
     await until(() => t3.threadStreamCount('thread-1') > 0);
+    // T3 made the first round's branch, and it's still there after the round failed (#158 F8)
+    git.branches.add('claude/conflict-pr4-abcdef1-b1b1b1b');
     t3.endRun('thread-1', 'failed');
     // the second round is launched and its lines are written before the test ends (N1: it raced
     // the teardown)
     await until(() => Boolean(rounds()[1]?.made));
     expect(rounds()[0]!.end).toMatchObject({ outcome: 'failed', head: H });
+    expect(t3.launches[1].workspaceStrategy).toEqual({ type: 'worktree', baseRef: H, branch: 'claude/conflict-pr4-abcdef1-b1b1b1b-2' });
+    expect(rounds()[1]!.made).toEqual(['claude/conflict-pr4-abcdef1-b1b1b1b-2']);
     expect(log.stops()).toEqual([]);
   });
 

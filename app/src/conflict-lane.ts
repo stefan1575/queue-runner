@@ -37,7 +37,7 @@
 import type { BuildRepo } from './build-lane.ts';
 import { conflictBrief, type ConflictWhere } from './briefs/conflict.ts';
 import { holdText } from './gate.ts';
-import type { FixGit } from './git.ts';
+import { freeBranch, type FixGit } from './git.ts';
 import type { GitHubMerge, GitHubReview, ReviewPull } from './github.ts';
 import { fixNext } from './fix-lane.ts';
 import { mergeNext } from './merge-lane.ts';
@@ -400,8 +400,10 @@ export class ConflictLane {
         where = { kind: 'worktree' };
         worktreePath = own.path;
       } else {
-        where = { kind: 'new', work: conflictBranch(n, h, baseSha) };
-        if (await this.d.git.hasBranch(repo.folder, where.work)) throw new NotStarted(`a local branch ${where.work} is left from an earlier round`);
+        // a failed round on this head left its branch: the retry takes the next free name (F8)
+        const work = await freeBranch(this.d.git, repo.folder, conflictBranch(n, h, baseSha));
+        if (!work) throw new NotStarted(`every local branch name for a round on ${h.slice(0, 7)} is taken by earlier rounds`);
+        where = { kind: 'new', work };
       }
       brief = await this.brief(repo, pr, where);
     } catch (e) {

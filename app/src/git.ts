@@ -59,6 +59,17 @@ export interface FixGit {
 
 export const samePath = (a: string, b: string) => a.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase() === b.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
 
+/** A local branch name a new worktree can be made on: `name`, else `name-2`, `name-3`... up to
+ *  `-9`, the first git doesn't have (#158 F8). A round that failed leaves its branch (and worktree)
+ *  for the merge's clean-up, so the retry on the same head takes the next. Null when all are taken. */
+export async function freeBranch(git: { hasBranch(folder: string, branch: string): Promise<boolean> }, folder: string, name: string): Promise<string | null> {
+  for (let k = 1; k <= 9; k++) {
+    const b = k === 1 ? name : `${name}-${k}`;
+    if (!await git.hasBranch(folder, b)) return b;
+  }
+  return null;
+}
+
 export const prRef =(n: number) => `refs/queue-runner/pr${n}`;
 
 type Run = (args: string[], cwd: string) => Promise<{ code: number; stdout?: string; stderr: string }>;

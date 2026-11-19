@@ -35,7 +35,7 @@
 import { fixBrief, type FixWhere } from './briefs/fix.ts';
 import type { BuildRepo } from './build-lane.ts';
 import { holdText } from './gate.ts';
-import type { FixGit } from './git.ts';
+import { freeBranch, type FixGit } from './git.ts';
 import type { GitHubChecks, GitHubMerge, GitHubReview, ReviewPull } from './github.ts';
 import { capReached, capText, roundsSinceAnswer } from './cap.ts';
 import { REVIEWED, settles, writes, type Job, type JobEnd, type JobLog, type Step } from './job-log.ts';
@@ -378,8 +378,10 @@ export class FixLane {
           where = { kind: 'worktree' };
           worktreePath = own.path;
         } else {
-          where = { kind: 'new', work: fixBranch(n, h) };
-          if (await this.d.git.hasBranch(repo.folder, where.work)) throw new NotStarted(`a local branch ${where.work} is left from an earlier round`);
+          // a failed round on this head left its branch: the retry takes the next free name (F8)
+          const work = await freeBranch(this.d.git, repo.folder, fixBranch(n, h));
+          if (!work) throw new NotStarted(`every local branch name for a round on ${h.slice(0, 7)} is taken by earlier rounds`);
+          where = { kind: 'new', work };
         }
       }
       brief = await this.brief(repo, pr, cause, where, plan.why ?? null);
