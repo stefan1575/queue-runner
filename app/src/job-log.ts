@@ -91,12 +91,17 @@ export type JobEnd = {
   head?: string | null;
 };
 export type Job = JobStart & { id: string; startedAt: string } & Partial<JobThread>
-  & { end?: JobEnd & { at: string }; answeredAt?: string; settledAt?: string };
+  & { end?: JobEnd & { at: string }; answeredAt?: string; settledAt?: string;
+    /** The local branches the app's own launch for this job made, with the worktree T3 put on
+     *  each (`made` lines, #156 F15): what a merge's clean-up may remove, and nothing else. */
+    made?: string[] };
 
 /** What a PR step ended in: a merge `merged` (by the app, or noticed as the user's: `by`),
  *  `failed`, or `head-moved` (GitHub refused the old head: it's reviewed again); a mark `marked` or
  *  `unmarked`. */
-export type StepOutcome = 'merged' | 'failed' | 'head-moved' | 'marked' | 'unmarked';
+export type StepOutcome = 'merged' | 'failed' | 'head-moved' | 'marked' | 'unmarked'
+  /** A PR the app reviewed, closed without merging: noticed once, done with (#156 F14). */
+  | 'closed';
 export type StepStart = { kind: 'merge' | 'ready'; repo: string; github: string; pr: number; branch: string; sha: string };
 export type StepEnd = { outcome: StepOutcome; error?: string | null; by?: 'app' | 'user'; commit?: string | null; why?: string };
 export type Step = StepStart & { id: string; startedAt: string; end?: StepEnd & { at: string }; cleanedAt?: string; left?: string[]; sweptAt?: string };
@@ -127,6 +132,7 @@ type Event =
   | ({ event: 'end'; job: string; at: string } & JobEnd)
   | { event: 'answered'; job: string; at: string }
   | { event: 'settled'; job: string; at: string }
+  | { event: 'made'; job: string; at: string; branch: string }
   | { event: 'pr'; job: string; at: string; pr: JobEnd['pr'] }
   | ({ event: 'step'; step: string; at: string } & StepStart)
   | ({ event: 'step-end'; step: string; at: string } & StepEnd)
@@ -198,6 +204,7 @@ export class JobLog {
       if (e.event === 'thread') this.all.set(e.job, { ...job, threadId: e.threadId, runId: e.runId, link: e.link });
       else if (e.event === 'answered') this.all.set(e.job, { ...job, answeredAt: e.at });
       else if (e.event === 'settled') this.all.set(e.job, { ...job, settledAt: e.at });
+      else if (e.event === 'made') this.all.set(e.job, { ...job, made: [...new Set([...(job.made ?? []), e.branch])] });
       else if (e.event === 'pr') {
         if (!job.end) return;
         const { error: _, ...end } = job.end;
@@ -237,6 +244,13 @@ export class JobLog {
   /** The user has answered a job that needed them: its repo is free again. */
   async answered(id: string): Promise<Job> {
     await this.append({ event: 'answered', job: id, at: this.now().toISOString() });
+    return this.all.get(id)!;
+  }
+
+  /** The app's own launch for the job made this local branch (and T3 its worktree on it): written
+   *  right after the launch, so a merge's clean-up removes only what the app made (F15). */
+  async made(id: string, branch: string): Promise<Job> {
+    await this.append({ event: 'made', job: id, at: this.now().toISOString(), branch });
     return this.all.get(id)!;
   }
 

@@ -39,7 +39,7 @@ export type MergeLaneDoors = {
   /** The served repos, each with who merges (`merge`, default the user). */
   repos: () => BuildRepo[];
   github: Pick<GitHubReview, 'pullsToReview' | 'issueComments' | 'reviewReplies' | 'checks'> & GitHubMerge;
-  git: Pick<FixGit, 'worktrees' | 'removeWorktree' | 'deleteBranch'>;
+  git: Pick<FixGit, 'worktrees' | 'removeWorktree' | 'deleteBranch' | 'isClean'>;
   mcp: Pick<T3Mcp, 'call'>;
   log: JobLog;
   say: (line: string) => void;
@@ -119,7 +119,8 @@ export class MergeLane {
       let pulls: ReviewPull[];
       try {
         pulls = (await this.d.github.pullsToReview(repo.github)).sort((a, b) => a.number - b.number);
-        if ((repo.merge ?? 'me') === 'me') await this.userPass(repo, pulls);
+        if ((repo.merge ?? 'me') === 'me') await this.marksPass(repo, pulls);
+        await this.noticePass(repo, pulls);
       } catch (e) {
         this.d.say(`${repo.title}: GitHub couldn't be read for merges (${(e as Error).message})`);
         continue;
@@ -277,38 +278,50 @@ export class MergeLane {
     this.d.say(`${name}: clean at ${pr.headSha.slice(0, 7)} with its checks passed: labelled ${READY}, for you to merge ${pr.url}`);
   }
 
-  /** Marks come off PRs the re-check no longer passes; a marked PR gone from the open list is read:
-   *  the user merged it, or it was closed. */
-  private async userPass(repo: BuildRepo, pulls: ReviewPull[]): Promise<void> {
-    const listed = new Map(pulls.map((p) => [p.number, p]));
-    const numbers = new Set(this.d.log.steps().filter((s) => s.kind === 'ready' && s.repo === repo.id).map((s) => s.pr));
-    for (const n of [...numbers].sort((a, b) => a - b)) {
-      const last = this.marked(repo, n);
-      if (!last || this.mergedSince(last)) continue; // a merge noticed once is done with
-      const pr = listed.get(n);
-      if (pr) {
-        const why = pr.headSha !== last.sha ? `the head moved from ${last.sha.slice(0, 7)} to ${pr.headSha.slice(0, 7)}: it's reviewed first`
-          : !this.cleanOnHead(repo, n, pr.headSha) ? `its review of ${pr.headSha.slice(0, 7)} is no longer clean`
-          : await this.whyNot(repo, n, pr.headSha);
-        if (why) await this.unmark(repo, last, why);
-        continue;
-      }
+  /** Marks come off the open PRs the re-check no longer passes. */
+  private async marksPass(repo: BuildRepo, pulls: ReviewPull[]): Promise<void> {
+    for (const pr of pulls) {
+      const last = this.marked(repo, pr.number);
+      if (!last) continue;
+      const why = pr.headSha !== last.sha ? `the head moved from ${last.sha.slice(0, 7)} to ${pr.headSha.slice(0, 7)}: it's reviewed first`
+        : !this.cleanOnHead(repo, pr.number, pr.headSha) ? `its review of ${pr.headSha.slice(0, 7)} is no longer clean`
+        : await this.whyNot(repo, pr.number, pr.headSha);
+      if (why) await this.unmark(repo, last, why);
+    }
+  }
+
+  /** Each PR the app reviewed or marked that's gone from the open list is read once: merged (by
+   *  the user, or by hand where the runner merges), its merge is recorded, its threads settled and
+   *  its clean-up run, whatever its label history (#156 F14: a mark taken off by a reply, then a
+   *  merge); closed, it's recorded closed and a mark on it comes off. Either way it's done with:
+   *  never read again. GitHub's list lagging (still open) leaves it for the next pass. */
+  private async noticePass(repo: BuildRepo, pulls: ReviewPull[]): Promise<void> {
+    const listed = new Set(pulls.map((p) => p.number));
+    const done = new Set(this.d.log.steps().filter((s) => s.kind === 'merge' && s.repo === repo.id
+      && (s.end?.outcome === 'merged' || s.end?.outcome === 'closed' || !s.end)).map((s) => s.pr));
+    const known = new Set([
+      ...this.d.log.jobs().filter((j) => j.kind === 'review' && j.repo === repo.id).map((j) => j.issue),
+      ...this.d.log.steps().filter((s) => s.kind === 'ready' && s.repo === repo.id).map((s) => s.pr),
+    ]);
+    for (const n of [...known].sort((a, b) => a - b)) {
+      if (this.stopped) return;
+      if (listed.has(n) || done.has(n)) continue;
       const now = await this.d.github.pull(repo.github!, n);
+      if (now.state === 'open') continue;
+      const mark = this.marked(repo, n);
       if (now.state === 'merged') {
         // the label goes too, so a merged PR isn't left saying it's ready (said if it fails)
         if (now.labels.includes(READY)) {
           await this.d.github.removeLabel(repo.github!, n, READY).catch((e: Error) => this.d.say(`merge ${repo.title}#${n}: removing ${READY} failed (${e.message})`));
         }
-        await this.userMerged(repo, last, now.headSha);
-      } else if (now.state === 'closed') await this.unmark(repo, last, 'closed without merging');
+        await this.userMerged(repo, n, now.branch, now.headSha, mark?.sha ?? null);
+        continue;
+      }
+      if (mark) await this.unmark(repo, mark, 'closed without merging');
+      const step = await this.d.log.stepStarted({ kind: 'merge', repo: repo.id, github: repo.github!, pr: n, branch: now.branch, sha: now.headSha });
+      await this.d.log.stepEnded(step.id, { outcome: 'closed', why: 'closed without merging' });
+      this.d.say(`merge ${repo.title}#${n}: closed without merging; done with`);
     }
-  }
-
-  /** A merge of the PR recorded after its mark: the mark's PR is done with (F2). */
-  private mergedSince(mark: Step): boolean {
-    const steps = this.d.log.steps();
-    const at = steps.indexOf(steps.find((s) => s.id === mark.id)!);
-    return steps.slice(at + 1).some((s) => s.kind === 'merge' && s.repo === mark.repo && s.pr === mark.pr && s.end?.outcome === 'merged');
   }
 
   private async unmark(repo: BuildRepo, last: Step, why: string): Promise<void> {
@@ -324,54 +337,62 @@ export class MergeLane {
     this.d.say(`${name}: no longer ready for you (${why}); ${READY} removed`);
   }
 
-  private async userMerged(repo: BuildRepo, last: Step, head: string): Promise<void> {
-    const step = await this.d.log.stepStarted({ kind: 'merge', repo: repo.id, github: repo.github!, pr: last.pr, branch: last.branch, sha: head });
+  private async userMerged(repo: BuildRepo, n: number, branch: string, head: string, ready: string | null): Promise<void> {
+    const step = await this.d.log.stepStarted({ kind: 'merge', repo: repo.id, github: repo.github!, pr: n, branch, sha: head });
     const done = await this.d.log.stepEnded(step.id, { outcome: 'merged', by: 'user' });
-    this.d.say(`merge ${repo.title}#${last.pr}: you merged it${head === last.sha ? '' : ` (at ${head.slice(0, 7)}, not ${last.sha.slice(0, 7)}, which was ready)`}`);
+    this.d.say(`merge ${repo.title}#${n}: you merged it${!ready || head === ready ? '' : ` (at ${head.slice(0, 7)}, not ${ready.slice(0, 7)}, which was ready)`}`);
     await this.cleanUp(repo, done);
     this.d.merged?.(repo);
   }
 
   // --- after a merge ---------------------------------------------------------------------------
 
-  /** The PR's own jobs: its reviews and fix rounds (by the PR's number), and its build: the one
-   *  whose end names this PR, or the one on the PR's head branch that ended before the merge was
-   *  recorded and names no other PR (a build that opened its PR and then failed or hit a usage
-   *  limit has no PR on its end, #154 looking one up only for `done`: F11). A build still running,
-   *  or started after the merge, on a reused branch name is another PR's (F2). */
+  /** The PR's own jobs: its reviews and fix rounds (by the PR's number and branch), and its
+   *  build: the one whose end names this PR, or the one that made the PR's head branch (a `made`
+   *  line), ended before the merge was recorded and names no other PR (F11: a build that opened
+   *  its PR and then failed has none on its end). A build still running, or started after the
+   *  merge, on a reused branch name is another PR's (F2). */
   private ownJobs(repo: BuildRepo, step: Step): Job[] {
     const build = (j: Job) => j.end?.pr?.number === step.pr
-      || (j.branch === step.branch && Boolean(j.end) && !j.end!.pr && j.startedAt < step.startedAt);
+      || (Boolean(j.made?.includes(step.branch)) && Boolean(j.end) && !j.end!.pr && j.startedAt < step.startedAt);
     return this.d.log.jobs().filter((j) => j.repo === repo.id
       && (j.kind === 'build' ? build(j) : j.issue === step.pr && j.branch === step.branch));
   }
 
-  /** The PR's worktrees and branches removed and every thread the app ran on it settled: the
-   *  latest point one of them can still be open (#68 story 7). Only what the PR's own jobs made is
-   *  touched: its build's branch and each fresh fixer's, never one another job of the app's uses
-   *  now (a new build on a reused branch name, F2), and never a person's. Recorded once both are
-   *  done; a settle that failed leaves it owed for the next pass. */
+  /** What the app made for the PR, removed, and every thread the app ran on it settled: the latest
+   *  point one of them can still be open (#68 story 7). Only branches the app's own launches
+   *  recorded making (`made`, F15) are touched, with the worktrees git lists on them: never a
+   *  branch that was there before the app looked (a `branch-exists` build made nothing), a person's,
+   *  or one another job of the app's is on now (a new build on a reused name, F2). A worktree with
+   *  uncommitted changes is never removed: it's left, said, and its branch kept. Recorded once both
+   *  are done; a settle that failed, or a worktree git keeps listing, leaves it owed. */
   private async cleanUp(repo: BuildRepo, step: Step): Promise<void> {
     const name = `merge ${repo.title}#${step.pr}`;
     const jobs = this.ownJobs(repo, step);
     const own = new Set(jobs.map((j) => j.id));
-    // another job of the app's on the branch: still running (or waiting, or cut off), or one whose
-    // end names another PR. An earlier build of this PR that ended without one is neither
+    // another job of the app's on a branch now: still running (or waiting, or cut off), or ended
+    // on another PR
     const others = new Set(this.d.log.jobs().filter((j) => j.repo === repo.id && !own.has(j.id) && j.kind !== 'review'
-      && (WRITING(j) || (j.end?.pr && j.end.pr.number !== step.pr))).map((j) => j.branch));
-    const branches = [...new Set(jobs.flatMap((j) => [...(j.kind === 'build' ? [j.branch] : []), ...(j.workBranch ? [j.workBranch] : [])]))]
-      .filter((b) => !others.has(b));
+      && (WRITING(j) || (j.end?.pr && j.end.pr.number !== step.pr))).flatMap((j) => [j.branch, ...(j.made ?? [])]));
+    const made = (j: Job) => (j.kind === 'build' ? (j.made ?? []).filter((b) => b === step.branch) : j.made ?? []);
+    const branches = [...new Set(jobs.flatMap(made))].filter((b) => !others.has(b));
     const left: string[] = [];
+    const kept = new Set<string>();
     let done = true;
     try {
       for (const w of await this.d.git.worktrees(repo.folder)) {
         if (!w.branch || !branches.includes(w.branch)) continue;
+        if (!(await this.d.git.isClean(w.path))) {
+          kept.add(w.branch);
+          this.d.say(`${name}: worktree ${w.path} has uncommitted changes (or git couldn't say): left as it is, and its branch ${w.branch} kept`);
+          continue;
+        }
         const gone = await this.d.git.removeWorktree(repo.folder, w.path);
         if (!gone) { done = false; this.d.say(`${name}: git still lists the worktree ${w.path}; tried again next pass`); continue; }
         if ((this.d.exists ?? existsSync)(w.path)) left.push(w.path);
         this.d.say(`${name}: worktree ${w.path} removed${left.includes(w.path) ? ' (T3 still holds its folder: swept later)' : ''}`);
       }
-      for (const b of branches) await this.d.git.deleteBranch(repo.folder, b);
+      for (const b of branches) if (!kept.has(b)) await this.d.git.deleteBranch(repo.folder, b);
     } catch (e) {
       done = false;
       this.d.say(`${name}: removing its worktrees and branches failed (${(e as Error).message}); tried again next pass`);

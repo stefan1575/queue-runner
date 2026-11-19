@@ -274,6 +274,7 @@ describe('a fresh fixer', () => {
     expect(t3.launches[0].message).toContain("You're a fresh fixer, called in for this round: review 2 marks F1 still not fixed after an earlier round.");
     expect(gate.calls).toContain('pick fix:owner/app#4');
     const job = fixes()[0]!;
+    expect(job.made).toBeUndefined(); // the PR's own worktree: the fixer made nothing (#156 F15)
     expect(job).toMatchObject({ fresh: expect.stringContaining('F1 still not fixed'), choice: FIX, threadId: 'thread-1' });
     // the fresh fixer writes the PR from now on: the next round goes back to it
     t3.endRun('thread-1', 'completed');
@@ -295,7 +296,7 @@ describe('a fresh fixer', () => {
     await until(() => t3.launches.length === 1);
     expect(t3.launches[0].workspaceStrategy).toEqual({ type: 'worktree', baseRef: H, branch: 'claude/fix-pr4-abcdef1' });
     expect(t3.launches[0].message).toContain('`git push origin HEAD:claude/add-a-thing-3`');
-    expect(fixes()[0]).toMatchObject({ workBranch: 'claude/fix-pr4-abcdef1', fresh: "no thread of the app's wrote this PR" });
+    expect(fixes()[0]).toMatchObject({ workBranch: 'claude/fix-pr4-abcdef1', fresh: "no thread of the app's wrote this PR", made: ['claude/fix-pr4-abcdef1'] });
   });
 
   test("the builder's thread deleted in T3 before the round: a fresh fixer, never a send (F3)", async () => {

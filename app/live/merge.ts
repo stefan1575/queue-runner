@@ -85,6 +85,8 @@ try {
   run(repo.folder, 'git', 'worktree', 'add', '-q', '-b', branch, wt, 'origin/main');
   const h1 = await push('one\n', 'Live merge check: first commit');
   const build = await log.started({ kind: 'build', repo: repo.id, github: GITHUB, issue: 0, branch, base: 'main', title: 'Queue runner build: sandbox#0', choice: NOBODY, onFallback: false });
+  // the check made the branch and its worktree as a build's launch does, so it records making them (F15)
+  await log.made(build.id, branch);
   await log.ended(build.id, { outcome: 'done' });
   n = Number(run(state, 'gh', 'api', '-X', 'POST', `repos/${GITHUB}/pulls`, '-f', `title=Live merge check ${stamp}`, '-f', `head=${branch}`, '-f', 'base=main',
     '-f', "body=Opened by the app's live merge check (`app/live/merge.ts`).", '-q', '.number'));

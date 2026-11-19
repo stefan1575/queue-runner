@@ -44,6 +44,9 @@ class FakeGit {
     return true;
   }
   async deleteBranch(_f: string, branch: string) { this.calls.push(`deleteBranch ${branch}`); }
+  /** Worktrees with uncommitted changes. */
+  dirty = new Set<string>();
+  async isClean(path: string) { return !this.dirty.has(path); }
 }
 
 let dir: string;
@@ -96,12 +99,14 @@ function makeLane(part: Partial<MergeLaneDoors> = {}) {
 async function built() {
   const build = await log.started({ kind: 'build', repo: 'p-app', github: 'owner/app', issue: 3, branch: BRANCH, base: 'main', title: 'Queue runner build: app#3', choice: CHOICE, onFallback: false });
   await log.thread(build.id, { threadId: 'thread-b', runId: 'r', link: null });
+  await log.made(build.id, BRANCH);
   t3.threadState['thread-b'] = { id: 'thread-b', projectId: 'p-app', runs: [], runtimeRequests: [], turnItems: [] };
   // a question the builder asked, left unsettled at its end: the merge settles it
   await log.ended(build.id, { outcome: 'waiting', request: 'user_input' });
   // so the lanes don't see it as writing: the user answered and it pushed (a later fix ended done)
   const fix = await log.started({ kind: 'fix', repo: 'p-app', github: 'owner/app', issue: 4, branch: BRANCH, base: 'main', title: 'Queue runner fix: app#4', choice: CHOICE, onFallback: false, sha: 'f'.repeat(40), round: 1, workBranch: 'claude/fix-pr4-fffffff', fresh: 'x' });
   await log.thread(fix.id, { threadId: 'thread-f', runId: 'r', link: null });
+  await log.made(fix.id, 'claude/fix-pr4-fffffff');
   t3.threadState['thread-f'] = { id: 'thread-f', projectId: 'p-app', runs: [], runtimeRequests: [], turnItems: [] };
   await log.ended(fix.id, { outcome: 'done' });
   await log.settled(fix.id);
@@ -280,6 +285,7 @@ describe("the PR's build is found by its branch too (F11, F12)", () => {
     test(`a build that opened its PR and ended ${end.outcome}, with no PR on its end: its worktree and branch go after the merge`, async () => {
       const build = await log.started({ kind: 'build', repo: 'p-app', github: 'owner/app', issue: 3, branch: BRANCH, base: 'main', title: 'Queue runner build: app#3', choice: CHOICE, onFallback: false });
       await log.thread(build.id, { threadId: 'thread-b', runId: 'r', link: null });
+      await log.made(build.id, BRANCH);
       t3.threadState['thread-b'] = { id: 'thread-b', projectId: 'p-app', runs: [], runtimeRequests: [], turnItems: [] };
       await log.ended(build.id, end);
       await review(1, H, 'clean');
@@ -306,8 +312,84 @@ describe("the PR's build is found by its branch too (F11, F12)", () => {
     await lane.idle();
     expect(steps('merge')[0]!.end?.outcome).toBe('merged');
     const later = await log.started({ kind: 'build', repo: 'p-app', github: 'owner/app', issue: 3, branch: BRANCH, base: 'main', title: 'b', choice: CHOICE, onFallback: false });
+    await log.made(later.id, BRANCH);
     await log.ended(later.id, { outcome: 'failed', error: 'x' });
+    git.trees.push({ path: 'C:/t3/worktrees/app/claude-add-a-thing-3-later', branch: BRANCH });
+    await lane.pass();
+    await lane.idle();
     expect(git.calls).toEqual([]); // no build of this PR's: nothing on the branch was its
+  });
+});
+
+describe('the clean-up removes only what the app made (F15)', () => {
+  test("a build that found the branch there already (branch-exists) made nothing: the worktree on it stays", async () => {
+    const found = await log.started({ kind: 'build', repo: 'p-app', github: 'owner/app', issue: 3, branch: BRANCH, base: 'main', title: 'Queue runner build: app#3', choice: CHOICE, onFallback: false });
+    await log.ended(found.id, { outcome: 'branch-exists', error: 'A local branch is left from an earlier run' });
+    await review(1, H, 'clean');
+    await makeLane().pass();
+    await lane.idle();
+    expect(steps('merge')[0]).toMatchObject({ end: { outcome: 'merged' }, cleanedAt: expect.any(String) });
+    expect(git.calls).toEqual([]);
+  });
+
+  test('a worktree with uncommitted changes is never removed: left, said, and its branch kept', async () => {
+    await built();
+    await answered();
+    await review(1, H, 'clean');
+    git.dirty.add(WT);
+    await makeLane().pass();
+    await lane.idle();
+    expect(git.calls).not.toContain(`removeWorktree ${WT}`);
+    expect(git.calls).not.toContain(`deleteBranch ${BRANCH}`);
+    expect(git.calls).toContain('deleteBranch claude/fix-pr4-fffffff');
+    expect(lines.some((l) => l.includes(`worktree ${WT} has uncommitted changes`))).toBe(true);
+  });
+});
+
+describe("a merge of any PR the app reviewed is noticed (F14)", () => {
+  test("in an \"I merge\" repo, a reply takes ready-to-merge off and the user then merges: noticed, settled, cleaned up", async () => {
+    repo = ME;
+    await built();
+    await answered();
+    await review(1, H, 'clean');
+    await makeLane().pass();
+    expect(steps('ready').map((s) => s.end?.outcome)).toEqual(['marked']);
+    gh.replies['owner/app#4'] = [{ author: 'pat', createdAt: '2026-11-19T11:30:00Z', body: 'looks good, merging' }];
+    await lane.pass();
+    expect(steps('ready').map((s) => s.end?.outcome)).toEqual(['marked', 'unmarked']);
+    gh.reviewPulls['owner/app'] = [];
+    gh.prs['owner/app#4'] = github({ state: 'merged' });
+    await lane.pass();
+    await lane.idle();
+    expect(steps('merge')).toHaveLength(1);
+    expect(steps('merge')[0]).toMatchObject({ end: { outcome: 'merged', by: 'user' }, cleanedAt: expect.any(String) });
+    expect(git.calls).toContain(`removeWorktree ${WT}`);
+    expect(settledThreads()).toContain('thread-b');
+    await lane.pass();
+    expect(steps('merge')).toHaveLength(1);
+  });
+
+  test('a reviewed PR merged by hand where the runner merges, never marked, is noticed once; one closed unmerged is read once', async () => {
+    await built();
+    await answered();
+    await review(1, H, 'blocking');
+    gh.reviewPulls['owner/app'] = [];
+    gh.prs['owner/app#4'] = github({ state: 'merged' });
+    await makeLane().pass();
+    await lane.idle();
+    expect(steps('merge')[0]).toMatchObject({ end: { outcome: 'merged', by: 'user' }, cleanedAt: expect.any(String) });
+    expect(merged).toEqual(['p-app']);
+
+    // another reviewed PR, closed without merging: recorded once, never read again
+    (gh.comments['owner/app#9'] ??= []);
+    const r = await log.started({ kind: 'review', repo: 'p-app', github: 'owner/app', issue: 9, branch: 'x', base: 'main', title: 'r', choice: CHOICE, onFallback: false, sha: H2, round: 1, reviewer: 'r' });
+    await log.ended(r.id, { outcome: 'blocking', verdict: 'blocking' });
+    gh.prs['owner/app#9'] = github({ number: 9, state: 'closed', branch: 'x' });
+    await lane.pass();
+    expect(steps('merge').find((s) => s.pr === 9)).toMatchObject({ end: { outcome: 'closed' } });
+    gh.pullFails = 5; // any read now would fail: there is none
+    await lane.pass();
+    expect(gh.pullFails).toBe(5);
   });
 });
 
@@ -353,6 +435,7 @@ describe('in a repo where the user merges', () => {
     // the issue reopened and rebuilt on the same branch name: a new build, its own worktree
     const again = await log.started({ kind: 'build', repo: 'p-app', github: 'owner/app', issue: 3, branch: BRANCH, base: 'main', title: 'Queue runner build: app#3', choice: CHOICE, onFallback: false });
     await log.thread(again.id, { threadId: 'thread-new', runId: 'r', link: null });
+    await log.made(again.id, BRANCH);
     git.trees.push({ path: 'C:/t3/worktrees/app/claude-add-a-thing-3-again', branch: BRANCH });
     git.calls = [];
     await lane.pass();
@@ -379,6 +462,7 @@ describe('in a repo where the user merges', () => {
     git.trees = git.trees.filter((t) => t.path !== WT);
     const again = await log.started({ kind: 'build', repo: 'p-app', github: 'owner/app', issue: 3, branch: BRANCH, base: 'main', title: 'Queue runner build: app#3', choice: CHOICE, onFallback: false });
     await log.thread(again.id, { threadId: 'thread-new', runId: 'r', link: null });
+    await log.made(again.id, BRANCH);
     git.trees.push({ path: 'C:/t3/worktrees/app/claude-add-a-thing-3-again', branch: BRANCH });
     git.calls = [];
     await lane.pass();

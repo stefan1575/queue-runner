@@ -370,6 +370,9 @@ export class FixLane {
       return this.notStarted(job, (e as Error).message);
     }
     await this.d.log.thread(job.id, thread);
+    // a fresh fixer's new worktree and its branch are the app's (F15); the PR's own worktree, or
+    // the writer's thread a round was sent to, made nothing
+    if (where.kind === 'new') await this.d.log.made(job.id, where.work);
     onLaunched();
     return this.watch({ ...job, ...thread });
   }

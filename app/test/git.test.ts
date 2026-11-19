@@ -64,6 +64,14 @@ test('a branch is deleted only when it is there; git log reads each commit oldes
   expect(await git.log('C:/r', 'origin/main', 'abc')).toEqual([{ sha: 'aaa', subject: 'First' }, { sha: 'bbb', subject: 'Second: with\ttab' }]);
 });
 
+test('a worktree is clean only when git status says nothing; git failing is never clean (#156 F15)', async () => {
+  const answer = (code: number, stdout: string) => new GitCli(async () => ({ code, stdout, stderr: '' }));
+  expect(await answer(0, '').isClean('C:/wt')).toBe(true);
+  expect(await answer(0, ' M src/a.ts\n').isClean('C:/wt')).toBe(false);
+  expect(await answer(0, '?? new.txt\n').isClean('C:/wt')).toBe(false);
+  expect(await answer(128, '').isClean('C:/wt')).toBe(false);
+});
+
 let dir: string | null = null;
 afterEach(async () => {
   if (dir) await rm(dir, { recursive: true, force: true });

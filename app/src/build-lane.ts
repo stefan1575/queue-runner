@@ -275,6 +275,9 @@ export class BuildLane {
       return await notStarted('not-started', (e as Error).message);
     }
     await this.d.log.thread(job.id, { threadId: launched.threadId, runId: launched.runId, link: launched.link });
+    // T3 made the job's branch and its worktree for this launch: the app's to remove after the
+    // merge (#156 F15). A leftover branch (branch-exists) never gets here, so it's never the app's
+    await this.d.log.made(job.id, ticket.branch);
     onLaunched();
     return this.watch({ ...job, threadId: launched.threadId, runId: launched.runId, link: launched.link }, repo.github);
   }

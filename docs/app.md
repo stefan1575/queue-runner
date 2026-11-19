@@ -594,24 +594,31 @@ merge half of `src/github.ts` and `src/git.ts`.
   `head-moved`, nothing merges, and the review lane is told so the new head is reviewed.
 - **"I merge" repos** (`merge: me`, the default): the re-checked clean PR gets `ready-to-merge`
   (it was `ready-for-stefan`) once per head and is never merged by the app. The mark comes off when
-  the head moves, the review isn't clean any more or the re-check fails. A marked PR gone from the
-  open list is read: merged, the user's merge is recorded (`by: user`) and cleaned up like the
-  app's, once: a mark followed by its PR's merge is done with (#156 F2); closed, it's unmarked.
-  The platform's notifications are a later ticket, so the log line
-  names the PR for now.
-- **After a merge:** only what the PR's own jobs made is touched (#156 F2): its reviews and fix
-  rounds (by the PR's number) and its build: the one whose end names the PR, or the one on the
-  PR's head branch that ended before the merge was recorded and names no other PR (a build that
-  opened its PR and then failed or hit a usage limit has none on its end, #156 F11). Their branches (the build's
-  and each fresh fixer's) are removed, with the worktrees `git worktree list` shows on them, but
-  never a branch another job of the app's is on (one still running, or ended on another PR: a
-  new build reusing the name), and never a person's branch. Every thread of those jobs is settled: the merge is the latest point one can still be open (#68,
-  story 7). Then a `cleaned` line; a worktree git keeps listing, or a settle that failed, leaves it
-  owed for the next pass. T3 may hold an emptied worktree folder until its thread settles
-  (`docs/t3.md`): such folders are kept in the `cleaned` line and swept on later passes (`swept`).
-  Merged is the end: no after-merge steps (#68).
+  the head moves, the review isn't clean any more or the re-check fails (a reply included). The
+  platform's notifications are a later ticket, so the log line names the PR for now.
+- **Merges noticed** (#156 F14), in every repo: each PR the app reviewed or marked that's gone from
+  the open list is read once, whatever its label history. Merged (by the user, or by hand where
+  the runner merges), its merge is recorded (`by: user`) and cleaned up like the app's, its label
+  removed; closed unmerged, it's recorded `closed` and a mark on it comes off. Either way it's done
+  with and never read again; GitHub's list lagging (still open) leaves it for the next pass.
+- **After a merge, only what the app made** (#156 F15): a build's launch, and a fresh fixer's in
+  a new worktree, write a `made` line for the branch T3 made (with its worktree) right after the
+  launch. A `branch-exists` build, a fixer in the PR's own worktree and a round sent to a thread
+  made nothing. The clean-up removes only branches with a `made` line from the PR's own jobs: its
+  fix rounds (by the PR's number and branch) and its build, the one whose end names the PR or the
+  one that made the PR's head branch, ended before the merge was recorded and names no other PR
+  (#156 F11: a build that opened its PR and then failed has none on its end). It never touches a
+  branch another job of the app's is on (one still running, or ended on another PR: a new build
+  reusing the name). It removes the worktrees `git worktree list` shows on those branches, but
+  never one with uncommitted changes (`git status --porcelain`, or git failing to say): that is
+  left, said in the log, and its branch kept. Every thread of those jobs, reviews included, is
+  settled: the merge is the latest point one can still be open (#68, story 7). Then a `cleaned`
+  line; a worktree git keeps listing, or a settle that failed, leaves it owed for the next pass. T3
+  may hold an emptied worktree folder until its thread settles (`docs/t3.md`): such folders are
+  kept in the `cleaned` line and swept on later passes (`swept`). Merged is the end: no
+  after-merge steps (#68).
 - **PR steps in the job log:** a merge or a mark is a `step` line and its `step-end` (`merged`,
-  `failed`, `head-moved`, `marked`, `unmarked`), apart from jobs: it runs on no model, so the gate
+  `failed`, `head-moved`, `marked`, `unmarked`, `closed`), apart from jobs: it runs on no model, so the gate
   never counts it. A merge step with no end (the app stopped mid-merge) is read from GitHub on the
   next pass: merged, or failed. A read that fails is said and tried next pass, never taken as
   merged or gone.

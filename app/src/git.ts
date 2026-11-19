@@ -52,6 +52,9 @@ export interface FixGit {
   removeWorktree(folder: string, path: string): Promise<boolean>;
   /** Deletes a local branch; one that isn't there is left so. */
   deleteBranch(folder: string, branch: string): Promise<void>;
+  /** Whether a worktree has no uncommitted changes (`git status --porcelain` says nothing); false
+   *  when git can't say, so a worktree is never removed on a guess (#156 F15). */
+  isClean(path: string): Promise<boolean>;
 }
 
 export const samePath = (a: string, b: string) => a.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase() === b.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
@@ -161,6 +164,11 @@ export class GitCli implements Git, ReviewGit, FixGit {
     await this.run(['worktree', 'remove', '--force', path], folder);
     await this.run(['worktree', 'prune'], folder);
     return !(await this.worktrees(folder)).some((w) => samePath(w.path, path));
+  }
+
+  async isClean(path: string): Promise<boolean> {
+    const { code, stdout } = await this.run(['status', '--porcelain', '--untracked-files=all'], path);
+    return code === 0 && !(stdout ?? '').trim();
   }
 
   async deleteBranch(folder: string, branch: string): Promise<void> {

@@ -128,6 +128,9 @@ describe('picking and launching', () => {
     expect(launch.message).toContain("Read the repo's `AGENTS.md` first");
     expect(launch.message).not.toMatch(/\bskills?\b|~\/|\b[A-Za-z]:[\\/]|evidence\.py/i);
     expect(lane.running()).toEqual(['p-app']);
+    // T3 made the branch and its worktree for this launch: recorded as the app's (#156 F15)
+    await until(() => Boolean(log.jobs()[0]!.made));
+    expect(log.jobs()[0]!.made).toEqual(['claude/ticket-number-11-11']);
   });
 
   test('a setting changed after the gate let the build in leaves it on the model let in', async () => {
@@ -287,7 +290,7 @@ describe('the end', () => {
     expect(organized()).toEqual([{ threadId: 'thread-1', action: 'settle' }]);
     expect(t3.toolCalls.at(-1)!.tool).toBe('t3_thread_organize');
     const saved = jobFiles.files.get(join(dir, 'jobs.jsonl'))!.trim().split('\n').map((l) => JSON.parse(l));
-    expect(saved.map((e) => e.event)).toEqual(['start', 'thread', 'end', 'settled']);
+    expect(saved.map((e) => e.event)).toEqual(['start', 'thread', 'made', 'end', 'settled']);
     expect(gate.calls).toEqual(['pick build:owner/app#5', `started ${job!.id}`, `finished ${job!.id}`]);
     // the issue stays held: a pass after the end builds nothing more
     expect(t3.launches).toHaveLength(1);
@@ -370,6 +373,7 @@ describe('the end', () => {
     await lane.idle();
     expect(t3.launches).toEqual([]);
     expect(log.jobs()[0]!.end).toMatchObject({ outcome: 'branch-exists' });
+    expect(log.jobs()[0]!.made).toBeUndefined(); // the branch was there before: never the app's (#156 F15)
     expect(log.heldIssues('p-app')).toEqual(new Set([5]));
     expect(lines.join('\n')).toMatch(/not started: A local branch claude\/ticket-number-5-5 is left from an earlier run/);
     expect(gate.calls.at(-1)).toMatch(/^dropped /);
