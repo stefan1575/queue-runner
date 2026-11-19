@@ -44,6 +44,14 @@ export class FakeT3 {
   launchFailure: { code: string; message: string } | null = null;
   /** `t3_thread_launch` runs, then its answer is lost (the connection drops before it arrives). */
   launchAnswerLost = false;
+  /** Every `t3_thread_send`, its arguments as T3 got them. */
+  sends: any[] = [];
+  /** Answers `t3_thread_send` with this failure instead (a thread that can't take another turn). */
+  sendFailure: { code: string; message: string } | null = null;
+  /** `t3_thread_send` runs, then its answer is lost. */
+  sendAnswerLost = false;
+  /** `t3_thread_send` answers without the new run's id. */
+  sendOmitsRunId = false;
   /** WebSocket methods that answer once, by tag: the value T3's Exit carries. Any other
    *  method but subscribeServerConfig ends in a Failure. */
   wsMethods: Record<string, (payload: any) => unknown> = {};
@@ -221,6 +229,21 @@ export class FakeT3 {
       };
       return { result: { threadId: `thread-${n}`, runId: `run-${n}`, link: `t3://thread/thread-${n}`, projectId: args.projectId, modelSelection: args.modelSelection, status: 'running' } };
     }
+    if (name === 't3_thread_send') {
+      // a message to a thread: a new run on it (T3's `queue` mode starts a new turn)
+      const t = this.threadState[args.threadId];
+      if (this.sendFailure) return { failure: this.sendFailure };
+      if (!t) return { failure: { code: 'not_found', message: 'The thread was not found.' } };
+      this.sends.push(args);
+      const ordinal = Math.max(0, ...t.runs.map((r) => r.ordinal ?? 0)) + 1;
+      const id = `${t.id}-run-${ordinal}`;
+      t.runs.push({ id, threadId: t.id, ordinal, rootNodeId: `${t.id}-node-${ordinal}`, status: 'running', completedAt: null });
+      (t.messages ??= []).push({ itemId: `msg-${++this.n}`, type: 'user_message', runId: id, text: args.message });
+      for (const s of this.threadStreams.get(t.id) ?? []) {
+        s.send({ kind: 'event', sequence: ++this.n, event: { id: `event-${this.n}`, threadId: t.id, type: 'run.updated', payload: t.runs.at(-1) } });
+      }
+      return { result: this.sendOmitsRunId ? { threadId: t.id } : { threadId: t.id, runId: id } };
+    }
     if (name === 't3_thread_read') {
       // `view: messages` pages of `limit` items from `afterPosition`; `itemId` + `textOffset` reads
       // one item's text on, `textChunk` characters at a time (T3 truncates long text)
@@ -339,6 +362,7 @@ export class FakeT3 {
         if (msg.method !== 'tools/call') return json(200, { jsonrpc: '2.0', id: msg.id, error: { message: 'unknown method' } });
         const done = this.tool(msg.params.name, msg.params.arguments);
         if (this.launchAnswerLost && msg.params.name === 't3_thread_launch') throw new Error('socket hang up');
+        if (this.sendAnswerLost && msg.params.name === 't3_thread_send') throw new Error('socket hang up');
         if (done.failure) return json(200, { jsonrpc: '2.0', id: msg.id, result: { isError: true, content: [{ text: JSON.stringify(done.failure) }] } });
         const data = `data: ${JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { structuredContent: done.result } })}\n\n`;
         return { status: 200, headers: { 'content-type': 'text/event-stream' }, text: data };
@@ -394,7 +418,9 @@ export class FakeT3 {
           threadStream = () => set.delete(stream);
           stream.send({ kind: 'snapshot', snapshotSequence: this.n, projection: structuredClone({ thread: { id: t.id, projectId: t.projectId }, runs: t.runs, runtimeRequests: t.runtimeRequests, turnItems: t.turnItems }) });
         } else if (msg._tag === 'Request' && msg.tag !== 'orchestration.subscribeShell') {
-          const method = this.wsMethods[msg.tag];
+          const own = msg.tag === 'orchestration.getThreadProjection' && this.threadState[msg.payload?.threadId]
+            ? () => structuredClone({ thread: { id: msg.payload.threadId }, runs: this.threadState[msg.payload.threadId]!.runs }) : undefined;
+          const method = this.wsMethods[msg.tag] ?? own;
           const exit = method ? { _tag: 'Success', value: method(msg.payload) } : { _tag: 'Failure', cause: { _tag: 'Die', defect: `no method ${msg.tag}` } };
           queueMicrotask(() => open && on.message(JSON.stringify({ _tag: 'Exit', requestId: msg.id, exit })));
         }

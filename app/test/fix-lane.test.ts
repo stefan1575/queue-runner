@@ -1,0 +1,312 @@
+// The fix lane (#156) on fake T3, fake GitHub and fake git: a blocking review's findings go back to
+// the thread that built the PR (t3_thread_send), its new run is watched to its end, and the review
+// lane is told so a fresh reviewer reviews the pushed head. A review that marks an earlier finding
+// still not fixed, a PR with no builder thread, or a send T3 turns down gets a fresh fixer on the
+// fix kind's settings instead. After a restart nothing is guessed.
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+import type { BuildRepo } from '../src/build-lane.ts';
+import { FixLane, type FixLaneDoors } from '../src/fix-lane.ts';
+import type { MergePull, ReviewPull } from '../src/github.ts';
+import { JobLog, type Job } from '../src/job-log.ts';
+import { DEFAULT_JOBS, type Jobs, type ModelChoice } from '../src/jobs.ts';
+import { mark, type Finding } from '../src/review/ledger.ts';
+import { catalogFromConfig } from '../src/t3/catalog.ts';
+import { T3Mcp } from '../src/t3/mcp.ts';
+import { runtimeAddress } from '../src/t3/real.ts';
+import { T3Ws } from '../src/t3/ws.ts';
+import { FakeReviewGitHub } from './fake-github.ts';
+import { FakeT3 } from './fake-t3.ts';
+
+const snapshot = JSON.parse(await readFile(new URL('./fixtures/server-config.json', import.meta.url), 'utf8'));
+const catalog = catalogFromConfig(snapshot.config);
+const BUILD: ModelChoice = { provider: 'claudeAgent', model: 'claude-opus-5-5', effort: 'medium' };
+const FIX: ModelChoice = { provider: 'claudeAgent', model: 'claude-haiku-5-5', effort: 'low' };
+const APP: BuildRepo = { id: 'p-app', title: 'app', folder: 'C:/code/app', github: 'owner/app' };
+const H = 'abcdef1234567890abcdef1234567890abcdef12';
+const H2 = '1234567890abcdef1234567890abcdef12345678';
+const BRANCH = 'claude/add-a-thing-3';
+const pull = (part: Partial<ReviewPull> = {}): ReviewPull =>
+  ({ number: 4, title: 'Add a thing', body: 'Closes #3', branch: BRANCH, base: 'main', headSha: H, draft: false, url: 'https://github.com/owner/app/pull/4', ...part });
+const finding = (part: Partial<Finding>): Finding => ({
+  id: 'F1', tag: 'important', class: 'unchecked input', file: 'src/a.ts', line: 3, scenario: 'empty input crashes', cost: '', rule: '', status: 'open', raised: 1, ...part,
+});
+
+class FixGitHub extends FakeReviewGitHub {
+  heads: Record<number, string> = {};
+  async pull(_repo: string, n: number): Promise<MergePull> {
+    return { number: n, title: 'Add a thing', url: '', state: 'open', headSha: this.heads[n] ?? H, branch: BRANCH, base: 'main', draft: false, mergeable: true, labels: [] };
+  }
+}
+
+class FakeGit {
+  calls: string[] = [];
+  heads: Record<number, string> = {};
+  trees: { path: string; branch: string | null }[] = [{ path: 'C:/code/app', branch: 'main' }];
+  branches = new Set<string>();
+  async fetchPr(folder: string, n: number, base: string) { this.calls.push(`fetchPr ${folder} ${n} ${base}`); return this.heads[n] ?? H; }
+  async log() { return [{ sha: H, subject: 'Add it' }]; }
+  async diffstat() { return ' src/a.ts | 3 ++\n'; }
+  async worktrees() { return structuredClone(this.trees); }
+  async hasBranch(_f: string, b: string) { return this.branches.has(b); }
+}
+
+class FakeGate {
+  calls: string[] = [];
+  room = true;
+  pick(id: string) {
+    this.calls.push(`pick ${id}`);
+    return this.room ? { fits: true as const, choice: FIX, onFallback: false, cost: { five_hour: 40 } }
+      : { fits: false as const, until: null, hold: { why: 'reading' as const, provider: 'Claude', checkedAt: null, stale: 'none' as const } };
+  }
+  check(job: { id: string; choice: ModelChoice }) {
+    this.calls.push(`check ${job.id} ${job.choice.model}`);
+    return this.room ? { fits: true as const, cost: { five_hour: 40 } }
+      : { fits: false as const, until: null, hold: { why: 'reading' as const, provider: 'Claude', checkedAt: null, stale: 'none' as const } };
+  }
+  started(job: { id: string; choice: ModelChoice }) { this.calls.push(`started ${job.id} ${job.choice.model}`); }
+  finished(id: string) { this.calls.push(`finished ${id}`); }
+  dropped(id: string) { this.calls.push(`dropped ${id}`); }
+  forget() {}
+}
+
+const until = (ok: () => boolean) => vi.waitFor(() => { if (!ok()) throw new Error('not yet'); }, { timeout: 2000, interval: 5 });
+
+let dir: string;
+let t3: FakeT3;
+let gh: FixGitHub;
+let git: FakeGit;
+let gate: FakeGate;
+let log: JobLog;
+let mcp: T3Mcp;
+let ws: T3Ws;
+let lines: string[];
+let jobs: Jobs;
+let ended: Job[];
+let lane: FixLane;
+
+beforeEach(async () => {
+  dir = await mkdtemp(join(tmpdir(), 'qr-fix-'));
+  t3 = new FakeT3();
+  t3.serverConfig = snapshot;
+  await writeFile(join(dir, 'server-runtime.json'), JSON.stringify({ origin: t3.origin }));
+  const address = runtimeAddress(join(dir, 'server-runtime.json'));
+  mcp = new T3Mcp(address, t3.cli, t3.http);
+  ws = new T3Ws(address, t3.cli, t3.http, t3.connect);
+  gh = new FixGitHub();
+  gh.reviewPulls['owner/app'] = [pull()];
+  git = new FakeGit();
+  gate = new FakeGate();
+  log = await JobLog.open(join(dir, 'state', 'jobs.jsonl'));
+  lines = [];
+  ended = [];
+  jobs = { ...DEFAULT_JOBS, build: { own: BUILD, fallback: null }, fix: { own: FIX, fallback: null } };
+});
+afterEach(async () => {
+  lane?.stop();
+  await rm(dir, { recursive: true, force: true });
+});
+
+function makeLane(part: Partial<FixLaneDoors> = {}) {
+  lane = new FixLane({
+    repos: () => [APP], github: gh, git, mcp, ws, gate, catalog: () => catalog, jobs: () => jobs, user: async () => 'Pat', log,
+    exists: () => true, say: (l) => lines.push(l), ended: (j) => ended.push(j), retry: () => () => {},
+    now: () => new Date('2026-11-19T12:00:00Z'), ...part,
+  });
+  return lane;
+}
+
+/** The PR's builder: a build job with its thread, which T3 has. */
+async function builder(thread = 'thread-b'): Promise<Job> {
+  const job = await log.started({ kind: 'build', repo: APP.id, github: 'owner/app', issue: 3, branch: BRANCH, base: 'main', title: 'Queue runner build: app#3', choice: BUILD, onFallback: false });
+  await log.thread(job.id, { threadId: thread, runId: 'run-b', link: `t3://thread/${thread}` });
+  t3.threadState[thread] = { id: thread, projectId: APP.id, runtimeRequests: [], turnItems: [], runs: [{ id: 'run-b', threadId: thread, ordinal: 1, rootNodeId: 'node-b', status: 'completed' }] };
+  return log.ended(job.id, { outcome: 'done', pr: { number: 4, url: '', state: 'open' } });
+}
+
+/** Review `round` of `sha`, blocking on `findings`, as the review lane leaves it: its job in the
+ *  log and its comment on the PR. */
+async function blocking(round: number, sha: string, findings: Finding[]) {
+  const url = `https://github.com/owner/app/pull/4#issuecomment-${round}`;
+  (gh.comments['owner/app#4'] ??= []).push({ author: 'me', createdAt: `2026-11-19T11:0${round}:00Z`, body: `## Sol review ${round}\n\n${mark(round, 'blocking', sha, findings)}`, url });
+  const job = await log.started({ kind: 'review', repo: APP.id, github: 'owner/app', issue: 4, branch: BRANCH, base: 'main', title: 'Queue runner review: app#4', choice: BUILD, onFallback: false, sha, round, reviewer: 'r' });
+  return log.ended(job.id, { outcome: 'blocking', verdict: 'blocking', link: url });
+}
+
+const fixes = () => log.jobs().filter((j) => j.kind === 'fix');
+
+describe('a fix round', () => {
+  test("goes back to the builder's thread, on its model, and its new run is watched to its end; the review lane is told", async () => {
+    await builder();
+    await blocking(1, H, [finding({})]);
+    makeLane();
+    await lane.pass();
+    await until(() => t3.sends.length === 1);
+    expect(t3.sends[0]).toMatchObject({ threadId: 'thread-b', mode: 'queue' });
+    expect(t3.sends[0].message).toContain('Fix round on PR #4 in owner/app: Add a thing');
+    expect(t3.sends[0].message).toContain('comes back to the thread that wrote the PR');
+    expect(t3.sends[0].message).toContain('**F1** · Important · unchecked input');
+    expect(t3.launches).toEqual([]);
+    expect(gate.calls.some((c) => c.startsWith('check fix:owner/app#4 claude-opus-5-5'))).toBe(true);
+    const job = fixes()[0]!;
+    expect(job).toMatchObject({ to: 'thread-b', knownRuns: ['run-b'], sha: H, round: 1, threadId: 'thread-b', runId: 'thread-b-run-2', choice: BUILD });
+    await until(() => t3.threadStreamCount('thread-b') > 0);
+    gh.heads[4] = H2;
+    t3.endRun('thread-b', 'completed');
+    await lane.idle();
+    expect(log.get(job.id)).toMatchObject({ end: { outcome: 'done', head: H2 }, settledAt: expect.any(String) });
+    expect(ended.map((j) => j.id)).toEqual([job.id]);
+    expect(lines.some((l) => l.includes('pushed 1234567: reviewed next'))).toBe(true);
+    expect(t3.toolCalls.filter((c) => c.tool === 't3_thread_organize')).toEqual([{ tool: 't3_thread_organize', args: { threadId: 'thread-b', action: 'settle' } }]);
+  });
+
+  test('a send T3 answers with no run id waits for the run that came after the send, not the build run that ended', async () => {
+    await builder();
+    await blocking(1, H, [finding({})]);
+    t3.sendOmitsRunId = true;
+    makeLane();
+    await lane.pass();
+    await until(() => t3.threadStreamCount('thread-b') > 0);
+    const job = fixes()[0]!;
+    expect(job.runId).toBeNull();
+    expect(log.get(job.id)!.end).toBeUndefined();
+    t3.endRun('thread-b', 'completed');
+    await lane.idle();
+    expect(log.get(job.id)!.end).toMatchObject({ outcome: 'done' });
+  });
+
+  test('one round per head: a round on H that ended without a push leaves the PR for the user', async () => {
+    await builder();
+    await blocking(1, H, [finding({})]);
+    makeLane();
+    await lane.pass();
+    await until(() => t3.threadStreamCount('thread-b') > 0);
+    t3.endRun('thread-b', 'completed');
+    await lane.idle();
+    expect(lines.some((l) => l.includes('without a push: the PR waits for you'))).toBe(true);
+    await lane.pass();
+    expect(t3.sends).toHaveLength(1);
+    expect(lines.some((l) => l.includes('ended done and the head is still abcdef1: left for you'))).toBe(true);
+  });
+
+  test('no round while a job writes to the branch, while the newest review comment is not the blocking one, or on a clean review', async () => {
+    const build = await log.started({ kind: 'build', repo: APP.id, github: 'owner/app', issue: 3, branch: BRANCH, base: 'main', title: 'b', choice: BUILD, onFallback: false });
+    await log.thread(build.id, { threadId: 'thread-b', runId: 'run-b', link: null });
+    await blocking(1, H, [finding({})]);
+    makeLane();
+    await lane.pass();
+    expect(lines.some((l) => l.includes('a build job is writing to claude/add-a-thing-3'))).toBe(true);
+    await log.ended(build.id, { outcome: 'done' });
+    gh.comments['owner/app#4']!.push({ author: 'me', createdAt: '2026-11-19T11:30:00Z', body: mark(2, 'clean', H2, []) });
+    await lane.pass();
+    expect(lines.some((l) => l.includes('its newest review comment is not the blocking review 1 of abcdef1'))).toBe(true);
+    expect(t3.sends).toEqual([]);
+  });
+
+  test("the gate holds a send on the builder's model: it waits and says why once", async () => {
+    await builder();
+    await blocking(1, H, [finding({})]);
+    gate.room = false;
+    makeLane();
+    await lane.pass();
+    await lane.pass();
+    expect(t3.sends).toEqual([]);
+    expect(lines.filter((l) => l.includes('no fix round now, waits:'))).toHaveLength(1);
+  });
+});
+
+describe('a fresh fixer', () => {
+  test("a review that marks an earlier finding still not fixed: a new thread on the fix kind's settings, in the PR's worktree", async () => {
+    await builder();
+    await blocking(1, 'f'.repeat(40), [finding({})]);
+    await blocking(2, H, [finding({ status: 'open', raised: 1 })]);
+    git.trees.push({ path: 'C:/t3/worktrees/app/claude-add-a-thing-3', branch: BRANCH });
+    makeLane();
+    await lane.pass();
+    await until(() => t3.launches.length === 1);
+    expect(t3.sends).toEqual([]);
+    expect(t3.launches[0]).toMatchObject({
+      projectId: APP.id, title: 'Queue runner fix: app#4',
+      modelSelection: { instanceId: FIX.provider, model: FIX.model },
+      workspaceStrategy: { type: 'existing_worktree', worktreePath: 'C:/t3/worktrees/app/claude-add-a-thing-3' },
+    });
+    expect(t3.launches[0].message).toContain("You're a fresh fixer, called in for this round: review 2 marks F1 still not fixed after an earlier round.");
+    expect(gate.calls).toContain('pick fix:owner/app#4');
+    const job = fixes()[0]!;
+    expect(job).toMatchObject({ fresh: expect.stringContaining('F1 still not fixed'), choice: FIX, threadId: 'thread-1' });
+    // the fresh fixer writes the PR from now on: the next round goes back to it
+    t3.endRun('thread-1', 'completed');
+    gh.heads[4] = H2;
+    await lane.idle();
+    const H3 = '9'.repeat(40);
+    gh.reviewPulls['owner/app'] = [pull({ headSha: H3 })];
+    git.heads[4] = H3;
+    await blocking(3, H3, [finding({ id: 'F9', raised: 3 })]);
+    await lane.pass();
+    await until(() => t3.sends.length === 1);
+    expect(t3.sends[0].threadId).toBe('thread-1');
+  });
+
+  test("a PR no app thread wrote, with no worktree on its branch: a new worktree at H on the fix's own branch, pushing to the PR's", async () => {
+    await blocking(1, H, [finding({})]);
+    makeLane();
+    await lane.pass();
+    await until(() => t3.launches.length === 1);
+    expect(t3.launches[0].workspaceStrategy).toEqual({ type: 'worktree', baseRef: H, branch: 'claude/fix-pr4-abcdef1' });
+    expect(t3.launches[0].message).toContain('`git push origin HEAD:claude/add-a-thing-3`');
+    expect(fixes()[0]).toMatchObject({ workBranch: 'claude/fix-pr4-abcdef1', fresh: "no thread of the app's wrote this PR" });
+  });
+
+  test("the builder's thread gone (T3 turns the send down): nothing counts, and the next pass sends a fresh fixer", async () => {
+    await builder();
+    await blocking(1, H, [finding({})]);
+    t3.sendFailure = { code: 'not_found', message: 'The thread was not found.' };
+    makeLane();
+    await lane.pass();
+    await until(() => t3.launches.length === 1);
+    expect(fixes()[0]!.end).toMatchObject({ outcome: 'not-started', error: expect.stringContaining('T3 turned the round down:') });
+    expect(t3.launches[0].message).toContain('T3 turned down a round sent to its thread thread-b');
+  });
+});
+
+describe("after a restart, don't guess", () => {
+  test('a send whose answer was lost needs the user: its repo starts nothing until they answer', async () => {
+    await builder();
+    await blocking(1, H, [finding({})]);
+    t3.sendAnswerLost = true;
+    makeLane();
+    await lane.pass();
+    await lane.idle();
+    const job = fixes()[0]!;
+    expect(log.get(job.id)!.end).toMatchObject({ outcome: 'needs-user' });
+    expect(log.needingUser(APP.id).map((j) => j.id)).toEqual([job.id]);
+    t3.sendAnswerLost = false;
+    await lane.pass();
+    expect(t3.sends).toHaveLength(1); // the lost one T3 got; no other
+  });
+
+  test('a round the log shows open is watched again on its new run; one with no thread line needs the user', async () => {
+    await builder();
+    await blocking(1, H, [finding({})]);
+    const open = await log.started({ kind: 'fix', repo: APP.id, github: 'owner/app', issue: 4, branch: BRANCH, base: 'main', title: 'Queue runner fix: app#4', choice: BUILD, onFallback: false, sha: H, round: 1, to: 'thread-b', knownRuns: ['run-b'] });
+    await log.thread(open.id, { threadId: 'thread-b', runId: null, link: null });
+    t3.threadState['thread-b']!.runs.push({ id: 'run-new', threadId: 'thread-b', ordinal: 2, rootNodeId: 'n2', status: 'running' });
+    makeLane();
+    void lane.start();
+    await until(() => t3.threadStreamCount('thread-b') > 0);
+    expect(log.get(open.id)!.end).toBeUndefined();
+    t3.endRun('thread-b', 'completed');
+    await lane.idle();
+    expect(log.get(open.id)!.end).toMatchObject({ outcome: 'done' });
+    expect(t3.sends).toEqual([]);
+
+    lane.stop();
+    const lost = await log.started({ kind: 'fix', repo: APP.id, github: 'owner/app', issue: 4, branch: BRANCH, base: 'main', title: 'Queue runner fix: app#4', choice: BUILD, onFallback: false, sha: H2, round: 2, to: 'thread-b', knownRuns: [] });
+    makeLane();
+    await lane.start();
+    await lane.idle();
+    expect(log.get(lost.id)!.end).toMatchObject({ outcome: 'needs-user', error: expect.stringContaining('before T3 answered') });
+  });
+});
