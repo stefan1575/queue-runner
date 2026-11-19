@@ -327,6 +327,11 @@ builds (`docs/flow.md`, `docs/claude-lane.md`). `src/build-lane.ts`, `src/picker
   names the runner's `scripts/evidence.py`, it says in words what that script does (compare the
   before and after, commit the shots to the `evidence` branch under `pr-<n>/` without touching
   the job's branch, link each by that commit).
+- **Each rule is written once** (`src/briefs/rules.ts`): a rule more than one brief needs (the
+  Before you push list, today's `templates/check.md` from closed PR #196; the screenshots; what
+  is the user's to decide) is written there and filled into each brief that needs it. The build
+  brief goes through Before you push before it pushes. `test/brief.test.ts` fails a brief file
+  that writes one of them out itself.
 - **Starting:** fetch `origin/<base>` (T3 doesn't), with the refspec named
   (`+refs/heads/<base>:refs/remotes/origin/<base>`), so the tracking ref is written whatever the
   clone's own refspec covers (a single-branch clone of another branch); then a leftover local

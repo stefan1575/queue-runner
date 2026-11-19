@@ -1,7 +1,9 @@
 // The build brief (#154): today's template ported, self-contained (docs/app.md, Rules: today's
 // tests/test_templates.py, ported with it), with the user's name from Settings.
+import { readdir, readFile } from 'node:fs/promises';
 import { describe, expect, test } from 'vitest';
 import { BUILD_TEMPLATE, buildBrief, type BuildBriefInput } from '../src/briefs/build.ts';
+import { BEFORE_YOU_PUSH, SCREENSHOTS, USERS_TO_DECIDE } from '../src/briefs/rules.ts';
 
 const input: BuildBriefInput = {
   github: 'owner/app', number: 42, title: 'Add a thing', body: '  Do the thing.\n', branch: 'claude/add-a-thing-42',
@@ -60,5 +62,37 @@ describe('buildBrief', () => {
     expect(bare).toContain('(The issue has no body.)');
     expect(bare).toContain('## Comments on the issue\n\nNo comments.');
     expect(bare).toContain('The repo has no `AGENTS.md`; follow its README');
+  });
+});
+
+describe('each rule is written once (#154)', () => {
+  const brief = buildBrief(input);
+  const flat = (t: string) => t.split(/\s+/).join(' ');
+
+  test('the brief carries the Before you push list, and goes through it before the push', () => {
+    expect(brief).toContain(BEFORE_YOU_PUSH);
+    const text = flat(brief);
+    expect(text).toContain('go through Before you push (below), then push');
+    expect(text).toContain('read to its last page');
+    expect(text).toContain("Don't run a review");
+    expect(text).not.toContain("Don't review your own work");
+  });
+
+  test('it carries the screenshot rule and what is the user\'s to decide from the same file, filled', () => {
+    expect(brief).toContain(SCREENSHOTS.replaceAll('$github', input.github));
+    expect(brief).toContain(USERS_TO_DECIDE.replaceAll('$user', input.user));
+    expect(flat(brief)).toContain('Output that is only text');
+  });
+
+  test('no brief file but the rules file writes a shared rule out', async () => {
+    const dir = new URL('../src/briefs/', import.meta.url);
+    const files = (await readdir(dir)).filter((f) => f.endsWith('.ts') && f !== 'rules.ts');
+    expect(files).toContain('build.ts');
+    // a line from each rule, as written: found in a brief file means the rule was copied there
+    const marks = [BEFORE_YOU_PUSH, SCREENSHOTS, USERS_TO_DECIDE].map((r) => r.split('\n').find((l) => l.length > 60)!);
+    for (const f of files) {
+      const text = await readFile(new URL(f, dir), 'utf8');
+      for (const m of marks) expect(text, `${f} copies "${m}"`).not.toContain(m);
+    }
   });
 });
