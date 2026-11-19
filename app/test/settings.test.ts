@@ -7,6 +7,7 @@ import { afterEach, describe, expect, test } from 'vitest';
 import { DEFAULT_JOBS } from '../src/jobs.ts';
 import { DEFAULT_SETTINGS, SettingsError, SettingsStore } from '../src/settings.ts';
 import { stateFolder } from '../src/state-folder.ts';
+import { memoryFiles } from './memory-files.ts';
 
 let dirs: string[] = [];
 afterEach(async () => {
@@ -47,6 +48,14 @@ describe('the settings', () => {
     const store = await SettingsStore.open(await temp());
     expect(store.get()).toEqual(DEFAULT_SETTINGS);
     expect(DEFAULT_SETTINGS).toEqual({ name: null, dateStyle: 'month-first', startWithWindows: true, jobs: DEFAULT_JOBS, shares: {}, repos: null, setupSeen: false });
+  });
+
+  test("kept in the files it's given, a test's in-memory folder as well as the disk", async () => {
+    const files = memoryFiles();
+    const store = await SettingsStore.open('state', files);
+    await store.set({ name: 'Ana' });
+    expect([...files.files.keys()]).toEqual([join('state', 'settings.json')]);
+    expect((await SettingsStore.open('state', files)).get().name).toBe('Ana');
   });
 
   test('a change is saved at once and survives a restart', async () => {
