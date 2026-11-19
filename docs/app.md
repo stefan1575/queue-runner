@@ -485,6 +485,10 @@ every open PR in a served repo without a review on its newest commit gets one, w
   Markers and headings inside a fenced block are only text. A follow-up issue is known as the
   app's by its own mark (`<!-- queue-runner-app finding <repo>#<n> <id> -->`) or the same title,
   never by another runner's footer, whose finding IDs are its own reviews'.
+  Each is filed before the comment, and a filing that fails (or open issues that can't be read)
+  holds the comment back: the post is tried again after the wait, as a comment that fails to post
+  is, and on a restart, so a review never finishes with a follow-up unfiled (#155 F24). The
+  ledger's `unfiled` is the Python runner's and older comments' only.
 - **The job log:** kind `review`, `issue` the PR, with `sha`, `round`, `reviewer`, the `cost` it
   was let in at, its `runDir`, its `checkout` and the repo's `folder`; its end `clean`, `blocking`,
   `stop`, `approach-note` (with `verdict`, `signals`, `link`), `failed`, `out-of-usage`,

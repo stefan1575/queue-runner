@@ -176,7 +176,11 @@ export class GitHubPoster implements Poster {
 
   async post(repo: string, n: number, d: Decision): Promise<string> {
     const name = `review ${repo}#${n}`;
+    // every follow-up issue is filed before the comment: a filing that fails throws PostFailed, so
+    // the lane posts again after the wait (and on a restart, the comment not being on the PR yet),
+    // and the open issues are read again first, so none is filed twice (#155 F24)
     const [urls, failed] = await this.file(repo, n, d);
+    if (failed.length) throw new PostFailed(`Filing ${failed.join(', ')} as follow-up issues failed, so the comment isn't posted yet.`);
     const body = withIssues(d, urls, failed);
     await this.write('comment.md', body);
     let url: string;

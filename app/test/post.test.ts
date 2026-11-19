@@ -59,15 +59,29 @@ describe('GitHubPoster', () => {
     expect(gh.posted.map((p) => p.what)).toEqual(['status']);
   });
 
-  test("a comment that can't be posted fails the review; a failed filing is marked unfiled", async () => {
+  test("a comment that can't be posted throws PostFailed, for the lane to post again", async () => {
     const gh = new FakeReviewGitHub();
     gh.failing.add('comment');
     await expect(new GitHubPoster(gh, () => {}).post('owner/app', 4, d())).rejects.toThrow(PostFailed);
-    const gh2 = new FakeReviewGitHub();
-    gh2.failing.add('issue');
-    await new GitHubPoster(gh2, () => {}).post('owner/app', 4, d([PRE]));
-    expect(gh2.posted[0]!.body).toContain('Filing F1 as a follow-up issue failed; the next review files it.');
-    expect(readReviews([{ author: 'me', createdAt: '1', body: gh2.posted[0]!.body }])[0]!.findings[0]).toMatchObject({ unfiled: true });
+  });
+
+  test("a follow-up issue that can't be filed holds the comment back; posting again files it once and posts (F24)", async () => {
+    const gh = new FakeReviewGitHub();
+    const poster = new GitHubPoster(gh, () => {});
+    gh.failing.add('issue');
+    await expect(poster.post('owner/app', 4, d([PRE]))).rejects.toThrow(new PostFailed("Filing F1 as follow-up issues failed, so the comment isn't posted yet."));
+    expect(gh.posted).toEqual([]);
+    gh.failing.delete('issue');
+    await poster.post('owner/app', 4, d([PRE]));
+    expect(gh.posted.map((p) => p.what)).toEqual(['issue', 'comment']);
+    expect(readReviews([{ author: 'me', createdAt: '1', body: gh.posted[1]!.body }])[0]!.findings[0]).not.toHaveProperty('unfiled');
+  });
+
+  test("open issues that can't be read hold the comment back too, so nothing is filed twice (F24)", async () => {
+    const gh = new FakeReviewGitHub();
+    gh.failing.add('openIssues');
+    await expect(new GitHubPoster(gh, () => {}).post('owner/app', 4, d([PRE]))).rejects.toThrow(PostFailed);
+    expect(gh.posted).toEqual([]);
   });
 
   test('the status or the row failing throws FinishFailed after trying both; finishing again lands them (F14)', async () => {
