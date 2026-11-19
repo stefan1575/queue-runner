@@ -1,6 +1,7 @@
 // T3's Time format, read from T3's client-settings.json (the one exception to "no reads of T3's
 // settings", docs/app.md): that one key, never written, watched for changes, System default when
 // it can't be read. A fake file in a temp folder stands in for T3's.
+import { writeFileSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -100,6 +101,34 @@ describe('following T3', () => {
     await t3Writes(d, { timestampFormat: '24-hour', wordWrap: false });
     await t3Writes(d, { timestampFormat: '12-hour' });
     await vi.waitFor(() => expect(seen).toEqual(['12-hour']), { timeout: 5000 });
+  });
+
+  test('a write right after the start is seen, however the first poll falls', async () => {
+    // CI, 2026-11-18 and 19: a stat poll took its first stat after the start's read, so a write
+    // in between was never seen (4 of 40 sources missed it locally). Forty at once, each set up
+    // while the others are, keep the file I/O busy enough to make the race.
+    const started = await Promise.all(Array.from({ length: 40 }, async () => {
+      const d = await userdata();
+      await t3Writes(d, { timestampFormat: '24-hour' });
+      const source = await start(d);
+      writeFileSync(settingsFile(d), JSON.stringify({ wordWrap: true, timestampFormat: '12-hour' }));
+      return source;
+    }));
+    await vi.waitFor(() => expect(started.map((s) => s.current())).toEqual(Array(40).fill('12-hour')),
+      { timeout: 3000 });
+  });
+
+  test('a closed source reads nothing more and tells no one', async () => {
+    const d = await userdata();
+    await t3Writes(d, { timestampFormat: '24-hour' });
+    const source = await start(d);
+    const seen: TimeFormat[] = [];
+    source.onChange((f) => seen.push(f));
+    source.close();
+    await t3Writes(d, { timestampFormat: '12-hour' });
+    await new Promise((r) => setTimeout(r, 1200));
+    expect(seen).toEqual([]);
+    expect(source.current()).toBe('24-hour');
   });
 
   test("no T3 folder at all is System default, and the start doesn't fail", async () => {
