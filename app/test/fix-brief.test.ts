@@ -1,7 +1,7 @@
 // The fix brief (#156): today's fix template ported, self-contained, with the Before you push list
 // and the other shared rules from the same file as the build brief's.
 import { describe, expect, test } from 'vitest';
-import { FIX_TEMPLATE, fixBrief, type FixBriefInput } from '../src/briefs/fix.ts';
+import { FIX_TEMPLATE, fixBrief, LOG_CHARS, type FixBriefInput } from '../src/briefs/fix.ts';
 import { buildBrief } from '../src/briefs/build.ts';
 import { BEFORE_YOU_PUSH, SCREENSHOTS, USERS_TO_DECIDE_ON_PR } from '../src/briefs/rules.ts';
 import type { Finding } from '../src/review/ledger.ts';
@@ -82,5 +82,26 @@ describe('fixBrief', () => {
     expect(bare).toContain('None started by the runner.');
     expect(bare).toContain('(The PR has no description.)');
     expect(bare).toContain('It closes: no issue');
+  });
+});
+
+describe('a round with no review behind it, and one after the user answered (#158)', () => {
+  test("a check that failed again after its re-run: the brief says so and carries the end of its log, no review's findings", () => {
+    const log = `${'x'.repeat(LOG_CHARS)}\nError: expected 2, got 3`;
+    const brief = fixBrief({ ...input, round: null, findings: [], reviewLink: null, checks: [{ name: 'tests', log }] });
+    expect(flat(brief)).toContain("because checks on the PR's head abcdef1 failed, and failed again after their one re-run (tests)");
+    expect(brief).toContain('## What failed');
+    expect(brief).toContain('### tests');
+    expect(brief).toContain('Error: expected 2, got 3');
+    expect(brief).toContain(`(the first ${log.length - LOG_CHARS} characters left out)`);
+    expect(brief).not.toContain('## What review');
+    expect(brief).not.toContain('$');
+  });
+
+  test("the user's answer to the PR's stop comes first, quoted", () => {
+    const brief = fixBrief({ ...input, direction: 'Drop the cache.\nKeep the API.' });
+    expect(brief).toContain("## Direction first\n\nRobin answered the PR's stop, and this round starts from it:\n\n> Drop the cache.\n> Keep the API.");
+    expect(brief.indexOf('## Direction first')).toBeLessThan(brief.indexOf('## Where you are'));
+    expect(fixBrief(input)).not.toContain('Direction first');
   });
 });

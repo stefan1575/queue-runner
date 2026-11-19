@@ -26,7 +26,7 @@ import { existsSync } from 'node:fs';
 import type { BuildRepo } from './build-lane.ts';
 import type { FixGit } from './git.ts';
 import { HeadMoved, type GitHubMerge, type GitHubReview, type MergePull, type ReviewPull } from './github.ts';
-import { REVIEWED, type Job, type JobLog, type Step } from './job-log.ts';
+import { REVIEWED, writes, type Job, type JobLog, type Step } from './job-log.ts';
 import { readReviews, runnerPost, type Comment } from './review/ledger.ts';
 import { ThreadSettler } from './settle.ts';
 import type { T3Mcp } from './t3/mcp.ts';
@@ -57,7 +57,7 @@ export type MergeLaneDoors = {
   headMoved?: () => void;
 };
 
-const WRITING = (j: Job) => !j.end || j.end.outcome === 'waiting' || j.end.outcome === 'usage-limit';
+const WRITING = writes;
 const defaultRemove = async (path: string) => {
   await rm(path, { recursive: true, force: true }).catch(() => {});
   return !existsSync(path);
@@ -78,6 +78,9 @@ export async function mergeNext(d: { log: JobLog; github: Pick<GitHubReview, 'is
   if (pr.state !== 'open') return { why: `it is ${pr.state}`, on: 'you' };
   if (pr.headSha !== h) return { why: `the head moved from ${h7} to ${pr.headSha.slice(0, 7)}: it's reviewed first`, on: 'loop' };
   if (pr.draft) return { why: 'it is a draft', on: 'you' };
+  // a stop on the PR holds it until the user answers (#158)
+  const stop = d.log.openStops(repo.id, n)[0];
+  if (stop) return { why: `it's stopped for you: ${stop.why}`, on: 'you' };
   const writer = d.log.jobs().find((j) => j.repo === repo.id && j.kind !== 'review' && j.branch === pr.branch && WRITING(j));
   if (writer) return { why: `a ${writer.kind} job is writing to ${pr.branch}`, on: writer.end?.outcome === 'waiting' ? 'you' : 'loop' };
   const held = d.log.needingUser(repo.id)[0];

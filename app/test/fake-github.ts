@@ -1,6 +1,6 @@
 // A fake GitHub behind the build lane's seam (`GitHubWork`), answered from memory. Repos are
 // `owner/name`; issues elsewhere are `owner/name#N` in `states`.
-import { GitHubError, HeadMoved, type Checks, type Comment, type GitHubMerge, type GitHubReview, type GitHubWork, type Issue, type MergePull, type Pull, type PullState, type ReviewPull } from '../src/github.ts';
+import { GitHubError, HeadMoved, type ActionsRun, type Checks, type Comment, type GitHubChecks, type GitHubMerge, type GitHubReview, type GitHubStops, type GitHubWork, type Issue, type MergePull, type Pull, type PullState, type ReviewPull } from '../src/github.ts';
 import type { GitHubPosts, OpenIssue } from '../src/review/post.ts';
 
 export class FakeGitHub implements GitHubWork {
@@ -33,7 +33,7 @@ export class FakeGitHub implements GitHubWork {
 
 /** The review lane's GitHub (#155): what it reads about a PR, and what posting a review writes,
  *  each write recorded in `posted`. */
-export class FakeReviewGitHub extends FakeGitHub implements GitHubPosts, GitHubReview {
+export class FakeReviewGitHub extends FakeGitHub implements GitHubPosts, GitHubReview, GitHubChecks, GitHubStops {
   reviewPulls: Record<string, ReviewPull[]> = {};
   /** Each commit's checks, by sha; one not named has none reported. */
   checkStates: Record<string, Checks> = {};
@@ -69,6 +69,7 @@ export class FakeReviewGitHub extends FakeGitHub implements GitHubPosts, GitHubR
     const url = `https://github.com/${repo}/issues/${++this.n}`;
     this.posted.push({ what: 'issue', repo, title, body, labels, url });
     (this.open[repo] ??= []).push({ number: this.n, title, body, url });
+    this.states[`${repo}#${this.n}`] = 'open';
     return url;
   }
   async postComment(repo: string, n: number, body: string) {
@@ -86,6 +87,53 @@ export class FakeReviewGitHub extends FakeGitHub implements GitHubPosts, GitHubR
   async editPullBody(repo: string, n: number, body: string) {
     this.posted.push({ what: 'body', repo, n, body });
     this.bodies[`${repo}#${n}`] = body;
+  }
+
+  // --- checks (#158) ---
+  /** The failed Actions check runs on each commit, by sha: name -> run id. */
+  failedRunsOn: Record<string, Record<string, number>> = {};
+  /** Each Actions run, by id. A re-run moves it to its next attempt, `in_progress`. */
+  runs: Record<number, ActionsRun> = {};
+  logs: Record<number, string> = {};
+  /** Answers update-branch with this (`refused` is GitHub's 422); a thrown failure while above 0. */
+  updateAnswer: 'updated' | 'refused' = 'updated';
+  updateFails = 0;
+  /** Runs when update-branch is called (the PR's head moving, say). */
+  onUpdate: (n: number) => void = () => {};
+  async failedRuns(_repo: string, sha: string) { return structuredClone(this.failedRunsOn[sha] ?? {}); }
+  async run(_repo: string, id: number) {
+    const r = this.runs[id];
+    if (!r) throw new GitHubError(`gh api failed (1): HTTP 404 (run ${id})`);
+    return { ...r };
+  }
+  async rerunFailed(repo: string, id: number) {
+    this.fail('rerun');
+    this.posted.push({ what: 'rerun', repo, id });
+    const r = this.runs[id]!;
+    this.runs[id] = { ...r, attempt: r.attempt + 1, status: 'in_progress', conclusion: null };
+  }
+  async failedLog(_repo: string, id: number) { return this.logs[id] ?? ''; }
+  async updateBranch(repo: string, n: number, sha: string) {
+    if (this.updateFails > 0) { this.updateFails--; throw new GitHubError('gh api PUT update-branch failed (1): HTTP 502'); }
+    this.posted.push({ what: 'update', repo, n, sha, answer: this.updateAnswer });
+    if (this.updateAnswer === 'updated') this.onUpdate(n);
+    return this.updateAnswer;
+  }
+
+  // --- stops (#158) ---
+  /** Labels on issues and PRs, by `owner/name#N`. */
+  labels: Record<string, string[]> = {};
+  async closeIssue(repo: string, n: number, reason: 'completed' | 'not_planned') {
+    this.fail('close');
+    this.posted.push({ what: 'close', repo, n, reason });
+    this.states[`${repo}#${n}`] = 'closed';
+    this.open[repo] = (this.open[repo] ?? []).filter((i) => i.number !== n);
+  }
+  async relabel(repo: string, n: number, add: string, remove: string | null) {
+    this.fail('label');
+    const now = (this.labels[`${repo}#${n}`] ?? []).filter((l) => l !== remove && l !== add);
+    this.labels[`${repo}#${n}`] = [...now, add];
+    this.posted.push({ what: 'relabel', repo, n, add, remove });
   }
 }
 

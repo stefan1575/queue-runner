@@ -106,6 +106,34 @@ export interface GitHubMerge {
   removeLabel(repo: string, n: number, label: string): Promise<void>;
 }
 
+/** A GitHub Actions run, as a re-run reads it: the attempt it's on, and how that attempt ended. */
+export type ActionsRun = { id: number; attempt: number; status: string; conclusion: string | null };
+
+/** What a failed check's one re-run and a base's failure read and write (#158; today's #93 and
+ *  #199 in `queue_runner/stops.py`). Each is a GitHubError when gh fails. */
+export interface GitHubChecks {
+  /** The checks that failed on `sha` that are GitHub Actions check runs, by name: the run each is
+   *  in (from its `details_url`). One not listed (a commit status, another app's) can't be re-run. */
+  failedRuns(repo: string, sha: string): Promise<Record<string, number>>;
+  run(repo: string, id: number): Promise<ActionsRun>;
+  /** Re-runs a run's failed jobs (`gh run rerun <id> --failed`). */
+  rerunFailed(repo: string, id: number): Promise<void>;
+  /** The run's failed jobs' log (`gh run view <id> --log-failed`). */
+  failedLog(repo: string, id: number): Promise<string>;
+  /** Brings the PR up to date with its base (GitHub's update-branch, naming its head): `refused`
+   *  is GitHub's 422 (a conflict, or the head moved). */
+  updateBranch(repo: string, n: number, sha: string): Promise<'updated' | 'refused'>;
+}
+
+/** What filing a stop writes and reads (#158), besides a review's posts. Each is a GitHubError
+ *  when gh fails. */
+export interface GitHubStops {
+  /** Closes an issue, as completed or not planned. */
+  closeIssue(repo: string, n: number, reason: 'completed' | 'not_planned'): Promise<void>;
+  /** Adds a label to an issue or PR, and takes another off (null: none). */
+  relabel(repo: string, n: number, add: string, remove: string | null): Promise<void>;
+}
+
 const REVIEW_THREADS = `
 query($owner: String!, $name: String!, $n: Int!, $endCursor: String) {
   repository(owner: $owner, name: $name) {
@@ -161,7 +189,7 @@ query($owner: String!, $name: String!, $endCursor: String) {
   }
 }`;
 
-export class GhGitHub implements GitHub, GitHubAccount, GitHubLabels, GitHubWork, GitHubReview, GitHubPosts, GitHubMerge {
+export class GhGitHub implements GitHub, GitHubAccount, GitHubLabels, GitHubWork, GitHubReview, GitHubPosts, GitHubMerge, GitHubChecks, GitHubStops {
   private gh: Gh;
   private exists: (folder: string) => boolean;
   constructor(gh: Gh = ghCli, exists: (folder: string) => boolean = existsSync) {
@@ -430,6 +458,52 @@ export class GhGitHub implements GitHub, GitHubAccount, GitHubLabels, GitHubWork
       open += nodes.filter((t: any) => t?.isResolved !== true).length;
     }
     return open;
+  }
+
+  async failedRuns(repo: string, sha: string): Promise<Record<string, number>> {
+    const runs = await this.allOf(`repos/${repo}/commits/${sha}/check-runs?per_page=100`, 'check_runs');
+    const found: Record<string, number> = {};
+    for (const r of runs) {
+      if (r?.status !== 'completed' || PASSED.has(String(r.conclusion)) || r?.app?.slug !== 'github-actions') continue;
+      const m = /\/actions\/runs\/(\d+)/.exec(String(r.details_url ?? ''));
+      if (m) found[r.name] = Number(m[1]);
+    }
+    return found;
+  }
+
+  async run(repo: string, id: number): Promise<ActionsRun> {
+    const r = await this.api([`repos/${repo}/actions/runs/${id}`], `${repo} run ${id}`);
+    if (typeof r?.run_attempt !== 'number') throw new GitHubError(`gh api ${repo} run ${id} named no attempt`);
+    return { id, attempt: r.run_attempt, status: String(r.status ?? ''), conclusion: typeof r.conclusion === 'string' ? r.conclusion : null };
+  }
+
+  async rerunFailed(repo: string, id: number): Promise<void> {
+    const endpoint = `repos/${repo}/actions/runs/${id}/rerun-failed-jobs`;
+    const { code, stderr } = await this.gh(['api', '-X', 'POST', endpoint], homedir());
+    if (code !== 0) throw new GitHubError(`gh api POST ${endpoint} failed (${code}): ${firstLine(stderr)}`);
+  }
+
+  async failedLog(repo: string, id: number): Promise<string> {
+    const { code, stdout, stderr } = await this.gh(['run', 'view', String(id), '--repo', repo, '--log-failed'], homedir());
+    if (code !== 0) throw new GitHubError(`gh run view ${id} --log-failed failed (${code}): ${firstLine(stderr)}`);
+    return stdout;
+  }
+
+  async updateBranch(repo: string, n: number, sha: string): Promise<'updated' | 'refused'> {
+    const endpoint = `repos/${repo}/pulls/${n}/update-branch`;
+    const { code, stderr } = await this.gh(['api', '-X', 'PUT', endpoint, '--input', '-'], homedir(), JSON.stringify({ expected_head_sha: sha }));
+    if (code === 0) return 'updated';
+    if (/HTTP 422/.test(stderr)) return 'refused';
+    throw new GitHubError(`gh api PUT ${endpoint} failed (${code}): ${firstLine(stderr)}`);
+  }
+
+  async closeIssue(repo: string, n: number, reason: 'completed' | 'not_planned'): Promise<void> {
+    await this.write('PATCH', `repos/${repo}/issues/${n}`, { state: 'closed', state_reason: reason });
+  }
+
+  async relabel(repo: string, n: number, add: string, remove: string | null): Promise<void> {
+    await this.addLabel(repo, n, add);
+    if (remove) await this.removeLabel(repo, n, remove);
   }
 
   async addLabel(repo: string, n: number, label: string): Promise<void> {

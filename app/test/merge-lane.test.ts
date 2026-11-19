@@ -171,6 +171,10 @@ describe('in a repo where the runner merges', () => {
     gh.prs['owner/app#4'] = github({ draft: true });
     expect(await why()).toBe('it is a draft');
     gh.prs['owner/app#4'] = github();
+    // a stop on the PR holds it until the user answers (#158)
+    const stop = await log.stopped({ cause: 'question', repo: repo.id, github: 'owner/app', pr: 4, sha: H, why: 'it asked', link: null });
+    expect(await why()).toBe("it's stopped for you: it asked");
+    await log.stopAnswered(stop.id, 'replied', 'go on');
     gh.checkStates[H] = { state: 'failed', pending: [], failed: ['tests'] };
     expect(await why()).toBe('checks on abcdef1 are failed (tests)');
     gh.checkStates[H] = { state: 'passed', pending: [], failed: [] };

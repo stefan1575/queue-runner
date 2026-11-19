@@ -20,6 +20,13 @@
 // per head: a round on H that ended without a push leaves the PR at H, which was reviewed already,
 // so it waits for the user.
 //
+// **What reaches the user, and what doesn't** (#158): a check that failed again after its one
+// re-run gets a round with its failing log (src/checks-lane.ts records it); a round that failed
+// gets another; one that ended without a push asked the user (src/stops.ts files it as a question).
+// Before every round the cap is asked (src/cap.ts): past it, the PR stops for a rethink. A stop on
+// the PR holds it; once the user answers, the PR gets one more round, their words first in its
+// brief, a review's Approach note included.
+//
 // **After a restart, don't guess** (#154, #155): a round is tied to a thread only by the id T3 gave
 // the app's own launch, or the id it sent to, saved before the send. A round the log shows open
 // with its thread line is watched again (a sent round on its new run, told apart from the runs the
@@ -29,8 +36,9 @@ import { fixBrief, type FixWhere } from './briefs/fix.ts';
 import type { BuildRepo } from './build-lane.ts';
 import { holdText } from './gate.ts';
 import type { FixGit } from './git.ts';
-import type { GitHubMerge, GitHubReview, ReviewPull } from './github.ts';
-import { REVIEWED, settles, type Job, type JobEnd, type JobLog } from './job-log.ts';
+import type { GitHubChecks, GitHubMerge, GitHubReview, ReviewPull } from './github.ts';
+import { capReached, capText, roundsSinceAnswer } from './cap.ts';
+import { REVIEWED, settles, writes, type Job, type JobEnd, type JobLog, type Step } from './job-log.ts';
 import { kindModels, type Catalog, type Jobs, type ModelChoice } from './jobs.ts';
 import { launchJob } from './launch.ts';
 import { closedIssues, JOB_BRANCH_PREFIX } from './picker.ts';
@@ -45,7 +53,7 @@ import type { UsageGate } from './usage-gate.ts';
 
 export type FixLaneDoors = {
   repos: () => BuildRepo[];
-  github: Pick<GitHubReview, 'pullsToReview' | 'issueComments'> & Pick<GitHubMerge, 'pull'>;
+  github: Pick<GitHubReview, 'pullsToReview' | 'issueComments'> & Pick<GitHubMerge, 'pull'> & Pick<GitHubChecks, 'failedLog'>;
   git: Pick<FixGit, 'fetchPr' | 'log' | 'diffstat' | 'worktrees'> & { hasBranch(folder: string, branch: string): Promise<boolean> };
   mcp: Pick<T3Mcp, 'call'>;
   ws: Pick<T3Ws, 'subscribe' | 'request'>;
@@ -82,36 +90,54 @@ const goneText = (threadId: string, why: string) => `the PR's writer thread ${th
 const refusedText = (threadId: string, why: string) => `the PR's writer thread ${threadId} ${GONE_MARK}: T3 refused the send (${why})`;
 
 const join = (folder: string, name: string) => `${folder.replace(/[\\/]+$/, '')}/${name}`;
-const WRITING = (j: Job) => !j.end || j.end.outcome === 'waiting' || j.end.outcome === 'usage-limit';
+const WRITING = writes;
 
-/** Whether the blocking `review` of the PR's head H gets its fix round now (the PR's reviews to
- *  brief from) or why not: the one rule for it, which the lane's pass and the conflict lane's hold
- *  both ask (#157 F7). `on` says what it waits on: `loop`, the round on H running or cut off by a
- *  usage limit, or another job writing to the branch; `you`, a question, a round on H that ended,
- *  or a newest review comment that isn't this review. */
-export async function fixNext(d: { log: JobLog; github: Pick<GitHubReview, 'issueComments'> }, repo: BuildRepo, pr: ReviewPull, review: Job):
-  Promise<{ why: string; on: 'loop' | 'you' } | { reviews: Review[] }> {
+/** Whether the PR's head H gets a fix round now (the PR's reviews to brief from, and the user's
+ *  answer to tell it first) or why not: the one rule for it, which the lane's pass and the conflict
+ *  lane's hold both ask (#157 F7). The round is for the blocking `review` of H, or with none, for
+ *  checks on H that failed again after their re-run (#158). `on` says what it waits on: `loop`, the
+ *  round on H running or cut off by a usage limit, or another job writing to the branch; `you`, a
+ *  stop on the PR, a question, a round on H that ended without a push, or a newest review comment
+ *  that isn't this review. One round per head, counted since the user's last answer: an answer
+ *  gives H another; a round that failed gets another (the cap bounds them). */
+export async function fixNext(d: { log: JobLog; github: Pick<GitHubReview, 'issueComments'> }, repo: BuildRepo, pr: ReviewPull, review: Job | null):
+  Promise<{ why: string; on: 'loop' | 'you' } | { reviews: Review[]; direction: string | null }> {
   const h7 = pr.headSha.slice(0, 7);
   const jobs = d.log.jobs().filter((j) => j.repo === repo.id);
-  // one round per head: one that ran on H (any end but not-started) is the last on H
-  const rounds = jobs.filter((j) => j.kind === 'fix' && j.issue === pr.number && j.sha === pr.headSha && j.end?.outcome !== 'not-started');
+  const stop = d.log.openStops(repo.id, pr.number)[0];
+  if (stop) return { why: `it's stopped for you: ${stop.why}`, on: 'you' };
+  const answer = d.log.lastAnswer(repo.id, pr.number);
+  const since = answer?.answered!.at ?? '';
+  // one round per head since the last answer: one that ran on H (any end but not-started) is the last
+  const rounds = jobs.filter((j) => j.kind === 'fix' && j.issue === pr.number && j.sha === pr.headSha && j.end?.outcome !== 'not-started' && j.startedAt > since);
   const last = rounds.at(-1);
   if (last) {
     if (!last.end) return { why: 'its fix round is still running', on: 'loop' };
-    if (last.end.outcome === 'waiting') return { why: 'its fix round waits for an answer', on: 'you' };
+    if (last.end.outcome === 'waiting' && !last.answeredAt) return { why: 'its fix round waits for an answer', on: 'you' };
     if (last.end.outcome === 'usage-limit') return { why: 'its fix round was cut off by a usage limit and resumes after the reset', on: 'loop' };
-    return { why: `a fix round on ${h7} ended ${last.end.outcome} and the head is still ${h7}: left for you`, on: 'you' };
+    if (last.end.outcome !== 'failed') return { why: `a fix round on ${h7} ended ${last.end.outcome} and the head is still ${h7}: left for you`, on: 'you' };
   }
   // one writer per PR
   const writer = jobs.find((j) => j.kind !== 'review' && j.branch === pr.branch && WRITING(j));
   if (writer) return { why: `a ${writer.kind} job is writing to ${pr.branch}`, on: writer.end?.outcome === 'waiting' ? 'you' : 'loop' };
   const reviews = readReviews(await d.github.issueComments(repo.github!, pr.number));
   const newest = reviews.at(-1);
-  if (!newest || newest.round !== review.round || !pr.headSha.startsWith(newest.sha) || newest.verdict !== 'blocking') {
+  if (review && (!newest || newest.round !== review.round || !pr.headSha.startsWith(newest.sha) || newest.verdict !== 'blocking')) {
     return { why: `its newest review comment is not the blocking review ${review.round} of ${h7}`, on: 'you' };
   }
-  return { reviews };
+  // the user's answer is told to the first round after it
+  const first = answer && !jobs.some((j) => j.kind === 'fix' && j.issue === pr.number && j.startedAt > since && j.end?.outcome !== 'not-started');
+  return { reviews, direction: first ? answer!.answered!.text ?? 'They closed its needs-info issue: carry on.' : null };
 }
+
+/** The newest `check-failed` step on the PR's head: checks that failed again after their re-run,
+ *  which get a fix round (src/checks-lane.ts records it). */
+export const checkFailed = (log: JobLog, repo: string, pr: number, sha: string): Step | undefined =>
+  log.steps().filter((s) => s.kind === 'check-failed' && s.repo === repo && s.pr === pr && s.sha === sha).at(-1);
+
+/** What a round is for: a blocking review of H, or checks on H that failed again after their
+ *  re-run; with the user's answer to tell it first, if one came since the last round. */
+type Cause = ({ review: Job } | { failed: Step }) & { reviews: Review[]; direction: string | null };
 
 /** What a round goes out on: sent to a thread, or a fresh fixer. */
 type Plan =
@@ -221,8 +247,9 @@ export class FixLane {
         if (this.running.has(key)) continue;
         const name = `fix ${repo.title}#${pr.number}`;
         const blocking = this.blockingReview(repo, pr);
-        if (!blocking) { this.why.delete(key); continue; }
-        let ready: { why: string } | { reviews: Review[] };
+        const failed = blocking ? undefined : checkFailed(this.d.log, repo.id, pr.number, pr.headSha);
+        if (!blocking && !failed) { this.why.delete(key); continue; }
+        let ready: { why: string } | { reviews: Review[]; direction: string | null };
         try {
           ready = await this.whyNot(repo, pr, blocking);
         } catch (e) {
@@ -230,6 +257,14 @@ export class FixLane {
         }
         if ('why' in ready) { this.note(key, name, ready.why); continue; }
         if ((this.resting.get(key) ?? 0) > this.now().getTime()) continue;
+        // the cap (#158): no round past it; the PR stops for a rethink, and src/stops.ts files it
+        if (capReached(this.d.log, repo.id, pr.number)) {
+          const why = capText(roundsSinceAnswer(this.d.log, repo.id, pr.number),
+            blocking ? `review ${blocking.round} of ${pr.headSha.slice(0, 7)} is still blocking` : `checks fail on ${pr.headSha.slice(0, 7)} after their re-run`);
+          await this.d.log.stopped({ cause: 'cap', repo: repo.id, github: repo.github, pr: pr.number, sha: pr.headSha, why, link: null });
+          this.note(key, name, `stopped for you: ${why}`);
+          continue;
+        }
         // a fork's PR: a fixer would push to this repo's branch of that name (a fork's `main` is
         // this repo's `main`), so none does; it needs the user (N2)
         if (pr.headRepo !== undefined && pr.headRepo?.toLowerCase() !== repo.github.toLowerCase()) {
@@ -237,36 +272,41 @@ export class FixLane {
           continue;
         }
         const plan = this.plan(repo, pr, blocking, ready.reviews);
+        const cause: Cause = blocking ? { review: blocking, reviews: ready.reviews, direction: ready.direction }
+          : { failed: failed!, reviews: ready.reviews, direction: ready.direction };
         // the gate counts the round from now; the pass goes on once T3 has it, so the next PR's
         // verdict counts this one
         const letIn = this.letIn(key, name, plan);
         if (!letIn) continue;
         this.why.set(key, null);
         await new Promise<void>((launched) => {
-          this.track(key, this.round(repo, pr, blocking, ready.reviews, plan, letIn, launched).finally(launched));
+          this.track(key, this.round(repo, pr, cause, plan, letIn, launched).finally(launched));
         });
       }
     }
   }
 
-  /** The app's newest review of the PR's head, if it's blocking. */
+  /** The app's newest review of the PR's head, if it's blocking: or one that went to the user (the
+   *  cap's Approach note, or an older app's stop) that they've answered since (#158). */
   private blockingReview(repo: BuildRepo, pr: ReviewPull): Job | null {
     const done = this.d.log.jobs().filter((j) => j.kind === 'review' && j.repo === repo.id && j.issue === pr.number
       && j.sha === pr.headSha && j.end && REVIEWED.includes(j.end.outcome));
     const last = done.at(-1);
-    return last?.end?.outcome === 'blocking' ? last : null;
+    if (last?.end?.outcome === 'blocking') return last;
+    const answered = this.d.log.lastAnswer(repo.id, pr.number)?.answered!.at;
+    return last && last.end!.verdict === 'blocking' && answered && answered > last.end!.at ? last : null;
   }
 
   /** Why the PR gets no round on its head now, or the PR's reviews to brief from (`fixNext`). */
-  private whyNot(repo: BuildRepo, pr: ReviewPull, review: Job): Promise<{ why: string } | { reviews: Review[] }> {
+  private whyNot(repo: BuildRepo, pr: ReviewPull, review: Job | null): Promise<{ why: string } | { reviews: Review[]; direction: string | null }> {
     return fixNext(this.d, repo, pr, review);
   }
 
   /** Where the round goes: back to the PR's writer thread, or to a fresh fixer, and why. */
-  private plan(repo: BuildRepo, pr: ReviewPull, review: Job, reviews: Review[]): Plan {
+  private plan(repo: BuildRepo, pr: ReviewPull, review: Job | null, reviews: Review[]): Plan {
     // a review that marks an earlier finding still not fixed: the writer is stuck there
-    const stuck = state(reviews).filter((f) => f.tag === 'important' && f.status === 'open' && f.raised < review.round!);
-    if (stuck.length) return { why: `review ${review.round} marks ${stuck.map((f) => f.id).join(', ')} still not fixed after an earlier round` };
+    const stuck = review ? state(reviews).filter((f) => f.tag === 'important' && f.status === 'open' && f.raised < review.round!) : [];
+    if (stuck.length) return { why: `review ${review!.round} marks ${stuck.map((f) => f.id).join(', ')} still not fixed after an earlier round` };
     const jobs = this.d.log.jobs().filter((j) => j.repo === repo.id && j.branch === pr.branch);
     // the thread that writes the PR: its builder's, or the fresh fixer's that took over since
     const writer = jobs.filter((j) => j.threadId && (j.kind === 'build' || (j.kind === 'fix' && j.fresh))).at(-1);
@@ -297,7 +337,7 @@ export class FixLane {
   }
 
   /** One fix round on H, start to end. */
-  private async round(repo: BuildRepo, pr: ReviewPull, review: Job, reviews: Review[], plan: Plan,
+  private async round(repo: BuildRepo, pr: ReviewPull, cause: Cause, plan: Plan,
     letIn: { choice: ModelChoice; onFallback: boolean; cost: Record<string, number> }, onLaunched: () => void): Promise<Job | null> {
     const n = pr.number;
     const h = pr.headSha;
@@ -307,6 +347,8 @@ export class FixLane {
     let worktreePath: string | null = null;
     let brief: string;
     let knownRuns: string[] = [];
+    const review = 'review' in cause ? cause.review : null;
+    const what = review ? `review ${review.round} of ${h.slice(0, 7)}` : `the checks failing on ${h.slice(0, 7)}`;
     try {
       const fetched = await this.d.git.fetchPr(repo.folder, n, pr.base);
       if (fetched !== h) throw new NotStarted(`the head moved from ${h.slice(0, 7)} to ${fetched.slice(0, 7)}; it's reviewed first`);
@@ -327,7 +369,7 @@ export class FixLane {
           if (await this.d.git.hasBranch(repo.folder, where.work)) throw new NotStarted(`a local branch ${where.work} is left from an earlier round`);
         }
       }
-      brief = await this.brief(repo, pr, review, reviews, where, plan.why ?? null);
+      brief = await this.brief(repo, pr, cause, where, plan.why ?? null);
     } catch (e) {
       if (e instanceof ThreadGone) {
         this.gone.add(e.message);
@@ -339,7 +381,8 @@ export class FixLane {
     }
     const job = await this.d.log.started({
       kind: 'fix', repo: repo.id, github: repo.github, issue: n, branch: pr.branch, base: pr.base, title,
-      choice: letIn.choice, onFallback: letIn.onFallback, cost: letIn.cost, sha: h, round: review.round!,
+      choice: letIn.choice, onFallback: letIn.onFallback, cost: letIn.cost, sha: h,
+      ...(review ? { round: review.round! } : { cause: 'check' as const }),
       ...(plan.send ? { to: plan.send.threadId!, knownRuns } : { fresh: plan.why! }),
       ...(where.kind === 'new' ? { workBranch: where.work } : {}),
     });
@@ -348,13 +391,13 @@ export class FixLane {
     let thread: { threadId: string; runId: string | null; link: string | null };
     try {
       if (plan.send) {
-        this.d.say(`${name}: review ${review.round} of ${h.slice(0, 7)} goes back to its thread ${plan.send.link ?? plan.send.threadId}`);
+        this.d.say(`${name}: ${what} goes back to its thread ${plan.send.link ?? plan.send.threadId}`);
         const sent = await this.d.mcp.call('t3_thread_send', { threadId: plan.send.threadId, message: brief, mode: 'queue' });
         thread = { threadId: plan.send.threadId!, runId: typeof sent?.runId === 'string' ? sent.runId : null, link: plan.send.link ?? null };
       } else {
         const catalog = this.d.catalog();
         if (!catalog) return this.notStarted(job, "T3's providers aren't known yet");
-        this.d.say(`${name}: a fresh fixer takes review ${review.round} of ${h.slice(0, 7)}: ${plan.why}`);
+        this.d.say(`${name}: a fresh fixer takes ${what}: ${plan.why}`);
         const launched = await launchJob(this.d.mcp, catalog, {
           kind: 'fix', projectId: repo.id, title, brief, choice: letIn.choice,
           ...(worktreePath ? { worktreePath } : { worktree: { baseRef: h, branch: (where as { work: string }).work } }),
@@ -389,10 +432,10 @@ export class FixLane {
 
   /** A blocking review on a fork's PR: recorded as a round on H that needs the user, so its repo
    *  starts nothing until they answer and H gets no round after (one per head). No gate, no thread. */
-  private async forked(repo: BuildRepo, pr: ReviewPull, review: Job): Promise<void> {
+  private async forked(repo: BuildRepo, pr: ReviewPull, review: Job | null): Promise<void> {
     const job = await this.d.log.started({
       kind: 'fix', repo: repo.id, github: repo.github, issue: pr.number, branch: pr.branch, base: pr.base, title: fixTitle(repo, pr.number),
-      choice: { provider: '', model: '', effort: null }, onFallback: false, sha: pr.headSha, round: review.round!,
+      choice: { provider: '', model: '', effort: null }, onFallback: false, sha: pr.headSha, ...(review ? { round: review.round! } : { cause: 'check' as const }),
     });
     await this.needsUser(job, `PR #${pr.number}'s head is in ${pr.headRepo ?? 'a fork GitHub no longer has'}, not ${repo.github}: no fixer pushes to a fork's branch`);
   }
@@ -446,18 +489,30 @@ export class FixLane {
     return this.watch({ ...job, ...thread });
   }
 
-  private async brief(repo: BuildRepo, pr: ReviewPull, review: Job, reviews: Review[], where: FixWhere, fresh: string | null): Promise<string> {
+  private async brief(repo: BuildRepo, pr: ReviewPull, cause: Cause, where: FixWhere, fresh: string | null): Promise<string> {
     const github = repo.github!;
     const here = github.toLowerCase();
-    const findings: Finding[] = state(reviews.filter((r) => r.round <= review.round!));
+    const review = 'review' in cause ? cause.review : null;
+    const findings: Finding[] = review ? state(cause.reviews.filter((r) => r.round <= review.round!)) : [];
+    // a check's round carries each failed check's log, read from its Actions run (a commit status
+    // has none); a log that can't be read says so rather than hold the round
+    const checks = 'failed' in cause ? await Promise.all((cause.failed.failed ?? []).map(async (name, k) => {
+      const run = cause.failed.runs?.[k];
+      if (!run) return { name, log: '' };
+      try {
+        return { name, log: await this.d.github.failedLog(github, run) };
+      } catch (e) {
+        return { name, log: `(its log couldn't be read: ${(e as Error).message})` };
+      }
+    })) : undefined;
     const threads = this.d.log.jobs()
       .filter((j) => j.repo === repo.id && j.link && (j.branch === pr.branch || (j.kind === 'review' && j.issue === pr.number)))
       .map((j) => ({ kind: j.kind, startedAt: j.startedAt, outcome: j.end?.outcome ?? 'still open', link: j.link! }));
     return fixBrief({
-      github, number: pr.number, title: pr.title, round: review.round!, sha: pr.headSha, branch: pr.branch, base: pr.base,
-      user: await this.d.user(), where, fresh,
+      github, number: pr.number, title: pr.title, round: review ? review.round! : null, sha: pr.headSha, branch: pr.branch, base: pr.base,
+      user: await this.d.user(), where, fresh, checks, direction: cause.direction,
       agentsFile: this.d.exists(join(repo.folder, 'AGENTS.md')) ? 'AGENTS.md' : this.d.exists(join(repo.folder, 'CLAUDE.md')) ? 'CLAUDE.md' : null,
-      reviewLink: review.end?.link ?? null, findings, body: pr.body,
+      reviewLink: review?.end?.link ?? null, findings, body: pr.body,
       closes: closedIssues(pr.body, here).map(([where_, k]) => (where_ === here ? `#${k}` : `${where_}#${k}`)),
       commits: await this.d.git.log(repo.folder, `origin/${pr.base}`, pr.headSha),
       diffstat: await this.d.git.diffstat(repo.folder, `origin/${pr.base}`, pr.headSha),

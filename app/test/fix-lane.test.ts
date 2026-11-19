@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import type { BuildRepo } from '../src/build-lane.ts';
+import { CAP } from '../src/cap.ts';
 import { FixLane, type FixLaneDoors } from '../src/fix-lane.ts';
 import type { MergePull, ReviewPull } from '../src/github.ts';
 import { JobLog, type Job } from '../src/job-log.ts';
@@ -456,5 +457,93 @@ describe("after a restart, don't guess", () => {
     await lane.idle();
     expect(log.get(open.id)!.end).toMatchObject({ outcome: 'done' });
     expect(t3.sends).toEqual([]);
+  });
+});
+
+describe('what never reaches the user, the cap, and an answer (#158)', () => {
+  // a clock that moves a second each read, so the log's times order what happened
+  let tick = 0;
+  beforeEach(async () => {
+    tick = 0;
+    log = await JobLog.open(join(dir, 'state', 'ticking.jsonl'), () => new Date(Date.UTC(2026, 10, 19, 12, 0, tick++)));
+  });
+
+  /** A check on H that failed again after its re-run, as the checks lane records it. */
+  const checkFailed = () => log.stepStarted({ kind: 'check-failed', repo: APP.id, github: 'owner/app', pr: 4, branch: BRANCH, sha: H, failed: ['tests', 'lint'], runs: [77, 0] });
+
+  test('a check that failed again after its re-run gets a fix round with its failing log, and no review', async () => {
+    await builder();
+    gh.logs[77] = 'FAIL src/a.test.ts\nexpected 2, got 3';
+    await checkFailed();
+    makeLane();
+    await lane.pass();
+    await until(() => t3.sends.length === 1);
+    expect(t3.sends[0].message).toContain("because checks on the PR's head abcdef1 failed, and failed again after their one re-run (tests, lint)");
+    expect(t3.sends[0].message).toContain('expected 2, got 3');
+    expect(t3.sends[0].message).toContain('### lint\n\n```\n(GitHub gave no log for it)');
+    expect(fixes()[0]).toMatchObject({ cause: 'check', sha: H });
+    expect(fixes()[0]!.round).toBeUndefined();
+    expect(log.stops()).toEqual([]);
+  });
+
+  test('a round that failed gets another round on the same head; it files nothing', async () => {
+    await builder();
+    await blocking(1, H, [finding({})]);
+    makeLane();
+    await lane.pass();
+    await until(() => t3.threadStreamCount('thread-b') > 0);
+    t3.endRun('thread-b', 'failed');
+    await until(() => t3.sends.length === 2);
+    expect(log.stops()).toEqual([]);
+  });
+
+  test(`the cap: with ${CAP - 1} rounds since the last answer, review ${CAP} still blocking gets no round but a cap stop; no round while it's open`, async () => {
+    await builder();
+    for (const k of [1, 2]) {
+      const r = await log.started({ kind: 'fix', repo: APP.id, github: 'owner/app', issue: 4, branch: BRANCH, base: 'main', title: 't', choice: BUILD, onFallback: false, sha: `${k}`.repeat(40), round: k });
+      await log.ended(r.id, { outcome: 'done', head: `${k + 1}`.repeat(40) });
+    }
+    await blocking(3, H, [finding({})]);
+    makeLane();
+    await lane.pass();
+    await lane.pass();
+    expect(t3.sends).toEqual([]);
+    expect(log.openStops(APP.id, 4)).toEqual([expect.objectContaining({ cause: 'cap', sha: H, why: expect.stringContaining('review 3 of abcdef1 is still blocking') })]);
+    expect(lines.filter((l) => l.includes("it's stopped for you"))).toHaveLength(1);
+  });
+
+  test("an Approach note's stop answered on GitHub releases the PR: one more round on H, the user's words first", async () => {
+    await builder();
+    const url = 'https://github.com/owner/app/pull/4#issuecomment-3';
+    (gh.comments['owner/app#4'] ??= []).push({ author: 'me', createdAt: '2026-11-19T11:03:00Z', body: mark(3, 'blocking', H, [finding({})]), url });
+    const review = await log.started({ kind: 'review', repo: APP.id, github: 'owner/app', issue: 4, branch: BRANCH, base: 'main', title: 'Queue runner review: app#4', choice: BUILD, onFallback: false, sha: H, round: 3, reviewer: 'r' });
+    await log.ended(review.id, { outcome: 'approach-note', verdict: 'blocking', link: url });
+    const stop = await log.stopped({ cause: 'cap', repo: APP.id, github: 'owner/app', pr: 4, sha: H, why: 'the cap', link: null, job: review.id });
+    makeLane();
+    await lane.pass();
+    expect(t3.sends).toEqual([]);
+    expect(t3.launches).toEqual([]);
+    await log.stopAnswered(stop.id, 'replied', 'Rework it: drop the cache.');
+    await lane.pass();
+    await until(() => t3.launches.length === 1);
+    expect(t3.launches[0].message).toContain("## Direction first\n\nPat answered the PR's stop, and this round starts from it:\n\n> Rework it: drop the cache.");
+    expect(fixes()[0]).toMatchObject({ sha: H, round: 3 });
+  });
+
+  test('a question the round asked, answered on GitHub, gives the head another round; unanswered, none', async () => {
+    await builder();
+    await blocking(1, H, [finding({})]);
+    makeLane();
+    await lane.pass();
+    await until(() => t3.threadStreamCount('thread-b') > 0);
+    t3.endRun('thread-b', 'completed'); // no push: the round asked on the PR
+    await lane.idle();
+    const stop = await log.stopped({ cause: 'question', repo: APP.id, github: 'owner/app', pr: 4, sha: H, why: 'it asked', link: null, job: fixes()[0]!.id });
+    await lane.pass();
+    expect(t3.sends).toHaveLength(1);
+    await log.stopAnswered(stop.id, 'replied', 'Use the second option.');
+    await lane.pass();
+    await until(() => t3.sends.length === 2);
+    expect(t3.sends[1].message).toContain('> Use the second option.');
   });
 });

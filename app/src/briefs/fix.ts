@@ -20,8 +20,12 @@ export type FixBriefInput = {
   github: string;
   number: number;
   title: string;
-  /** The blocking review's round, and the head it reviewed. */
-  round: number;
+  /** The blocking review's round, and the head it reviewed; null for a round on a check that
+   *  failed again after its re-run (#158), whose names and logs are `checks`. */
+  round: number | null;
+  checks?: { name: string; log: string }[];
+  /** What the user said when they answered the PR's stop (#158): told first, before anything else. */
+  direction?: string | null;
   sha: string;
   branch: string;
   base: string;
@@ -42,10 +46,10 @@ export type FixBriefInput = {
 
 const TEMPLATE = `Fix round on PR #$number in $github: $title
 
-The queue runner started this round because review $round of the PR's head $sha7 is blocking.
+The queue runner started this round because $because.
 $user isn't watching it live. Everything you need is below or in the repo. There are no handoff
 files.
-
+$direction
 $who
 
 ## Where you are
@@ -53,24 +57,7 @@ $who
 $where
 - $agents
 
-## What review $round found
-
-The review: $review
-
-### Important (each one blocks the merge)
-
-$important
-
-**Classes to fix:** $classes. Fix every case of each class in the PR's change, not only the line
-cited: look for the same kind of problem everywhere the PR touches.
-
-### Nits (optional)
-
-$nits
-
-### Settled in earlier reviews
-
-$settled
+$found
 
 ## The PR
 
@@ -113,6 +100,9 @@ $threads
   can't be captured, say so on the PR and end your turn.
 - Commit after every step, with the decision in the commit message: what you chose and why. A
   usage limit can cut this thread off at any point, and the next job starts from your commits.
+- A failed check: find its cause in the log below and fix that, with a test where one fits. If it's
+  a flaky test, make it reliable rather than skipping it; if the failure isn't the PR's (the base
+  fails it too), say so on the PR with the evidence and end your turn.
 - When every finding is fixed or declined, go through Before you push (below), then end the round
   by pushing to \`$branch\`. A round that ends without a push isn't reviewed again: the PR waits
   for $user. A fresh reviewer reviews the new head.
@@ -144,24 +134,65 @@ function agentsPointer(file: FixBriefInput['agentsFile']): string {
     : "The repo has no `AGENTS.md`; follow its README and existing conventions.";
 }
 
+const REVIEW_FOUND = `## What review $round found
+
+The review: $review
+
+### Important (each one blocks the merge)
+
+$important
+
+**Classes to fix:** $classes. Fix every case of each class in the PR's change, not only the line
+cited: look for the same kind of problem everywhere the PR touches.
+
+### Nits (optional)
+
+$nits
+
+### Settled in earlier reviews
+
+$settled`;
+
+/** How much of each failed check's log the brief carries: its end, where the failure is. */
+export const LOG_CHARS = 6000;
+
+function checksFound(i: FixBriefInput): string {
+  const logs = (i.checks ?? []).map((c) => {
+    const log = c.log.length > LOG_CHARS ? `(the first ${c.log.length - LOG_CHARS} characters left out)\n${c.log.slice(-LOG_CHARS)}` : c.log;
+    return `### ${c.name}\n\n\`\`\`\n${log.trimEnd() || '(GitHub gave no log for it)'}\n\`\`\``;
+  });
+  return `## What failed\n\nEach check below failed on \`${i.sha.slice(0, 7)}\`, and failed again after its one re-run. Its failing log:\n\n`
+    + (logs.join('\n\n') || 'No log could be read.');
+}
+
+const quote = (text: string) => text.trim().split('\n').map((l) => `> ${l}`).join('\n');
+
 /** Fills the template: each `$name` once, with nothing in a filled value read again. */
 export function fixBrief(i: FixBriefInput): string {
   const important = i.findings.filter((f) => f.tag === 'important' && (f.status === 'open' || f.status === 'decline-kept'));
   const nits = i.findings.filter((f) => f.tag === 'nit' && (f.status === 'open' || f.status === 'decline-kept'));
   const settled = i.findings.filter((f) => f.status === 'fixed' || f.status === 'decline-accepted');
   const classes = [...new Set(important.map((f) => f.class.trim()).filter(Boolean))];
-  const values: Record<string, string> = {
-    number: String(i.number), github: i.github, title: i.title, round: String(i.round), sha7: i.sha.slice(0, 7),
-    base: i.base, branch: i.branch, user: i.user,
-    who: i.fresh
-      ? `You're a fresh fixer, called in for this round: ${i.fresh}. Read the change and the review below before you start.`
-      : 'This round comes back to the thread that wrote the PR, so you start with what you know of it. Read the review below afresh all the same.',
-    where: where(i), agents: agentsPointer(i.agentsFile),
-    review: i.reviewLink ?? `review ${i.round} on the PR`,
+  const found: Record<string, string> = {
+    round: String(i.round), review: i.reviewLink ?? `review ${i.round} on the PR`,
     important: important.map(openLine).join('\n') || 'None.',
     classes: classes.map((c) => `"${c}"`).join('; ') || 'none named',
     nits: nits.map(openLine).join('\n') || 'None.',
     settled: settled.map((f) => `- **${f.id}** · ${f.class || 'no class'} · ${(STATUSES as Record<string, string>)[f.status]!.toLowerCase()}`).join('\n') || 'None.',
+  };
+  const checks = i.round === null;
+  const values: Record<string, string> = {
+    because: checks
+      ? `checks on the PR's head ${i.sha.slice(0, 7)} failed, and failed again after their one re-run (${(i.checks ?? []).map((c) => c.name).join(', ') || 'no name given'})`
+      : `review ${i.round} of the PR's head ${i.sha.slice(0, 7)} is blocking`,
+    direction: i.direction?.trim() ? `\n## Direction first\n\n${i.user} answered the PR's stop, and this round starts from it:\n\n${quote(i.direction)}\n` : '',
+    found: checks ? checksFound(i) : REVIEW_FOUND.replace(/\$([a-z]+)/g, (whole, name: string) => found[name] ?? whole),
+    number: String(i.number), github: i.github, title: i.title, sha7: i.sha.slice(0, 7),
+    base: i.base, branch: i.branch, user: i.user,
+    who: i.fresh
+      ? `You're a fresh fixer, called in for this round: ${i.fresh}. Read the change and ${checks ? 'what failed' : 'the review'} below before you start.`
+      : `This round comes back to the thread that wrote the PR, so you start with what you know of it. Read ${checks ? 'what failed' : 'the review'} below afresh all the same.`,
+    where: where(i), agents: agentsPointer(i.agentsFile),
     body: i.body.trim() || '(The PR has no description.)',
     closes: i.closes.join(', ') || 'no issue',
     commits: i.commits.map((c) => `- \`${c.sha.slice(0, 7)}\` ${c.subject}`).join('\n') || 'None.',
@@ -171,5 +202,5 @@ export function fixBrief(i: FixBriefInput): string {
   return TEMPLATE.replace(/\$([a-z0-9]+)/g, (whole, name: string) => values[name] ?? whole);
 }
 
-/** The template as it is, unfilled: the tests hold it to the brief rules. */
-export const FIX_TEMPLATE = TEMPLATE;
+/** The template as it is, unfilled, with its review section: the tests hold it to the brief rules. */
+export const FIX_TEMPLATE = `${TEMPLATE}\n\n${REVIEW_FOUND}`;

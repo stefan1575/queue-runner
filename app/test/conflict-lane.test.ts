@@ -409,7 +409,7 @@ describe('one conflicted PR at a time, oldest first', () => {
       await afterRound4();
       await review4('blocking');
       const fix = await log.started(job({ kind: 'fix', title: 'Queue runner fix: app#4', sha: H2, round: 1 }));
-      await log.ended(fix.id, { outcome: 'failed', error: 'it failed' });
+      await log.ended(fix.id, { outcome: 'done', head: H2 }); // no push: its question is the user's (a failed one gets another round, #158)
       await goes5();
     });
 
