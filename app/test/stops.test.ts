@@ -385,3 +385,31 @@ describe('what never reaches the user files nothing, and the crashes between ste
     expect(log.needingUser(APP.id)).toEqual([]);
   });
 });
+
+describe('an answer that says hold (#158 F1)', () => {
+  test("keeps the PR held; a later answer releases it with only its own words", async () => {
+    await ran({}, { outcome: 'waiting', request: 'user_input' });
+    makeDesk();
+    await desk.pass();
+    (gh.comments['owner/app#101'] ??= []).push({ author: 'pat', createdAt: '2026-11-19T13:00:00Z', body: 'Hold: I want to think about the API first.' });
+    await desk.pass();
+    await desk.pass();
+    expect(log.openStops(APP.id, 4)).toHaveLength(1);
+    expect(answered).toEqual([]);
+    expect(lines.filter((l) => l.includes('held: the answer says hold'))).toHaveLength(1);
+    (gh.comments['owner/app#4'] ??= []).push({ author: 'pat', createdAt: '2026-11-19T14:00:00Z', body: 'Fix on, keep the v2 API.' });
+    await desk.pass();
+    expect(log.stops()[0]!.answered).toMatchObject({ answer: 'replied', text: 'Fix on, keep the v2 API.' });
+  });
+
+  test('closing the issue releases a held stop', async () => {
+    await ran({}, { outcome: 'waiting', request: 'user_input' });
+    makeDesk();
+    await desk.pass();
+    (gh.comments['owner/app#101'] ??= []).push({ author: 'pat', createdAt: '2026-11-19T13:00:00Z', body: 'hold' });
+    await desk.pass();
+    gh.states['owner/app#101'] = 'closed';
+    await desk.pass();
+    expect(log.stops()[0]!.answered).toMatchObject({ answer: 'issue-closed' });
+  });
+});

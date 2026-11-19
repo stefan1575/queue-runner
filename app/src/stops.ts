@@ -57,6 +57,8 @@ const READY = 'ready-for-agent';
 /** How much of a thread's last message a stop quotes. */
 export const QUOTE_CHARS = 3000;
 const RECOMMEND = ['rework', 'fix on', 'hold'];
+/** An answer whose first word is "hold": the user keeps the PR as it is (today's `hold`). */
+export const HOLD = /^\s*\**hold\b/i;
 
 /** The hidden line that ties a `needs-info` issue to its PR. */
 export const needsInfoMark = (github: string, pr: number) => `<!-- queue-runner-app needs-info ${github}#${pr} -->`;
@@ -383,6 +385,7 @@ export class StopDesk {
     }
     if (stop.link || job?.link) parts.push(`Thread: ${stop.link ?? job!.link}`);
     parts.push(stop.cause === 'question' ? 'Answer here: the job carries on with your answer.' : 'Answer here, or close the issue, and the PR goes back to the loop.');
+    parts.push('An answer that starts with "hold" keeps it as it is.');
     return parts.join('\n\n');
   }
 
@@ -427,7 +430,15 @@ export class StopDesk {
     const words = [...await this.d.github.issueComments(github, issue)];
     if ((stop.on ?? 'pr') === 'pr') words.push(...await this.d.github.issueComments(github, stop.pr), ...await this.d.github.reviewReplies(github, stop.pr));
     const reply = words.filter((c) => said(c, stop.at)).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-    if (reply.length) return this.answer(repo, stop, 'replied', reply.map((c) => c.body.trim()).join('\n\n'));
+    if (!reply.length) return;
+    // an answer that says hold keeps the PR held (#158 F1): only words after it release it, and
+    // only those go on to the next round
+    const held = reply.map((c) => HOLD.test(c.body)).lastIndexOf(true);
+    if (held === reply.length - 1) {
+      this.note(`${stop.id}:hold`, `${repo.title}#${stop.pr}: held: the answer says hold; a later answer, or the issue closed, releases it`);
+      return;
+    }
+    return this.answer(repo, stop, 'replied', reply.slice(held + 1).map((c) => c.body.trim()).join('\n\n'));
   }
 
   /** The PR merged or closed outside the app (#88): its `needs-info` issue gets a note and is closed
