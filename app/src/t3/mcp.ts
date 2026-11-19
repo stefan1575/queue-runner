@@ -23,6 +23,9 @@ function rpcResult(text: string, contentType: string): any {
 
 /** T3 answered, refusing the call: it didn't run it. */
 class Refused extends T3Error {}
+/** T3 ran the tool and answered that it failed (`isError`): a thread that's gone, say, or one
+ *  that can't take another turn. */
+export class ToolFailed extends T3Error {}
 
 export class T3Mcp {
   private token: string | null = null;
@@ -124,7 +127,7 @@ export class T3Mcp {
         const failure = JSON.parse(text);
         text = `${failure.code}: ${failure.message}`;
       } catch { /* the text as it is */ }
-      throw new T3Error(`${tool} failed: ${text.slice(0, 300)}`);
+      throw new ToolFailed(`${tool} failed: ${text.slice(0, 300)}`);
     }
     return result.structuredContent;
   }

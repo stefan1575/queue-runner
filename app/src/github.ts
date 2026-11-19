@@ -76,6 +76,40 @@ export interface GitHubReview {
   reviewReplies(repo: string, n: number): Promise<ReviewComment[]>;
 }
 
+/** A PR as the merge reads it just before merging (#156): open, closed or merged, its head, and
+ *  whether GitHub can merge it (null while GitHub is still working that out). */
+export type MergePull = {
+  number: number; title: string; url: string; state: 'open' | 'closed' | 'merged'; headSha: string;
+  branch: string; base: string; draft: boolean; mergeable: boolean | null; labels: string[];
+};
+
+/** GitHub refused a merge because the PR's head isn't the one named (its 409). */
+export class HeadMoved extends GitHubError {}
+
+/** What merging writes and reads on GitHub (#156). Each is a GitHubError when gh fails. */
+export interface GitHubMerge {
+  pull(repo: string, n: number): Promise<MergePull>;
+  /** Merges the PR at `sha` only, with a merge commit: its sha. HeadMoved when the head isn't `sha`. */
+  merge(repo: string, n: number, sha: string): Promise<string | null>;
+  /** How many of the PR's review threads are unresolved, every page read. */
+  openThreads(repo: string, n: number): Promise<number>;
+  addLabel(repo: string, n: number, label: string): Promise<void>;
+  /** Removes a label; one that isn't there is left so. */
+  removeLabel(repo: string, n: number, label: string): Promise<void>;
+}
+
+const REVIEW_THREADS = `
+query($owner: String!, $name: String!, $n: Int!, $endCursor: String) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $n) {
+      reviewThreads(first: 100, after: $endCursor) {
+        pageInfo { hasNextPage endCursor }
+        nodes { isResolved }
+      }
+    }
+  }
+}`;
+
 const PASSED = new Set(['success', 'neutral', 'skipped']);
 /** The status the review sets on the commit it reviewed: never one of the checks it waits for. */
 const REVIEW_STATUS = 'sol-review';
@@ -119,7 +153,7 @@ query($owner: String!, $name: String!, $endCursor: String) {
   }
 }`;
 
-export class GhGitHub implements GitHub, GitHubAccount, GitHubLabels, GitHubWork, GitHubReview, GitHubPosts {
+export class GhGitHub implements GitHub, GitHubAccount, GitHubLabels, GitHubWork, GitHubReview, GitHubPosts, GitHubMerge {
   private gh: Gh;
   private exists: (folder: string) => boolean;
   constructor(gh: Gh = ghCli, exists: (folder: string) => boolean = existsSync) {
@@ -337,5 +371,60 @@ export class GhGitHub implements GitHub, GitHubAccount, GitHubLabels, GitHubWork
 
   async editPullBody(repo: string, n: number, body: string) {
     await this.write('PATCH', `repos/${repo}/pulls/${n}`, { body });
+  }
+
+  async pull(repo: string, n: number): Promise<MergePull> {
+    const p = await this.api([`repos/${repo}/pulls/${n}`], `${repo}#${n}`);
+    if (typeof p?.head?.sha !== 'string') throw new GitHubError(`gh api ${repo}#${n} named no head`);
+    return {
+      number: p.number, title: p.title ?? '', url: p.html_url ?? '', headSha: p.head.sha,
+      state: p.merged_at || p.merged === true ? 'merged' : p.state === 'open' ? 'open' : 'closed',
+      branch: p.head?.ref ?? '', base: p.base?.ref ?? '', draft: p.draft === true,
+      mergeable: typeof p.mergeable === 'boolean' ? p.mergeable : null,
+      labels: (p.labels ?? []).map((l: any) => l?.name).filter((x: unknown): x is string => typeof x === 'string'),
+    };
+  }
+
+  async merge(repo: string, n: number, sha: string): Promise<string | null> {
+    const endpoint = `repos/${repo}/pulls/${n}/merge`;
+    const { code, stdout, stderr } = await this.gh(['api', '-X', 'PUT', endpoint, '--input', '-'], homedir(),
+      JSON.stringify({ sha, merge_method: 'merge' }));
+    // GitHub answers 409 when the head isn't `sha` ("Head branch was modified")
+    if (code !== 0 && /HTTP 409/.test(stderr)) throw new HeadMoved(`GitHub refused the merge at ${sha.slice(0, 7)}: ${firstLine(stderr)}`);
+    if (code !== 0) throw new GitHubError(`gh api PUT ${endpoint} failed (${code}): ${firstLine(stderr)}`);
+    let answer: any;
+    try {
+      answer = JSON.parse(stdout);
+    } catch {
+      throw new GitHubError(`gh api PUT ${endpoint} printed no JSON: ${stdout.slice(0, 200)}`);
+    }
+    if (answer?.merged !== true) throw new GitHubError(`GitHub didn't merge ${repo}#${n}: ${answer?.message ?? 'no reason given'}`);
+    return typeof answer.sha === 'string' ? answer.sha : null;
+  }
+
+  async openThreads(repo: string, n: number): Promise<number> {
+    const [owner, name] = repo.split('/');
+    const pages = await this.api(['graphql', '--paginate', '--slurp', '-f', `query=${REVIEW_THREADS}`, '-f', `owner=${owner}`, '-f', `name=${name}`, '-F', `n=${n}`],
+      `graphql (${repo}#${n}'s review threads)`);
+    if (!Array.isArray(pages)) throw new GitHubError(`gh api graphql printed no pages for ${repo}#${n}'s review threads`);
+    let open = 0;
+    for (const page of pages) {
+      const nodes = page?.data?.repository?.pullRequest?.reviewThreads?.nodes;
+      // a page without its threads isn't "none open": the merge would go ahead on it
+      if (!Array.isArray(nodes)) throw new GitHubError(`gh api graphql gave no review threads for ${repo}#${n}: ${JSON.stringify(page).slice(0, 200)}`);
+      open += nodes.filter((t: any) => t?.isResolved !== true).length;
+    }
+    return open;
+  }
+
+  async addLabel(repo: string, n: number, label: string): Promise<void> {
+    await this.write('POST', `repos/${repo}/issues/${n}/labels`, { labels: [label] });
+  }
+
+  async removeLabel(repo: string, n: number, label: string): Promise<void> {
+    const endpoint = `repos/${repo}/issues/${n}/labels/${encodeURIComponent(label)}`;
+    const { code, stderr } = await this.gh(['api', '-X', 'DELETE', endpoint], homedir());
+    if (code === 0 || /HTTP 404/.test(stderr)) return; // not there: as good as removed
+    throw new GitHubError(`gh api DELETE ${endpoint} failed (${code}): ${firstLine(stderr)}`);
   }
 }

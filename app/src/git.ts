@@ -37,7 +37,26 @@ export interface ReviewGit {
   evidence(folder: string, n: number, dest: string): Promise<string[]>;
 }
 
-export const prRef = (n: number) => `refs/queue-runner/pr${n}`;
+/** What a fix round and a merge's clean-up do with git (#156): the brief's commits and files, and
+ *  the PR's worktrees and branches, found by branch in `git worktree list`. */
+export interface FixGit {
+  fetchPr(folder: string, n: number, base: string): Promise<string>;
+  /** The commits in `b` and not in `a`, oldest first. */
+  log(folder: string, a: string, b: string): Promise<{ sha: string; subject: string }[]>;
+  /** `git diff --stat a...b`. */
+  diffstat(folder: string, a: string, b: string): Promise<string>;
+  /** The folder's worktrees and the branch each has checked out (null when detached). */
+  worktrees(folder: string): Promise<{ path: string; branch: string | null }[]>;
+  /** Removes a worktree (`--force`). True once git no longer lists it, though T3 may still hold
+   *  its empty folder (docs/t3.md): that's swept later. */
+  removeWorktree(folder: string, path: string): Promise<boolean>;
+  /** Deletes a local branch; one that isn't there is left so. */
+  deleteBranch(folder: string, branch: string): Promise<void>;
+}
+
+export const samePath = (a: string, b: string) => a.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase() === b.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+
+export const prRef =(n: number) => `refs/queue-runner/pr${n}`;
 
 type Run = (args: string[], cwd: string) => Promise<{ code: number; stdout?: string; stderr: string }>;
 /** One blob's bytes (`git cat-file blob`): binary, so not through Run's text. */
@@ -60,7 +79,7 @@ const gitBlob: Blob = (folder, spec) => new Promise((resolve, reject) => {
     (error, stdout, stderr) => (error ? reject(new GitError(`git cat-file ${spec} failed: ${firstLine(String(stderr))}`)) : resolve(stdout)));
 });
 
-export class GitCli implements Git, ReviewGit {
+export class GitCli implements Git, ReviewGit, FixGit {
   private run: Run;
   private blob: Blob;
   constructor(run: Run = gitRun, blob: Blob = gitBlob) {
@@ -112,6 +131,41 @@ export class GitCli implements Git, ReviewGit {
 
   diff(folder: string, a: string, b: string, mergeBase = false): Promise<string> {
     return this.ok(folder, ['diff', ...(mergeBase ? [`${a}...${b}`] : [a, b])]);
+  }
+
+  async log(folder: string, a: string, b: string) {
+    const out = await this.ok(folder, ['log', '--reverse', '--format=%H%x09%s', `${a}..${b}`]);
+    return out.split(/\r?\n/).filter((l) => l.includes('\t')).map((l) => {
+      const [sha, ...rest] = l.split('\t');
+      return { sha: sha!, subject: rest.join('\t') };
+    });
+  }
+
+  diffstat(folder: string, a: string, b: string): Promise<string> {
+    return this.ok(folder, ['diff', '--stat', `${a}...${b}`]);
+  }
+
+  async worktrees(folder: string) {
+    const out = await this.ok(folder, ['worktree', 'list', '--porcelain']);
+    const list: { path: string; branch: string | null }[] = [];
+    for (const block of out.split(/\r?\n\r?\n/)) {
+      const path = /^worktree (.+)$/m.exec(block)?.[1]?.trim();
+      if (!path) continue;
+      list.push({ path, branch: /^branch refs\/heads\/(.+)$/m.exec(block)?.[1]?.trim() ?? null });
+    }
+    return list;
+  }
+
+  async removeWorktree(folder: string, path: string): Promise<boolean> {
+    await unlinkModules(path);
+    await this.run(['worktree', 'remove', '--force', path], folder);
+    await this.run(['worktree', 'prune'], folder);
+    return !(await this.worktrees(folder)).some((w) => samePath(w.path, path));
+  }
+
+  async deleteBranch(folder: string, branch: string): Promise<void> {
+    if (!(await this.hasBranch(folder, branch))) return;
+    await this.ok(folder, ['branch', '-D', branch]);
   }
 
   async evidence(folder: string, n: number, dest: string): Promise<string[]> {

@@ -1,5 +1,5 @@
-// The rules more than one brief needs, each written once (#154): the build brief fills them in
-// now, and the fix brief (a later ticket) fills in the same ones. A brief file never writes one
+// The rules more than one brief needs, each written once (#154): the build brief and the fix brief
+// (#156) fill in the same ones. A brief file never writes one
 // out itself (`test/brief.test.ts`). A rule may name `$user` or `$github`: it goes into a
 // template before the template is filled, so they're filled with the rest.
 //
@@ -30,6 +30,10 @@ and fix what you find, with a test for each:
 /** What stops the agent for the user, and how it hands the question over. */
 export const USERS_TO_DECIDE = `- If something only $user can decide stops you: commit and push what you have, comment the
   question on the issue, swap its \`ready-for-agent\` label for \`needs-info\`, and end your turn.`;
+
+/** The same, for a job on a PR (a fix round): the question goes on the PR. */
+export const USERS_TO_DECIDE_ON_PR = `- If something only $user can decide stops you: push what you have, comment the question on the
+  PR, and end your turn.`;
 
 /** When to take screenshots, and how to publish them where the review reads them. Today's brief
  *  names the runner's own screenshot script by its path; the app has no such script beside a

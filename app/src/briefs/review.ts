@@ -99,7 +99,8 @@ export const REVIEW_TEMPLATE = TEMPLATE;
 export const said = (c: Comment) =>
   `---\n**${c.author}**, ${c.createdAt}${c.path ? ` on \`${c.path}:${c.line}\`` : ''}:\n\n${(c.body ?? '').trim()}\n`;
 
-function openLine(f: Finding): string {
+/** One open finding as a brief lists it: where, its class, its status and why it matters. */
+export function openLine(f: Finding): string {
   const at = f.file && f.line ? `\`${f.file}:${f.line}\`` : f.file ? `\`${f.file}\`` : 'no file';
   const why = f.scenario ? `Scenario: ${f.scenario}` : f.cost ? `Cost: ${f.cost}${f.rule ? ` (rule: ${f.rule})` : ''}` : '';
   const s = f.status === 'open' ? 'open' : 'decline kept open';

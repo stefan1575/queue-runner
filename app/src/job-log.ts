@@ -14,6 +14,11 @@
 //   `settled` line yet: an app that stopped between the two settles it on its next start (F9).
 // - **PR owed:** a build ended `done` whose PR lookup failed has no `pr` yet: it's looked up again
 //   until GitHub answers, and a `pr` line then records the PR or, with none, `done-no-pr` (F13).
+// - **PR steps** (#156): a merge the app made or noticed, and a `ready-to-merge` mark put on or
+//   taken off, each a `step` line and its `step-end`; a merge's clean-up after it (worktrees and
+//   branches removed, the PR's threads settled) is a `cleaned` line, and its folders T3 still held
+//   then are a `swept` line once they're gone. A merge started with no end (the app stopped
+//   mid-merge) is read from GitHub on the next pass; one merged and not cleaned is cleaned then.
 import { appendFile, mkdir, readFile, truncate } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import type { Cost, Reading } from './costs.ts';
@@ -50,6 +55,14 @@ export type JobStart = {
   runDir?: string;
   checkout?: string;
   folder?: string;
+  /** A fix round's (#156): sent to the thread `to` (the PR's builder, or the fresh fixer that took
+   *  over), whose runs before the send were `knownRuns`, so its new run is told apart from them
+   *  after a restart; or `fresh`, a new thread on the fix kind's settings, with why. A fresh fixer
+   *  in a new worktree works on the local branch `workBranch` and pushes to `branch`. */
+  to?: string;
+  knownRuns?: string[];
+  fresh?: string;
+  workBranch?: string;
   /** What the usage gate let the job in at, and T3's reading it was let in on: a job watched
    *  again after a restart is reserved and measured from these. Absent on a line an older app
    *  wrote, and on a job no gate let in (the live check's). */
@@ -74,9 +87,19 @@ export type JobEnd = {
   signals?: string[];
   link?: string | null;
   runDir?: string;
+  /** A fix round's: the PR's head once it ended (null when GitHub couldn't say). */
+  head?: string | null;
 };
 export type Job = JobStart & { id: string; startedAt: string } & Partial<JobThread>
   & { end?: JobEnd & { at: string }; answeredAt?: string; settledAt?: string };
+
+/** What a PR step ended in: a merge `merged` (by the app, or noticed as the user's: `by`),
+ *  `failed`, or `head-moved` (GitHub refused the old head: it's reviewed again); a mark `marked` or
+ *  `unmarked`. */
+export type StepOutcome = 'merged' | 'failed' | 'head-moved' | 'marked' | 'unmarked';
+export type StepStart = { kind: 'merge' | 'ready'; repo: string; github: string; pr: number; branch: string; sha: string };
+export type StepEnd = { outcome: StepOutcome; error?: string | null; by?: 'app' | 'user'; commit?: string | null; why?: string };
+export type Step = StepStart & { id: string; startedAt: string; end?: StepEnd & { at: string }; cleanedAt?: string; left?: string[]; sweptAt?: string };
 
 export class JobLogError extends Error {}
 
@@ -104,12 +127,17 @@ type Event =
   | ({ event: 'end'; job: string; at: string } & JobEnd)
   | { event: 'answered'; job: string; at: string }
   | { event: 'settled'; job: string; at: string }
-  | { event: 'pr'; job: string; at: string; pr: JobEnd['pr'] };
+  | { event: 'pr'; job: string; at: string; pr: JobEnd['pr'] }
+  | ({ event: 'step'; step: string; at: string } & StepStart)
+  | ({ event: 'step-end'; step: string; at: string } & StepEnd)
+  | { event: 'cleaned'; step: string; at: string; left: string[] }
+  | { event: 'swept'; step: string; at: string };
 
 export class JobLog {
   private file: string;
   private files: JobLogFiles;
   private all = new Map<string, Job>();
+  private steps_ = new Map<string, Step>();
   private writing: Promise<void> = Promise.resolve();
   private now: () => Date;
   private n = 0;
@@ -145,6 +173,22 @@ export class JobLog {
   }
 
   private fold(e: Event) {
+    if (e.event === 'step') {
+      const { event, step, at, ...start } = e;
+      this.steps_.set(step, { ...start, id: step, startedAt: at });
+      return;
+    }
+    if (e.event === 'step-end' || e.event === 'cleaned' || e.event === 'swept') {
+      const st = this.steps_.get(e.step);
+      if (!st) return;
+      if (e.event === 'cleaned') this.steps_.set(e.step, { ...st, cleanedAt: e.at, left: e.left });
+      else if (e.event === 'swept') this.steps_.set(e.step, { ...st, sweptAt: e.at });
+      else {
+        const { event, step, ...end } = e;
+        this.steps_.set(e.step, { ...st, end });
+      }
+      return;
+    }
     if (e.event === 'start') {
       const { event, job, at, ...start } = e;
       this.all.set(job, { ...start, id: job, startedAt: at });
@@ -210,6 +254,34 @@ export class JobLog {
 
   jobs(): Job[] {
     return [...this.all.values()];
+  }
+
+  /** A PR step's start (a merge, a mark), written. */
+  async stepStarted(start: StepStart): Promise<Step> {
+    const at = this.now().toISOString();
+    const id = `${start.kind}-${at.replace(/[-:.]/g, '')}-${++this.n}`;
+    await this.append({ event: 'step', step: id, at, ...start });
+    return this.steps_.get(id)!;
+  }
+
+  async stepEnded(id: string, end: StepEnd): Promise<Step> {
+    await this.append({ event: 'step-end', step: id, at: this.now().toISOString(), ...end });
+    return this.steps_.get(id)!;
+  }
+
+  /** A merge's clean-up is done; `left` are folders T3 still held, swept later. */
+  async cleaned(id: string, left: string[]): Promise<Step> {
+    await this.append({ event: 'cleaned', step: id, at: this.now().toISOString(), left });
+    return this.steps_.get(id)!;
+  }
+
+  async swept(id: string): Promise<Step> {
+    await this.append({ event: 'swept', step: id, at: this.now().toISOString() });
+    return this.steps_.get(id)!;
+  }
+
+  steps(): Step[] {
+    return [...this.steps_.values()];
   }
 
   get(id: string): Job | undefined {
