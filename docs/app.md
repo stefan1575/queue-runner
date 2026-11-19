@@ -916,7 +916,8 @@ is killed is code -1 with Node's reason in stderr, never a gh exit code (so is t
   holds it, on T3's default model at its lowest effort unless `--run` names one; the gate isn't
   asked. It checks the end was `done`, the branch is on `origin`, the thread ran in its own
   worktree on the job branch on the asked model, and it was settled. **Run 2026-11-19** on Haiku
-  5.5 at low: all ok, in about 20 seconds.
+  5.5 at low: all ok, in about 20 seconds. **Run again 2026-11-20** with #210's chooser in, on
+  T3's default (Opus 5.5) at low: all ok, in about 30 seconds.
 - `app/live/review.ts` (`pnpm --dir app live:review -- (--pr N | --open-pr) --run
   <instance>:<model> [--state <folder>]`): today's `scripts/live_review.py` for the app, dry run. One real review of
   one open PR in `stefan1575/queue-runner-sandbox` only (it refuses another clone), through
@@ -960,19 +961,21 @@ is killed is code -1 with Node's reason in stderr, never a gh exit code (so is t
   worktree and local branch gone). **Run again 2026-11-19** after #156 F15 (the clean-up removes
   only what a `made` line records; the check records its build's): all ok, sandbox PR #8 (H1
   f266f22 refused with 409; merged at a82bd12, merge commit 2135b76, worktree and local branch
-  gone).
+  gone). **Run again 2026-11-20** with #210's chooser in: all ok, sandbox PR #12 (H1 1b11a36
+  refused with 409; merged at dc3393b, merge commit 85e8873).
 - `app/live/conflict.ts` (`pnpm --dir app live:conflict [-- --run <instance>:<model>]`): a conflict
   round against `stefan1575/queue-runner-sandbox` only, in the T3 project cloned from it (found by
   its remote, as the review check's), on T3's default model at its lowest effort unless `--run`
   names one; the gate isn't asked, and the lane sees only the check's own PR. **It writes to
   GitHub:** a branch adding `live-conflict-<stamp>.txt` and its PR, then a commit to main adding
   the same file with other text, so GitHub says the PR conflicts; one round through the
-  `ConflictLane`'s pass, which must end `done` with the base it merged read from the branch, on its
+  chooser's pass with the `ConflictLane` its one lane (#210), which must end `done` with the base it merged read from the branch, on its
   own made branch in a T3 worktree, the PR's head moved, main's tip in the new head's history,
   GitHub saying it merges, no stop, and the thread settled. The PR is closed and its branch
   deleted at the end; main keeps its commit. **Run 2026-11-19** on Haiku 5.5 at low: all ok,
   sandbox PR #9 (H 85f306b against main at b8cdc82; the round pushed 27f8676 in about 30
-  seconds).
+  seconds). **Run again 2026-11-20** through the chooser (#210), on T3's default (Opus 5.5) at
+  low: all ok, sandbox PR #13 (H 5313301 against main at eb4522a; the round pushed 2d255cf).
 - `app/live/usage.ts` (`pnpm --dir app live:usage [-- --minutes N]`): acts on no project. It
   subscribes to T3's server config and prints each connected provider's windows as the app reads
   them, then each `providerStatuses` event that changes one, for N minutes (5 by default). **Run
