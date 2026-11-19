@@ -41,6 +41,8 @@ DEFAULT = "busy"
 # Takes of the page before this one, kept while its look is being agreed: `serve.py` serves the
 # ones in `dashboard/earlier/` on the sample addresses, and the sidebar's sample menu links them.
 EARLIER = [
+    {"href": "/earlier/take-30.html", "label": "Take 30", "note": "The Overview: the roadmap with what waits on you inside it, as a column, a line each, or a board"},
+    {"href": "/earlier/take-29.html", "label": "Take 29", "note": "The Overview: the board, the lanes, then the roadmap in a sentence per effort"},
     {"href": "/earlier/take-27.html", "label": "Take 27", "note": "The Overview: the board, the lanes, then Progress or Now, next, then"},
     {"href": "/earlier/take-25.html", "label": "Take 25", "note": "The Overview four ways: the plate first, a table by effort, a roadmap track, written out"},
     {"href": "/earlier/take-24.html", "label": "Take 24", "note": "The Queue as settled (#30), the Overview still take 9's three cards"},
@@ -99,9 +101,13 @@ def build(name: str = DEFAULT, base: datetime | None = None, control: dict | Non
             # `doing`: the Claude job running in it (as a lane's `job`), and `wait`: why none
             # starts in it now (#50; both filled in by `_doing`, below). `icon`: its favicon as a
             # data: URL, or null (the page draws its first two letters).
-            {"name": LD, "github": GH[LD], "icon": LD_ICON, "merge": "stefan", "stopped": None},
-            {"name": QR, "github": GH[QR], "icon": None, "merge": "runner", "stopped": None},
-            {"name": GB, "github": GH[GB], "icon": None, "merge": "stefan", "stopped": None},
+            # `about` (take 31): what the repository is, as its GitHub description says it.
+            {"name": LD, "github": GH[LD], "icon": LD_ICON, "merge": "stefan", "stopped": None,
+             "about": "The dashboard where each Client sees their calls and leads."},
+            {"name": QR, "github": GH[QR], "icon": None, "merge": "runner", "stopped": None,
+             "about": "Runs the build-and-review flow: picks the next ticket, reviews it and merges it."},
+            {"name": GB, "github": GH[GB], "icon": None, "merge": "stefan", "stopped": None,
+             "about": "A tray app that puts a backdrop behind a windowed game."},
         ],
         # An ask is written to be picked up cold, a week later. `kind` is why it came to Stefan:
         # `stuck` (the runner tried and couldn't get it through), `decision` (a product decision
@@ -378,9 +384,29 @@ _TIMELINES = {
 
 
 def _efforts() -> list[dict]:
+    # PROTOTYPE (#29, take 31): what an effort is, in a line, as its spec's first sentence would
+    # say it. Stefan: a name like "Ring-to numbers" says nothing until it's opened.
+    ABOUT = {
+        (LD, 140): "Everything a new Client needs before their calls work: their numbers, and the form that collects their details.",
+        (LD, 149): "Each Client chooses the phone that rings when a lead calls their tracking number.",
+        (LD, 220): "A form a new Client fills in after signing, so nobody has to ask for their details by email.",
+        (LD, 225): "Reports on calls and leads: how many, from which source, over time.",
+        (LD, 200): "The list of people who called, with ways to filter, sort and archive it.",
+        (LD, 240): "Sends each Client's leads to the CRM they already use, starting with HubSpot.",
+        (LD, 180): "Texts a caller back when nobody picks up.",
+        (QR, 120): "The page that shows what each repository builds next, and why.",
+        (QR, 121): "The page that lists what waits on you, one ask at a time.",
+        (QR, 122): "Shows how much of Claude's and ChatGPT's limits is spent.",
+        (QR, 125): "Where repositories, connections and the runner's rules are set.",
+        (QR, 68): "The runner rebuilt as a TypeScript app, replacing the Python one.",
+        (GB, 1): "A tray app that puts a black backdrop behind a windowed game.",
+        (GB, 22): "Backdrops other than black: colours and images, picked from the tray.",
+    }
+
     def e(repo, n, title, kind, parent=None, blocked_by=()):
         return {"id": f"{repo}#{n}", "repo": repo, "n": n, "title": title, "kind": kind,
-                "parent": parent and f"{repo}#{parent}", "blocked_by": [f"{repo}#{b}" for b in blocked_by]}
+                "parent": parent and f"{repo}#{parent}", "blocked_by": [f"{repo}#{b}" for b in blocked_by],
+                "about": ABOUT.get((repo, n))}
     return [
         # leads-dashboard: a map holding two specs, then two specs of their own, and a finished one
         e(LD, 140, "Client phone setup", "map"),

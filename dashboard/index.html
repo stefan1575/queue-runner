@@ -1860,6 +1860,125 @@ body.page-ov26 .top-col, body.page-ov26 main { max-width: 1480px; }
   .o30-tbl .o30-e, .o30-tbl .o29-s { width: auto; min-width: 0; }
 }
 
+/* ---------------------------------------------------------------- overview, take 31 (PROTOTYPE, #29) */
+/* Each effort says what it is, how far it is, what you do and what you only wait for. Names, not
+   numbers; a line of description under each name; one tag on each thing that needs you. */
+.o31-top { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 24px; align-items: start; padding: 22px 24px 20px; border-bottom: 1px solid var(--line); }
+.o31-top h2 { font: 600 23px/1.25 var(--display); letter-spacing: -.012em; }
+.o31-links { display: flex; gap: 16px; padding-top: 6px; font-size: 14px; }
+.o31-links .ov-to, .o31-links .ov-to + .ov-to { margin-left: 0; }
+.o31-top p { grid-column: 1 / -1; max-width: 78ch; font-size: 15.5px; line-height: 1.5; color: var(--ink-2); }
+.o31-top p + p { color: var(--mute); font-size: 14.5px; }
+.o31-u { padding: 22px 24px 24px; }
+.o31-u + .o31-u, .o31-fin { border-top: 1px solid var(--line); }
+.o31-uh { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 3px 24px; align-items: start; }
+.o31-ut { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.o31-ut h3 { font: 600 18.5px/1.3 var(--display); letter-spacing: -.006em; }
+.o31-spec { font-size: 13.5px; color: var(--dim); text-decoration: none; }
+.o31-spec:hover { color: var(--ink); text-decoration: underline; }
+.o31-meta { display: flex; align-items: center; gap: 14px; padding-top: 2px; white-space: nowrap; }
+.o31-about { grid-column: 1; max-width: 66ch; font-size: 15px; line-height: 1.45; color: var(--mute); }
+.o31-sum { grid-column: 1 / -1; margin-top: 8px; font-size: 15px; line-height: 1.5; color: var(--ink); }
+.o31-est { color: var(--mute); }
+.o31-v { display: inline-flex; align-items: center; height: 24px; padding: 0 10px; border-radius: 12px; font: 600 13px/1 var(--sans); white-space: nowrap; }
+.o31-v.you { background: var(--you); color: var(--you-ink); }
+.o31-v.run { background: var(--run-wash); color: var(--run); }
+.o31-v.line { box-shadow: inset 0 0 0 1px var(--btn-line); color: var(--ink-2); }
+.o31-v.hold { border: 1px dashed var(--btn-line); color: var(--mute); }
+.o31-v.ok { padding: 0; color: var(--ok); }
+.o31-prog { display: inline-flex; align-items: center; gap: 9px; font-size: 13px; color: var(--mute); font-variant-numeric: tabular-nums; }
+.o31-prog .fbar { width: 92px; height: 8px; gap: 2px; }
+.o31-prog .fbar .sg { min-width: 1px; border-radius: 2px; }
+.o31-kids { margin: 18px 0 0 3px; padding-left: 22px; border-left: 2px solid var(--line); }
+.o31-kids > .o31-u { padding: 0 0 20px; }
+.o31-kids > .o31-u + .o31-u { padding-top: 20px; border-top: 1px solid var(--line-soft); }
+.o31-kids > .o31-u:last-child { padding-bottom: 2px; }
+.o31-kids .o31-ut h3 { font-size: 17px; }
+/* what's left, by who moves it: yours, the runner's, waiting, done */
+.o31-gs { display: grid; gap: 14px; margin-top: 16px; }
+.o31-g { display: grid; grid-template-columns: 124px minmax(0, 1fr); gap: 4px 14px; align-items: start; }
+.o31-g h4 { margin: 0; padding-top: 1px; font: 600 13.5px/1.45 var(--sans); color: var(--mute); }
+.o31-g h4 span { margin-left: 6px; font-weight: 400; color: var(--dim); }
+.o31-g h4 small { display: block; font: 400 12.5px/1.35 var(--sans); color: var(--dim); }
+.o31-g.you h4 { padding-top: 12px; color: var(--you); }
+.o31-g.you h4 span { color: var(--you); opacity: .75; }
+.o31-g.run h4 { color: var(--run); }
+.o31-g ol { display: grid; gap: 5px; min-width: 0; }
+.o31-g ol.o31-ys { gap: 0; padding: 0 14px; border-radius: 12px; background: color-mix(in srgb, var(--you-wash) 62%, transparent); }
+.o31-y { display: grid; grid-template-columns: 138px minmax(0, 1fr) auto; gap: 3px 12px; align-items: baseline; padding: 11px 0; }
+.o31-y + .o31-y { border-top: 1px solid color-mix(in srgb, var(--you-line) 55%, transparent); }
+.o31-y.c { padding: 8px 0; }
+.o31-yb { grid-column: 2 / -1; display: grid; gap: 2px; }
+.o31-tag { justify-self: start; display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 8px; border-radius: 6px; border: 1px solid var(--you-line); background: var(--surface); color: var(--you); font: 600 12.5px/1 var(--sans); white-space: nowrap; }
+.o31-tag .i { width: 14px; height: 14px; flex: none; }
+.o31-tag.bad { border-color: var(--bad-line); color: var(--bad); }
+.o31-tt { color: var(--ink); font-weight: 500; text-decoration: none; }
+.o31-tt:hover { text-decoration: underline; text-underline-offset: 3px; }
+.o31-y .o31-tt { font-size: 15.5px; font-weight: 600; line-height: 1.4; }
+.o31-y.c .o31-tt { font-size: 15px; font-weight: 500; }
+.o31-ab { font-size: 14px; line-height: 1.45; color: var(--mute); }
+.o31-do { max-width: 72ch; font-size: 14.5px; line-height: 1.45; color: var(--ink-2); }
+.o31-hold { color: var(--mute); }
+.o31-hold b { font-weight: 500; color: var(--ink-2); }
+.o31-why b { font-weight: 400; color: var(--ink-2); }
+.o31-t { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0 14px; align-items: baseline; font-size: 14.5px; line-height: 1.5; }
+.o31-t .o31-ab { display: block; }
+.o31-why { color: var(--mute); }
+.o31-mine { color: var(--you); }
+.o31-ref { font-size: 13px; color: var(--dim); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.o31-more, .o31-donel { font-size: 14px; line-height: 1.5; color: var(--mute); }
+.o31-g ol.o31-efs { display: flex; flex-wrap: wrap; gap: 3px 20px; font-size: 14.5px; line-height: 1.5; }
+.o31-efs li { white-space: nowrap; }
+.o31-efs b { font-weight: 500; }
+.o31-efs span { color: var(--mute); }
+.o31-efs span.you { color: var(--you); }
+.o31-efs span.run { color: var(--run); }
+.o31-efs span.ok { color: var(--ok); }
+.o31-fin { padding: 14px 24px 16px; font-size: 14.5px; color: var(--mute); }
+.o31-fin b { font-weight: 500; color: var(--ink-2); }
+.o31-ut h3 button { padding: 0; border: 0; background: none; font: inherit; letter-spacing: inherit; color: inherit; text-align: left; cursor: pointer; }
+.o31-rb { display: inline-flex; align-items: center; gap: 10px; }
+.o31-rb .rlogo { width: 26px; height: 26px; border-radius: 7px; font-size: 11px; }
+.o31-rb > .i { width: 16px; height: 16px; color: var(--dim); }
+.o31-rb:hover > span:not(.rlogo), .o31-tg:hover > span { text-decoration: underline; text-underline-offset: 4px; text-decoration-color: var(--btn-line); }
+.o31-ut:has(.o31-rb) { align-items: center; }
+/* B: rows that open */
+.o31.b > .o31-u { padding-left: 48px; }
+.o31.b .o31-kids > .o31-u { padding-left: 24px; }
+.o31-tg { display: inline-flex; align-items: center; gap: 6px; margin-left: -22px; }
+.o31-tg .i { width: 16px; height: 16px; flex: none; color: var(--dim); transition: transform .12s; }
+.o31-tg[aria-expanded="true"] .i { transform: rotate(90deg); }
+/* C: pick one */
+.o31-md { display: grid; grid-template-columns: 244px minmax(0, 1fr); align-items: stretch; }
+.o31-nav { padding: 10px; border-right: 1px solid var(--line); }
+.o31-nav ol { position: sticky; top: 12px; display: grid; gap: 2px; }
+.o31-nb { display: grid; gap: 1px; width: 100%; padding: 9px 12px; border: 0; border-radius: 9px; background: none; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+.o31-nb.d1 { padding-left: 30px; }
+.o31-nb:hover { background: var(--hover); }
+.o31-nb.on { background: var(--raised); box-shadow: inset 0 0 0 1px var(--btn-line); }
+.o31-nn { display: flex; align-items: center; gap: 8px; font: 600 15px/1.35 var(--sans); }
+.o31-nv { font-size: 13px; color: var(--mute); }
+.o31-nv b { font-weight: 500; }
+.o31-nv b.you { color: var(--you); font-weight: 600; }
+.o31-nv b.run { color: var(--run); }
+.o31-nv b.ok { color: var(--ok); }
+.o31-det { min-width: 0; }
+.o31-det .o31-about { grid-column: 1 / -1; }
+.o31-det .o31-g { grid-template-columns: minmax(0, 1fr); }
+.o31-det .o31-g.you h4 { padding-top: 1px; }
+.o31-det .o31-g h4 small { display: inline; margin-left: 8px; }
+@media (max-width: 1000px) {
+  .o31-top, .o31-u, .o31-fin { padding-left: 16px; padding-right: 16px; }
+  .o31-uh, .o31-g, .o31-md { grid-template-columns: minmax(0, 1fr); }
+  .o31-meta { grid-row: 2; flex-wrap: wrap; }
+  .o31-g.you h4 { padding-top: 0; }
+  .o31-y { grid-template-columns: minmax(0, 1fr) auto; }
+  .o31-y .o31-tag, .o31-yb { grid-column: 1 / -1; }
+  .o31-nav { border-right: 0; border-bottom: 1px solid var(--line); }
+  .o31-nav ol { position: static; }
+  .o31.b > .o31-u { padding-left: 38px; }
+}
+
 @media (max-width: 1100px) {
   .o28-rowhead { display: none; }
   .o28-repo { grid-template-columns: 1fr auto; row-gap: 8px; }
@@ -1950,7 +2069,7 @@ if (theme) document.documentElement.dataset.theme = theme;
 const sampleName = new URLSearchParams(location.search).get("sample");
 const ui = { page: "overview", repo: "", view: "list", pr: null, ask: null, hold: null, sel: null, pop: null, nav: false, rail: false,
   variant: "a", feature: "", open: [], qview: "", qeffort: "",
-  o28: { f: "", open: new Set(), pick: "" }, o29: { open: new Set(), shut: new Set() } };   // take 29: the efforts opened, and those shut that start open   // take 28: the number picked, the tickets opened, the bar picked   // qview, qeffort: the Queue (take 12)   // the Queue: which arrangement, the feature it's narrowed to (A), the features unfolded (B)
+  o28: { f: "", open: new Set(), pick: "" }, o29: { open: new Set(), shut: new Set() }, o31: { open: new Set(), pick: "" } };   // take 31: the units opened (B), the one picked (C)   // take 29: the efforts opened, and those shut that start open   // take 28: the number picked, the tickets opened, the bar picked   // qview, qeffort: the Queue (take 12)   // the Queue: which arrangement, the feature it's narrowed to (A), the features unfolded (B)
 
 function recall(k) { try { return localStorage.getItem("qr." + k); } catch { return null; } }
 function remember(k, v) { try { localStorage.setItem("qr." + k, v); } catch { /* a private window */ } }
@@ -2655,7 +2774,8 @@ function plateCalm(p) {
 function overview() {
   const W = work();
   // take 30: the roadmap first, what waits on you inside it, then the lanes. Take 29 (the board, the lanes, then the roadmap) is earlier/take-29.html.
-  return `<div class="q12 ov26">${overview30(W)}${qNow(W)}</div>${protoBar()}`;
+  // take 31: the same card, drawn again (see overview31). Take 30 is earlier/take-30.html.
+  return `<div class="q12 ov26">${overview31(W)}${qNow(W)}</div>${protoBar()}`;
 }
 
 // ---- take 28 (Stefan, 2026-11-19): under the board and the lanes, a slot that looks back, and it
@@ -2674,7 +2794,7 @@ const V28 = {
 };
 const V29 = { a: "In a sentence", b: "Written out", c: "A grid by stage" };   // take 29: the same three for all repositories and for one
 const V30 = { a: "What you do, a column", b: "What you do, a line each", c: "A board, a lane each" };   // take 30
-const variantName = (k) => V30[k] || "";
+const variantName = (k) => V31[k] || "";
 const DAYMS = 86400e3;
 const hist = (W) => (snap.history || []).filter((t) => W.repos.includes(t.repo));
 const tKey = (t) => `${t.repo}#${t.n}`;
@@ -3220,6 +3340,180 @@ function board30(rows) {
     ${KINDS30.map((k) => { const its = x.items.filter((y) => y.kind === k); return `<div class="o30-cell${its.length ? " has" : ""}" data-h="${esc(ASK[k] ? ASK[k][0] : k)}">${its.length ? `<ol>${its.map(card).join("")}</ol>` : ""}</div>`; }).join("")}`;
   return `<section class="card o29 o30" aria-label="Roadmap">${head30(ui.repo ? "A lane per effort, a column for each way it waits on you" : "A lane per repository, a column for each way it waits on you")}
     ${snap.asks === null ? kinds30(rows) : ""}<div class="o30-board"><span class="o30-corner">${all.length ? `${plural(all.length, "thing waits", "things wait")} on you` : "Nothing waits on you"}</span>${heads}${rows.map(lane).join("")}</div></section>`;
+}
+
+// ---- take 31 (Stefan, 2026-11-19): what take 30 got wrong, in his words. A name like "Ring-to
+// numbers" says nothing until it's opened; "Left: #188, #216" is a row of numbers; the header was
+// a strip of chips; nothing stood out. He wants, for each effort: what it is, its tickets by
+// name, a tag on what needs him, what's left split into what he does and what he only waits for,
+// and how far it is from finished. He liked take 29 A's sentence and take 30 B's nesting. So:
+//   - a headline the runner writes, in place of the head and the chip strip;
+//   - each effort (or repository) as a block: its name, a line saying what it is (its spec's
+//     first sentence; `about` in the sample), a verdict (needs you, the runner's on it, in line,
+//     waiting, done), its bar, and a sentence on what's left;
+//   - under it, what's left by who moves it: Yours (the tag, the ticket's name, what it is,
+//     what's asked, what it holds up), The runner's, Waiting (after which ticket, by name), Done;
+//   - an effort inside another sits inside it.
+// The container is the open question, three ways:
+//   A, written out: every block open, nothing to click.
+//   B, rows that open: a block shows its sentence and what's yours; opening it shows the rest.
+//   C, pick one: the efforts listed on the left, the picked one written out on the right.
+// The estimate ("about 9 h of building and review left") is this repository's middle merged
+// ticket's working time, times the tickets the runner still has to work. Take 30 is
+// earlier/take-30.html.
+const V31 = { a: "Written out", b: "Rows that open", c: "Pick one" };
+const allYours31 = (u) => [...u.yours, ...u.kids.flatMap(allYours31)];
+const count31 = (u) => (u.loose ? `${u.f.open.length} open` : `${u.f.done} of ${u.f.its.length} done`);
+const dot31 = (t) => (/[.?!]$/.test(t) ? t : `${t}.`);
+// The units: a repository's efforts as a tree (then its tickets with no effort), or the repositories.
+function units31(W) {
+  const byN = (a, b) => a.n - b.n;
+  if (!ui.repo) return W.repos.map((r) => {
+    const f = repoFacts29(W, r), R = (snap.repos || []).find((x) => x.name === r) || {};
+    return { id: r, r, repo: true, title: r, about: R.about || "", n: null, kids: [], f, own: f, yours: yours30(W, r) };
+  });
+  const r = ui.repo, ys = yours30(W, r), E = effortsOf(W, r);
+  const mk = (n) => {
+    const all = W.tickets(n.id).sort(byN);
+    return { id: n.id, r, title: n.title, about: n.about || "", n, kids: subsOf(n, W).map(mk), f: facts29(all, W),
+      own: facts29(all.filter((i) => W.nodes.get(key(i)).parent === n.id), W), yours: ys.filter((y) => y.effort === n.id) };
+  };
+  const out = E.open.map(mk);
+  if (E.loose.length) { const f = facts29([...E.loose].sort(byN), W); out.push({ id: `none:${r}`, r, title: "No effort", about: "Tickets that belong to no effort: fixes and upkeep.", n: null, loose: true, kids: [], f, own: f, yours: ys.filter((y) => y.effort === `none:${r}`) }); }
+  const off = ys.filter((y) => !y.i);
+  if (off.length) out.unshift({ id: `off:${r}`, r, title: "Not in the queue", about: "Asks about a PR or an issue the queue doesn't hold.", n: null, kids: [], f: null, own: null, yours: off });
+  return out;
+}
+// What's left in a unit, by who moves it. `own`: only its own tickets, not those of the efforts inside it.
+function lists31(u, W, own) {
+  const f = (own ? u.own : u.f) || { moving: [], ready: [], held: [], its: [] };
+  const mine = new Set(allYours31(u).filter((y) => y.i).map((y) => key(y.i))), not = (i) => !mine.has(key(i));
+  return { yours: own ? u.yours : allYours31(u), runner: [...f.moving, ...f.ready].filter(not), waiting: f.held.filter(not), done: f.its.filter((i) => i.state === "done") };
+}
+function verdict31(u, W) {
+  const L = lists31(u, W);
+  if (L.yours.length) return ["you", plural(L.yours.length, "needs you", "need you")];
+  if (!u.f || !u.f.open.length) return ["ok", "Done"];
+  if (u.f.moving.length) return ["run", "The runner's on it"];
+  return L.runner.length ? ["line", "In line"] : ["hold", "Waiting"];
+}
+// What's left, in a sentence: how many start with you, how many the runner has, how many wait.
+function sum31(u, W) {
+  const f = u.f;
+  if (!f) return "";
+  if (!f.its.length) return "No tickets yet.";
+  if (!f.open.length) return "Every ticket is done.";
+  const L = lists31(u, W), y = L.yours.length, k = L.runner.length, h = L.waiting.length;
+  const behind = L.waiting.filter((i) => blockers29(i, W).some((b) => b && !b.outside && MINE.has(rootOf(b, W).state))).length;
+  const bits = [y ? `${y} ${y === 1 ? "starts" : "start"} with you` : "", k ? `the runner has ${k}` : "",
+    h ? (behind === h ? `${h} ${h === 1 ? "waits" : "wait"} behind yours` : behind ? `${h} wait, ${behind} of them behind yours` : `${h} ${h === 1 ? "waits its" : "wait their"} turn`) : ""].filter(Boolean);
+  const list = bits.length > 1 ? `${bits.slice(0, -1).join(", ")} and ${bits[bits.length - 1]}` : bits[0];
+  return `${u.kids.length ? `Across its ${u.kids.length} efforts, ` : ""}${y + k + h} to go: ${list}.`;
+}
+// How much runner work is left, roughly: the tickets it still has to work, times what a ticket
+// usually takes here (the middle of the repository's merged tickets, building and review only).
+function est31(u, W) {
+  const L = lists31(u, W), its = [...L.runner, ...L.waiting, ...L.yours.map((y) => y.i).filter(Boolean)].filter((i) => !["merged", "ready-for-human", "needs-triage"].includes(i.state));
+  const ts = (snap.history || []).filter((t) => t.repo === u.r && t.outcome === "merged");
+  if (!its.length || ts.length < 3) return "";
+  const mins = ts.map((t) => t.events.filter((e) => ["work", "rev"].includes(fam(e))).reduce((a, e) => a + e.minutes, 0)).sort((a, b) => a - b), mid = mins[Math.floor(mins.length / 2)];
+  return ` <span class="o31-est" title="${plural(its.length, "ticket", "tickets")} the runner still works, at ${esc(span(mid * 60))} of building and review each: the middle of ${esc(u.r)}'s merged tickets">About ${esc(span(its.length * mid * 60))} of building and review left.</span>`;
+}
+const tag31 = (k) => `<span class="o31-tag${k === "broken" ? " bad" : ""}">${KIND_ICON[k] || ""}${esc(ASK[k] ? ASK[k][0] : k)}</span>`;
+// What a thing that waits on you asks of you.
+function do31(y) {
+  if (y.ask) return [y.ask.situation, y.ask.question].filter(Boolean).map(dot31).join(" ");
+  if (y.kind === "ready-for-human") return "Yours to build. The runner never builds this one.";
+  if (y.kind === "needs-triage") return "Yours to triage: decide what it becomes.";
+  return dot31((y.i && y.i.note) || "Waits on you");
+}
+function yours31(y, u, compact) {
+  const about = (y.i && y.i.about) || (y.ask && y.ask.about) || "";
+  const hold = y.holds.length ? `Holds up ${y.holds.length > 3 ? plural(y.holds.length, "ticket", "tickets") : y.holds.map((h) => `<b>${esc(h.title)}</b>`).join(" and ")}.` : "";
+  const head = `${tag31(y.kind)}${open30(y, "o31-tt", esc(y.title))}<span class="o31-ref">${u.repo && y.in ? `${esc(y.in)}, ` : ""}${esc(y.ref)}</span>`;
+  if (compact) return `<li class="o31-y c">${head}</li>`;
+  return `<li class="o31-y">${head}<div class="o31-yb">${about ? `<p class="o31-ab">${esc(about)}</p>` : ""}<p class="o31-do">${esc(do31(y))}${hold ? ` <span class="o31-hold">${hold}</span>` : ""}</p></div></li>`;
+}
+// Where a blocker stands, in a word or two.
+function short31(b, W) {
+  if (b.outside) return `in ${b.repo}, which the runner doesn't serve`;
+  if (MINE.has(b.state)) {
+    const a = b.state === "you" ? askFor(b) : null;
+    return a ? ({ stuck: "stuck, yours", decision: "your decision", merge: "yours to merge", broken: "broken, yours" }[a.kind] || "yours") : ({ "ready-for-human": "yours to build", "needs-triage": "yours to triage" }[b.state] || "yours");
+  }
+  return { building: "being built", review: "in review", fixing: "in a fix round", "fixing-itself": "fixing itself", merged: "going live" }[b.state]
+    || (repoOff(b.repo) ? "its repository is stopped" : b.state === "ready" && !W.blockersOf(b).length ? "in line" : "waiting too");
+}
+// What a waiting ticket waits for, by name.
+function after31(i, W) {
+  const bs = blockers29(i, W).filter(Boolean);
+  if (!bs.length) return repoOff(i.repo) ? "Its repository is stopped." : i.state === "not-ready" ? "Not ready to build yet." : "Blocked.";
+  return `After ${bs.map((b) => `<b>${esc(b.outside || b.repo !== i.repo ? `${b.repo}#${b.n}${b.title ? ` ${b.title}` : ""}` : b.title)}</b> <span${!b.outside && MINE.has(b.state) ? ` class="o31-mine"` : ""}>(${esc(short31(b, W))})</span>`).join(" and ")}.`;
+}
+const ticket31 = (i, why, full) => `<li class="o31-t"><span><a class="o31-tt" href="${esc(issueUrl(i))}" target="_blank" rel="noreferrer"${i.about ? ` title="${esc(i.about)}"` : ""}>${esc(i.title)}</a> <span class="o31-why">${why}</span>${full && i.about ? `<span class="o31-ab">${esc(i.about)}</span>` : ""}</span><span class="o31-ref">#${i.n}${i.pr ? `, PR #${i.pr}` : ""}</span></li>`;
+// A repository's efforts, each with where it stands in two words.
+function efforts31(u, W) {
+  const E = effortsOf(W, u.r);
+  const li = (n) => {
+    const f = facts29(W.tickets(n.id), W), ys = u.yours.filter((y) => y.i && W.ancestors(key(y.i)).includes(n.id)).length;
+    const [cls, word] = ys ? ["you", plural(ys, "needs you", "need you")] : f.moving.length ? ["run", "the runner's on it"] : f.ready.length ? ["", "in line"] : ["", "waiting"];
+    return `<li><b>${esc(n.title)}</b> <span class="${cls}">${word}</span></li>`;
+  };
+  return E.open.map(li).join("") + (E.loose.length ? `<li><b>No effort</b> <span>${plural(E.loose.length, "ticket", "tickets")}</span></li>` : "");
+}
+function groups31(u, W, o = {}) {
+  const L = lists31(u, W, !!u.kids.length), cap = u.repo ? 4 : 99, out = [];
+  const g = (cls, name, n, hint, body) => `<div class="o31-g ${cls}"><h4>${name}<span>${n}</span>${hint ? `<small>${hint}</small>` : ""}</h4>${body}</div>`;
+  const more = (its) => (its.length > cap ? `<li class="o31-more">And ${its.length - cap} more, in the Queue.</li>` : "");
+  if (L.yours.length) out.push(g("you", "Yours", L.yours.length, "", `<ol class="o31-ys">${L.yours.map((y) => yours31(y, u, o.compact)).join("")}</ol>`));
+  if (o.only !== "you") {
+    if (L.runner.length) out.push(g("run", "The runner's", L.runner.length, "moves without you", `<ol>${L.runner.slice(0, cap).map((i) => ticket31(i, esc(dot31(whyOf(i, W))), o.full)).join("")}${more(L.runner)}</ol>`));
+    if (L.waiting.length && !u.repo) out.push(g("hold", "Waiting", L.waiting.length, "can't start yet", `<ol>${L.waiting.map((i) => ticket31(i, after31(i, W), o.full)).join("")}</ol>`));
+    if (L.done.length && !u.repo) out.push(g("done", "Done", L.done.length, "", `<p class="o31-donel">${L.done.slice(0, 4).map((i) => esc(i.title)).join(", ")}${L.done.length > 4 ? `, and ${L.done.length - 4} more` : ""}.</p>`));
+    if (u.repo && efforts31(u, W)) out.push(g("efs", "Efforts", "", "", `<ol class="o31-efs">${efforts31(u, W)}</ol>`));
+  }
+  return out.length ? `<div class="o31-gs">${out.join("")}</div>` : "";
+}
+// A unit, drawn: its name and what it is, its verdict and bar, the sentence, then what's left.
+// `o.toggle` (B): a unit shows only what's yours until it's opened. `o.full` (C): every ticket says what it is.
+function block31(u, W, o = {}) {
+  const [vc, vt] = verdict31(u, W), f = u.f, toggles = o.toggle && !u.kids.length, open = !toggles || ui.o31.open.has(u.id);
+  const prog = f && f.its.length ? `<span class="o31-prog">${ticketBar(u.title, [...f.its].sort((a, b) => segmentOf(a) - segmentOf(b) || a.n - b.n))}<span>${esc(count31(u))}</span></span>` : "";
+  const spec = u.n && u.n.n ? `<a class="o31-spec" href="${esc(issueUrl({ repo: u.r, n: u.n.n }))}" target="_blank" rel="noreferrer" title="${esc(KINDNAME[u.n.kind] || "Spec")} #${u.n.n}">#${u.n.n}</a>` : "";
+  const name = u.repo ? `<h3><button class="o31-rb" data-act="repo" data-repo="${esc(u.r)}" title="See ${esc(u.r)}'s efforts">${repoLogo(u.r)}<span>${esc(u.title)}</span>${ICON.right}</button></h3>${offTag(u.r)}`
+    : toggles ? `<h3><button class="o31-tg" data-act="o31-row" data-k="${esc(u.id)}" aria-expanded="${open}">${ICON.right}<span>${esc(u.title)}</span></button></h3>${spec}`
+    : `<h3>${esc(u.title)}</h3>${spec}`;
+  const sum = sum31(u, W);
+  return `<section class="o31-u" aria-label="${esc(u.title)}"><div class="o31-uh"><div class="o31-ut">${name}</div><div class="o31-meta"><span class="o31-v ${vc}">${esc(vt)}</span>${prog}</div>
+    ${u.about ? `<p class="o31-about">${esc(u.about)}</p>` : ""}${sum ? `<p class="o31-sum">${esc(sum)}${est31(u, W)}</p>` : ""}</div>
+    ${open ? groups31(u, W, o) : groups31(u, W, { ...o, compact: true, only: "you" })}${u.kids.length ? `<div class="o31-kids">${u.kids.map((k) => block31(k, W, o)).join("")}</div>` : ""}</section>`;
+}
+// The headline: what's yours, by kind, and what the runner carries by itself.
+function top31(units, W) {
+  const ys = units.flatMap(allYours31), F = facts29((snap.issues || []).filter((i) => W.repos.includes(i.repo)), W);
+  const mine = new Set(ys.filter((y) => y.i).map((y) => key(y.i))), behind = new Set(ys.flatMap((y) => y.holds.map(key))).size;
+  const KW = { stuck: "stuck", decision: ["decision", "decisions"], merge: "to merge", broken: "broken", "ready-for-human": "to build", "needs-triage": "to triage" };
+  const kinds = KINDS30.map((k) => { const n = ys.filter((y) => y.kind === k).length; return n ? `${n} ${Array.isArray(KW[k]) ? KW[k][n === 1 ? 0 : 1] : KW[k]}` : ""; }).filter(Boolean).join(", ");
+  const moving = F.moving.filter((i) => !mine.has(key(i))).length, ready = F.ready.length;
+  const h = snap.asks === null ? NOT_READ[0] : ys.length ? `${plural(ys.length, "thing is", "things are")} yours to move` : `Nothing needs you${ui.repo ? ` in ${ui.repo}` : ""}`;
+  const p1 = snap.asks === null ? NOT_READ[1] : ys.length ? `${kinds}.${behind ? ` ${plural(behind, "ticket waits", "tickets wait")} behind ${ys.length === 1 ? "it" : "them"}.` : ""}` : "";
+  const runs = moving && ready ? `The runner is working on ${moving} and has ${ready} more in line` : moving ? `The runner is working on ${moving}` : ready ? `The runner has ${ready} in line` : "";
+  const p2 = `${runs ? `${runs}; none of that needs you.` : "The runner has nothing it can start."} ${F.done} of ${F.its.length} tickets are done.`;
+  return `<header class="o31-top"><h2>${esc(h)}</h2><span class="o31-links">${toInbox("Inbox")}${toQueue("Queue")}</span>${p1 ? `<p>${esc(p1)}</p>` : ""}<p>${esc(p2)}</p></header>`;
+}
+// C: the units on the left, the picked one written out on the right.
+function pick31(units, W) {
+  const all = [], walk = (u, d) => { all.push([u, d]); u.kids.forEach((k) => walk(k, d + 1)); };
+  units.forEach((u) => walk(u, 0));
+  const [cur] = all.find(([u]) => u.id === ui.o31.pick) || all.find(([u]) => !u.kids.length && u.yours.length) || all[0];
+  const row = ([u, d]) => { const [vc, vt] = verdict31(u, W); return `<li><button class="o31-nb d${Math.min(d, 1)}${u === cur ? " on" : ""}" data-act="o31-pick" data-k="${esc(u.id)}"${u === cur ? ` aria-current="true"` : ""}><span class="o31-nn">${u.repo ? repoLogo(u.r) : ""}${esc(u.title)}</span><span class="o31-nv"><b class="${vc}">${esc(vt)}</b>${u.f && u.f.its.length ? `, ${esc(count31(u))}` : ""}</span></button></li>`; };
+  return `<div class="o31-md"><nav class="o31-nav" aria-label="${ui.repo ? "Efforts" : "Repositories"}"><ol>${all.map(row).join("")}</ol></nav><div class="o31-det">${block31(cur, W, { full: true })}</div></div>`;
+}
+function overview31(W) {
+  if (!W.repos.length) return `<section class="card"><p class="empty">No repository.</p></section>`;
+  const units = units31(W), v = ui.variant, fin = ui.repo ? effortsOf(W, ui.repo).done : [];
+  const body = !units.length ? `<p class="o31-fin">Nothing open in ${esc(ui.repo)}.</p>` : v === "c" ? pick31(units, W) : units.map((u) => block31(u, W, { toggle: v === "b" })).join("");
+  return `<section class="card o31 ${v}" aria-label="Roadmap">${top31(units, W)}${body}${fin.length ? `<p class="o31-fin">Finished: ${fin.map((n) => `<b>${esc(n.title)}</b>`).join(", ")}.</p>` : ""}</section>`;
 }
 
 // What waits on you, as a board (Stefan, 2026-11-18, take 27): a column per tag that needs you,
@@ -4404,7 +4698,7 @@ document.addEventListener("click", (e) => {
       if (d.ask) { ui.ask = d.ask; ui.hold = null; }   // a link that opens the Inbox at one ask
       address(true); draw(); scrollTo(0, 0);
       return;
-    case "repo": ui.repo = d.repo; remember("repo", d.repo); ui.pop = null; ui.sel = null; ui.o28.f = ""; ui.o28.pick = ""; if (e.target.closest(".o28, .o29")) scrollTo(0, 0); break;
+    case "repo": ui.repo = d.repo; remember("repo", d.repo); ui.pop = null; ui.sel = null; ui.o28.f = ""; ui.o28.pick = ""; ui.o31.pick = ""; if (e.target.closest(".o28, .o29, .o31")) scrollTo(0, 0); break;
     case "ask": ui.ask = d.id; ui.hold = null; break;
     case "unread": {
       const a = inboxOrder().find((x) => x.id === d.id);
@@ -4422,6 +4716,8 @@ document.addEventListener("click", (e) => {
     case "o28-f": ui.o28.f = ui.o28.f === d.f ? "" : d.f; break;   // take 28: a number lists its tickets
     case "o28-row": if (ui.o28.open.has(d.k)) ui.o28.open.delete(d.k); else ui.o28.open.add(d.k); break;
     case "o28-pick": ui.o28.pick = ui.o28.pick === d.k ? "" : d.k; break;
+    case "o31-row": if (ui.o31.open.has(d.k)) ui.o31.open.delete(d.k); else ui.o31.open.add(d.k); break;   // take 31, B
+    case "o31-pick": ui.o31.pick = d.k; break;   // take 31, C
     case "o29-row": { const was = d.open === "1"; ui.o29[was ? "shut" : "open"].add(d.k); ui.o29[was ? "open" : "shut"].delete(d.k); break; }   // take 29: an effort opens to its tickets by stage
     case "ov-effort": {   // PROTOTYPE (#29, take 25): an effort opens the Queue's Progress at it
       if (e.ctrlKey || e.metaKey || e.shiftKey) return;
