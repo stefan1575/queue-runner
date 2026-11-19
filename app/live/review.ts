@@ -32,6 +32,7 @@ import { JobLog } from '../src/job-log.ts';
 import { noToolsRefusal } from '../src/launch.ts';
 import { kindModels, model, type Catalog, type ModelChoice } from '../src/jobs.ts';
 import { Deps } from '../src/review/deps.ts';
+import { readReviews } from '../src/review/ledger.ts';
 import { DryRunPoster } from '../src/review/post.ts';
 import { ReviewLane, reviewerName } from '../src/review-lane.ts';
 import { SettingsStore } from '../src/settings.ts';
@@ -135,6 +136,7 @@ try {
   const runDir = job.end?.runDir ?? '';
   const comment = await readFile(join(runDir, 'comment.md'), 'utf8').catch(() => '');
   check('the comment carries the ledger and names its reviewer', comment.includes('```sol-findings') && comment.includes(`· ${m.label}`), comment.split('\n')[0]);
+  check("the comment carries the app's own marker, and reads back", readReviews([{ author: 'app', createdAt: '', body: comment }]).length === 1 && comment.includes('<!-- queue-runner-app review '));
   check('nothing was posted', (await github.issueComments(GITHUB, n)).length === before && said.some((l) => l.startsWith('dry run:')));
   const statuses = run(clone, 'gh', 'api', `repos/${GITHUB}/commits/${pr.headSha}/statuses`, '-q', '[.[] | select(.context == "sol-review")] | length');
   check('no sol-review status was set', statuses === '0', statuses);
