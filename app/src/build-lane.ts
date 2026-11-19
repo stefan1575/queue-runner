@@ -237,7 +237,7 @@ export class BuildLane {
     try {
       await this.d.git.fetch(repo.folder, base);
       if (await this.d.git.hasBranch(repo.folder, ticket.branch)) {
-        return await notStarted('branch-exists', `A local branch ${ticket.branch} is left from an earlier run; it holds ${repo.title}#${n} until it's gone.`);
+        return await notStarted('branch-exists', `A local branch ${ticket.branch} is left from an earlier run; ${repo.title}#${n} stays held, as every started build's issue is.`);
       }
       const catalog = this.d.catalog();
       if (!catalog) return await notStarted('not-started', "T3's providers aren't known yet");
