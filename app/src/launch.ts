@@ -77,9 +77,10 @@ export async function launchJob(mcp: Pick<T3Mcp, 'call'>, catalog: Catalog, job:
       : job.worktreePath ? { workspaceStrategy: { type: 'existing_worktree', worktreePath: job.worktreePath } } : {}),
   });
   // an answer that names no thread may still have started one: every lane treats it as a lost
-  // answer (the job needs the user), never as a thread to watch
+  // answer (the job needs the user), never as a thread to watch; so may an answer with no content
+  // at all (`undefined`, which JSON.stringify gives back as undefined)
   if (typeof launched?.threadId !== 'string' || !launched.threadId) {
-    throw new NoAnswer(`t3_thread_launch was sent and T3's answer named no thread: ${JSON.stringify(launched).slice(0, 200)}`);
+    throw new NoAnswer(`t3_thread_launch was sent and T3's answer named no thread: ${(JSON.stringify(launched) ?? 'nothing').slice(0, 200)}`);
   }
   return { threadId: launched.threadId, runId: launched.runId ?? null, link: launched.link ?? null, choice };
 }

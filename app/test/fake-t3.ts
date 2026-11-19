@@ -46,6 +46,8 @@ export class FakeT3 {
   launchAnswerLost = false;
   /** `t3_thread_launch` runs, and its answer leaves the thread id out. */
   launchOmitsThreadId = false;
+  /** `t3_thread_launch` runs, and its answer has no `structuredContent` at all. */
+  launchOmitsContent = false;
   /** Every `t3_thread_send`, its arguments as T3 got them. */
   sends: any[] = [];
   /** Answers `t3_thread_send` with this failure instead (a thread that can't take another turn). */
@@ -374,7 +376,8 @@ export class FakeT3 {
         if (this.launchAnswerLost && msg.params.name === 't3_thread_launch') throw new Error('socket hang up');
         if (this.sendAnswerLost && msg.params.name === 't3_thread_send') throw new Error('socket hang up');
         if (done.failure) return json(200, { jsonrpc: '2.0', id: msg.id, result: { isError: true, content: [{ text: JSON.stringify(done.failure) }] } });
-        const data = `data: ${JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { structuredContent: done.result } })}\n\n`;
+        const bare = this.launchOmitsContent && msg.params.name === 't3_thread_launch';
+        const data = `data: ${JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: bare ? { content: [] } : { structuredContent: done.result } })}\n\n`;
         return { status: 200, headers: { 'content-type': 'text/event-stream' }, text: data };
       }
     }

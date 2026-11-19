@@ -45,6 +45,16 @@ describe('launching a job', () => {
     expect(t3.launches).toHaveLength(1);
   });
 
+  test('an answer with no structuredContent at all is a lost answer too, not a TypeError (#157 N6)', async () => {
+    t3.serverConfig = { version: 1, type: 'snapshot', config };
+    t3.launchOmitsContent = true;
+    const own = last(a);
+    const sent = launchJob(mcp, catalog, { ...job, kind: 'build', choice: { provider: own.provider, model: own.model, effort: own.effort } });
+    await expect(sent).rejects.toThrow(NoAnswer);
+    await expect(sent).rejects.toThrow("T3's answer named no thread: nothing");
+    expect(t3.launches).toHaveLength(1);
+  });
+
   test("each kind launches on the choice it's given: the kind's own, else Default's, as kindModels resolves them", async () => {
     const def = last(b), own = last(a);
     const jobs: Jobs = { ...DEFAULT_JOBS, default: { provider: def.provider, model: def.model, effort: def.effort }, review: { own: { provider: own.provider, model: own.model, effort: own.effort }, fallback: null } };
