@@ -83,6 +83,8 @@ export type ReviewLaneDoors = {
   /** How long a PR whose review started no thread rests before it's tried again (ms). */
   restMs?: number;
   now?: () => Date;
+  /** A review ended (#156: a blocking one gets a fix round, a clean one merges). */
+  ended?: (job: Job) => void;
 };
 
 export const reviewTitle = (repo: BuildRepo, n: number) => `Queue runner review: ${repo.title}#${n}`;
@@ -205,7 +207,11 @@ export class ReviewLane {
    *  stopped. */
   private track(p: Promise<unknown>) {
     this.running = p;
-    p.then((job) => (job as Job | undefined)?.end?.outcome !== 'head-moved', (e) => {
+    p.then((job) => {
+      const ended = job as Job | undefined;
+      if (ended?.end && !this.stopped) this.d.ended?.(ended);
+      return ended?.end?.outcome !== 'head-moved';
+    }, (e) => {
       this.d.say(`a review stopped: ${(e as Error).message}`);
       return true;
     }).then((again) => {
