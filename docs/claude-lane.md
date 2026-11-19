@@ -153,9 +153,10 @@ head. A blocking review on H gets its ordinary fix round first.
   - the newest round on H ended `no-push`, `head-unknown` or `branch-exists` and H still
     conflicts (an ordinary fix round's `no-push` is its own `no-push` stop);
   - **the base hasn't moved:** the PR conflicts again with the same base commit its last
-    conflict round on an earlier head merged (that round's `base` equals GitHub's base sha for
-    the PR now, `PullRequest.base_sha`), so its push didn't resolve it. A record without
-    `base` (before #91), or GitHub not giving the base sha, counts as a different base;
+    conflict round on an earlier head merged (that round's `base` equals the base branch's own
+    tip now, `github.branch_head`; never the PR's `base.sha`, which GitHub refreshes lazily:
+    issue #189), so its push didn't resolve it. A record without `base` (before #91) counts as
+    a different base; reading the tip failing leaves the PR for the next pass, with no stop;
   - **the ceiling:** after `MAX_CONFLICT_ROUNDS` (5) conflict rounds since the last release (a
     round a limit's recovery or a decision's retry or answer carried on is one round:
     `stops.rounds_counted`), the
