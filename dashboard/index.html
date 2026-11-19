@@ -65,6 +65,13 @@
     Moving, Yours, Ready, Held across. Above each, what's in the way: the tickets that wait on
     you and hold others. Take 28's look-back views are earlier/take-28.html, parked for an
     Analytics page.
+  - PROTOTYPE, with sample data only (#29, take 30): the roadmap goes on top and takes in what
+    waits on you, so the board is gone: each effort (one repo) or repository (all) says how far it
+    is, with the Queue's bar, what's left, and what it needs from you by kind (stuck, your
+    decision, ready to merge, broken, ready-for-human, needs-triage), each saying what it holds.
+    ?variant=a|b|c: A, what you do as a column of the table; B, a line under the effort for each
+    thing you do; C, a board with a lane per effort and a column per kind. The Claude and ChatGPT
+    cards follow. Take 29 is earlier/take-29.html.
   - A feature's bar has a cell per ticket, left to right: done (done means live), merged but not
     live, in a PR, building, waiting on you, ready, blocked. Colour is the state's family and a
     hatched cell is the earlier step in it: green hatched is merged and not live, amber hatched
@@ -1775,6 +1782,84 @@ body.page-ov26 .top-col, body.page-ov26 main { max-width: 1480px; }
   .o29-doc .o29-tbl { width: auto; margin: 10px -20px 6px; }
 }
 
+/* ---------------------------------------------------------------- overview, take 30 (PROTOTYPE, #29) */
+/* The roadmap on top, with what waits on you inside it: per effort (or repository) how far it is,
+   what's left, and what it needs from you, by kind. */
+.o30 > .q12-head .ov26-hint { flex: 1; }
+.o30 > .q12-head .ov-to { margin-left: 0; }
+.o30 > .q12-head .ov-to + .ov-to { margin-left: 14px; }
+.o30-kinds { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 18px; padding: 12px 20px; border-bottom: 1px solid var(--line-soft); font-size: 14px; }
+.o30-kinds b { font: 600 15.5px/1.3 var(--display); color: var(--you); margin-right: 6px; }
+.o30-k { display: inline-flex; align-items: center; gap: 6px; color: var(--you); white-space: nowrap; }
+.o30-k .i, .o30-do .i, .o30-kd .i, .o30-ch .i { width: 15px; height: 15px; flex: none; }
+.o30-k .lbl, .o30-do .lbl, .o30-kd .lbl, .o30-ch .lbl { font: 600 12.5px/1.2 var(--mono); }
+.o30-k em, .o30-ch em { font-style: normal; min-width: 20px; height: 18px; padding: 0 6px; border-radius: 9px; background: var(--you); color: var(--you-ink); font: 700 12px/18px var(--sans); text-align: center; }
+.o30-k.z, .o30-ch.z { color: var(--dim); }
+.o30-k.z em, .o30-ch.z em { background: var(--line); color: var(--mute); }
+.o30-name { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.o30 .o29-nm { padding-left: 0; }
+.o30-prog { display: flex; align-items: center; gap: 10px; margin-top: 7px; font-size: 13px; color: var(--mute); white-space: nowrap; }
+.o30-prog .fbar { flex: 1; height: 8px; gap: 2px; max-width: 180px; }
+.o30-prog .fbar .sg { min-width: 2px; }
+.o30-prog.many .fbar { gap: 1px; }
+.o30-prog.many .fbar .sg { min-width: 1px; border-radius: 1px; }
+.o30-prog .fbar .sg:first-child, .o30-prog .fbar .sg:last-child { border-radius: 4px; }
+.o30-holds { color: var(--mute); font-size: 13.5px; white-space: nowrap; }
+/* A: a column */
+.o30-tbl .o30-e { width: 27%; min-width: 230px; }
+.o30-tbl .o29-s { width: 33%; }
+.o30-tbl .o29-r.d1 .o30-e { padding-left: 40px; }
+.o30-dos { display: grid; gap: 5px; }
+.o30-dos li { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; }
+.o30-do { display: inline-flex; align-items: center; gap: 6px; padding: 1px 9px 1px 7px; border-radius: 8px; border: 1px solid var(--you-line); background: var(--you-wash); color: var(--you); text-decoration: none; font-size: 13.5px; font-weight: 500; white-space: nowrap; }
+.o30-do b { font-weight: 700; margin-left: 2px; }
+.o30-do:hover { border-color: var(--you); }
+/* B: a line each */
+.o30-list { display: grid; }
+.o30-ef + .o30-ef { border-top: 1px solid var(--line-soft); }
+.o30-ef { padding: 12px 20px; }
+.o30-ef.d1 { padding-left: 40px; }
+.o30-eh { display: grid; grid-template-columns: 230px 200px minmax(0, 1fr); gap: 4px 18px; align-items: center; font-size: 15px; }
+.o30-eh .o30-prog { margin-top: 0; }
+.o30-acts { display: grid; gap: 4px; margin-top: 9px; }
+.o30-act { display: grid; grid-template-columns: 150px 74px minmax(0, 1fr) max-content 52px; gap: 12px; align-items: center; padding: 6px 12px; border: 1px solid var(--you-line); border-radius: 9px; background: var(--you-wash); color: var(--ink); text-decoration: none; font-size: 14.5px; }
+.o30-act:hover { border-color: var(--you); }
+.o30-kd { display: inline-flex; align-items: center; gap: 6px; color: var(--you); font-weight: 600; font-size: 13.5px; white-space: nowrap; }
+.o30-ref { font-weight: 700; white-space: nowrap; }
+.o30-ti { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.o30-ti i { font-style: normal; color: var(--mute); font-size: 13px; margin-left: 10px; }
+.o30-age { text-align: right; color: var(--mute); font-size: 13px; white-space: nowrap; }
+/* C: a board, a lane each */
+.o30-board { display: grid; grid-template-columns: minmax(170px, 1.5fr) repeat(6, minmax(0, 1fr)); }
+.o30-corner, .o30-ch { padding: 12px 8px 10px; }
+.o30-corner { padding-left: 20px; font: 600 15.5px/1.3 var(--display); color: var(--you); }
+.o30-ch { display: flex; align-items: flex-start; gap: 6px; font: 600 13px/1.25 var(--sans); color: var(--you); min-width: 0; }
+.o30-ch > span { min-width: 0; overflow-wrap: anywhere; }
+.o30-ch .i { margin-top: 1px; }
+.o30-ch em { margin-left: auto; flex: none; }
+.o30-lane, .o30-cell { border-top: 1px solid var(--line-soft); padding: 12px 8px; min-width: 0; }
+.o30-lane { padding-left: 20px; }
+.o30-lane.d1 { padding-left: 38px; }
+.o30-lane .o30-prog { flex-wrap: wrap; gap: 4px 10px; }
+.o30-lane .o30-prog .fbar { flex: 1 1 100%; max-width: 150px; }
+.o30-cell.has { background: color-mix(in srgb, var(--you-wash) 55%, transparent); }
+.o30-cell ol { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; }
+.o30-cell .ov27-card { min-width: 0; }
+.o30-cell .ov27-age { white-space: normal; }
+.o30-cell .ov27-top span + span { margin-left: auto; font-family: var(--sans); color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 1000px) {
+  .o30-eh { grid-template-columns: minmax(0, 1fr); }
+  .o30-act { grid-template-columns: max-content minmax(0, 1fr) max-content; }
+  .o30-act .o30-ti { grid-column: 1 / -1; order: 5; white-space: normal; }
+  .o30-act .o30-holds { display: none; }
+  .o30-board { grid-template-columns: minmax(0, 1fr); }
+  .o30-ch { display: none; }
+  .o30-cell { display: none; border-top: 0; padding: 0 16px 10px; }
+  .o30-cell.has { display: block; background: none; }
+  .o30-cell.has::before { content: attr(data-h); display: block; margin-bottom: 4px; font-size: 13px; font-weight: 600; color: var(--you); }
+  .o30-tbl .o30-e, .o30-tbl .o29-s { width: auto; min-width: 0; }
+}
+
 @media (max-width: 1100px) {
   .o28-rowhead { display: none; }
   .o28-repo { grid-template-columns: 1fr auto; row-gap: 8px; }
@@ -2569,8 +2654,8 @@ function plateCalm(p) {
 // on the roadmap", per repo). Take 25 is earlier/take-25.html.
 function overview() {
   const W = work();
-  const body = overview29(W);   // take 29; take 28's look-back views are earlier/take-28.html, take 26's ovProgress and ovRoadmap earlier/take-27.html
-  return `<div class="q12 ov26">${ovPlateLine(W)}${qNow(W)}${body}</div>${protoBar()}`;
+  // take 30: the roadmap first, what waits on you inside it, then the lanes. Take 29 (the board, the lanes, then the roadmap) is earlier/take-29.html.
+  return `<div class="q12 ov26">${overview30(W)}${qNow(W)}</div>${protoBar()}`;
 }
 
 // ---- take 28 (Stefan, 2026-11-19): under the board and the lanes, a slot that looks back, and it
@@ -2588,7 +2673,8 @@ const V28 = {
   one: { a: "The last 30 days", b: "Where it gets stuck", c: "Ticket journeys" },
 };
 const V29 = { a: "In a sentence", b: "Written out", c: "A grid by stage" };   // take 29: the same three for all repositories and for one
-const variantName = (k) => V29[k] || "";
+const V30 = { a: "What you do, a column", b: "What you do, a line each", c: "A board, a lane each" };   // take 30
+const variantName = (k) => V30[k] || "";
 const DAYMS = 86400e3;
 const hist = (W) => (snap.history || []).filter((t) => W.repos.includes(t.repo));
 const tKey = (t) => `${t.repo}#${t.n}`;
@@ -2875,7 +2961,7 @@ function held29(i, W, r) {
 }
 const word29 = (i, W, r) => MOVE29[i.state] || (i.state === "ready" && !W.blockersOf(i).length && !repoOff(i.repo) ? (W.qpos.get(key(i)) === 1 ? "next" : "ready") : held29(i, W, r));
 // Where an effort stands, in a sentence.
-function say29(f, W, r, loose) {
+function say29(f, W, r, loose, bare) {
   const L = (i) => tLink(i, undefined, r);
   const far = loose ? plural(f.open.length, "open ticket", "open tickets") : !f.its.length ? "No tickets yet" : !f.open.length ? "All done"
     : f.done ? `${f.done} of ${f.its.length} done` : f.moving.length ? "None done yet" : "Nothing started";
@@ -2888,6 +2974,7 @@ function say29(f, W, r, loose) {
     if (f.held.length) bits.push(`${f.held.length} held`);
     left = `Left: ${bits.join(", ")}`;
   }
+  if (bare) return left ? `${left}.` : f.yours.length ? "The rest waits on you." : f.open.length ? "" : "All done.";   // take 30: how far is the bar's, what's yours has its own place
   const yours = f.yours.length ? `<span class="o29-y">Yours: ${f.yours.map((i) => `${L(i)} (${esc(yours29(i))})`).join(", ")}</span>` : "";
   return `${[far, left, yours].filter(Boolean).join(". ")}.`;
 }
@@ -2962,14 +3049,14 @@ function table29(W, r, opens) {
   return `<table class="o29-tbl"><thead><tr><th>Effort</th><th>Spec</th><th>Where it stands</th></tr></thead><tbody>${rows.map(tr).join("")}</tbody></table>`;
 }
 // A repo in a sentence: how much is left, what moves, what comes next, what's yours.
-function repoSay29(W, r) {
+function repoSay29(W, r, bare) {
   const f = repoFacts29(W, r), efforts = efforts29(W, r).filter((x) => x.n && !x.subs).length, L = (i) => tLink(i, undefined, r);
   if (!f.open.length) return "Nothing open.";
   const building = f.moving.filter((i) => i.state === "building"), inPr = f.moving.filter((i) => ["review", "fixing", "fixing-itself"].includes(i.state)), merged = f.moving.filter((i) => i.state === "merged");
   const bits = [building.length ? `Claude is building ${building.map(L).join(", ")}` : "", inPr.length ? `${inPr.length} in a PR` : "", merged.length ? `${merged.length} merged, not live` : "",
     repoOff(r) ? "" : f.ready.length ? `${L(f.ready[0])} is next` : ""].filter(Boolean);
   return [repoOff(r) ? "Stopped by you" : "", `${plural(efforts, "effort", "efforts")}, ${plural(f.open.length, "ticket", "tickets")} left`, bits.join(", ") || "Nothing is moving",
-    f.yours.length ? `<span class="o29-y o29-nw">${plural(f.yours.length, "waits", "wait")} on you</span>` : ""].filter(Boolean).join(". ") + ".";
+    f.yours.length && !bare ? `<span class="o29-y o29-nw">${plural(f.yours.length, "waits", "wait")} on you</span>` : ""].filter(Boolean).join(". ") + ".";
 }
 function repoWay29(W, r) {
   const ws = inWay29(W, [r]);
@@ -3043,6 +3130,96 @@ function allGrid29(W) {
       <td data-h="Done">${num(f.done, "ok")}</td>${GRID29.map(([k, name, cls]) => `<td data-h="${name}">${num(f[k].length, cls)}</td>`).join("")}</tr>`; }).join("");
   return `<section class="card o29" aria-label="Roadmap">${head29("Roadmap", "Tickets by stage, a row per repository. Pick one for its efforts")}
     <table class="o29-tbl o29-grid"><thead><tr><th>Repository</th><th>Done</th>${GRID29.map(([, name]) => `<th>${name}</th>`).join("")}</tr></thead><tbody>${rows}</tbody></table></section>`;
+}
+
+// ---- take 30 (Stefan, 2026-11-19): "roadmap goes on top", and what waits on you belongs in it:
+// for each effort, how far it is, and what he's supposed to do about it (what's stuck, needs his
+// decision, is ready to merge, is broken, is ready-for-human, needs triage). So the board is gone
+// and each row carries its own asks, three ways:
+//   A, a column: the table gains "What you do", a line per ask, its kind first.
+//   B, a line each: an effort's asks sit under it, full width, with the ticket's name and age.
+//   C, a board: the old board's six columns, cut into a lane per effort.
+// All repositories reads the same, a row or lane per repository. How far an effort is, is the
+// Queue's bar (take 24) and a count. What an ask holds behind it rides on the ask.
+const KINDS30 = ["stuck", "decision", "merge", "broken", "ready-for-human", "needs-triage"];
+const kindHead30 = (k) => (ASK[k] ? `${KIND_ICON[k] || ""}<span>${esc(ASK[k][0])}</span>` : `<span class="lbl">${esc(k)}</span>`);
+// What waits on you in a repository: the Inbox's asks (each on its ticket, when it has one), then
+// the tickets only you move. Each: its kind, where it opens, and the tickets it holds.
+function yours30(W, r) {
+  const its = (snap.issues || []).filter((i) => i.repo === r), byN = (a, b) => a.n - b.n;
+  const way = new Map(inWay29(W, [r]).filter((w) => !w.root.outside).map((w) => [key(w.root), [...w.holds.values()].sort(byN)]));
+  const effortOf = (i) => { const p = W.nodes.get(key(i)).parent; return p.startsWith("repo:") ? `none:${r}` : p; };
+  const titleOf = (i) => { const n = W.nodes.get(W.nodes.get(key(i)).parent); return n && n.t === "effort" ? n.title : ""; };
+  const out = [], seen = new Set();
+  for (const a of (snap.asks || []).filter((x) => x.repo === r && !snoozedUntil(x))) {
+    const i = its.find((x) => askFor(x) === a) || null;
+    if (i) seen.add(key(i));
+    out.push({ kind: KINDS30.includes(a.kind) ? a.kind : "decision", ask: a, i, ref: a.ref, title: a.subject, since: a.since, holds: i ? way.get(key(i)) || [] : [], effort: i ? effortOf(i) : null, in: i ? titleOf(i) : "" });
+  }
+  for (const i of its) {
+    if (!MINE.has(i.state) || seen.has(key(i))) continue;
+    out.push({ kind: i.state === "you" ? "decision" : i.state, ask: null, i, ref: `#${i.n}`, title: i.title, since: null, holds: way.get(key(i)) || [], effort: effortOf(i), in: titleOf(i) });
+  }
+  return out.sort((a, b) => KINDS30.indexOf(a.kind) - KINDS30.indexOf(b.kind));
+}
+// The rows: a repository's efforts, or the repositories. Each: its name, how far, what's left in
+// a sentence, and what it needs from you.
+function rows30(W) {
+  if (!ui.repo) return W.repos.map((r) => { const f = repoFacts29(W, r);
+    return { id: r, r, title: r, name: repoCell29(r), spec: "", depth: 0, subs: 0, f, items: yours30(W, r), say: repoSay29(W, r, true), count: f.its.length ? `${f.done} of ${f.its.length} done` : "" }; });
+  const r = ui.repo, ys = yours30(W, r);
+  const rows = efforts29(W, r).map((x) => ({ ...x, r, title: x.n ? x.n.title : "No effort", name: `<span class="o29-nm">${x.n ? esc(x.n.title) : "No effort"}</span>`, spec: specLink29(x, r),
+    items: x.subs ? [] : ys.filter((y) => y.effort === x.id), say: x.subs ? `Across ${plural(x.subs, "effort", "efforts")}.` : say29(x.f, W, r, !x.n, true),
+    count: x.n ? `${x.f.done} of ${x.f.its.length} done` : `${x.f.open.length} open` }));
+  const off = ys.filter((y) => !rows.some((x) => !x.subs && x.id === y.effort));
+  if (off.length) rows.unshift({ id: `off:${r}`, r, title: "Not in the queue", name: `<span class="o29-nm">Not in the queue</span>`, spec: "", depth: 0, subs: 0, f: null, items: off, say: "Asks about a PR or an issue the queue doesn't hold.", count: "" });
+  return rows;
+}
+const prog30 = (x) => (x.f && x.f.its.length ? `<span class="o30-prog${x.f.its.length > 24 ? " many" : ""}">${ticketBar(x.title, [...x.f.its].sort((a, b) => segmentOf(a) - segmentOf(b) || a.n - b.n))}<span>${esc(x.count)}</span></span>` : "");
+const holds30 = (y) => (y.holds.length ? `holds ${y.holds.length > 3 ? plural(y.holds.length, "ticket", "tickets") : y.holds.map((h) => `#${h.n}`).join(", ")}` : "");
+const open30 = (y, cls, inner, title = "") => `<a class="${cls}"${title ? ` title="${esc(title)}"` : ""} ${y.ask ? goto("inbox", y.ask) : `href="${esc(issueUrl(y.i))}" target="_blank" rel="noreferrer"`}>${inner}</a>`;
+// The line under the head: how many wait on you, by kind. It's the key to the rows below, too.
+function kinds30(rows) {
+  if (snap.asks === null) return `<p class="o30-kinds"><b>${NOT_READ[0]}.</b><span class="o30-k z">${NOT_READ[1]}</span></p>`;
+  const all = rows.flatMap((x) => x.items);
+  return `<p class="o30-kinds"><b>${all.length ? `${plural(all.length, "thing waits", "things wait")} on you` : `Nothing waits on you${ui.repo ? ` in ${esc(ui.repo)}` : ""}`}</b>
+    ${KINDS30.map((k) => { const n = all.filter((y) => y.kind === k).length; return `<span class="o30-k${n ? "" : " z"}">${kindHead30(k)}<em>${n}</em></span>`; }).join("")}</p>`;
+}
+const head30 = (hint) => `<header class="q12-head"><h2>Roadmap</h2><span class="ov26-hint">${hint}</span>${toInbox()}${toQueue()}</header>`;
+const first30 = () => (ui.repo ? "Effort" : "Repository");
+
+function overview30(W) {
+  if (!W.repos.length) return `<section class="card"><p class="empty">No repository.</p></section>`;
+  const rows = rows30(W), v = ui.variant;
+  return v === "b" ? lines30(rows) : v === "c" ? board30(rows) : column30(rows);
+}
+
+// ---- A: the table, with what you do as its last column.
+function column30(rows) {
+  const dos = (x) => (x.items.length ? `<ol class="o30-dos">${x.items.map((y) => `<li>${open30(y, "o30-do", `${kindHead30(y.kind)}<b>${esc(y.ref)}</b>`, y.title)}${holds30(y) ? `<span class="o30-holds">${holds30(y)}</span>` : ""}</li>`).join("")}</ol>` : "");
+  const tr = (x) => `<tr class="o29-r d${Math.min(x.depth, 1)}${x.subs ? " grp" : ""}"><td class="o29-e o30-e"><span class="o30-name">${x.name}${x.spec}</span>${prog30(x)}</td><td class="o29-s">${x.say}</td><td class="o30-y">${dos(x)}</td></tr>`;
+  return `<section class="card o29 o30" aria-label="Roadmap">${head30(ui.repo ? "Each effort: how far, what's left, and what it needs from you" : "Each repository: how far, what's left, and what it needs from you")}${kinds30(rows)}
+    <table class="o29-tbl o30-tbl"><thead><tr><th>${first30()}</th><th>What's left</th><th>What you do</th></tr></thead><tbody>${rows.map(tr).join("")}</tbody></table></section>`;
+}
+
+// ---- B: an effort's line, and under it a line for each thing you do.
+function lines30(rows) {
+  const act = (y) => `<li>${open30(y, "o30-act", `<span class="o30-kd">${kindHead30(y.kind)}</span><span class="o30-ref">${esc(y.ref)}</span><span class="o30-ti">${esc(y.title)}${!ui.repo && y.in ? `<i>${esc(y.in)}</i>` : ""}</span><span class="o30-holds">${holds30(y)}</span><span class="o30-age"${y.since ? ` title="Waiting since ${esc(stamp(y.since))}"` : ""}>${y.since ? esc(ago(y.since)) : ""}</span>`)}</li>`;
+  const li = (x) => `<li class="o30-ef d${Math.min(x.depth, 1)}${x.subs ? " grp" : ""}"><div class="o30-eh"><span class="o30-name">${x.name}${x.spec}</span>${prog30(x) || "<span></span>"}<span class="o29-s">${x.say}</span></div>
+    ${x.items.length ? `<ol class="o30-acts">${x.items.map(act).join("")}</ol>` : ""}</li>`;
+  return `<section class="card o29 o30" aria-label="Roadmap">${head30(ui.repo ? "Each effort, and under it what it needs from you" : "Each repository, and under it what it needs from you")}${kinds30(rows)}
+    <ol class="o30-list">${rows.map(li).join("")}</ol></section>`;
+}
+
+// ---- C: the board, a lane per effort and a column per kind.
+function board30(rows) {
+  const all = rows.flatMap((x) => x.items);
+  const card = (y) => `<li>${open30(y, "ov27-card", `<span class="ov27-top"><span>${esc(y.ref)}</span>${!ui.repo && y.in ? `<span>${esc(y.in)}</span>` : ""}</span><b>${esc(y.title)}</b>${holds30(y) || y.since ? `<span class="ov27-age">${[holds30(y), y.since ? ago(y.since) : ""].filter(Boolean).map((t) => `<span class="o29-nw">${esc(t)}</span>`).join(", ")}</span>` : ""}`)}</li>`;
+  const heads = KINDS30.map((k) => { const n = all.filter((y) => y.kind === k).length; return `<h3 class="o30-ch${n ? "" : " z"}">${kindHead30(k)}<em>${n}</em></h3>`; }).join("");
+  const lane = (x) => `<div class="o30-lane d${Math.min(x.depth, 1)}${x.subs ? " grp" : ""}"><span class="o30-name">${x.name}${x.spec}</span>${prog30(x)}</div>
+    ${KINDS30.map((k) => { const its = x.items.filter((y) => y.kind === k); return `<div class="o30-cell${its.length ? " has" : ""}" data-h="${esc(ASK[k] ? ASK[k][0] : k)}">${its.length ? `<ol>${its.map(card).join("")}</ol>` : ""}</div>`; }).join("")}`;
+  return `<section class="card o29 o30" aria-label="Roadmap">${head30(ui.repo ? "A lane per effort, a column for each way it waits on you" : "A lane per repository, a column for each way it waits on you")}
+    ${snap.asks === null ? kinds30(rows) : ""}<div class="o30-board"><span class="o30-corner">${all.length ? `${plural(all.length, "thing waits", "things wait")} on you` : "Nothing waits on you"}</span>${heads}${rows.map(lane).join("")}</div></section>`;
 }
 
 // What waits on you, as a board (Stefan, 2026-11-18, take 27): a column per tag that needs you,
