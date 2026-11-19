@@ -319,6 +319,8 @@ export class BuildLane {
     this.d.gate.started({ id: job.id, kind: 'build', choice: job.choice }, letIn.cost, before);
     this.d.say(`${old.title}: ${choice.inPlace ? 'carrying it on in place' : 'carrying it on in a fresh thread'}, ${choice.why}`);
     if (choice.inPlace) {
+      // asked again after T3's read: a repo switched off meanwhile gets nothing sent
+      if (!isServed(this.d.repos(), repo)) return this.notStarted(job, 'not-started', `${repo.title} is no longer served`);
       const thread = { threadId: old.threadId!, runId: answering ? old.runId ?? null : null, link: old.link ?? null };
       try {
         if (answering) {

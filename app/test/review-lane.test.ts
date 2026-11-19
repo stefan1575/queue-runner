@@ -15,6 +15,7 @@ import { JobLog } from '../src/job-log.ts';
 import { DEFAULT_JOBS, type Jobs, type ModelChoice } from '../src/jobs.ts';
 import { readReviews } from '../src/review/ledger.ts';
 import { DryRunPoster, TABLE_END, TABLE_START } from '../src/review/post.ts';
+import { CAP } from '../src/cap.ts';
 import { ReviewLane, type ReviewLaneDoors } from '../src/review-lane.ts';
 import { DEFAULT_SETTINGS, type Settings } from '../src/settings.ts';
 import { catalogFromConfig } from '../src/t3/catalog.ts';
@@ -694,5 +695,47 @@ describe('the fallback', () => {
     expect(gh.bodies['owner/app#4']).toContain(`| [Review 1](${comment.url}) | ${who} |`);
     expect(log.jobs().at(-1)).toMatchObject({ onFallback: true, end: { outcome: 'clean' } });
     expect(gate.runningJobs()).toEqual([]);
+  });
+});
+
+describe('the cap and a stop (#158)', () => {
+  const blockingF1 = [{ id: 'F1', tag: 'important', class: 'unchecked input', file: 'src/a.ts', line: 3, scenario: 'empty input crashes' }];
+
+  test(`with ${CAP - 1} rounds on the PR since the last answer, a review still blocking is an approach-note, not a fix round`, async () => {
+    for (const k of [1, 2]) {
+      const r = await log.started({ kind: 'fix', repo: APP.id, github: 'owner/app', issue: 4, branch: 'claude/add-a-thing-3', base: 'main', title: 't', choice: BUILD, onFallback: false, sha: `${k}`.repeat(40), round: k });
+      await log.ended(r.id, { outcome: 'done', head: `${k + 1}`.repeat(40) });
+    }
+    makeLane();
+    const passed = lane.pass();
+    await answer(1, reply(blockingF1));
+    await passed;
+    await lane.idle();
+    const review = log.jobs().find((j) => j.kind === 'review')!;
+    expect(review.end).toMatchObject({ outcome: 'approach-note', verdict: 'blocking' });
+    expect(gh.posted.find((p) => p.what === 'comment')!.body).toContain('still blocking at the cap, so an approach note goes to Pat');
+  });
+
+  test('below the cap, the same review is a fix round', async () => {
+    makeLane();
+    const passed = lane.pass();
+    await answer(1, reply(blockingF1));
+    await passed;
+    await lane.idle();
+    expect(log.jobs().find((j) => j.kind === 'review')!.end).toMatchObject({ outcome: 'blocking' });
+  });
+
+  test('an open stop holds the PR: no review, even on a new head, until the user answers', async () => {
+    const stop = await log.stopped({ cause: 'cap', repo: APP.id, github: 'owner/app', pr: 4, sha: H, why: 'review 3 is still blocking at the cap', link: null });
+    gh.reviewPulls['owner/app'] = [pull({ headSha: H2 })];
+    gh.checkStates[H2] = { state: 'passed', pending: [], failed: [] };
+    git.heads[4] = H2;
+    makeLane();
+    await lane.pass();
+    expect(t3.launches).toEqual([]);
+    expect(lines).toContain("review app#4: not now, it's stopped for you: review 3 is still blocking at the cap");
+    await log.stopAnswered(stop.id, 'replied', 'Fix on.');
+    void lane.pass();
+    await until(() => t3.launches.length === 1);
   });
 });

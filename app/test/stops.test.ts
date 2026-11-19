@@ -326,3 +326,63 @@ describe('the decision brief', () => {
     expect(readDecision('```queue-runner-decision\n{"version": 2, "action": "stop", "question": "q"}\n```', APPROACH_NOTE)).toEqual({ error: 'its answer is version 2, not 1' });
   });
 });
+
+describe('what never reaches the user files nothing, and the crashes between steps (#158)', () => {
+  test('a blocking review with a repeated class, a reopened finding or a kept decline, a check that failed again, and a conflict round without a push file no stop', async () => {
+    const r = await log.started(job({ kind: 'review', title: 'Queue runner review: app#4', round: 2, reviewer: 'r' }));
+    await log.ended(r.id, { outcome: 'blocking', verdict: 'blocking', signals: ['repeated-class', 'reopened', 'decline-kept'], link: null });
+    await log.stepStarted({ kind: 'check-failed', repo: APP.id, github: 'owner/app', pr: 4, branch: BRANCH, sha: H, failed: ['tests'], runs: [1] });
+    await ran({ kind: 'conflict', title: 'Queue runner conflict: app#4', baseSha: 'b'.repeat(40) }, { outcome: 'done', head: H });
+    await ran({ sha: 'c'.repeat(40) }, { outcome: 'failed', error: 'it broke' }, 'thread-f');
+    makeDesk();
+    await desk.pass();
+    expect(log.stops()).toEqual([]);
+    expect(posted('issue')).toEqual([]);
+    expect(gh.posted).toEqual([]);
+  });
+
+  test("the decision's reply read failing is asked again after a wait, never taken as no answer", async () => {
+    await atTheCap();
+    const waits: (() => void)[] = [];
+    desk = new StopDesk({
+      repos: () => [APP], github: gh, mcp, ws, gate, catalog: () => catalog, user: async () => 'Pat', log,
+      say: (l) => lines.push(l), retry: (again) => { waits.push(again); return () => {}; },
+    });
+    await desk.pass();
+    await until(() => t3.threadStreamCount('thread-1') > 0);
+    t3.say('thread-1', block({ action: 'approach-note', note: 'Read on the second try.', recommend: 'fix on' }));
+    t3.readFailures = 1;
+    t3.endRun('thread-1', 'completed');
+    // the stream's own retry and the read's: run each as the desk asks for it
+    await until(() => lines.some((l) => l.includes("its reply couldn't be read")));
+    for (const w of waits.splice(0)) w();
+    await desk.idle();
+    await desk.pass();
+    expect(posted('comment').find((p) => p.body.startsWith('## Approach note'))!.body).toContain('Read on the second try.');
+  });
+
+  test('a note posted before the app stopped, not yet recorded, is found by its mark: not posted again, and the stop links it', async () => {
+    const review = await atTheCap();
+    const stop = await log.stopped({ cause: 'cap', repo: APP.id, github: 'owner/app', pr: 4, sha: H, why: 'the cap', link: null, job: review.id });
+    const d = await log.started(job({ kind: 'decision', title: 'Queue runner decision: app#4', question: 'approach-note', about: stop.id }));
+    await log.ended(d.id, { outcome: 'decided', action: 'approach-note' });
+    (gh.comments['owner/app#4'] ??= []).push({ author: 'me', createdAt: '2026-11-19T12:30:00Z', body: `## Approach note\n\nIt was posted.\n\n<!-- queue-runner-app approach-note ${stop.id} -->`, url: 'https://github.com/owner/app/pull/4#issuecomment-50' });
+    makeDesk();
+    await desk.pass();
+    expect(t3.launches).toEqual([]);
+    expect(log.stops().find((s) => s.id === stop.id)!.noted).toMatchObject({ link: 'https://github.com/owner/app/pull/4#issuecomment-50' });
+    expect(posted('comment').filter((p) => p.body.startsWith('## Approach note'))).toEqual([]);
+  });
+
+  test('a stop answered before the app stopped, its job not yet answered: the next pass answers the job', async () => {
+    const j = await log.started(job({ kind: 'review', title: 'Queue runner review: app#4', round: 1 }));
+    await log.ended(j.id, { outcome: 'needs-user', error: 'lost' });
+    const stop = await log.stopped({ cause: 'needs-user', repo: APP.id, github: 'owner/app', pr: 4, sha: H, why: 'lost', link: null, job: j.id });
+    await log.stopFiled(stop.id, 'https://github.com/owner/app/issues/101');
+    await log.stopAnswered(stop.id, 'replied', 'done');
+    expect(log.needingUser(APP.id)).toHaveLength(1);
+    makeDesk();
+    await desk.pass();
+    expect(log.needingUser(APP.id)).toEqual([]);
+  });
+});

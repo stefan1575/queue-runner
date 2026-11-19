@@ -45,7 +45,7 @@ import { readReviews, runnerPost, state, type Comment } from './review/ledger.ts
 import type { GitHubPosts } from './review/post.ts';
 import { ThreadSettler } from './settle.ts';
 import type { T3Mcp } from './t3/mcp.ts';
-import type { Retry } from './t3/project-feed.ts';
+import { retryAfter, type Retry } from './t3/project-feed.ts';
 import { NoAnswer } from './t3/seams.ts';
 import { watchThreadEnd } from './t3/thread-end.ts';
 import { runReply } from './t3/thread-reply.ts';
@@ -161,6 +161,7 @@ export class StopDesk {
     this.settler.owed('decision');
     const served = new Map(this.d.repos().filter((r) => r.github).map((r) => [r.id, r]));
     await this.record(served);
+    await this.free();
     for (const stop of this.d.log.stops()) {
       if (this.stopped) return;
       const repo = served.get(stop.repo);
@@ -210,6 +211,20 @@ export class StopDesk {
     }
   }
 
+  /** The jobs an answered stop is about, answered: also after an app that stopped between
+   *  recording the answer and this. */
+  private async free() {
+    for (const stop of this.d.log.stops()) {
+      if (!stop.answered) continue;
+      for (const job of this.d.log.jobs()) {
+        if ((job.id === stop.job || (job.kind === 'decision' && job.about === stop.id)) && job.end && !job.answeredAt
+          && (job.end.outcome === 'needs-user' || job.end.outcome === 'waiting' || job.end.outcome === 'done-no-pr' || job.end.outcome === 'done')) {
+          await this.d.log.answered(job.id);
+        }
+      }
+    }
+  }
+
   // --- the Approach note --------------------------------------------------------------------
 
   /** The cap stop's Approach note: a decision thread asked, gated as the decision kind. */
@@ -218,7 +233,16 @@ export class StopDesk {
     const name = `decision ${repo.title}#${stop.pr}`;
     // one that started no thread before is asked again; any other end files the stop as it is
     const done = this.d.log.jobs().filter((j) => j.kind === 'decision' && j.about === stop.id && j.end && j.end.outcome !== 'not-started').at(-1);
-    if (done) return this.unnoted(stop, `the decision thread ended ${done.end!.outcome}${done.end!.error ? ` (${done.end!.error})` : ''}`);
+    if (done) {
+      // a note posted before the app stopped, and not yet recorded: found by its mark
+      const posted = done.end!.action === 'approach-note'
+        ? (await this.d.github.issueComments(repo.github!, stop.pr)).find((c) => c.body.includes(noteMark(stop.id))) : undefined;
+      if (posted) {
+        await this.d.log.stopNoted(stop.id, posted.url ?? null, `The Approach note: ${posted.url ?? 'on the PR'}.`);
+        return;
+      }
+      return this.unnoted(stop, `the decision thread ended ${done.end!.outcome}${done.end!.error ? ` (${done.end!.error})` : ''}`);
+    }
     const v = this.d.gate.pick(`decision:${stop.id}`, 'decision');
     if (!v.fits) { this.note(key, `${name}: waits: ${holdText(v.hold, (d) => d.toISOString())}`); return; }
     const catalog = this.d.catalog();
@@ -227,6 +251,8 @@ export class StopDesk {
     this.note(key, null);
     const brief = await this.approachBrief(repo, stop);
     const pr = await this.d.github.pull(repo.github!, stop.pr);
+    // asked again after the reads: a repo switched off meanwhile starts nothing
+    if (!this.d.repos().some((r) => r.id === repo.id)) return;
     const job = await this.d.log.started({
       kind: 'decision', repo: repo.id, github: repo.github, issue: stop.pr, branch: pr.branch, base: pr.base,
       title: `Queue runner decision: ${repo.title}#${stop.pr}`, choice: v.choice, onFallback: v.onFallback, cost: v.cost,
@@ -280,15 +306,20 @@ export class StopDesk {
       await this.settler.settle(ended);
       return;
     }
+    // a read that fails is asked again after a wait, never taken as no answer; only an empty reply
+    // three times in a row is the thread's own
     let reply: string | null = null;
-    for (let tries = 0; !reply && tries < 3 && !this.stopped; tries++) {
+    for (let empty = 0; !reply && empty < 3;) {
+      if (this.stopped) return; // its end isn't recorded: the next start reads it again
       try {
         reply = (await runReply(this.d.mcp, job.threadId!, job.runId ?? null))?.trim() || null;
+        if (!reply) empty++;
       } catch (e) {
         this.d.say(`${job.title}: its reply couldn't be read (${(e as Error).message}); asking again`);
+        await new Promise<void>((done) => { (this.d.retry ?? retryAfter(30_000))(done); });
       }
     }
-    const decided = reply ? readDecision(reply, APPROACH_NOTE) : { error: 'its reply was empty or could not be read' };
+    const decided = reply ? readDecision(reply, APPROACH_NOTE) : { error: 'its reply was empty' };
     const ok = 'action' in decided && (decided.action !== 'approach-note' || RECOMMEND.includes(decided.fields.recommend!.toLowerCase()));
     const error = 'error' in decided ? decided.error : ok ? null : `its recommendation ${JSON.stringify(decided.fields.recommend)} isn't rework, fix on or hold`;
     const ended = await this.d.log.ended(job.id, { outcome: 'decided', status: end.status, action: error ? 'stop' : (decided as { action: string }).action, error });
@@ -414,12 +445,7 @@ export class StopDesk {
   private async answer(repo: BuildRepo, stop: Stop, how: 'issue-closed' | 'replied' | 'pr-closed', text: string | null) {
     const done = await this.d.log.stopAnswered(stop.id, how, text);
     // the job it's about is answered: a question's carries on, one that needed the user frees its repo
-    for (const job of this.d.log.jobs()) {
-      if ((job.id === stop.job || (job.kind === 'decision' && job.about === stop.id)) && job.end && !job.answeredAt
-        && (job.end.outcome === 'needs-user' || job.end.outcome === 'waiting' || job.end.outcome === 'done-no-pr' || job.end.outcome === 'done')) {
-        await this.d.log.answered(job.id);
-      }
-    }
+    await this.free();
     this.d.say(`${repo.title}#${stop.pr}: the stop is ${how === 'pr-closed' ? 'cleared: the PR was merged or closed' : how === 'issue-closed' ? 'answered: its issue was closed' : 'answered on GitHub'}`);
     this.d.answered?.(done);
   }
