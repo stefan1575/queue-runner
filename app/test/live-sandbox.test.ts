@@ -6,25 +6,22 @@ const mcpOf = (projects: object[]) => ({ call: async () => ({ projects, nextCurs
 const githubOf = (remotes: Record<string, string>): Pick<GitHub, 'remoteOf'> => ({
   remoteOf: async (f) => (remotes[f] ? { nameWithOwner: remotes[f]!, url: `https://github.com/${remotes[f]}` } : null),
 });
+// the build check's sandbox (a local bare origin, no GitHub) and the review check's GitHub clone
+const build = { id: 'p1', title: 'queue-runner sandbox', workspaceRoot: 'C:/sandbox/repo' };
+const review = { id: 'p2', title: 'queue-runner sandbox GitHub', workspaceRoot: 'C:/gh-sandbox/repo' };
+const remotes = { 'C:/gh-sandbox/repo': 'stefan1575/queue-runner-sandbox', 'C:/o': 'stefan1575/queue-runner' };
 
-describe("the live review check's sandbox repo (#155 F18)", () => {
-  it("is the sandbox T3 project's own folder, so its checkouts are that project's worktrees", async () => {
-    const repo = await sandboxRepo(mcpOf([{ id: 'p1', title: 'queue-runner sandbox', workspaceRoot: 'C:/sandbox' }, { id: 'p2', title: 'other', workspaceRoot: 'C:/o' }]),
-      githubOf({ 'C:/sandbox': 'stefan1575/queue-runner-sandbox' }));
-    expect(repo).toEqual({ id: 'p1', title: 'queue-runner-sandbox', folder: 'C:/sandbox', github: 'stefan1575/queue-runner-sandbox' });
+describe("the live review check's sandbox repo (#155 F18, F21)", () => {
+  it("is the one project cloned from the GitHub sandbox, by its remote, not the build check's by title", async () => {
+    const repo = await sandboxRepo(mcpOf([build, review, { id: 'p3', title: 'other', workspaceRoot: 'C:/o' }]), githubOf(remotes));
+    expect(repo).toEqual({ id: 'p2', title: 'queue-runner-sandbox', folder: 'C:/gh-sandbox/repo', github: 'stefan1575/queue-runner-sandbox' });
   });
 
-  it('refuses no sandbox project, or two', async () => {
-    const one = { id: 'p1', title: 'queue-runner sandbox', workspaceRoot: 'C:/sandbox' };
-    const github = githubOf({ 'C:/sandbox': 'stefan1575/queue-runner-sandbox' });
-    await expect(sandboxRepo(mcpOf([]), github)).rejects.toThrow('found 0: refusing');
-    await expect(sandboxRepo(mcpOf([one, { ...one, id: 'p2' }]), github)).rejects.toThrow('found 2: refusing');
-  });
-
-  it("refuses a sandbox project whose folder isn't a clone of the sandbox", async () => {
-    const projects = [{ id: 'p1', title: 'queue-runner sandbox', workspaceRoot: 'C:/sandbox' }];
-    await expect(sandboxRepo(mcpOf(projects), githubOf({ 'C:/sandbox': 'stefan1575/queue-runner' }))).rejects.toThrow('is stefan1575/queue-runner, not stefan1575/queue-runner-sandbox: refusing');
-    await expect(sandboxRepo(mcpOf(projects), githubOf({}))).rejects.toThrow('no GitHub clone');
+  it('refuses no such project, or two', async () => {
+    await expect(sandboxRepo(mcpOf([build]), githubOf(remotes))).rejects.toThrow('clone of stefan1575/queue-runner-sandbox, found 0: refusing');
+    const twice = { ...review, id: 'p4', title: 'another', workspaceRoot: 'C:/again' };
+    await expect(sandboxRepo(mcpOf([review, twice]), githubOf({ ...remotes, 'C:/again': 'stefan1575/queue-runner-sandbox' })))
+      .rejects.toThrow('found 2 (queue-runner sandbox GitHub at C:/gh-sandbox/repo), (another at C:/again): refusing');
   });
 
   it("says plainly when T3 didn't start the review, and nothing otherwise", () => {

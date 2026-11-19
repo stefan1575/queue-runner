@@ -77,8 +77,8 @@ the real clock or runs on a real timer that no `vi.useFakeTimers()` around it fa
   (`afterEach` with `rm(..., {recursive: true, force: true})`).
 - **The Python runner keeps serving Stefan's repos until the cutover ticket.** The app acts only
   on projects switched to Served (Repositories ticket), and until the cutover only the sandbox
-  project ("queue-runner sandbox") and the GitHub sandbox `stefan1575/queue-runner-sandbox` are
-  ever switched on, by live checks.
+  project ("queue-runner sandbox") and the GitHub sandbox `stefan1575/queue-runner-sandbox` (its
+  T3 project "queue-runner sandbox GitHub") are ever switched on, by live checks.
 - **Port, don't redesign.** Today's runner and its docs (`docs/flow.md`, `docs/claude-lane.md`,
   `docs/reviews.md`, `docs/stops.md`, `docs/usage.md`, `docs/dashboard.md`) are the behaviour to
   port, with #68's changes on top. A rule you'd change is a comment on #68, not a quiet change.
@@ -695,8 +695,10 @@ is killed is code -1 with Node's reason in stderr, never a gh exit code (so is t
   <instance>:<model> [--state <folder>]`): today's `scripts/live_review.py` for the app, dry run. One real review of
   one open PR in `stefan1575/queue-runner-sandbox` only (it refuses another clone), through
   `ReviewLane.review` with a `DryRunPoster`, after saying what adoption would decide (the sandbox
-  has no CI, so it reviews anyway). The review runs in the "queue-runner sandbox" T3 project, whose
-  folder must be a clone of the GitHub sandbox, and its checkout of the head is a worktree of that
+  has no CI, so it reviews anyway). The review runs in the one T3 project whose folder is a clone of
+  the GitHub sandbox, found by that remote, not by title (it refuses none or several; #155 F21):
+  "queue-runner sandbox GitHub", at `~/.queue-runner/gh-sandbox/repo`, set up by hand like the build
+  check's. The build check's "queue-runner sandbox" (a local bare origin) is never it. Its checkout of the head is a worktree of that
   folder, removed at the end: T3 binds `existing_worktree` only to one of the project's own `git
   worktree list` paths (its launch's `assertProjectWorktree`, read in the installed server
   2026-11-19), so a checkout of a clone elsewhere is refused before a review starts (#155 F18).

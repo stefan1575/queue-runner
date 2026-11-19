@@ -3,8 +3,9 @@
 // through the review lane's own `review`, with a poster that posts nothing. It says what adoption
 // would decide, then reviews anyway (the sandbox has no CI, so its checks never pass).
 //
-// The review runs in the "queue-runner sandbox" T3 project (it refuses to run without exactly one,
-// or when its folder isn't a clone of the sandbox), the only T3 project a live check may use. Its
+// The review runs in the one T3 project whose folder is a clone of the GitHub sandbox, found by
+// that remote ("queue-runner sandbox GitHub"; it refuses none or several), the only T3 project a
+// live review check may use; the build check's "queue-runner sandbox" is never it. Its
 // checkout of the PR's head is a worktree of that project's own folder, as the app's are, since T3
 // binds a thread only to one of the project's own worktrees (live/sandbox.ts); the lane removes it
 // at the end. When T3 refuses the launch anyway, the check says so. Costs one review thread.
