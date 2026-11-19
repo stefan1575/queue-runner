@@ -16,6 +16,7 @@ import { catalogFromConfig } from '../src/t3/catalog.ts';
 import { T3Mcp } from '../src/t3/mcp.ts';
 import { runtimeAddress } from '../src/t3/real.ts';
 import { T3Ws } from '../src/t3/ws.ts';
+import { mark } from '../src/review/ledger.ts';
 import { FakeReviewGitHub } from './fake-github.ts';
 import { FakeT3 } from './fake-t3.ts';
 
@@ -37,6 +38,8 @@ class ConflictGitHub extends FakeReviewGitHub {
   tipFails = 0;
   pullFails = 0;
   tipReads = 0;
+  threads: Record<string, number> = {};
+  async openThreads(repo: string, n: number) { return this.threads[`${repo}#${n}`] ?? 0; }
   async branchHead(_repo: string, branch: string) {
     this.tipReads++;
     if (this.tipFails > 0) { this.tipFails--; throw new GitHubError('gh api branches failed (1): HTTP 502'); }
@@ -97,6 +100,7 @@ let ws: T3Ws;
 let lines: string[];
 let ended: Job[];
 let lane: ConflictLane;
+let repoNow: BuildRepo;
 
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), 'qr-conflict-'));
@@ -114,6 +118,7 @@ beforeEach(async () => {
   log = await JobLog.open(join(dir, 'state', 'jobs.jsonl'));
   lines = [];
   ended = [];
+  repoNow = APP;
 });
 afterEach(async () => {
   lane?.stop();
@@ -122,7 +127,7 @@ afterEach(async () => {
 
 function makeLane(part: Partial<ConflictLaneDoors> = {}) {
   lane = new ConflictLane({
-    repos: () => [APP], github: gh, git, mcp, ws, gate, catalog: () => catalog, user: async () => 'Pat', log,
+    repos: () => [repoNow], github: gh, git, mcp, ws, gate, catalog: () => catalog, user: async () => 'Pat', log,
     exists: () => true, say: (l) => lines.push(l), ended: (j) => ended.push(j), retry: () => () => {},
     now: () => new Date('2026-11-19T12:00:00Z'), ...part,
   });
@@ -266,12 +271,80 @@ describe('one conflicted PR at a time, oldest first', () => {
     // #4 is on its way to merging (reviewed next): #5 waits to resolve against what it lands on
     await lane.pass();
     expect(t3.launches).toHaveLength(1);
-    expect(lines).toContain("conflict app#5: no conflict round now, PR #4 had a conflict round and hasn't merged or stopped yet: one conflicted PR at a time");
+    expect(lines).toContain('conflict app#5: no conflict round now, PR #4 had a conflict round and is still on its way to merging (1234567 is reviewed next): one conflicted PR at a time');
     // #4 merged: gone from the open list
     gh.reviewPulls['owner/app'] = [pull(5)];
     await lane.pass();
     await until(() => t3.launches.length === 2);
     expect(t3.launches[1].title).toBe('Queue runner conflict: app#5');
+  });
+
+  describe('a PR that had a round holds the others only while the loop moves it (F6)', () => {
+    /** #4 had its round and pushed H2, which merges; #5 conflicts. */
+    async function afterRound4() {
+      gh.reviewPulls['owner/app'] = [pull(4), pull(5)];
+      gh.conflicting.add('owner/app#5');
+      makeLane();
+      await lane.pass();
+      await finish('thread-1', 4, H2);
+      await lane.idle();
+      expect(t3.launches).toHaveLength(1);
+    }
+    async function review4(outcome: 'clean' | 'blocking') {
+      const url = `https://github.com/owner/app/pull/4#issuecomment-1`;
+      (gh.comments['owner/app#4'] ??= []).push({ author: 'me', createdAt: '2026-11-19T11:00:00Z', body: mark(1, outcome, H2, []), url });
+      const r = await log.started({ ...job({ kind: 'review', round: 1, sha: H2 }), title: 'Queue runner review: app#4' });
+      await log.ended(r.id, { outcome, verdict: outcome, link: url });
+    }
+    const goes5 = async () => {
+      await lane.pass();
+      await until(() => t3.launches.length === 2);
+      expect(t3.launches[1].title).toBe('Queue runner conflict: app#5');
+    };
+
+    test('a draft holds nothing', async () => {
+      await afterRound4();
+      gh.reviewPulls['owner/app'] = gh.reviewPulls['owner/app']!.map((p) => (p.number === 4 ? { ...p, draft: true } : p));
+      await goes5();
+    });
+
+    test('a failed check on its head holds nothing', async () => {
+      await afterRound4();
+      gh.checkStates[H2] = { state: 'failed', pending: [], failed: ['tests'] };
+      await goes5();
+    });
+
+    test('a question to the user on its branch holds nothing', async () => {
+      await afterRound4();
+      const fix = await log.started(job({ kind: 'fix', title: 'Queue runner fix: app#4', sha: H2, round: 1 }));
+      await log.ended(fix.id, { outcome: 'waiting', request: 'user_input' });
+      await goes5();
+    });
+
+    test('a clean review where the user merges holds nothing, marked or not', async () => {
+      await afterRound4();
+      await review4('clean');
+      await goes5();
+    });
+
+    test('a clean review where the app merges holds the others until a reply or an open thread leaves it for the user', async () => {
+      repoNow = { ...APP, merge: 'runner' };
+      await afterRound4();
+      await review4('clean');
+      await lane.pass();
+      expect(t3.launches).toHaveLength(1);
+      expect(lines.at(-1)).toContain('PR #4 had a conflict round and is still on its way to merging (clean at 1234567, merged next)');
+      gh.threads['owner/app#4'] = 1;
+      await goes5();
+    });
+
+    test('a blocking review still holds the others: its fix round comes', async () => {
+      await afterRound4();
+      await review4('blocking');
+      await lane.pass();
+      expect(t3.launches).toHaveLength(1);
+      expect(lines.at(-1)).toContain('(review 1 of 1234567 gets its fix round)');
+    });
   });
 
   test('a PR left for the user holds no other back', async () => {

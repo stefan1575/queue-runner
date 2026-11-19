@@ -422,7 +422,8 @@ every open PR in a served repo without a review on its newest commit gets one, w
   passed, `sol-review` not counted (`checks`: check runs and commit statuses). Why not is said once
   per PR. Lowest number first, repo by repo. Last, a head GitHub says conflicts with its base
   (`mergeable: false`) waits, its checks passed or not: its conflict round comes first, and its
-  push is what's reviewed (#157; Conflict rounds, below). Stops (#158) aren't filed yet: a `stop`
+  push is what's reviewed (#157; Conflict rounds, below). `null`, GitHub still working it out, is
+  not known yet: it waits too, and is read again next pass (#157 F5). Stops (#158) aren't filed yet: a `stop`
   or `approach-note` is recorded and posted, and nothing more happens.
 - **One review at a time** (#106 runs them at once later). Each asks the usage gate
   (`UsageGate.pick`, kind `review`): the kind's own model, or its fallback while that provider has
@@ -590,7 +591,8 @@ merge half of `src/github.ts` and `src/git.ts`.
   newest commit, checks passed on it, nothing open. Just before merging the PR is read again: still
   open at H, not a draft, nothing writing to its branch, the repo not held for the user, fewer than
   2 failed merges on H, its newest review comment the clean one on H, checks passed on H
-  (`sol-review` not counted), no conflict, nothing said since the clean review (bots and the
+  (`sol-review` not counted), no conflict (`mergeable` true: `null`, not known yet, waits for a later
+  pass, marks nothing and takes no mark off, #157 F5), nothing said since the clean review (bots and the
   runner's posts aside) and no unresolved review thread (GraphQL, every page). Then
   `PUT pulls/<n>/merge {sha: H, merge_method: merge}`: GitHub's 409 (the head moved meanwhile) is
   `head-moved`, nothing merges, and the review lane is told so the new head is reviewed.
@@ -635,8 +637,10 @@ A PR whose head conflicts with its base gets a conflict round (#157; `docs/flow.
 `branchHead` in `src/github.ts`.
 
 - **Which PRs** (`ConflictLane`): each open PR in a served repo is read (`pull`) for GitHub's
-  `mergeable`; `false` conflicts, and `null` (GitHub still working it out) is no conflict yet. A
-  read that fails leaves the repo for the next pass, never taken as "no conflict". A conflicting
+  `mergeable`; `false` conflicts, and `null` (GitHub still working it out, its usual first answer
+  just after the base moves) is not known yet: that PR gets no round, and no newer conflicting PR
+  goes ahead of it, until a later pass reads GitHub's answer (#157 F5). A read that fails leaves
+  the repo for the next pass, never taken as "no conflict". A conflicting
   PR waits while a job writes to its branch (one writer per PR: the fix and review lanes wait on a
   conflict round the same way), while a review of it runs, and while its head's blocking review
   hasn't had its fix round (that comes first). A head left for the user gets none: a stop on it, a
@@ -644,8 +648,13 @@ A PR whose head conflicts with its base gets a conflict round (#157; `docs/flow.
   without a push, or a `ready-to-merge` mark on it. A repo with a job that needs the user starts
   none.
 - **One conflicted PR at a time,** lowest number first, as today's runner: while a round runs in
-  the repo, or another open PR that had a round isn't left for the user (it's on its way to
-  merging, so the next resolves against the base it lands on), the next waits. One that conflicts
+  the repo, or another open PR that had a round is still being moved by the loop (it's on its way
+  to merging, so the next resolves against the base it lands on), the next waits. Moved means the
+  lanes act on it without the user (`moving`): a job on it (not one waiting on a question), a
+  review running, its head reviewed next (its checks not failed), a blocking review's fix round to
+  come, or a clean review the app merges with no reply since, no unresolved thread and fewer than 2
+  failed merges. A PR waiting on the user holds nothing: a draft, a failed check, a question, a stop
+  or anything left for them, a clean review where the user merges (#157 F6). One that conflicts
   again waits its own turn, so it holds back only higher numbers. A round held by the gate holds
   the rest too.
 - **The round:** the gate picks the conflict kind's model (`UsageGate.pick`, kind `conflict`, its

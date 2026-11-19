@@ -110,7 +110,11 @@ try {
   const only = n;
   const lane = new ConflictLane({
     repos: () => [repo],
-    github: { pullsToReview: async (r) => (await github.pullsToReview(r)).filter((p) => p.number === only), pull: (r, k) => github.pull(r, k), branchHead: (r, b) => github.branchHead(r, b) },
+    github: {
+      pullsToReview: async (r) => (await github.pullsToReview(r)).filter((p) => p.number === only), pull: (r, k) => github.pull(r, k),
+      branchHead: (r, b) => github.branchHead(r, b), checks: (r, sha) => github.checks(r, sha), issueComments: (r, k) => github.issueComments(r, k),
+      reviewReplies: (r, k) => github.reviewReplies(r, k), openThreads: (r, k) => github.openThreads(r, k),
+    },
     git, mcp, ws, catalog: () => catalog, user: async () => 'the live check', log, exists: existsSync, say,
     gate: { pick: () => ({ fits: true, choice, onFallback: false, cost: {} }), started() {}, finished() {}, dropped() {}, forget() {} } as any,
   });
