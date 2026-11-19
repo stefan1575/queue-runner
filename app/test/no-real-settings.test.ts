@@ -1,12 +1,10 @@
 // #172: a test builds its own settings and checks what the code does with them. None reaches the
 // real ones (docs/app.md, Test it), so changing one of Stefan's settings never turns main red.
-import { readdirSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { appTestFiles, hitsInAppTests } from './app-test-files.ts';
 import { realSettingsReads } from './real-settings.ts';
 
-const HERE = import.meta.dirname;
-const SELF = ['no-real-settings.test.ts', 'real-settings.ts'];
+const SELF = ['test/no-real-settings.test.ts', 'test/real-settings.ts'];
 
 describe('no test reaches the real settings', () => {
   it.each([
@@ -78,11 +76,27 @@ describe('no test reaches the real settings', () => {
     expect(realSettingsReads(source)).toEqual([]);
   });
 
+  it('reads a renderer test as JSX', () => {
+    const source = [
+      "test('the page', () => {",
+      "  render(<p>Stefan's page, see https://example.invalid</p>);",
+      "  const dir = homedir();",
+      "});",
+    ].join('\n');
+    expect(realSettingsReads(source, 'renderer/test/page.test.tsx')).toEqual([
+      "3: in test 'the page': the user's home folder: const dir = homedir();",
+    ]);
+  });
+
+  it("reads every app test file, the renderer's included", () => {
+    const files = appTestFiles();
+    expect(files).toContain('test/t3.test.ts');
+    expect(files).toContain('renderer/test/models-page.test.tsx');
+    expect(files).toContain('test/fake-t3.ts');
+    expect(files.filter((f) => f.includes('node_modules'))).toEqual([]);
+  });
+
   it("passes the app's tests", () => {
-    const names = readdirSync(HERE, { recursive: true, encoding: 'utf8' })
-      .filter((name) => name.endsWith('.ts') && !SELF.includes(name));
-    expect(names).toContain('t3.test.ts');
-    const found = names.flatMap((name) => realSettingsReads(readFileSync(join(HERE, name), 'utf8')).map((hit) => `${name}:${hit}`));
-    expect(found).toEqual([]);
+    expect(hitsInAppTests(SELF, realSettingsReads)).toEqual([]);
   });
 });

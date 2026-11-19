@@ -7,6 +7,7 @@
 // It reads the code through TypeScript's parser, so a comment or a string that names a timer is
 // not a use, and a use split over lines is still one.
 import ts from 'typescript';
+import { scriptKind } from './app-test-files.ts';
 import { isTestCall, testNameAt } from './test-names.ts';
 
 const CLOCK = 'the real clock (use vi.useFakeTimers or pass a clock)';
@@ -61,8 +62,8 @@ function onFakeClock(node: ts.Node): boolean {
 /** Each line of `source` that reads the real clock or runs on a real timer, as
  *  `line: in test '<describe > test>': what: the line` (or `outside any test` for a helper at
  *  the top of the file). A use where the fake clock is installed is not one. */
-export function realTimeUses(source: string): string[] {
-  const file = ts.createSourceFile('test.ts', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+export function realTimeUses(source: string, name = 'test.ts'): string[] {
+  const file = ts.createSourceFile(name, source, ts.ScriptTarget.Latest, true, scriptKind(name));
   const lines = source.split('\n');
   const found = new Map<number, string>();
   const visit = (node: ts.Node) => {

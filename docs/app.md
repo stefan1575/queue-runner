@@ -54,7 +54,7 @@ the settings tickets export as `SETTINGS_PATH` (`test/real-settings.ts` lists th
 
 **Tests get time from a fake clock and files from a temp folder** (#202): none waits for real
 time to pass or a real file watcher to fire; `test/no-real-time.test.ts` fails a test that reads
-the real clock or runs on real timers outside `vi.useFakeTimers()`, naming it (`test/real-time.ts`).
+the real clock or runs on real timers outside `vi.useFakeTimers()`, naming it (`test/real-time.ts`). Both checks read every app test file, `renderer/test/` included (`test/app-test-files.ts`).
 
 ## Rules for every rebuild ticket
 

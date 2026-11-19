@@ -2,13 +2,11 @@
 // main red (docs/app.md, Test it). This fails a test file that reads the real clock or runs on
 // real timers, and names the test that does; `no-real-settings.test.ts` does the same for the
 // user's home.
-import { readdirSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { appTestFiles, hitsInAppTests } from './app-test-files.ts';
 import { realTimeUses } from './real-time.ts';
 
-const HERE = import.meta.dirname;
-const SELF = ['no-real-time.test.ts', 'real-time.ts'];
+const SELF = ['test/no-real-time.test.ts', 'test/real-time.ts'];
 
 describe('no test runs on the real clock', () => {
   it.each([
@@ -81,11 +79,26 @@ describe('no test runs on the real clock', () => {
     ]);
   });
 
+  it('reads a renderer test as JSX', () => {
+    const source = [
+      "test('the stamp', () => {",
+      "  render(<p>it's {String(Date.now())}</p>);",
+      "});",
+    ].join('\n');
+    expect(realTimeUses(source, 'renderer/test/page.test.tsx')).toEqual([
+      "2: in test 'the stamp': the real clock (use vi.useFakeTimers or pass a clock): render(<p>it's {String(Date.now())}</p>);",
+    ]);
+  });
+
+  it("reads every app test file, the renderer's included", () => {
+    const files = appTestFiles();
+    expect(files).toContain('test/time-format.test.ts');
+    expect(files).toContain('renderer/test/models-page.test.tsx');
+    expect(files).toContain('test/fake-t3.ts');
+    expect(files.filter((f) => f.includes('node_modules'))).toEqual([]);
+  });
+
   it("passes the app's tests", () => {
-    const names = readdirSync(HERE, { recursive: true, encoding: 'utf8' })
-      .filter((name) => name.endsWith('.ts') && !SELF.includes(name));
-    expect(names).toContain('time-format.test.ts');
-    const found = names.flatMap((name) => realTimeUses(readFileSync(join(HERE, name), 'utf8')).map((hit) => `${name}:${hit}`));
-    expect(found).toEqual([]);
+    expect(hitsInAppTests(SELF, realTimeUses)).toEqual([]);
   });
 });
