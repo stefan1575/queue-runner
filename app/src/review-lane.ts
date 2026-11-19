@@ -8,7 +8,7 @@
 //   ->  a detached checkout of H in the state folder, the repo's dependencies linked in
 //   ->  the inputs in a run folder (the diffs, the PR, the issues it closes, what's been said,
 //       the screenshots) and the brief (src/briefs/review.ts)
-//   ->  t3_thread_launch in the project's folder, told to work in the checkout
+//   ->  t3_thread_launch with the checkout as its working folder (T3's existing_worktree)
 //   ->  its end from T3's thread events; its reply read whole
 //   ->  decide (src/review/ledger.ts): the verdict from the reply's sol-findings block
 //   ->  post (src/review/post.ts): follow-ups, the comment, sol-review on H, the Review row
@@ -370,7 +370,7 @@ export class ReviewLane {
       if (!served()) throw new NotStarted(`${repo.title} is no longer served`);
       this.d.say(`${name}: ${reviewer} reviews ${h.slice(0, 7)} (review ${round}) in ${runDir}`);
       try {
-        launched = await launchJob(this.d.mcp, catalog, { kind: 'review', projectId: repo.id, title, brief, choice: letIn.choice, toolFree: this.d.toolFree(),
+        launched = await launchJob(this.d.mcp, catalog, { kind: 'review', projectId: repo.id, title, brief, worktreePath: wt, choice: letIn.choice, toolFree: this.d.toolFree(),
           buildInstance: kindModels(this.d.jobs(), 'build', catalog).choice?.provider ?? null });
       } catch (e) {
         // sent and its answer lost: T3 may have started the thread, and nothing says which one it

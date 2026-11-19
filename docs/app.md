@@ -438,11 +438,11 @@ every open PR in a served repo without a review on its newest commit gets one, w
   `<state>/checkouts/<repo>-pr<n>`, its dependencies linked in from `<state>/deps/`
   (`src/review/deps.ts`: one `npm ci` or `bun install --frozen-lockfile` per lockfile key, the
   three newest kept per repo). It's removed after the review, `node_modules` unlinked first.
-- **The thread:** `launchJob` with kind `review` in the project's folder, no worktree (T3 starts a
-  thread only in a project folder or a worktree it makes), titled `Queue runner review:
-  <project>#<n>`. The brief (`src/briefs/review.ts`, `templates/review.md` and today's `_brief`)
-  opens by sending it to the checkout and asks for no posts, no questions and tests in the
-  foreground. Its inputs are in `<state>/runs/<repo>-pr<n>-r<K>-<time>/`, as today's: the diffs,
+- **The thread:** `launchJob` with kind `review`, its working folder the checkout of H (T3's
+  `workspaceStrategy: {type: existing_worktree, worktreePath}`: the checkout is a worktree of the
+  project's repo), titled `Queue runner review: <project>#<n>`. The brief (`src/briefs/review.ts`,
+  `templates/review.md` and today's `_brief`) names the checkout too, leaves the project's clone
+  alone, and asks for no posts, no questions and tests in the foreground. Its inputs are in `<state>/runs/<repo>-pr<n>-r<K>-<time>/`, as today's: the diffs,
   `pr.md`, each closed issue with its comments, `conversation.md`, `evidence/`. Its end comes
   from T3's thread events (Builds); its reply is the run's last assistant message, read whole
   through `t3_thread_read` (`view: messages`, paged, then `textOffset` while truncated; T3's CLI's

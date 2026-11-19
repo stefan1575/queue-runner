@@ -25,7 +25,8 @@ describe('reviewBrief', () => {
   test('review 1: the checkout, the exact commit, the inputs, and nothing left unfilled', () => {
     const b = reviewBrief(input);
     expect(b).toContain('it means `C:/state/checkouts/app-pr4`');
-    expect(b).toContain("starts in the repo's own clone (`C:/code/app`)");
+    expect(b).toContain('the folder this thread starts in');
+    expect(b).toContain("The repo's own clone (`C:/code/app`) isn't the PR");
     expect(b).toContain(`exactly ${SHA} (abcdef1)`);
     expect(b).toContain("- `change.diff`: the PR's whole diff against `main`");
     expect(b).toContain('4. **Tests:** do the tests cover the behaviour it changes? Run `npm test`.');

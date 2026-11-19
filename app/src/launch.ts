@@ -23,8 +23,12 @@ export type Job = {
   title: string;
   /** The message the thread starts with. */
   brief: string;
-  /** A new worktree T3 makes from `baseRef` on a new branch; without one, the project's folder. */
+  /** A new worktree T3 makes from `baseRef` on a new branch; without one (or `worktreePath`), the
+   *  project's folder. */
   worktree?: { baseRef: string; branch: string };
+  /** A worktree of the project's repo that exists already, the thread's working folder (T3's
+   *  `existing_worktree`): a review's detached checkout of H. */
+  worktreePath?: string;
   /** What it runs on: the choice the gate let in. */
   choice: ModelChoice;
   /** A review's: the instances set up without outside tools, and the one builds run on. A review
@@ -68,7 +72,8 @@ export async function launchJob(mcp: Pick<T3Mcp, 'call'>, catalog: Catalog, job:
   const launched = await mcp.call('t3_thread_launch', {
     projectId: job.projectId, title: job.title, message: job.brief, runtimeMode: 'full-access',
     modelSelection: modelSelection(choice, catalog),
-    ...(job.worktree ? { workspaceStrategy: { type: 'worktree', ...job.worktree } } : {}),
+    ...(job.worktree ? { workspaceStrategy: { type: 'worktree', ...job.worktree } }
+      : job.worktreePath ? { workspaceStrategy: { type: 'existing_worktree', worktreePath: job.worktreePath } } : {}),
   });
   return { threadId: launched?.threadId, runId: launched?.runId ?? null, link: launched?.link ?? null, choice };
 }

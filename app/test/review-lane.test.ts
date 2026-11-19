@@ -141,7 +141,8 @@ describe('a review', () => {
 
     const launch = t3.launches[0];
     expect(launch).toMatchObject({ projectId: 'p-app', title: 'Queue runner review: app#4', runtimeMode: 'full-access', modelSelection: { instanceId: 'codex', model: 'gpt-6.2-sol', options: [{ id: 'reasoningEffort', value: 'high' }] } });
-    expect(launch.workspaceStrategy).toBeUndefined();
+    // the thread's working folder is the checkout of H, not the project's clone (F17)
+    expect(launch.workspaceStrategy).toEqual({ type: 'existing_worktree', worktreePath: join(dir, 'state', 'checkouts', 'app-pr4') });
     const wt = join(dir, 'state', 'checkouts', 'app-pr4').replace(/\\/g, '/');
     expect(launch.message).toContain(`it means \`${wt}\``);
     expect(launch.message).toContain(`exactly ${H}`);

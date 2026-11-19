@@ -143,6 +143,8 @@ try {
   const shell = await ws.first('orchestration.subscribeShell', {});
   const thread = [...(shell.snapshot?.threads ?? []), ...(shell.snapshot?.archivedThreads ?? [])].find((t: any) => t.id === job.threadId);
   check('its thread is settled', Boolean(thread?.settledAt) || thread?.settledOverride === 'settled', `settledAt ${thread?.settledAt ?? null}`);
+  const norm = (p: unknown) => String(p ?? '').replace(/\\/g, '/').toLowerCase();
+  check('it ran in its checkout of the head, not the clone', Boolean(job.checkout) && norm(thread?.worktreePath) === norm(job.checkout), String(thread?.worktreePath ?? null));
   check("its run was on the review kind's model", thread?.modelSelection?.model === choice.model, JSON.stringify(thread?.modelSelection));
   check('the checkout is gone', !run(clone, 'git', 'worktree', 'list').includes('checkouts'));
   console.log(`Run folder kept for reading: ${runDir}`);

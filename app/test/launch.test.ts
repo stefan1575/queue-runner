@@ -72,6 +72,11 @@ describe('launching a job', () => {
     expect(t3.launches[0].workspaceStrategy).toEqual({ type: 'worktree', baseRef: 'origin/main', branch: 'claude/x-7' });
   });
 
+  test('a worktree that exists already is bound as the thread\'s working folder', async () => {
+    await launchJob(mcp, catalog, { ...job, kind: 'build', choice: catalog.t3Default!, worktreePath: 'C:/state/checkouts/app-pr4' });
+    expect(t3.launches[0].workspaceStrategy).toEqual({ type: 'existing_worktree', worktreePath: 'C:/state/checkouts/app-pr4' });
+  });
+
   test("a kind's fallback, given, is what launches", async () => {
     const f = last(a);
     const jobs: Jobs = { ...DEFAULT_JOBS, review: { own: null, fallback: { provider: f.provider, model: f.model, effort: f.effort } } };

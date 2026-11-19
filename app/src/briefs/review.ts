@@ -1,9 +1,8 @@
 // The review brief (#155): today's `queue_runner/templates/review.md` and the brief the Python
 // reviewer builds around it (`review.Reviewer._brief`), ported. Self-contained (docs/app.md,
 // Rules): no skill, no slash command, nothing outside the repo but the run folder the app writes
-// the review's inputs to. A review runs as a T3 thread in the project's folder, since T3 starts a
-// thread in a project folder or a worktree it makes itself; the opening tells it to work in the
-// app's checkout of H instead, as today's fallback review's does. It has no outside tools
+// the review's inputs to. A review's T3 thread starts in the app's checkout of H, a worktree of
+// the project's repo (T3's `existing_worktree`); the opening names it too. It has no outside tools
 // (docs/reviews.md): its provider instance is set up without them, and the brief asks for none.
 import { OPEN, TAGS, norm, state, type Comment, type Finding, type Review } from '../review/ledger.ts';
 
@@ -34,9 +33,9 @@ export type ReviewBriefInput = {
 const TEMPLATE = `## First: where you are
 
 You review this PR. Where the brief below says "this workdir", it means \`$checkout\`: a throwaway
-checkout of the PR's head the queue runner made. Run every command there (\`cd $checkout\` first)
-and read the repo there. This thread starts in the repo's own clone (\`$project\`): change nothing
-in it, and change nothing outside the workdir but tests you add there. Don't post on GitHub, push,
+checkout of the PR's head the queue runner made, and the folder this thread starts in. Run every
+command there and read the repo there. The repo's own clone (\`$project\`) isn't the PR: change
+nothing in it, and change nothing outside the workdir but tests you add there. Don't post on GitHub, push,
 comment or open anything there: the queue runner posts your reply as the review comment. Your
 reply is the review, and its last sol-findings block is its verdict. Ask nothing: nobody is there
 to answer. Run tests in the foreground and wait for them: a review has no outside tools, so
