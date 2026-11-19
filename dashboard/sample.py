@@ -41,6 +41,7 @@ DEFAULT = "busy"
 # Takes of the page before this one, kept while its look is being agreed: `serve.py` serves the
 # ones in `dashboard/earlier/` on the sample addresses, and the sidebar's sample menu links them.
 EARLIER = [
+    {"href": "/earlier/take-27.html", "label": "Take 27", "note": "The Overview: the board, the lanes, then Progress or Now, next, then"},
     {"href": "/earlier/take-25.html", "label": "Take 25", "note": "The Overview four ways: the plate first, a table by effort, a roadmap track, written out"},
     {"href": "/earlier/take-24.html", "label": "Take 24", "note": "The Queue as settled (#30), the Overview still take 9's three cards"},
     {"href": "/earlier/take-11.html", "label": "Take 11", "note": "The Queue as #107 and #109 decide it: repo by repo, side by side, one numbered list"},
@@ -293,6 +294,7 @@ def build(name: str = DEFAULT, base: datetime | None = None, control: dict | Non
         "prs": _prs(ago),
     }
     snap["activity"] = _activity(snap["prs"], ago)
+    snap["history"] = _history(ago)
     held = {i["feature"] for i in snap["issues"]}
     snap["features"] = [{k: e[k] for k in ("id", "repo", "n", "title")} for e in snap["efforts"] if e["id"] in held]
     _vary(snap, name, ago, ahead)
@@ -657,6 +659,126 @@ def _activity(prs: list[dict], ago) -> list[dict]:
         e(day + 300, "runner", "Claude waited 2 h for its session to reset", "A fix round needed 34% and 21% was left"),
     ]
     return sorted(rows, key=lambda r: datetime.fromisoformat(r["at"]), reverse=True)
+
+
+# PROTOTYPE (#29, take 28): 60 days of tickets the runner took through, so the Overview's
+# look-back views have something to count. Made up, seeded so it's the same on every start. Each
+# ticket: its repo, number, title, effort, PR, `outcome` ("merged", "closed" never merged, or "open"
+# still going), review `rounds`, `stops` (why it came to Stefan), Claude's `usage` in percent of the
+# week, and `events` oldest first, each with `at`, `kind` (build, review, fix, conflict, stop,
+# answer, wait, merge, close), `by` (claude, chatgpt, you, runner), `text`, the `minutes` it took
+# and its `usage`.
+_HISTORY_TITLES = {
+    QR: [("Rebuild", t) for t in (
+        "The app reads its repos from T3's projects", "A job's thread is found again after a restart",
+        "The usage gate reads both windows", "Each job kind names its model", "Reviews fall back to a second model",
+        "The build brief ends with the push list", "A settle that failed is tried again", "Learned costs per model",
+        "The window's tray icon", "Logon entry for the app", "Fake clock for the app's tests",
+        "A stop is filed on its needs-info issue", "The review ledger in the PR body", "Approach note after review 3",
+        "Conflict rounds merge main in", "Snapshot written every pass", "Wake tasks survive DST", "Usage endpoint retries on 429",
+    )] + [("No effort", t) for t in ("Tests clean up their temp folders", "Docs: the live check", "Rename ready-for-stefan")],
+    LD: [("Callers", t) for t in ("Callers list: sort by last call", "Caller notes on the caller's page", "Callers list: filter by tag",
+                                  "Archive view for old callers", "Call length on every call")]
+        + [("Client phone setup", t) for t in ("Ring-to number in the call log", "A Client's Twilio number on their page",
+                                               "Verify a Client's Twilio account", "Ring-to number per Client")]
+        + [("Unassigned leads", t) for t in ("Unassigned: assign several at once", "Unassigned: who called last", "Unassigned count in the header")],
+    GB: [("Game Backdrop", t) for t in ("Tray app that restyles a windowed game", "Black backdrop bound to the game",
+                                        "Backdrop follows the game across monitors", "Settings saved per game", "Exit cleanly when the game closes")],
+}
+STOP_WHY = {
+    "review": "Still blocking after review 3", "question": "The build stopped with a question",
+    "tests": "Tests failed and no one could tell why", "usage": "Usage ran out mid-job",
+}
+
+
+def _history(ago) -> list[dict]:
+    import random
+    rnd = random.Random(28)
+    out = []
+    plan = {QR: (34, 120, "runner"), LD: (20, 160, "stefan"), GB: (8, 30, "stefan")}
+    for repo, (count, first, merger) in plan.items():
+        titles = _HISTORY_TITLES[repo]
+        for k in range(count):
+            # Older work is sparser: start times lean towards the recent end of the 60 days.
+            start = 60 * DAY * (1 - (k + rnd.random()) / count) ** 1.15 + rnd.uniform(60, 600)
+            if repo == GB:
+                start += 8 * DAY   # game-backdrop has gone quiet for a week
+            effort, title = titles[k % len(titles)]
+            n = first + k
+            t = [start]
+            events = []
+
+            def step(kind, by, text, minutes, usage=None):
+                events.append({"at_min": t[0], "kind": kind, "by": by, "text": text, "minutes": round(minutes), "usage": usage})
+                t[0] -= minutes
+
+            roll = rnd.random()
+            closed = roll < 0.06
+            question = 0.06 <= roll < 0.11
+            stuck = 0.11 <= roll < 0.19
+            rounds_to_clean = 1 if roll < 0.52 else 2 if roll < 0.82 else 3
+            if stuck:
+                rounds_to_clean = 4
+            step("build", "claude", f"Built it and opened PR #{n + 400}", rnd.uniform(25, 80), round(rnd.uniform(2.5, 7.5), 1))
+            stops = []
+            if question:
+                step("stop", "runner", f"Stopped for you: {STOP_WHY['question']}", 0)
+                stops.append("question")
+                step("wait", "you", "Waited for your answer", rnd.uniform(60, 14 * 60))
+                step("answer", "you", "You answered in the decision thread", 0)
+                step("build", "claude", "Carried on building from your answer", rnd.uniform(15, 40), round(rnd.uniform(1.5, 4), 1))
+            if closed:
+                step("review", "chatgpt", "Review 1: blocking", rnd.uniform(12, 25))
+                step("close", "you", rnd.choice(["Closed: superseded by a rebuild ticket", "Closed: the approach was wrong, filed again"]), 0)
+                outcome = "closed"
+            else:
+                for r in range(1, rounds_to_clean + 1):
+                    if r == 3 and stuck:
+                        step("review", "chatgpt", "Review 3: still blocking", rnd.uniform(12, 25))
+                        step("stop", "runner", f"Stopped for you: {STOP_WHY['review']}", 0)
+                        stops.append("review")
+                        step("wait", "you", "Waited for your answer", rnd.uniform(90, 26 * 60))
+                        step("answer", "you", rnd.choice(["You answered: fix on", "You answered: rework"]), 0)
+                        step("fix", "claude", "Fix round 3 pushed", rnd.uniform(20, 45), round(rnd.uniform(1.5, 4), 1))
+                        continue
+                    if r == rounds_to_clean:
+                        step("review", "chatgpt", f"Review {r}: clean", rnd.uniform(10, 22))
+                        break
+                    step("review", "chatgpt", f"Review {r}: blocking", rnd.uniform(12, 25))
+                    if rnd.random() < 0.08:
+                        step("stop", "runner", f"Stopped for you: {STOP_WHY['tests']}", 0)
+                        stops.append("tests")
+                        step("wait", "you", "Waited for your answer", rnd.uniform(30, 6 * 60))
+                        step("answer", "you", "You answered: a flake, carry on", 0)
+                    elif rnd.random() < 0.06:
+                        step("stop", "runner", f"Held: {STOP_WHY['usage']}", 0)
+                        stops.append("usage")
+                        step("wait", "runner", "Waited for the usage reset", rnd.uniform(60, 4 * 60))
+                    step("fix", "claude", f"Fix round {r} pushed", rnd.uniform(12, 38), round(rnd.uniform(1, 3.2), 1))
+                if rnd.random() < 0.1:
+                    step("conflict", "claude", "Conflict with main, merged it in", rnd.uniform(8, 20), round(rnd.uniform(0.5, 1.5), 1))
+                if merger == "runner":
+                    step("merge", "runner", "Merged: clean on its head, checks passed", rnd.uniform(5, 12))
+                else:
+                    step("wait", "you", "Ready to merge, waited for you", rnd.uniform(40, 30 * 60))
+                    step("merge", "you", "You merged it", 0)
+                outcome = "merged"
+            # Anything that would land after now hasn't happened yet: the ticket is still going.
+            kept = [e for e in events if e["at_min"] > 0]
+            if not kept:
+                continue
+            if len(kept) < len(events):
+                outcome = "open"
+            for e in kept:
+                e["at"] = ago(e.pop("at_min"))
+            out.append({
+                "repo": repo, "n": n, "title": title, "effort": effort, "pr": n + 400, "outcome": outcome,
+                "rounds": sum(1 for e in kept if e["kind"] == "review"),
+                "stops": stops[: sum(1 for e in kept if e["kind"] == "stop")],
+                "usage": round(sum(e["usage"] or 0 for e in kept), 1), "events": kept,
+                "url": f"{GH[repo]}/issues/{n}",
+            })
+    return out
 
 
 def _lane(snap: dict, id: str) -> dict:

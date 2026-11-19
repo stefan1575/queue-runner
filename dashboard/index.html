@@ -47,6 +47,15 @@
     on you by number), or ?variant=b, Now / Next / Then per repo (the columns a thread draws when
     asked for the roadmap). ?theme=light|dark holds a theme. Take 25's four looks are
     earlier/take-25.html; take 9's three cards are overviewTake9() and earlier/take-24.html.
+  - PROTOTYPE, with sample data only (#29, take 28): under the board and the lanes, a slot that
+    looks back, different for all repositories and for one (research:
+    .scratch/queue-runner/research/overview-page-patterns.md). ?variant=a|b|c switches both. All
+    repositories: A a row per repo (state, in flight, last merge, merged over 14 days, Claude's
+    week), B the last 7 days as numbers that list their tickets, C two weeks of tickets as tracks.
+    One repo: A the last 30 days as numbers that list their tickets, each opening its
+    back-and-forth; B where it gets stuck; C each ticket's journey as a bar of its steps. The
+    sample's `history` is new for this take. A repo with no favicon shows its first two letters
+    in capitals. Take 27 is earlier/take-27.html.
   - A feature's bar has a cell per ticket, left to right: done (done means live), merged but not
     live, in a PR, building, waiting on you, ready, blocked. Colour is the state's family and a
     hatched cell is the earlier step in it: green hatched is merged and not live, amber hatched
@@ -1496,6 +1505,177 @@ body.page-ov26 .top-col, body.page-ov26 main { max-width: 1480px; }
 .ov27-none { margin: 2px 4px; color: var(--dim); font-size: 14px; }
 @media (max-width: 1300px) { .ov27-board { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (max-width: 760px) { .ov27-board { grid-template-columns: minmax(0, 1fr); } }
+
+/* ---------------------------------------------------------------- overview, take 28 (PROTOTYPE, #29) */
+/* The slot under the board and the lanes looks back, and differs by scope: all repositories or one. */
+.o28-pad { padding: 16px; display: grid; gap: 16px; }
+.o28 > .q12-head h2 { white-space: nowrap; }
+.o28 i { font-style: normal; }
+.o28 .s { display: inline-block; }
+.s.work { background: var(--run-fill); }
+.s.rev { background: var(--btn-line); }
+.s.you { background: var(--you); }
+.s.held { background: repeating-linear-gradient(135deg, var(--btn-line) 0 3px, transparent 3px 6px); box-shadow: inset 0 0 0 1px var(--btn-line); }
+.o28-key { display: inline-flex; flex-wrap: wrap; gap: 4px 14px; margin-left: auto; font-size: 13px; color: var(--mute); }
+.o28-key span { display: inline-flex; align-items: center; gap: 6px; }
+.o28-key .s, .o28-key .tick { width: 12px; height: 12px; border-radius: 3px; position: static; }
+.o28-key .tick { width: 3px; background: var(--bad); }
+.o28-dim { color: var(--dim); }
+.o28-sub { margin: -4px 0 10px; color: var(--mute); font-size: 13.5px; }
+.o28-empty { color: var(--mute); padding: 6px 2px; }
+
+/* tiles that filter a list */
+.o28-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(124px, 1fr)); gap: 10px; }
+.o28-tile { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 12px 14px 13px; text-align: left; border: 1px solid var(--line); border-radius: 12px; background: var(--sunk); color: var(--ink); cursor: pointer; font: inherit; }
+.o28-tile:hover { border-color: var(--btn-line); }
+.o28-tile.on { border-color: var(--ink-2); box-shadow: inset 0 0 0 1px var(--ink-2); background: var(--surface); }
+.o28-tl { font-size: 13.5px; color: var(--mute); }
+.o28-tile b { font: 600 28px/1.1 var(--display); font-variant-numeric: tabular-nums; }
+.o28-d { font-size: 12.5px; color: var(--dim); }
+
+/* a list of tickets, each opening its story */
+.o28-listhead { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.o28-listhead h3 { display: inline-flex; align-items: center; gap: 8px; font: 600 15px/1.3 var(--sans); }
+.o28-listhead .link { margin-left: auto; }
+.o28-list, .o28-journeys { display: grid; gap: 0; border: 1px solid var(--line-soft); border-radius: 12px; overflow: hidden; }
+.o28-row + .o28-row, .o28-jrow + .o28-jrow { border-top: 1px solid var(--line-soft); }
+.o28-rb, .o28-jb { width: 100%; display: grid; align-items: center; gap: 12px; padding: 10px 14px; background: none; border: 0; color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
+.o28-rb { grid-template-columns: 16px auto auto minmax(0, 1fr) auto 84px 56px 52px; }
+.o28-rb:not(:has(.rlogo)) { grid-template-columns: 16px auto minmax(0, 1fr) auto 84px 56px 52px; }
+.o28-rb:hover, .o28-jb:hover { background: var(--hover); }
+.o28-chev .i { width: 14px; height: 14px; color: var(--dim); transition: transform .12s; }
+.o28-row.open .o28-chev .i { transform: rotate(90deg); }
+.o28-n { font-weight: 500; font-size: 14px; color: var(--mute); font-variant-numeric: tabular-nums; }
+.o28-title { display: flex; flex-direction: column; min-width: 0; }
+.o28-title b { font-weight: 600; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.o28-title > span { font-size: 13px; color: var(--dim); }
+.o28-chips { display: inline-flex; gap: 6px; }
+.o28-c { font-size: 12.5px; line-height: 20px; padding: 0 8px; border-radius: 10px; border: 1px solid var(--line); color: var(--ink-2); white-space: nowrap; }
+.o28-c.done { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, transparent); }
+.o28-c.you { color: var(--you); border-color: var(--you-line); background: var(--you-wash); }
+.o28-c.run { color: var(--run); border-color: color-mix(in srgb, var(--run) 45%, transparent); }
+.o28-num { text-align: right; font-size: 13.5px; color: var(--mute); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.o28-story { padding: 4px 14px 14px 42px; background: var(--sunk); border-top: 1px solid var(--line-soft); }
+.o28-story ol { display: grid; }
+.o28-story li { display: grid; grid-template-columns: 110px 104px minmax(0, 1fr) 64px 52px; gap: 10px; align-items: baseline; padding: 7px 0 7px 12px; border-left: 3px solid var(--line); font-size: 14px; }
+.o28-story li.f-work { border-left-color: var(--run-fill); }
+.o28-story li.f-you { border-left-color: var(--you); }
+.o28-story li.f-stop { border-left-color: var(--bad); }
+.o28-story li.f-stop .o28-what { color: var(--bad); font-weight: 600; }
+.o28-story li.f-done { border-left-color: var(--ok); }
+.o28-story li.f-done .o28-what { color: var(--ok); font-weight: 600; }
+.o28-at { color: var(--dim); font-size: 13px; }
+.o28-who { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-2); font-weight: 500; }
+.o28-who svg { width: 14px; height: 14px; }
+.o28-took, .o28-use { text-align: right; color: var(--mute); font-size: 13px; font-variant-numeric: tabular-nums; }
+.o28-links { display: flex; flex-wrap: wrap; gap: 14px; margin: 10px 0 0 12px; font-size: 13.5px; color: var(--mute); }
+.o28-links a { color: var(--ink-2); }
+.o28-links span { margin-left: auto; }
+
+/* all repositories, A: a row per repo */
+.o28-rows { padding: 6px 8px 8px; }
+.o28-rowhead, .o28-repo { display: grid; grid-template-columns: minmax(0, 1fr) 132px 84px 236px 128px 16px; gap: 14px; align-items: center; }
+.o28-rowhead { padding: 8px 12px; font-size: 12.5px; color: var(--dim); }
+.o28-repo { width: 100%; padding: 14px 12px; border: 0; border-top: 1px solid var(--line-soft); background: none; color: var(--ink); font: inherit; text-align: left; cursor: pointer; border-radius: 8px; }
+.o28-repo:hover { background: var(--hover); }
+.o28-rname { display: grid; grid-template-columns: 28px minmax(0, 1fr); grid-template-areas: "l n" "l f"; column-gap: 10px; align-items: center; }
+.o28-rname .rlogo { grid-area: l; }
+.o28-rname b { grid-area: n; }
+.o28-rname .rlogo { width: 28px; height: 28px; border-radius: 7px; font-size: 12px; }
+.o28-rname b { font-weight: 600; font-size: 15.5px; }
+.o28-state { display: inline-flex; align-items: center; gap: 6px; font-size: 13.5px; font-weight: 600; padding: 2px 10px; border-radius: 12px; border: 1px solid var(--line); color: var(--ink-2); }
+.o28-state::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.o28-state.bad { color: var(--bad); border-color: var(--bad-line); background: var(--bad-wash); }
+.o28-state.you { color: var(--you); border-color: var(--you-line); background: var(--you-wash); }
+.o28-state.run { color: var(--run); border-color: color-mix(in srgb, var(--run) 40%, transparent); background: var(--run-wash); }
+.o28-state.idle, .o28-state.off { color: var(--mute); }
+.o28-flight { grid-area: f; color: var(--mute); font-size: 13.5px; }
+.o28-last { font-variant-numeric: tabular-nums; color: var(--ink-2); }
+.o28-last.old { color: var(--run); font-weight: 600; }
+.o28-merged { display: flex; align-items: center; gap: 10px; font-size: 13.5px; color: var(--mute); }
+.o28-merged b { color: var(--ink); font-size: 15px; }
+.o28-spark { display: inline-flex; align-items: flex-end; gap: 2px; width: 84px; height: 26px; flex: none; }
+.o28-spark i { flex: 1; background: var(--ok); border-radius: 1.5px; opacity: .85; }
+.o28-spark i.z { background: var(--line); opacity: 1; }
+.o28-use { display: flex; flex-direction: column; font-size: 13px; color: var(--mute); }
+.o28-use b { color: var(--ink); font-size: 15px; }
+.o28-go .i { width: 16px; height: 16px; color: var(--dim); }
+
+/* all repositories, C: two weeks as tracks */
+.o28-axis { position: relative; height: 18px; margin-left: 200px; font-size: 12px; color: var(--dim); }
+.o28-axis span { position: absolute; top: 0; white-space: nowrap; padding-left: 4px; border-left: 1px solid var(--line-soft); }
+.o28-track { display: grid; grid-template-columns: 188px minmax(0, 1fr); gap: 12px; align-items: start; padding: 10px 0; border-top: 1px solid var(--line-soft); }
+.o28-tname { display: grid; grid-template-columns: 28px 1fr; grid-template-areas: "l n" "l s"; column-gap: 10px; align-items: center; background: none; border: 0; color: var(--ink); font: inherit; text-align: left; cursor: pointer; padding: 4px; border-radius: 8px; }
+.o28-tname:hover { background: var(--hover); }
+.o28-tname .rlogo { grid-area: l; width: 28px; height: 28px; border-radius: 7px; font-size: 12px; }
+.o28-tname b { grid-area: n; font-weight: 600; }
+.o28-tname span { grid-area: s; font-size: 13px; color: var(--mute); }
+.o28-lane { position: relative; background: repeating-linear-gradient(90deg, var(--line-soft) 0 1px, transparent 1px calc(100% / 14)); border-radius: 6px; }
+.o28-quiet { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--run); font-size: 13.5px; font-weight: 600; }
+.o28-bar { position: absolute; height: 18px; min-width: 5px; padding: 0; border: 0; border-radius: 4px; background: var(--sunk); box-shadow: inset 0 0 0 1px var(--btn-line); overflow: visible; cursor: pointer; }
+.o28-bar .s { position: absolute; top: 2px; bottom: 2px; border-radius: 2px; }
+.o28-bar .tick { position: absolute; top: -3px; bottom: -3px; width: 3px; margin-left: -1px; background: var(--bad); border-radius: 2px; }
+.o28-bar.merged::after { content: ""; position: absolute; right: -4px; top: 5px; width: 8px; height: 8px; border-radius: 50%; background: var(--ok); }
+.o28-bar.on, .o28-bar:hover { box-shadow: inset 0 0 0 2px var(--ink); z-index: 2; }
+.o28-picked { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.o28-picked > .o28-listhead { padding: 10px 14px; }
+.o28-picked .o28-story { padding-left: 14px; }
+
+/* one repo, B: where it gets stuck */
+.o28-panels { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.o28-panel { padding: 14px 16px 16px; border: 1px solid var(--line-soft); border-radius: 12px; background: var(--sunk); }
+.o28-panel h3 { font: 600 15px/1.3 var(--sans); margin-bottom: 10px; }
+.o28-hbars { display: grid; gap: 6px; }
+.o28-h { display: grid; grid-template-columns: 100px minmax(0, 1fr) 30px; align-items: center; gap: 10px; padding: 4px 6px; border: 0; border-radius: 6px; background: none; color: var(--ink-2); font: inherit; font-size: 14px; text-align: left; cursor: pointer; }
+.o28-h i { height: 14px; border-radius: 3px; background: var(--ok); min-width: 2px; }
+.o28-h:last-child i { background: var(--btn-line); }
+.o28-h b { text-align: right; font-variant-numeric: tabular-nums; }
+.o28-h:hover, .o28-why:hover { background: var(--hover); }
+.o28-h.on, .o28-why.on { background: var(--surface); box-shadow: inset 0 0 0 1px var(--ink-2); }
+.o28-whys { display: grid; gap: 4px; }
+.o28-why { display: grid; grid-template-columns: 34px minmax(0, 1fr); align-items: baseline; gap: 8px; padding: 6px; border: 0; border-radius: 6px; background: none; color: var(--ink-2); font: inherit; font-size: 14.5px; text-align: left; cursor: pointer; }
+.o28-why b { font: 600 20px/1 var(--display); color: var(--you); text-align: right; }
+.o28-split { display: flex; height: 22px; gap: 2px; border-radius: 5px; overflow: hidden; }
+.o28-split .s { flex-basis: 0; }
+.o28-splitkey { display: grid; gap: 6px; margin-top: 12px; }
+.o28-splitkey li { display: grid; grid-template-columns: 12px minmax(0, 1fr) 44px 64px; gap: 10px; align-items: center; font-size: 14px; }
+.o28-splitkey .s { width: 12px; height: 12px; border-radius: 3px; }
+.o28-splitkey b { text-align: right; }
+.o28-splitkey .o28-dim { text-align: right; font-size: 13px; }
+.o28-cols { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 8px; height: 130px; align-items: end; }
+.o28-cols div { display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 4px; height: 100%; }
+.o28-cols i { width: 100%; max-width: 30px; background: var(--run-fill); border-radius: 3px 3px 0 0; }
+.o28-cols span { font-size: 12px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.o28-cols em { font-style: normal; font-size: 11.5px; color: var(--dim); white-space: nowrap; }
+
+/* one repo, C: ticket journeys */
+.o28-jb { grid-template-columns: minmax(220px, 1fr) minmax(0, 2.2fr) 22px 60px 52px; }
+.o28-journey { position: relative; display: flex; gap: 2px; height: 26px; }
+.o28-journey .s { flex-basis: 0; min-width: 3px; border-radius: 3px; display: flex; align-items: center; overflow: hidden; }
+.o28-journey .s span { font-style: normal; padding: 0 6px; font-size: 12px; font-weight: 600; white-space: nowrap; color: var(--you-ink); }
+.o28-journey .s.work span { color: #1d1500; }
+.o28-journey .s.rev span, .o28-journey .s.held span { color: var(--ink); }
+.o28-stopflag { position: absolute; right: 4px; top: -9px; font-size: 11px; font-style: normal; font-weight: 700; color: var(--bad); background: var(--surface); padding: 0 4px; border-radius: 4px; box-shadow: inset 0 0 0 1px var(--bad-line); }
+.o28-end { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; font-style: normal; font-size: 12px; color: var(--mute); box-shadow: inset 0 0 0 1px var(--line); }
+.o28-end .i { width: 14px; height: 14px; }
+.o28-end.done { color: var(--ok); box-shadow: inset 0 0 0 1px currentColor; }
+.o28-end.run { color: var(--run); }
+.o28-jrow .o28-story { padding-left: 14px; }
+
+@media (max-width: 1100px) {
+  .o28-rowhead { display: none; }
+  .o28-repo { grid-template-columns: 1fr auto; row-gap: 8px; }
+  .o28-panels { grid-template-columns: minmax(0, 1fr); }
+  .o28-rb, .o28-rb:not(:has(.rlogo)) { grid-template-columns: 16px auto minmax(0, 1fr) auto; }
+  .o28-rb .o28-num { display: none; }
+  .o28-jb { grid-template-columns: minmax(0, 1fr) 22px; }
+  .o28-jb .o28-journey { grid-column: 1 / -1; }
+  .o28-jb .o28-num { display: none; }
+  .o28-track { grid-template-columns: minmax(0, 1fr); }
+  .o28-axis { margin-left: 0; }
+  .o28-story li { grid-template-columns: 90px minmax(0, 1fr); }
+  .o28-story .o28-who, .o28-story .o28-took, .o28-story .o28-use { display: none; }
+}
 </style>
 </head>
 <body>
@@ -1565,13 +1745,14 @@ const PAGES = [["overview", "Overview"], ["inbox", "Inbox"], ["queue", "Queue"],
 const UNBUILT = [];   // pages still as they were before the split
 // PROTOTYPE (#29, take 25): the Overview, four ways, ?variant=a|b|c|d. (The Queue's lanes were
 // switched the same way until take 16.)
-const VARIANTS = [["a", "Progress"], ["b", "Now, next, then"]];   // take 26; take 25 had four
+const VARIANTS = [["a", "A"], ["b", "B"], ["c", "C"]];   // take 28: named by scope, V28 below; take 26 had two, take 25 four
 // PROTOTYPE (#29, take 25): ?theme=light|dark holds a theme, whatever the system's.
 const theme = ["light", "dark"].includes(new URLSearchParams(location.search).get("theme")) ? new URLSearchParams(location.search).get("theme") : "";
 if (theme) document.documentElement.dataset.theme = theme;
 const sampleName = new URLSearchParams(location.search).get("sample");
 const ui = { page: "overview", repo: "", view: "list", pr: null, ask: null, hold: null, sel: null, pop: null, nav: false, rail: false,
-  variant: "a", feature: "", open: [], qview: "", qeffort: "" };   // qview, qeffort: the Queue (take 12)   // the Queue: which arrangement, the feature it's narrowed to (A), the features unfolded (B)
+  variant: "a", feature: "", open: [], qview: "", qeffort: "",
+  o28: { f: "", open: new Set(), pick: "" } };   // take 28: the number picked, the tickets opened, the bar picked   // qview, qeffort: the Queue (take 12)   // the Queue: which arrangement, the feature it's narrowed to (A), the features unfolded (B)
 
 function recall(k) { try { return localStorage.getItem("qr." + k); } catch { return null; } }
 function remember(k, v) { try { localStorage.setItem("qr." + k, v); } catch { /* a private window */ } }
@@ -1677,7 +1858,7 @@ function repoLogo(name) {
   const icon = ((snap && snap.repos) || []).find((r) => r.name === name)?.icon;
   if (icon && /^data:image\//.test(icon)) return `<span class="rlogo img" aria-hidden="true"><img src="${esc(icon)}" alt=""></span>`;
   const two = String(name || "").replace(/[^a-z0-9]/gi, "").slice(0, 2) || "?";
-  return `<span class="rlogo" aria-hidden="true">${esc(two[0].toUpperCase() + two.slice(1).toLowerCase())}</span>`;
+  return `<span class="rlogo" aria-hidden="true">${esc(two.toUpperCase())}</span>`;   // take 28: both capitals, as T3 Code
 }
 const repoMark = (name) => `${repoLogo(name)}<span class="rname">${esc(name)}</span>${offTag(name)}`;
 const repoTag = (name) => (ui.repo ? offTag(name) : `<span class="tag">${esc(name)}${repoOff(name) ? ", stopped" : ""}</span>`);
@@ -2275,8 +2456,276 @@ function plateCalm(p) {
 // on the roadmap", per repo). Take 25 is earlier/take-25.html.
 function overview() {
   const W = work();
-  const body = ui.variant === "b" ? ovRoadmap(W) : ovProgress(W);
+  const body = overview28(W);   // take 28; take 26's ovProgress and ovRoadmap are earlier/take-27.html
   return `<div class="q12 ov26">${ovPlateLine(W)}${qNow(W)}${body}</div>${protoBar()}`;
+}
+
+// ---- take 28 (Stefan, 2026-11-19): under the board and the lanes, a slot that looks back, and it
+// differs by scope. All repositories asks "which repo needs a look?"; one repo asks "how has its
+// work gone, and where did tickets lose time?" (.scratch/queue-runner/research/
+// overview-page-patterns.md). Three ways each, the same ?variant= key switching both:
+//   All repositories: A, a row per repo (Buildkite, Sentry); B, this week in numbers that filter
+//   a list (his CRM page); C, two weeks of tickets drawn side by side, a track per repo.
+//   One repo: A, the last 30 days in numbers that filter its tickets, each opening its back-and-
+//   forth (the CRM page); B, where it gets stuck (reviews to merge, why it came to you, where the
+//   time went, usage per merged PR); C, each ticket's journey as a bar of its steps.
+// Sample only: the snapshot's `history` (sample.py, _history) is made up.
+const V28 = {
+  all: { a: "A row per repo", b: "This week, clickable", c: "Two weeks, side by side" },
+  one: { a: "The last 30 days", b: "Where it gets stuck", c: "Ticket journeys" },
+};
+const variantName = (k) => V28[ui.repo ? "one" : "all"][k] || "";
+const DAYMS = 86400e3;
+const hist = (W) => (snap.history || []).filter((t) => W.repos.includes(t.repo));
+const tKey = (t) => `${t.repo}#${t.n}`;
+const tStart = (t) => ms(t.events[0].at);
+const tEnd = (t) => { const e = t.events[t.events.length - 1]; return ms(e.at) + e.minutes * 60e3; };
+const tTook = (t) => ((t.outcome === "open" ? Date.now() : tEnd(t)) - tStart(t)) / 1000;
+const pct = (x) => `${Math.round(x * 10) / 10}%`;
+const prUrl = (t) => { const r = (snap.repos || []).find((x) => x.name === t.repo); return r && r.github ? `${r.github}/pull/${t.pr}` : ""; };
+// A step's family, for colour: Claude working (amber), a review (plain), waiting on you (blue),
+// held for usage (hatched), a stop (red), the merge (green).
+function fam(e) {
+  if (e.kind === "build" || e.kind === "fix" || e.kind === "conflict") return "work";
+  if (e.kind === "review") return "rev";
+  if (e.kind === "wait") return e.by === "you" ? "you" : "held";
+  if (e.kind === "stop") return "stop";
+  if (e.kind === "merge") return "done";
+  return "mark";
+}
+const FAM = [["work", "Claude working"], ["rev", "ChatGPT reviewing"], ["you", "Waiting on you"], ["held", "Held for usage"]];
+
+// What a window holds: tickets started, merged, merged on their first review, the stops, never
+// merged, Claude's usage spent, and every ticket that moved in it.
+function win28(ts, days, back = 0) {
+  const to = Date.now() - back * days * DAYMS, from = to - days * DAYMS;
+  const ended = ts.filter((t) => t.outcome !== "open" && tEnd(t) >= from && tEnd(t) < to);
+  const merged = ended.filter((t) => t.outcome === "merged");
+  const stops = ts.filter((t) => t.events.some((e) => e.kind === "stop" && ms(e.at) >= from && ms(e.at) < to));
+  const usage = ts.reduce((s, t) => s + t.events.filter((e) => e.usage && ms(e.at) >= from && ms(e.at) < to).reduce((a, e) => a + e.usage, 0), 0);
+  const moved = ts.filter((t) => tStart(t) < to && (t.outcome === "open" || tEnd(t) >= from));
+  return {
+    from, to, merged, stops, usage, moved,
+    built: ts.filter((t) => tStart(t) >= from && tStart(t) < to),
+    first: merged.filter((t) => t.rounds === 1),
+    closed: ended.filter((t) => t.outcome === "closed"),
+    rounds: merged.length ? merged.reduce((s, t) => s + t.rounds, 0) / merged.length : 0,
+  };
+}
+// The change on the window before, plainly: no colour, since up isn't always better.
+function delta28(now, before, unit = "", fixed = 0) {
+  const d = now - before;
+  if (Math.abs(d) < (fixed ? 0.05 : 0.5)) return "Same as the period before";
+  const n = fixed ? (Math.round(Math.abs(d) * 10) / 10) : Math.abs(Math.round(d));
+  return `${d > 0 ? "↑" : "↓"} ${n}${unit} on the period before`;
+}
+function tiles28(defs) {
+  return `<div class="o28-tiles" role="group" aria-label="Pick a number to list its tickets">${defs.map((d) =>
+    `<button class="o28-tile${ui.o28.f === d.id ? " on" : ""}" data-act="o28-f" data-f="${esc(d.id)}" aria-pressed="${ui.o28.f === d.id}">
+      <span class="o28-tl">${esc(d.label)}</span><b>${esc(d.value)}</b><span class="o28-d">${esc(d.delta || "")}</span></button>`).join("")}</div>`;
+}
+function chips28(t) {
+  const out = t.outcome === "merged" ? `<span class="o28-c done">Merged</span>` : t.outcome === "closed" ? `<span class="o28-c">Never merged</span>` : `<span class="o28-c run">Going</span>`;
+  return out + (t.stops.length ? `<span class="o28-c you">Came to you${t.stops.length > 1 ? ` ×${t.stops.length}` : ""}</span>` : "");
+}
+// A ticket's back-and-forth, oldest first: when, who, what, how long, Claude's usage.
+function story28(t) {
+  const rows = t.events.map((e) => {
+    const [name, provider] = ACTOR[e.by] || [e.by, ""];
+    return `<li class="f-${fam(e)}"><span class="o28-at" title="${esc(stamp(e.at))}">${esc(clock(e.at))}</span>
+      <span class="o28-who">${MARK[provider] || ""}${esc(name)}</span><span class="o28-what">${esc(e.text)}</span>
+      <span class="o28-took">${e.minutes ? esc(span(e.minutes * 60)) : ""}</span><span class="o28-use">${e.usage ? esc(pct(e.usage)) : ""}</span></li>`;
+  }).join("");
+  return `<div class="o28-story"><ol>${rows}</ol><p class="o28-links"><a href="${esc(t.url)}" target="_blank" rel="noreferrer">Issue #${t.n}</a>${prUrl(t) ? `<a href="${esc(prUrl(t))}" target="_blank" rel="noreferrer">PR #${t.pr}</a>` : ""}
+    <span>${esc(span(tTook(t)))} from build to ${t.outcome === "merged" ? "merge" : t.outcome === "closed" ? "close" : "now"}, ${esc(pct(t.usage))} of Claude's week</span></p></div>`;
+}
+function row28(t, many) {
+  const k = tKey(t), open = ui.o28.open.has(k);
+  return `<li class="o28-row${open ? " open" : ""}"><button class="o28-rb" data-act="o28-row" data-k="${esc(k)}" aria-expanded="${open}">
+      <span class="o28-chev">${ICON.chevron}</span>${many ? repoLogo(t.repo) : ""}<span class="o28-n">#${t.n}</span>
+      <span class="o28-title"><b>${esc(t.title)}</b><span>${esc(t.effort)}</span></span>
+      <span class="o28-chips">${chips28(t)}</span>
+      <span class="o28-num" title="Reviews">${plural(t.rounds, "review", "reviews")}</span>
+      <span class="o28-num" title="From build to the end">${esc(span(tTook(t)))}</span>
+      <span class="o28-num" title="Claude's usage, of the week">${esc(pct(t.usage))}</span></button>
+    ${open ? story28(t) : ""}</li>`;
+}
+function list28(title, ts, many, empty = "Nothing here.") {
+  return `<div class="o28-listhead"><h3>${title}</h3>${ui.o28.f ? `<button class="link" data-act="o28-f" data-f="">Show every ticket</button>` : ""}</div>
+    ${ts.length ? `<ol class="o28-list">${ts.map((t) => row28(t, many)).join("")}</ol>` : `<p class="o28-empty">${esc(empty)}</p>`}`;
+}
+const newest = (a, b) => (b.outcome === "open" ? Date.now() : tEnd(b)) - (a.outcome === "open" ? Date.now() : tEnd(a));
+
+function overview28(W) {
+  if (!(snap.history || []).length) return `<section class="card"><p class="empty">No history in this sample.</p></section>`;
+  const v = ui.variant;
+  if (!ui.repo) return v === "b" ? allWeek28(W) : v === "c" ? allTracks28(W) : allRows28(W);
+  return v === "b" ? oneFriction28(W) : v === "c" ? oneJourneys28(W) : oneMonth28(W);
+}
+
+// ---- All repositories, A: a row per repo, the same few readings each, one state. The row picks
+// that repository in the sidebar.
+function repoState28(r) {
+  if (repoOff(r)) return ["off", "Stopped"];
+  const asks = (snap.asks || []).filter((a) => a.repo === r && !snoozedUntil(a));
+  const bad = asks.filter((a) => a.kind === "stuck" || a.kind === "broken");
+  if (bad.length) return ["bad", bad.some((a) => a.kind === "broken") ? "Broken" : "Stuck"];
+  const its = (snap.issues || []).filter((i) => i.repo === r);
+  if (asks.length || its.some((i) => i.state === "ready-for-human")) return ["you", "Waiting on you"];
+  if (its.some((i) => ["building", "review", "fixing", "fixing-itself"].includes(i.state))) return ["run", "Moving"];
+  return ["idle", "Idle"];
+}
+function spark28(ts, days) {
+  const now = Date.now(), counts = Array.from({ length: days }, (_, d) => ts.filter((t) => t.outcome === "merged" && tEnd(t) >= now - (days - d) * DAYMS && tEnd(t) < now - (days - d - 1) * DAYMS).length);
+  const top = Math.max(1, ...counts);
+  return `<span class="o28-spark" role="img" aria-label="Merged each day, oldest first: ${counts.join(", ")}">${counts.map((c, d) =>
+    `<i style="height:${c ? 20 + (80 * c) / top : 6}%" class="${c ? "" : "z"}" title="${esc(new Date(now - (days - d - 1) * DAYMS).toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" }))}: ${c} merged"></i>`).join("")}</span>`;
+}
+function allRows28(W) {
+  const ts = hist(W), wk = win28(ts, 7);
+  const rows = W.repos.map((r) => {
+    const mine = ts.filter((t) => t.repo === r), w = win28(mine, 7), was = win28(mine, 7, 1);
+    const its = (snap.issues || []).filter((i) => i.repo === r);
+    const building = its.filter((i) => i.state === "building"), inPr = its.filter((i) => ["review", "fixing", "fixing-itself"].includes(i.state));
+    const ready = its.filter((i) => i.state === "ready").length;
+    const last = mine.filter((t) => t.outcome === "merged").map(tEnd).sort((a, b) => b - a)[0];
+    const [cls, word] = repoState28(r);
+    const flight = [building.length ? `Claude building ${building.map((i) => `#${i.n}`).join(", ")}` : "", inPr.length ? `${plural(inPr.length, "PR", "PRs")} in review` : "", ready ? `${ready} ready` : ""].filter(Boolean).join(", ") || "Nothing in flight";
+    const share = wk.usage ? Math.round((100 * w.usage) / wk.usage) : 0;
+    return `<li><button class="o28-repo" data-act="repo" data-repo="${esc(r)}" title="See how ${esc(r)}'s work went">
+      <span class="o28-rname">${repoLogo(r)}<b>${esc(r)}</b><span class="o28-flight">${esc(flight)}</span></span>
+      <span><span class="o28-state ${cls}">${esc(word)}</span></span>
+      <span class="o28-last${last && Date.now() - last > 5 * DAYMS ? " old" : ""}">${last ? `${esc(ago(new Date(last).toISOString()))} ago` : "Never"}</span>
+      <span class="o28-merged">${spark28(mine, 14)}<span><b>${w.merged.length}</b> this week, ${was.merged.length} the week before</span></span>
+      <span class="o28-use"><b>${esc(pct(w.usage))}</b><span>${share}% of the runner's</span></span>
+      <span class="o28-go">${ICON.right}</span></button></li>`;
+  }).join("");
+  return `<section class="card o28" aria-label="Repositories"><header class="q12-head"><h2>Repositories</h2><span class="ov26-hint">One row each. Pick one to see how its work went</span></header>
+    <div class="o28-rows"><div class="o28-rowhead" aria-hidden="true"><span>Repository, and what's in flight now</span><span>State</span><span>Last merge</span><span>Merged, last 14 days</span><span>Claude's week, 7 days</span><span></span></div>
+    <ol>${rows}</ol></div></section>`;
+}
+
+// ---- All repositories, B: this week in numbers, against the week before; a number lists its
+// tickets below, each opening its back-and-forth.
+function allWeek28(W) {
+  const ts = hist(W), w = win28(ts, 7), was = win28(ts, 7, 1);
+  const defs = [
+    { id: "merged", label: "Merged", value: w.merged.length, delta: delta28(w.merged.length, was.merged.length), list: w.merged },
+    { id: "first", label: "Clean on the first review", value: w.merged.length ? `${Math.round((100 * w.first.length) / w.merged.length)}%` : "–", delta: `${w.first.length} of ${w.merged.length}`, list: w.first },
+    { id: "rounds", label: "Reviews per merged PR", value: w.rounds ? (Math.round(w.rounds * 10) / 10).toString() : "–", delta: delta28(w.rounds, was.rounds, "", 1), list: [...w.merged].filter((t) => t.rounds > 1).sort((a, b) => b.rounds - a.rounds) },
+    { id: "stops", label: "Came to you", value: w.stops.length, delta: delta28(w.stops.length, was.stops.length), list: w.stops },
+    { id: "closed", label: "Never merged", value: w.closed.length, delta: delta28(w.closed.length, was.closed.length), list: w.closed },
+    { id: "usage", label: "Claude's usage", value: pct(w.usage), delta: `of a week, ${w.merged.length ? pct(w.usage / w.merged.length) : "–"} per merged PR`, list: [...w.moved].sort((a, b) => b.usage - a.usage) },
+  ];
+  const d = defs.find((x) => x.id === ui.o28.f);
+  const ts2 = d ? d.list : [...w.moved].sort(newest);
+  const title = d ? `${d.label}: ${plural(ts2.length, "ticket", "tickets")}` : `Every ticket that moved this week: ${ts2.length}`;
+  return `<section class="card o28" aria-label="This week"><header class="q12-head"><h2>The last 7 days</h2><span class="ov26-hint">Every repository, against the 7 days before. Pick a number to list its tickets</span></header>
+    <div class="o28-pad">${tiles28(defs)}${list28(title, ts2, true)}</div></section>`;
+}
+
+// ---- All repositories, C: two weeks of tickets, a track per repo. A bar runs from build to
+// merge, coloured by where its time went; a red tick is a stop. A bar opens its story below.
+function allTracks28(W) {
+  const days = 14, to = Date.now(), from = to - days * DAYMS, X = (t) => Math.max(0, Math.min(100, ((t - from) / (to - from)) * 100));
+  const ts = hist(W).filter((t) => tStart(t) < to && (t.outcome === "open" || tEnd(t) >= from));
+  const ticks = Array.from({ length: days }, (_, d) => { const at = from + d * DAYMS, dt = new Date(at); return `<span style="left:${X(at)}%">${esc(dt.toLocaleDateString("en-GB", { weekday: "short", day: "numeric" }))}</span>`; }).join("");
+  const tracks = W.repos.map((r) => {
+    const mine = ts.filter((t) => t.repo === r).sort((a, b) => tStart(a) - tStart(b)), lanes = [];
+    for (const t of mine) {
+      const end = t.outcome === "open" ? to : tEnd(t);
+      let at = lanes.findIndex((e) => e + 2 * 3600e3 < tStart(t));
+      if (at < 0) { lanes.push(0); at = lanes.length - 1; }
+      lanes[at] = end; t._lane = at;
+    }
+    const bars = mine.map((t) => {
+      const end = t.outcome === "open" ? to : tEnd(t), l = X(tStart(t)), w = Math.max(0.5, X(end) - l);
+      const segs = t.events.filter((e) => e.minutes).map((e) => { const s = ms(e.at), x = ((s - tStart(t)) / (end - tStart(t))) * 100, ww = ((e.minutes * 60e3) / (end - tStart(t))) * 100; return `<i class="s ${fam(e)}" style="left:${x}%;width:${Math.max(ww, 0.5)}%"></i>`; }).join("");
+      const stops = t.events.filter((e) => e.kind === "stop").map((e) => `<i class="tick" style="left:${((ms(e.at) - tStart(t)) / (end - tStart(t))) * 100}%"></i>`).join("");
+      const on = ui.o28.pick === tKey(t);
+      return `<button class="o28-bar${on ? " on" : ""}${t.outcome === "merged" ? " merged" : t.outcome === "closed" ? " closed" : ""}" style="left:${l}%;width:${w}%;top:${t._lane * 26 + 6}px" data-act="o28-pick" data-k="${esc(tKey(t))}" title="#${t.n} ${esc(t.title)}: ${esc(span(tTook(t)))}, ${plural(t.rounds, "review", "reviews")}${t.stops.length ? ", came to you" : ""}">${segs}${stops}</button>`;
+    }).join("");
+    const merged = mine.filter((t) => t.outcome === "merged" && tEnd(t) >= from).length;
+    return `<div class="o28-track"><button class="o28-tname" data-act="repo" data-repo="${esc(r)}">${repoLogo(r)}<b>${esc(r)}</b><span>${merged} merged</span></button>
+      <div class="o28-lane" style="height:${Math.max(1, lanes.length) * 26 + 10}px">${bars || `<span class="o28-quiet">Nothing moved in these two weeks</span>`}</div></div>`;
+  }).join("");
+  const picked = ts.find((t) => tKey(t) === ui.o28.pick);
+  return `<section class="card o28" aria-label="Two weeks"><header class="q12-head"><h2>The last two weeks</h2><span class="ov26-hint">Each bar a ticket, from build to merge. Pick one to read its story</span>
+      <span class="o28-key">${FAM.map(([k, n]) => `<span><i class="s ${k}"></i>${n}</span>`).join("")}<span><i class="tick"></i>Came to you</span></span></header>
+    <div class="o28-pad"><div class="o28-axis">${ticks}</div>${tracks}
+    ${picked ? `<div class="o28-picked"><div class="o28-listhead"><h3>${repoLogo(picked.repo)} #${picked.n} ${esc(picked.title)}</h3>${chips28(picked)}<button class="link" data-act="o28-pick" data-k="">Close</button></div>${story28(picked)}</div>` : ""}</div></section>`;
+}
+
+// ---- One repo, A: the last 30 days in numbers against the 30 before. A number lists its
+// tickets; a ticket opens its back-and-forth, with how long each step took and what it cost.
+function oneMonth28(W) {
+  const ts = hist(W), w = win28(ts, 30), was = win28(ts, 30, 1);
+  const defs = [
+    { id: "built", label: "Built", value: w.built.length, delta: delta28(w.built.length, was.built.length), list: w.built },
+    { id: "merged", label: "Merged", value: w.merged.length, delta: delta28(w.merged.length, was.merged.length), list: w.merged },
+    { id: "first", label: "Merged on the first review", value: w.first.length, delta: w.merged.length ? `${Math.round((100 * w.first.length) / w.merged.length)}% of merged` : "", list: w.first },
+    { id: "stops", label: "Came to you", value: w.stops.length, delta: delta28(w.stops.length, was.stops.length), list: w.stops },
+    { id: "closed", label: "Never merged", value: w.closed.length, delta: delta28(w.closed.length, was.closed.length), list: w.closed },
+    { id: "usage", label: "Claude's usage", value: pct(w.usage), delta: `${w.merged.length ? pct(w.usage / w.merged.length) : "–"} per merged PR`, list: [...w.moved].sort((a, b) => b.usage - a.usage) },
+  ];
+  const d = defs.find((x) => x.id === ui.o28.f);
+  const list = d ? [...d.list].sort(newest) : [...w.moved].sort(newest);
+  const title = d ? `${d.label}: ${plural(list.length, "ticket", "tickets")}` : `Every ticket that moved: ${list.length}`;
+  return `<section class="card o28" aria-label="The last 30 days"><header class="q12-head"><h2>The last 30 days</h2><span class="ov26-hint">Against the 30 days before. Pick a number to list its tickets</span></header>
+    <div class="o28-pad">${tiles28(defs)}${list28(title, list, false)}</div></section>`;
+}
+
+// ---- One repo, B: where it gets stuck. Four readings of the last 30 days, each one a way in
+// to the tickets behind it.
+function oneFriction28(W) {
+  const ts = hist(W), w = win28(ts, 30);
+  const byRounds = [["r1", "1 review", (t) => t.rounds === 1], ["r2", "2 reviews", (t) => t.rounds === 2], ["r3", "3 reviews", (t) => t.rounds === 3], ["r4", "4 or more", (t) => t.rounds >= 4]];
+  const ended = [...w.merged, ...w.closed];
+  const top = Math.max(1, ...byRounds.map(([, , f]) => w.merged.filter(f).length), w.closed.length);
+  const hbar = (id, label, n) => `<button class="o28-h${ui.o28.f === id ? " on" : ""}" data-act="o28-f" data-f="${id}"><span>${esc(label)}</span><i style="width:${(100 * n) / top}%"></i><b>${n}</b></button>`;
+  const rounds = byRounds.map(([id, label, f]) => hbar(id, label, w.merged.filter(f).length)).join("") + hbar("closed", "Never merged", w.closed.length);
+  const why = {};
+  ts.forEach((t) => t.events.forEach((e) => { if (e.kind === "stop" && ms(e.at) >= w.from) { const k = e.text.replace(/^(Stopped for you|Held): /, ""); (why[k] = why[k] || new Set()).add(t); } }));
+  const whys = Object.entries(why).sort((a, b) => b[1].size - a[1].size);
+  const whyHtml = whys.length ? whys.map(([k, s]) => `<button class="o28-why${ui.o28.f === "s:" + k ? " on" : ""}" data-act="o28-f" data-f="${esc("s:" + k)}"><b>${s.size}</b><span>${esc(k)}</span></button>`).join("") : `<p class="o28-empty">Nothing came to you.</p>`;
+  const spent = { work: 0, rev: 0, you: 0, held: 0 };
+  ended.forEach((t) => t.events.forEach((e) => { const f = fam(e); if (f in spent) spent[f] += e.minutes; }));
+  const all = Object.values(spent).reduce((a, b) => a + b, 0) || 1;
+  const timeBar = `<div class="o28-split" role="img" aria-label="Where the time went">${FAM.map(([k]) => spent[k] ? `<i class="s ${k}" style="flex-grow:${spent[k]}"></i>` : "").join("")}</div>
+    <ul class="o28-splitkey">${FAM.map(([k, n]) => `<li><i class="s ${k}"></i><span>${n}</span><b>${Math.round((100 * spent[k]) / all)}%</b><span class="o28-dim">${esc(span(spent[k] * 60))}</span></li>`).join("")}</ul>`;
+  const weeks = Array.from({ length: 8 }, (_, k) => { const x = win28(ts, 7, 7 - k); return { n: x.merged.length, per: x.merged.length ? x.usage / x.merged.length : 0, from: x.from }; });
+  const wtop = Math.max(1, ...weeks.map((x) => x.per));
+  const weekCols = `<div class="o28-cols">${weeks.map((x) => `<div title="Week of ${esc(new Date(x.from).toLocaleDateString("en-GB", { day: "numeric", month: "short" }))}: ${x.n} merged"><span>${x.per ? esc(pct(x.per)) : "–"}</span><i style="height:${x.per ? 12 + (88 * x.per) / wtop : 2}%"></i><em>${esc(new Date(x.from).toLocaleDateString("en-GB", { day: "numeric", month: "short" }))}</em></div>`).join("")}</div>`;
+  const f = ui.o28.f;
+  const pickR = byRounds.find(([id]) => id === f);
+  const list = pickR ? w.merged.filter(pickR[2]) : f === "closed" ? w.closed : f.startsWith("s:") ? [...(why[f.slice(2)] || [])] : [...ended].sort((a, b) => tTook(b) - tTook(a)).slice(0, 8);
+  const title = pickR ? `Merged after ${pickR[1]}` : f === "closed" ? "Never merged" : f.startsWith("s:") ? f.slice(2) : "The slowest, build to merge";
+  return `<section class="card o28" aria-label="Where it gets stuck"><header class="q12-head"><h2>Where it gets stuck</h2><span class="ov26-hint">The last 30 days. Pick a bar or a reason to list its tickets</span></header>
+    <div class="o28-pad"><div class="o28-panels">
+      <div class="o28-panel"><h3>Reviews to merge</h3><div class="o28-hbars">${rounds}</div></div>
+      <div class="o28-panel"><h3>Why it came to you</h3><div class="o28-whys">${whyHtml}</div></div>
+      <div class="o28-panel"><h3>Where the time went</h3><p class="o28-sub">Every step of the ${ended.length} tickets that ended</p>${timeBar}</div>
+      <div class="o28-panel"><h3>Claude's usage per merged PR</h3><p class="o28-sub">Of the week, week by week</p>${weekCols}</div>
+    </div>${list28(`${esc(title)}: ${plural(list.length, "ticket", "tickets")}`, [...list].sort((a, b) => tTook(b) - tTook(a)), false)}</div></section>`;
+}
+
+// ---- One repo, C: each ticket of the last 30 days as its journey, newest first: a bar of its
+// steps, each as wide as its share of the ticket's time. A row opens its story.
+function oneJourneys28(W) {
+  const ts = win28(hist(W), 30).moved.sort(newest).slice(0, 16);
+  const label = (e) => ({ build: "Build", review: /clean/.test(e.text) ? `R${(e.text.match(/\d/) || [""])[0]} ✓` : `R${(e.text.match(/\d/) || [""])[0]} ✗`, fix: "Fix", conflict: "Main", wait: e.by === "you" ? "You" : "Usage" }[e.kind] || "");
+  const rows = ts.map((t) => {
+    const k = tKey(t), open = ui.o28.open.has(k), steps = t.events.filter((e) => e.minutes), all = steps.reduce((a, e) => a + e.minutes, 0) || 1;
+    const bar = steps.map((e) => { const share = e.minutes / all; return `<i class="s ${fam(e)}" style="flex-grow:${e.minutes}" title="${esc(e.text)}: ${esc(span(e.minutes * 60))}">${share > 0.07 ? `<span>${esc(label(e))}${share > 0.14 ? ` ${esc(span(e.minutes * 60))}` : ""}</span>` : ""}</i>`; }).join("");
+    const end = t.outcome === "merged" ? `<i class="o28-end done" title="Merged">${ICON.check}</i>` : t.outcome === "closed" ? `<i class="o28-end" title="Never merged">✕</i>` : `<i class="o28-end run" title="Still going">…</i>`;
+    return `<li class="o28-jrow${open ? " open" : ""}"><button class="o28-jb" data-act="o28-row" data-k="${esc(k)}" aria-expanded="${open}">
+        <span class="o28-title"><b><span class="o28-n">#${t.n}</span> ${esc(t.title)}</b><span>${esc(t.effort)}, built ${esc(clock(t.events[0].at))}</span></span>
+        <span class="o28-journey">${bar}${t.stops.length ? `<em class="o28-stopflag" title="Came to you">${t.stops.length > 1 ? `${t.stops.length}×` : ""} to you</em>` : ""}</span>${end}
+        <span class="o28-num">${esc(span(tTook(t)))}</span><span class="o28-num">${esc(pct(t.usage))}</span></button>${open ? story28(t) : ""}</li>`;
+  }).join("");
+  return `<section class="card o28" aria-label="Ticket journeys"><header class="q12-head"><h2>Ticket journeys</h2><span class="ov26-hint">The last 30 days, newest first. Each bar is one ticket's time, split by step</span>
+      <span class="o28-key">${FAM.map(([k, n]) => `<span><i class="s ${k}"></i>${n}</span>`).join("")}</span></header>
+    <div class="o28-pad"><ol class="o28-journeys">${rows}</ol></div></section>`;
 }
 
 // What waits on you, as a board (Stefan, 2026-11-18, take 27): a column per tag that needs you,
@@ -3066,8 +3515,8 @@ document.addEventListener("keydown", (e) => {
 // Take 25: the Overview's four.
 function protoBar() {
   if (!snap.sample || ui.page !== "overview") return "";
-  const [k, name] = VARIANTS.find((v) => v[0] === ui.variant);
-  return `<div class="proto" role="group" aria-label="Prototype: the Overview, four ways" title="Prototype: the Overview four ways. Left and right arrow keys">
+  const [k] = VARIANTS.find((v) => v[0] === ui.variant), name = `${variantName(k)}, ${ui.repo ? "one repo" : "all repositories"}`;
+  return `<div class="proto" role="group" aria-label="Prototype: the Overview, three ways" title="Prototype: the Overview three ways for all repositories and three for one. Left and right arrow keys">
     <button data-act="variant" data-by="-1" aria-label="Previous variant" title="Left arrow key">${ICON.left}</button>
     <span class="proto-name"><b>${k.toUpperCase()}</b>${esc(name)}</span>
     <button data-act="variant" data-by="1" aria-label="Next variant" title="Right arrow key">${ICON.right}</button></div>`;
@@ -3076,7 +3525,7 @@ function turnVariant(by) {
   const at = VARIANTS.findIndex((v) => v[0] === ui.variant);
   ui.variant = VARIANTS[(at + by + VARIANTS.length) % VARIANTS.length][0];
   remember("ovariant", ui.variant);
-  ui.sel = null; ui.pop = null;
+  ui.sel = null; ui.pop = null; ui.o28.f = ""; ui.o28.pick = "";
 }
 
 // The pyramid: each group of linked items drawn in layers, a blocker above what it blocks, so the
@@ -3461,7 +3910,7 @@ document.addEventListener("click", (e) => {
       if (d.ask) { ui.ask = d.ask; ui.hold = null; }   // a link that opens the Inbox at one ask
       address(true); draw(); scrollTo(0, 0);
       return;
-    case "repo": ui.repo = d.repo; remember("repo", d.repo); ui.pop = null; ui.sel = null; break;
+    case "repo": ui.repo = d.repo; remember("repo", d.repo); ui.pop = null; ui.sel = null; ui.o28.f = ""; ui.o28.pick = ""; if (e.target.closest(".o28")) scrollTo(0, 0); break;
     case "ask": ui.ask = d.id; ui.hold = null; break;
     case "unread": {
       const a = inboxOrder().find((x) => x.id === d.id);
@@ -3476,6 +3925,9 @@ document.addEventListener("click", (e) => {
     case "feature": ui.feature = ui.feature === d.id ? "" : d.id; ui.sel = null; scrollTo(0, 0); break;   // the Queue, A
     case "open": ui.open = ui.open.includes(d.id) ? ui.open.filter((x) => x !== d.id) : [...ui.open, d.id]; break;   // the Queue, B
     case "variant": turnVariant(Number(d.by)); break;   // PROTOTYPE
+    case "o28-f": ui.o28.f = ui.o28.f === d.f ? "" : d.f; break;   // take 28: a number lists its tickets
+    case "o28-row": if (ui.o28.open.has(d.k)) ui.o28.open.delete(d.k); else ui.o28.open.add(d.k); break;
+    case "o28-pick": ui.o28.pick = ui.o28.pick === d.k ? "" : d.k; break;
     case "ov-effort": {   // PROTOTYPE (#29, take 25): an effort opens the Queue's Progress at it
       if (e.ctrlKey || e.metaKey || e.shiftKey) return;
       e.preventDefault();
