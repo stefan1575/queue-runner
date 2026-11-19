@@ -662,3 +662,131 @@ describe('the usage gate', () => {
     expect(gate.runningJobs()).toHaveLength(1);
   });
 });
+
+describe('a build that stopped on a question, answered on GitHub (#158)', () => {
+  const NOW = new Date('2026-11-19T12:00:00Z');
+  const ago = (mins: number) => new Date(NOW.getTime() - mins * 60_000).toISOString();
+  const BRANCH = 'claude/ticket-number-7-7';
+
+  /** A build of #7 that ran on thread-b and ended `outcome`; its thread last asked `minsAgo`, its
+   *  context `tokens`; its stop on the issue answered as `answer`. */
+  async function asked(outcome: 'waiting' | 'done-no-pr', minsAgo: number, tokens: number, answer: 'replied' | 'issue-closed' = 'replied') {
+    const job = await log.started({ kind: 'build', repo: APP.id, github: 'owner/app', issue: 7, branch: BRANCH, base: 'origin/main', title: 'Queue runner build: app#7', choice: BUILD, onFallback: false });
+    await log.thread(job.id, { threadId: 'thread-b', runId: 'run-b', link: 't3://thread/thread-b' });
+    t3.threadState['thread-b'] = {
+      id: 'thread-b', projectId: APP.id,
+      runs: [{ id: 'run-b', threadId: 'thread-b', ordinal: 1, rootNodeId: 'node-b', status: outcome === 'waiting' ? 'waiting' : 'completed' }],
+      runtimeRequests: outcome === 'waiting' ? [{ id: 'req-1', kind: 'user_input', status: 'pending', nodeId: 'node-b' }] : [],
+      turnItems: outcome === 'waiting' ? [{ id: 'ti-1', type: 'user_input_request', requestId: 'req-1', questions: [{ id: 'which', question: 'v1 or v2?' }] }] : [],
+      messages: [{ itemId: 'm1', type: 'assistant_message', runId: 'run-b', text: 'Should it keep v1 or v2?' }],
+      providerTurns: [{ startedAt: ago(minsAgo), tokenUsage: { usedTokens: tokens } }],
+    };
+    await log.ended(job.id, outcome === 'waiting' ? { outcome, request: 'user_input' } : { outcome, pr: null });
+    const stop = await log.stopped({ cause: 'question', repo: APP.id, github: 'owner/app', pr: 7, sha: null, why: 'it asked', link: null, on: 'issue', job: job.id });
+    await log.stopAnswered(stop.id, answer, answer === 'replied' ? 'Keep v2 only.' : null);
+    await log.answered(job.id);
+    (gh as any).issue = async () => ({ title: 'Ticket number 7', body: 'Do 7.' });
+    return job;
+  }
+  const carried = () => log.jobs().filter((j) => j.about);
+
+  test('waiting and warm: its question is answered in its own thread, and the same run goes on to the PR', async () => {
+    const old = await asked('waiting', 10, 300_000);
+    gh.pullsFromBranch[`owner/app:${BRANCH}`] = { number: 12, url: 'https://github.com/owner/app/pull/12', state: 'open' };
+    makeLane({ now: () => NOW });
+    await lane.pass();
+    await until(() => t3.responses.length === 1);
+    expect(t3.responses[0]).toEqual({ action: 'respond', threadId: 'thread-b', requestId: 'req-1', answers: { which: 'Keep v2 only.' } });
+    expect(t3.launches).toEqual([]);
+    const job = carried()[0]!;
+    expect(job).toMatchObject({ about: old.id, issue: 7, branch: BRANCH, threadId: 'thread-b', runId: 'run-b', answering: 'req-1', resume: { how: 'in-place', why: expect.stringContaining('warm') } });
+    // the answered question isn't read as still waiting: the run goes on, and ends
+    await watching('thread-b');
+    t3.endRun('thread-b', 'completed');
+    await lane.idle();
+    expect(log.get(job.id)!.end).toMatchObject({ outcome: 'done', pr: { number: 12 } });
+    // carried on once
+    await lane.pass();
+    expect(carried()).toHaveLength(1);
+  });
+
+  test('ended without a PR, cold and under 120k tokens: the answer goes to its own thread as a new turn', async () => {
+    await asked('done-no-pr', 120, 50_000);
+    makeLane({ now: () => NOW });
+    await lane.pass();
+    await until(() => t3.sends.length === 1);
+    expect(t3.sends[0]).toMatchObject({ threadId: 'thread-b', mode: 'queue' });
+    expect(t3.sends[0].message).toContain('> Keep v2 only.');
+    expect(t3.sends[0].message).toContain(`push \`${BRANCH}\` and open the PR`);
+    expect(carried()[0]).toMatchObject({ knownRuns: ['run-b'], resume: { how: 'in-place', why: expect.stringContaining('50,000 tokens, under 120,000') } });
+    await watching('thread-b');
+    t3.endRun('thread-b', 'completed');
+    await lane.idle();
+    expect(carried()[0]!.end).toMatchObject({ outcome: 'done-no-pr' });
+  });
+
+  test('cold and 120k or more: a fresh thread on the same branch, in its own worktree, briefed with the question and the answer', async () => {
+    await asked('waiting', 120, 150_000);
+    (git as any).worktrees = async () => [{ path: 'C:/t3/worktrees/app/ticket-7', branch: BRANCH }];
+    makeLane({ now: () => NOW });
+    await lane.pass();
+    await until(() => t3.launches.length === 1);
+    expect(t3.responses).toEqual([]);
+    expect(t3.sends).toEqual([]);
+    const launch = t3.launches[0];
+    expect(launch).toMatchObject({ title: 'Queue runner build: app#7', workspaceStrategy: { type: 'existing_worktree', worktreePath: 'C:/t3/worktrees/app/ticket-7' } });
+    expect(launch.message).toContain('Build GitHub issue #7 in owner/app: Ticket number 7');
+    expect(launch.message).toContain('Do 7.');
+    expect(launch.message).toContain('## Direction first');
+    expect(launch.message).toContain('Its question:\n\n> Should it keep v1 or v2?');
+    expect(launch.message).toContain("Robin's answer:\n\n> Keep v2 only.");
+    expect(carried()[0]).toMatchObject({ resume: { how: 'fresh' } });
+    expect(carried()[0]!.made).toBeUndefined();
+  });
+
+  test("fresh, with no worktree on the branch: a new one from the pushed branch, on a branch of its own that pushes to the job's", async () => {
+    await asked('done-no-pr', 120, 150_000);
+    (git as any).worktrees = async () => [];
+    makeLane({ now: () => NOW });
+    await lane.pass();
+    await until(() => t3.launches.length === 1);
+    const where = t3.launches[0].workspaceStrategy;
+    expect(where).toMatchObject({ type: 'worktree', baseRef: `origin/${BRANCH}` });
+    expect(where.branch.startsWith(`${BRANCH}-carry-`)).toBe(true);
+    expect(git.calls).toContain(`fetch C:/code/app ${BRANCH}`);
+    expect(t3.launches[0].message).toContain(`git push origin HEAD:${BRANCH}`);
+    await until(() => Boolean(carried()[0]?.made));
+    expect(carried()[0]!.made).toEqual([where.branch]);
+  });
+
+  test('an issue closed instead of answered carries nothing on; an open stop holds every new build in the repo', async () => {
+    await asked('done-no-pr', 10, 1000, 'issue-closed');
+    gh.ready['owner/app'] = [issue(11)];
+    await log.stopped({ cause: 'question', repo: APP.id, github: 'owner/app', pr: 4, sha: 'a'.repeat(40), why: 'a fix round asked', link: null });
+    makeLane({ now: () => NOW });
+    await lane.pass();
+    expect(t3.launches).toEqual([]);
+    expect(t3.sends).toEqual([]);
+    expect(t3.responses).toEqual([]);
+    expect(lines).toContain('app: no build while a stop waits for you (PR #4: a fix round asked)');
+  });
+
+  test("a thread that can't be read isn't taken as cold: nothing starts, and it's tried again after the rest", async () => {
+    await asked('waiting', 10, 1000);
+    t3.wsMethods['orchestration.getThreadProjection'] = () => { throw new Error('busy'); };
+    makeLane({ now: () => NOW });
+    await lane.pass();
+    expect(carried()).toEqual([]);
+    expect(t3.launches).toEqual([]);
+    expect(lines.some((l) => l.includes("its thread couldn't be read to carry it on"))).toBe(true);
+  });
+
+  test('an answer in place whose outcome is unclear needs the user, never "not started"', async () => {
+    await asked('waiting', 10, 1000);
+    t3.respondAnswerLost = true;
+    makeLane({ now: () => NOW });
+    await lane.pass();
+    await lane.idle();
+    expect(carried()[0]!.end).toMatchObject({ outcome: 'needs-user' });
+  });
+});

@@ -29,14 +29,15 @@ const byId = (list: unknown) => new Map((Array.isArray(list) ? list : []).filter
 
 /** The end of `runId` (the thread's latest run when null, leaving out the runs in `known`: a
  *  message sent to a thread that had them starts a new one) as the state shows it, or null while
- *  it runs or before that new run shows. */
-export function endOf(state: State, runId: string | null, known: ReadonlySet<string> = new Set()): ThreadEnd | null {
+ *  it runs or before that new run shows. A request in `answered` (one the app just answered in
+ *  place, #158) is no question, though T3 may not have marked it resolved yet. */
+export function endOf(state: State, runId: string | null, known: ReadonlySet<string> = new Set(), answered: ReadonlySet<string> = new Set()): ThreadEnd | null {
   const run = runId ? state.runs.get(runId)
     : [...state.runs.values()].filter((r) => !known.has(r.id)).sort((a, b) => (a.ordinal ?? 0) - (b.ordinal ?? 0)).at(-1);
   if (!run) return null;
   const status: string = run.status;
   if (!ENDED.has(status)) {
-    const asked = [...state.requests.values()].find((r) => r.status === 'pending');
+    const asked = [...state.requests.values()].find((r) => r.status === 'pending' && !answered.has(r.id));
     return asked ? { outcome: 'waiting', status, request: asked.kind ?? 'request' } : null;
   }
   if (status === 'completed') return { outcome: 'done', status };
@@ -60,7 +61,8 @@ export type Watch = {
 /** Watches one thread until `runId` ends or stops on a question (with no `runId`, its newest run
  *  not in `known`). `onDown` hears why a stream dropped, before it's opened again. */
 export function watchThreadEnd(ws: Pick<T3Ws, 'subscribe'>, threadId: string, runId: string | null,
-  retry: Retry = retryAfter(5_000), onDown: (why: string) => void = () => {}, known: ReadonlySet<string> = new Set()): Watch {
+  retry: Retry = retryAfter(5_000), onDown: (why: string) => void = () => {}, known: ReadonlySet<string> = new Set(),
+  answered: ReadonlySet<string> = new Set()): Watch {
   let stopped = false;
   let close = () => {};
   let rejectStop: (e: Error) => void = () => {};
@@ -85,7 +87,7 @@ export function watchThreadEnd(ws: Pick<T3Ws, 'subscribe'>, threadId: string, ru
           else if (type === 'turn-item.updated' && payload.type === 'error') state.errors.set(payload.id, payload);
           else return;
         } else return;
-        const got = endOf(state, runId, known);
+        const got = endOf(state, runId, known, answered);
         if (!got) return;
         found = true;
         sub.close();

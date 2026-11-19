@@ -15,7 +15,9 @@ type ShellStream = { send(item: unknown): void; end(): void; ended: boolean };
 
 /** A thread's state as `orchestration.subscribeThread` shows it: its runs, runtime requests (a
  *  question to the user is a pending one) and turn items (a failed run's error among them). */
-export type FakeThread = { id: string; projectId: string; runs: any[]; runtimeRequests: any[]; turnItems: any[]; messages?: any[]; title?: string; branch?: string | null };
+export type FakeThread = { id: string; projectId: string; runs: any[]; runtimeRequests: any[]; turnItems: any[]; messages?: any[]; title?: string; branch?: string | null;
+  /** Its provider turns, each with `startedAt` and `tokenUsage.usedTokens` (#158: how warm and big it is). */
+  providerTurns?: any[] };
 
 export class FakeT3 {
   port = 3773;
@@ -48,6 +50,12 @@ export class FakeT3 {
   launchOmitsThreadId = false;
   /** `t3_thread_launch` runs, and its answer has no `structuredContent` at all. */
   launchOmitsContent = false;
+  /** Every `t3_pending_request` answer, its arguments as T3 got them. */
+  responses: any[] = [];
+  /** Answers `t3_pending_request` with this failure instead. */
+  respondFailure: { code: string; message: string } | null = null;
+  /** `t3_pending_request` runs, then its answer is lost. */
+  respondAnswerLost = false;
   /** Every `t3_thread_send`, its arguments as T3 got them. */
   sends: any[] = [];
   /** Answers `t3_thread_send` with this failure instead (a thread that can't take another turn). */
@@ -256,6 +264,17 @@ export class FakeT3 {
       if (this.sendFailure) return { failure: this.sendFailure }; // taken, then answered as failed
       return { result: this.sendOmitsRunId ? { threadId: t.id } : { threadId: t.id, runId: id } };
     }
+    if (name === 't3_pending_request') {
+      // answering a question: the request resolved, the run going on (T3's runtime-request.respond)
+      if (this.respondFailure) return { failure: this.respondFailure };
+      const t = this.threadState[args.threadId];
+      const r = t?.runtimeRequests.find((x) => x.id === args.requestId && x.status === 'pending');
+      if (!t || !r) return { failure: { code: 'not_found', message: 'No such pending request.' } };
+      this.responses.push(args);
+      this.threadEvent(t.id, 'runtime-request', { ...r, status: 'resolved', answers: args.answers });
+      this.threadEvent(t.id, 'run', { ...t.runs.at(-1), status: 'running' });
+      return { result: { requestId: r.id, status: 'resolved' } };
+    }
     if (name === 't3_thread_read') {
       // `view: messages` pages of `limit` items from `afterPosition`; `itemId` + `textOffset` reads
       // one item's text on, `textChunk` characters at a time (T3 truncates long text)
@@ -375,6 +394,7 @@ export class FakeT3 {
         const done = this.tool(msg.params.name, msg.params.arguments);
         if (this.launchAnswerLost && msg.params.name === 't3_thread_launch') throw new Error('socket hang up');
         if (this.sendAnswerLost && msg.params.name === 't3_thread_send') throw new Error('socket hang up');
+        if (this.respondAnswerLost && msg.params.name === 't3_pending_request') throw new Error('socket hang up');
         if (done.failure) return json(200, { jsonrpc: '2.0', id: msg.id, result: { isError: true, content: [{ text: JSON.stringify(done.failure) }] } });
         const bare = this.launchOmitsContent && msg.params.name === 't3_thread_launch';
         const data = `data: ${JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: bare ? { content: [] } : { structuredContent: done.result } })}\n\n`;
@@ -432,7 +452,7 @@ export class FakeT3 {
           stream.send({ kind: 'snapshot', snapshotSequence: this.n, projection: structuredClone({ thread: { id: t.id, projectId: t.projectId }, runs: t.runs, runtimeRequests: t.runtimeRequests, turnItems: t.turnItems }) });
         } else if (msg._tag === 'Request' && msg.tag !== 'orchestration.subscribeShell') {
           const own = msg.tag === 'orchestration.getThreadProjection' && this.threadState[msg.payload?.threadId]
-            ? () => structuredClone({ thread: { id: msg.payload.threadId }, runs: this.threadState[msg.payload.threadId]!.runs }) : undefined;
+            ? () => { const t = this.threadState[msg.payload.threadId]!; return structuredClone({ thread: { id: t.id }, runs: t.runs, runtimeRequests: t.runtimeRequests, turnItems: t.turnItems, providerTurns: t.providerTurns ?? [] }); } : undefined;
           const method = this.wsMethods[msg.tag] ?? own;
           let exit: unknown;
           try {

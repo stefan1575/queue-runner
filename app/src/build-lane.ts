@@ -22,12 +22,24 @@
 // and T3's first reading after it are the gate's cost record (`usage.jsonl`, by the same job id);
 // both the reading and the cost it was let in at are in its start line, so a job watched again
 // after a restart keeps them.
+//
+// **A build that stopped on a question** (#158): its question is a stop on its issue (src/stops.ts
+// files it, `needs-info`). Once the user answers there, the build carries on to its PR, whether it
+// was waiting on the answer or ended without a PR, and even with its branch pushed: in its own
+// thread while that thread is warm, or cold and under 120k tokens (src/resume.ts, the one rule),
+// the answer given to the question it waits on or sent as a new turn; otherwise in a fresh thread
+// on the same branch (its own worktree when git lists one, else a new one made from the branch),
+// briefed with the question and the answer. A new build job `about` the old one, gated as a build.
+// While any stop is open in the repo, no new build starts there (#179).
 import { buildBrief } from './briefs/build.ts';
 import { reading } from './costs.ts';
 import { holdText } from './gate.ts';
-import type { GitHubWork } from './github.ts';
-import type { Git } from './git.ts';
-import { settles, type Job, type JobEnd, type JobLog } from './job-log.ts';
+import type { GitHubReview, GitHubWork } from './github.ts';
+import type { FixGit, Git } from './git.ts';
+import { settles, type Job, type JobEnd, type JobLog, type Stop } from './job-log.ts';
+import { resumeChoice, threadNow } from './resume.ts';
+import { ToolFailed } from './t3/mcp.ts';
+import { runReply } from './t3/thread-reply.ts';
 import type { Catalog, Jobs } from './jobs.ts';
 import { launchJob } from './launch.ts';
 import { pick, type BuildTicket } from './picker.ts';
@@ -49,11 +61,14 @@ export type BuildRepo = { id: string; title: string; folder: string; github: str
 export type BuildLaneDoors = {
   /** The served repos, now. */
   repos: () => BuildRepo[];
-  github: GitHubWork;
-  git: Git;
+  /** `issue` reads a carried-on build's issue for its fresh brief (it's `needs-info` by then, so
+   *  no longer among the ready ones). */
+  github: GitHubWork & Partial<Pick<GitHubReview, 'issue'>>;
+  /** Git in the repo's folder; `worktrees` finds a build's own worktree to carry it on in. */
+  git: Git & Partial<Pick<FixGit, 'worktrees'>>;
   mcp: Pick<T3Mcp, 'call'>;
-  ws: Pick<T3Ws, 'subscribe'>;
-  gate: Pick<UsageGate, 'pick' | 'reading' | 'started' | 'finished' | 'dropped' | 'forget'>;
+  ws: Pick<T3Ws, 'subscribe'> & Partial<Pick<T3Ws, 'request'>>;
+  gate: Pick<UsageGate, 'pick' | 'reading' | 'started' | 'finished' | 'dropped' | 'forget'> & Partial<Pick<UsageGate, 'check'>>;
   catalog: () => Catalog | null;
   jobs: () => Jobs;
   /** The user's name for the brief (Settings, Name; else the gh account's). */
@@ -181,6 +196,24 @@ export class BuildLane {
       .map(({ r }) => r);
     for (const repo of repos) {
       if (this.stopped) return;
+      // a build the user answered on GitHub carries on first (#158)
+      const owed = this.carryOwed(repo);
+      if (owed) {
+        const v = this.carryGate(repo, owed);
+        if (!v) continue;
+        await new Promise<void>((launched) => {
+          this.track(repo.id, this.carryOn(repo, owed.job, owed.stop, v, launched).finally(launched));
+        });
+        continue;
+      }
+      // while a stop is open in the repo, no new build starts there (#179)
+      const stop = this.d.log.openStops(repo.id)[0];
+      if (stop) {
+        const text = `${repo.title}: no build while a stop waits for you (${stop.on === 'issue' ? 'issue' : 'PR'} #${stop.pr}: ${stop.why})`;
+        if (this.prHeld.get(repo.id) !== text) this.d.say(text);
+        this.prHeld.set(repo.id, text);
+        continue;
+      }
       let base: string;
       let ticket: BuildTicket | null;
       try {
@@ -225,6 +258,140 @@ export class BuildLane {
       this.building.delete(repo);
       void this.pass();
     });
+  }
+
+  /** A build of the repo the user answered on GitHub (`replied` to its question's stop) that
+   *  nothing has carried on yet, the oldest first. */
+  private carryOwed(repo: BuildRepo): { job: Job; stop: Stop } | null {
+    const jobs = this.d.log.jobs();
+    for (const job of jobs) {
+      if (job.kind !== 'build' || job.repo !== repo.id || !job.answeredAt || !job.threadId) continue;
+      if (job.end?.outcome !== 'waiting' && job.end?.outcome !== 'done-no-pr') continue;
+      if (jobs.some((j) => j.about === job.id && j.end?.outcome !== 'not-started')) continue;
+      const stop = this.d.log.stops().find((s) => s.job === job.id && s.answered?.answer === 'replied');
+      if (stop) return { job, stop };
+    }
+    return null;
+  }
+
+  /** The gate's word on carrying a build on: in its own thread it runs on that thread's model
+   *  (`check`), fresh on the build kind's (`pick`). Which one is known only once T3 is read, so the
+   *  stricter is asked here: the build kind's, as a new build would be. Said once when held. */
+  private carryGate(repo: BuildRepo, owed: { job: Job }) {
+    const id = `build:${repo.github}#${owed.job.issue}`;
+    const v = this.d.gate.pick(id, 'build');
+    if (!v.fits) {
+      const text = holdText(v.hold, (d) => d.toISOString());
+      if (this.holdSaid.get(repo.id) !== text) this.d.say(`${owed.job.title} carries on once there's room: ${text}`);
+      this.holdSaid.set(repo.id, text);
+      return null;
+    }
+    this.holdSaid.delete(repo.id);
+    this.d.gate.forget(id);
+    return v;
+  }
+
+  /** The answered build carried on, in place or fresh (src/resume.ts), to its end. */
+  private async carryOn(repo: BuildRepo, old: Job, stop: Stop, letIn: { choice: Job['choice']; onFallback: boolean; cost: Record<string, number> },
+    onLaunched: () => void): Promise<Job> {
+    const answer = stop.answered!.text ?? '';
+    let now;
+    try {
+      if (!this.d.ws.request) throw new Error("T3's thread projection can't be read here");
+      now = await threadNow(this.d.ws as Pick<T3Ws, 'request'>, old.threadId!);
+    } catch (e) {
+      // not read: never taken as "cold" or "gone"; tried again after the rest
+      onLaunched();
+      this.resting.set(repo.id, this.now().getTime() + (this.d.restMs ?? 300_000));
+      this.d.say(`${old.title}: its thread couldn't be read to carry it on (${(e as Error).message}); tried again later`);
+      return old;
+    }
+    const choice = resumeChoice(now.lastRequest, now.tokens, this.now());
+    const how = choice.inPlace ? 'in-place' : 'fresh';
+    const answering = choice.inPlace && old.end!.outcome === 'waiting' && now.pending ? now.pending : null;
+    const before = this.d.gate.reading(choice.inPlace ? old.choice : letIn.choice);
+    const job = await this.d.log.started({
+      kind: 'build', repo: repo.id, github: repo.github, issue: old.issue, branch: old.branch, base: old.base, title: old.title,
+      choice: choice.inPlace ? old.choice : letIn.choice, onFallback: choice.inPlace ? old.onFallback : letIn.onFallback,
+      cost: letIn.cost, before, about: old.id, resume: { how, why: choice.why },
+      ...(answering ? { answering: answering.requestId } : choice.inPlace ? { knownRuns: now.runs } : {}),
+    });
+    this.d.gate.started({ id: job.id, kind: 'build', choice: job.choice }, letIn.cost, before);
+    this.d.say(`${old.title}: ${choice.inPlace ? 'carrying it on in place' : 'carrying it on in a fresh thread'}, ${choice.why}`);
+    if (choice.inPlace) {
+      const thread = { threadId: old.threadId!, runId: answering ? old.runId ?? null : null, link: old.link ?? null };
+      try {
+        if (answering) {
+          // the question it waits on, answered: its run goes on
+          await this.d.log.thread(job.id, thread);
+          const answers = Object.fromEntries((answering.questions.length ? answering.questions : ['answer']).map((q) => [q, answer]));
+          await this.d.mcp.call('t3_pending_request', { action: 'respond', threadId: old.threadId, requestId: answering.requestId, answers });
+        } else {
+          const sent = await this.d.mcp.call('t3_thread_send', { threadId: old.threadId, message: this.answerMessage(old, answer), mode: 'queue' });
+          thread.runId = typeof sent?.runId === 'string' ? sent.runId : null;
+          await this.d.log.thread(job.id, thread);
+        }
+      } catch (e) {
+        // T3 may have taken it: an unclear answer is never "not started"
+        if (e instanceof NoAnswer || e instanceof ToolFailed) return this.needsUser(job, (e as Error).message);
+        return this.notStarted(job, 'not-started', (e as Error).message);
+      }
+      onLaunched();
+      return this.watch({ ...job, ...thread }, repo.github);
+    }
+    let launched;
+    let work: string | null = null;
+    try {
+      const catalog = this.d.catalog();
+      if (!catalog) return await this.notStarted(job, 'not-started', "T3's providers aren't known yet");
+      // its own worktree when git lists one on the branch; else a new one from the branch, on a
+      // branch of its own that pushes to the job's (T3 makes no worktree on a branch that exists)
+      const own = (await this.d.git.worktrees?.(repo.folder))?.find((w) => w.branch === old.branch);
+      let baseRef = old.branch;
+      if (!own) {
+        work = `${old.branch}-carry-${job.id.slice(-6)}`;
+        if (!await this.d.git.hasBranch(repo.folder, old.branch)) {
+          await this.d.git.fetch(repo.folder, old.branch);
+          baseRef = `origin/${old.branch}`;
+        }
+      }
+      let question: string | null = null;
+      try {
+        question = (await runReply(this.d.mcp, old.threadId!, old.runId ?? null))?.trim() || null;
+      } catch {
+        question = null; // the stop on the issue quotes it; the brief links the thread
+      }
+      const issue = repo.github && this.d.github.issue ? await this.d.github.issue(repo.github, old.issue) : { title: `#${old.issue}`, body: '' };
+      const brief = buildBrief({
+        github: repo.github ?? repo.title, number: old.issue, title: issue.title, body: issue.body,
+        comments: repo.github ? await this.d.github.issueComments(repo.github, old.issue) : [],
+        branch: old.branch, base: old.base, user: await this.d.user(),
+        agentsFile: this.d.exists(join(repo.folder, 'AGENTS.md')) ? 'AGENTS.md' : this.d.exists(join(repo.folder, 'CLAUDE.md')) ? 'CLAUDE.md' : null,
+        carryOn: { question, answer, link: old.link ?? null, work },
+      });
+      if (!isServed(this.d.repos(), repo)) return await this.notStarted(job, 'not-started', `${repo.title} is no longer served`);
+      try {
+        launched = await launchJob(this.d.mcp, catalog, {
+          kind: 'build', projectId: repo.id, title: job.title, brief, choice: letIn.choice,
+          ...(own ? { worktreePath: own.path } : { worktree: { baseRef, branch: work! } }),
+        });
+      } catch (e) {
+        if (e instanceof NoAnswer) return await this.needsUser(job, (e as Error).message);
+        throw e;
+      }
+    } catch (e) {
+      return await this.notStarted(job, 'not-started', (e as Error).message);
+    }
+    await this.d.log.thread(job.id, { threadId: launched.threadId, runId: launched.runId, link: launched.link });
+    if (work) await this.d.log.made(job.id, work);
+    onLaunched();
+    return this.watch({ ...job, threadId: launched.threadId, runId: launched.runId, link: launched.link }, repo.github);
+  }
+
+  /** The user's answer as a new turn for a build that ended without a PR. */
+  private answerMessage(old: Job, answer: string): string {
+    return `The user answered your question on GitHub, on issue #${old.issue}:\n\n${answer.trim().split('\n').map((l) => `> ${l}`).join('\n')}\n\n`
+      + `Carry on with the issue from where you stopped (\`git status\`, \`git log\`) to its PR: go through Before you push, push \`${old.branch}\` and open the PR as your brief says, with \`Closes #${old.issue}\`.`;
   }
 
   /** One build, start to end: the job's start, its launch, its end recorded and its thread
@@ -307,13 +474,30 @@ export class BuildLane {
     // teaches nothing rather than measure from a reading taken mid-run
     this.d.gate.started({ id: job.id, kind: job.kind, choice: job.choice }, job.cost ?? {}, job.before ?? reading(null, []));
     if (!job.threadId) return this.needsUser(job, 'the app stopped before T3 named its thread');
+    // an answer in place the app stopped before T3 took: the question still pending is answered
+    // again (#158); a read that fails leaves it to the watch, which still sees the question
+    if (job.answering && job.about && this.d.ws.request) {
+      try {
+        const now = await threadNow(this.d.ws as Pick<T3Ws, 'request'>, job.threadId);
+        if (now.pending?.requestId === job.answering) {
+          const stop = this.d.log.stops().find((s) => s.job === job.about && s.answered?.answer === 'replied');
+          const answers = Object.fromEntries((now.pending.questions.length ? now.pending.questions : ['answer']).map((q) => [q, stop?.answered?.text ?? '']));
+          await this.d.mcp.call('t3_pending_request', { action: 'respond', threadId: job.threadId, requestId: job.answering, answers });
+        }
+      } catch (e) {
+        this.d.say(`${job.title}: its answer couldn't be given again after the restart (${(e as Error).message})`);
+      }
+    }
     this.d.say(`Watching ${job.title} again: ${job.link ?? job.threadId}`);
     return this.watch(job, job.github);
   }
 
   private async watch(job: Job, github: string | null): Promise<Job> {
+    // a build carried on in place: a new turn is told apart from the runs before it, and the
+    // question it answered is no question any more (#158)
     const w = watchThreadEnd(this.d.ws, job.threadId!, job.runId ?? null, this.d.retry,
-      (why) => this.d.say(`${job.title}: T3's thread stream dropped (${why}); opening it again`));
+      (why) => this.d.say(`${job.title}: T3's thread stream dropped (${why}); opening it again`),
+      new Set(job.knownRuns ?? []), new Set(job.answering ? [job.answering] : []));
     this.watches.add(w);
     let end: ThreadEnd;
     try {

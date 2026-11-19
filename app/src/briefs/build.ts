@@ -20,13 +20,17 @@ export type BuildBriefInput = {
   agentsFile: 'AGENTS.md' | 'CLAUDE.md' | null;
   /** The user's name (Settings, Name; else the gh account's). */
   user: string;
+  /** A fresh thread picking up a build that stopped on a question the user answered on GitHub
+   *  (#158): its question, their answer, and the local branch it works on when that isn't `branch`
+   *  (it pushes to `branch`). */
+  carryOn?: { question: string | null; answer: string; link: string | null; work: string | null } | null;
 };
 
 const TEMPLATE = `Build GitHub issue #$number in $github: $title
 
 The queue runner started this job; $user isn't watching it live. Everything you need is below or
 in the repo. There are no handoff files.
-
+$carryon
 ## Where you are
 
 - Repo: \`$github\`, in a T3 worktree on branch \`$branch\`, made from \`$base\`.
@@ -96,11 +100,25 @@ function comments(list: Comment[]): string {
 }
 
 /** Fills the template: each `$name` once, with nothing in a filled value read again. */
+const quote = (text: string) => text.trim().split('\n').map((l) => `> ${l}`).join('\n');
+
+function carryOnText(i: BuildBriefInput): string {
+  const c = i.carryOn;
+  if (!c) return '';
+  const where = c.work
+    ? `You're on a local branch \`${c.work}\` made from it: push to the job's branch with \`git push origin HEAD:${i.branch}\`, and open the PR from \`${i.branch}\` (\`gh pr create --head ${i.branch}\`).`
+    : `You're on its branch \`${i.branch}\`, with its commits.`;
+  return `\n## Direction first\n\nAn earlier thread built this issue${c.link ? ` (${c.link})` : ''} and stopped to ask ${i.user} a question; `
+    + `${i.user} answered it on GitHub, and this fresh thread carries the work on to its PR. ${where} `
+    + `Start from what it left (\`git log\`, \`git status\`), not from scratch.\n\n`
+    + `${c.question ? `Its question:\n\n${quote(c.question)}\n\n` : ''}${i.user}'s answer:\n\n${quote(c.answer)}\n`;
+}
+
 export function buildBrief(i: BuildBriefInput): string {
   const values: Record<string, string> = {
     number: String(i.number), github: i.github, title: i.title, branch: i.branch, base: i.base,
     agents: agentsPointer(i.agentsFile), body: i.body.trim() || '(The issue has no body.)',
-    comments: comments(i.comments), user: i.user,
+    comments: comments(i.comments), user: i.user, carryon: carryOnText(i),
   };
   return TEMPLATE.replace(/\$([a-z]+)/g, (whole, name: string) => values[name] ?? whole);
 }
