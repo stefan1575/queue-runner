@@ -28,6 +28,7 @@ pnpm --dir app live:build         # the live build check, sandbox only (Live che
 pnpm --dir app live:review        # the live review check, GitHub sandbox, dry run (Live checks, below)
 pnpm --dir app live:merge         # the live merge check, GitHub sandbox, review stubbed clean (Live checks, below)
 pnpm --dir app live:conflict      # the live conflict check, GitHub sandbox, one real round (Live checks, below)
+pnpm --dir app live:stops         # the live stops check, GitHub sandbox, no thread (Live checks, below)
 pnpm --dir app desktop            # builds and opens the desktop app (The desktop app, below)
 pnpm --dir app installer          # builds the Windows installer into installer-dist/ (The installer, below)
 ```
@@ -1027,6 +1028,16 @@ is killed is code -1 with Node's reason in stderr, never a gh exit code (so is t
   deleted at the end; main keeps its commit. **Run 2026-11-19** on Haiku 5.5 at low: all ok,
   sandbox PR #9 (H 85f306b against main at b8cdc82; the round pushed 27f8676 in about 30
   seconds).
+- `app/live/stops.ts` (`pnpm --dir app live:stops`): filing a stop and reading its answer against
+  `stefan1575/queue-runner-sandbox` only, in the T3 project cloned from it (found by its remote).
+  No thread runs: the stops are a fix round that needs the user and a question with no thread, in a
+  job log of its own; the stop desk, gh and GitHub are real. The decision thread (the cap's
+  Approach note) is the fakes' only. **It writes to GitHub:** a branch and its PR; one pass must
+  file the PR's `needs-info` issue (its hidden line, the label), the stop in it and a comment on the
+  PR, and a second post nothing; a plain comment on the issue answers it and frees the job; a second
+  stop goes in the same issue; the PR closed outside the app clears it, closing the issue as not
+  planned with a note. The branch is deleted at the end. **Run 2026-11-19:** all ok, sandbox PR #10
+  and its `needs-info` issue #11.
 - `app/live/usage.ts` (`pnpm --dir app live:usage [-- --minutes N]`): acts on no project. It
   subscribes to T3's server config and prints each connected provider's windows as the app reads
   them, then each `providerStatuses` event that changes one, for N minutes (5 by default). **Run

@@ -22,7 +22,8 @@
     "live:build": "node live/build.ts",
     "live:review": "node live/review.ts",
     "live:merge": "node live/merge.ts",
-    "live:conflict": "node live/conflict.ts"
+    "live:conflict": "node live/conflict.ts",
+    "live:stops": "node live/stops.ts"
   },
   "devDependencies": {
     "@fontsource-variable/inter": "5.3.0",
