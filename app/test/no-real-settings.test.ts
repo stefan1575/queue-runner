@@ -43,7 +43,20 @@ describe('no test reaches the real settings', () => {
 
   it('reports a call over several lines at the line it starts on', () => {
     expect(realSettingsReads("const a = 1;\nconst cli = t3Cli(\n);")).toEqual([
-      "2: T3's real files (pass a path of the test's own): const cli = t3Cli(",
+      "2: outside any test: T3's real files (pass a path of the test's own): const cli = t3Cli(",
+    ]);
+  });
+
+  it('names the test the read is in', () => {
+    const source = [
+      "describe('the settings', () => {",
+      "  test.each([1, 2])('reads %s', () => {",
+      "    const dir = join(homedir(), '.queue-runner');",
+      "  });",
+      "});",
+    ].join('\n');
+    expect(realSettingsReads(source)).toEqual([
+      "3: in test 'the settings > reads %s': the user's home folder: const dir = join(homedir(), '.queue-runner');",
     ]);
   });
 

@@ -22,13 +22,18 @@ const POLL_MS = 500;
 export type Poll = (tick: () => Promise<void>) => () => void;
 
 /** `tick` every `ms`, the next wait set only once a tick is done, so a slow read never lands
- *  after a newer one. Its timer is never what keeps the app running. */
+ *  after a newer one, and one that fails doesn't end the polling. Its timer is never what keeps
+ *  the app running. */
 export const pollEvery = (ms: number): Poll => (tick) => {
   let timer: ReturnType<typeof setTimeout> | undefined;
   let stopped = false;
   const next = () => {
     timer = setTimeout(async () => {
-      await tick();
+      try {
+        await tick();
+      } catch {
+        // A tick that fails (a listener that throws) is tried again at the next, never the end.
+      }
       if (!stopped) next();
     }, ms);
     timer.unref();

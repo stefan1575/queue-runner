@@ -180,6 +180,14 @@ describe('the real poll, on the fake clock', () => {
     stop();
   });
 
+  test('a tick that fails is tried again at the next', async () => {
+    let ticks = 0;
+    const stop = pollEvery(500)(async () => { ticks++; if (ticks === 1) throw new Error('a listener threw'); });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(ticks).toBe(2);
+    stop();
+  });
+
   test('stopped, it ticks no more, even when stopped while a tick is on its way', async () => {
     let ticks = 0;
     let finish = () => {};

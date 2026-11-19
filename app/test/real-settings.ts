@@ -5,6 +5,7 @@
 // The patterns run over the whole source with its comments blanked out, not line by line, so a
 // call or an access split over lines (`t3Cli(\n)`, `process.env\n  .HOME`) is still found (#173).
 import ts from 'typescript';
+import { testNameAt } from './test-names.ts';
 
 const REAL: [RegExp, string][] = [
   [/\bhomedir\b/g, "the user's home folder"],
@@ -52,16 +53,18 @@ export function blankComments(source: string): string {
   return out.join('');
 }
 
-/** Each line of `source` where a real setting is reached, as `line: what it reaches: the line`;
+/** Each line of `source` where a real setting is reached, as
+ *  `line: in test '<describe > test>': what it reaches: the line` (or `outside any test`);
  *  a match over several lines is reported at the line it starts on. Comments are skipped. */
 export function realSettingsReads(source: string): string[] {
   const code = blankComments(source);
+  const file = ts.createSourceFile('test.ts', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
   const lines = source.split('\n');
   const found = new Map<number, string>();
   for (const [pattern, what] of REAL) {
     for (const match of code.matchAll(pattern)) {
       const n = code.slice(0, match.index).split('\n').length - 1;
-      if (!found.has(n)) found.set(n, what);
+      if (!found.has(n)) found.set(n, `${testNameAt(file, match.index)}: ${what}`);
     }
   }
   return [...found.entries()]

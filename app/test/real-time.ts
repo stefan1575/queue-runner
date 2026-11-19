@@ -7,13 +7,13 @@
 // It reads the code through TypeScript's parser, so a comment or a string that names a timer is
 // not a use, and a use split over lines is still one.
 import ts from 'typescript';
+import { isTestCall, testNameAt } from './test-names.ts';
 
 const CLOCK = 'the real clock (use vi.useFakeTimers or pass a clock)';
 const TIMER = 'a real timer (use vi.useFakeTimers or a seam the test runs)';
 const TIMERS = new Set(['setTimeout', 'setInterval', 'setImmediate']);
 const TIMER_MODULE = /^(?:node:)?timers(?:\/promises)?$/;
 const CLOCK_READS: Record<string, string[]> = { Date: ['now'], performance: ['now'], process: ['hrtime', 'uptime'] };
-const TEST_CALLS = new Set(['describe', 'test', 'it']);
 
 const isName = (n: ts.Node | undefined, name: string) => !!n && ts.isIdentifier(n) && n.text === name;
 
@@ -38,25 +38,6 @@ function use(node: ts.Node): string | null {
   return null;
 }
 
-/** `test`, `it` or `describe` behind a call's callee (`test`, `test.each([...])`, `it.skip`). */
-function testCall(callee: ts.Expression): boolean {
-  if (ts.isIdentifier(callee)) return TEST_CALLS.has(callee.text);
-  if (ts.isPropertyAccessExpression(callee)) return testCall(callee.expression);
-  if (ts.isCallExpression(callee)) return testCall(callee.expression);
-  return false;
-}
-
-/** The titles of the describes and tests a node sits in, outermost first. */
-function titles(node: ts.Node): string[] {
-  const out: string[] = [];
-  for (let n = node.parent; n; n = n.parent) {
-    const first = ts.isCallExpression(n) ? n.arguments[0] : undefined;
-    if (ts.isCallExpression(n) && testCall(n.expression) && first && ts.isStringLiteralLike(first)) out.unshift(first.text);
-  }
-  return out;
-}
-
-const isTestCall = (n: ts.Node): n is ts.CallExpression => ts.isCallExpression(n) && testCall(n.expression);
 const isFakeClock = (n: ts.Node) => ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression)
   && isName(n.expression.expression, 'vi') && n.expression.name.text === 'useFakeTimers';
 
@@ -87,11 +68,9 @@ export function realTimeUses(source: string): string[] {
   const visit = (node: ts.Node) => {
     const what = use(node);
     if (what && !onFakeClock(node)) {
-      const n = file.getLineAndCharacterOfPosition(node.getStart(file)).line;
-      if (!found.has(n)) {
-        const where = titles(node);
-        found.set(n, `${where.length ? `in test '${where.join(' > ')}'` : 'outside any test'}: ${what}`);
-      }
+      const start = node.getStart(file);
+      const n = file.getLineAndCharacterOfPosition(start).line;
+      if (!found.has(n)) found.set(n, `${testNameAt(file, start)}: ${what}`);
     }
     ts.forEachChild(node, visit);
   };
