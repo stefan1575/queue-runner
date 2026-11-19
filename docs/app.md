@@ -296,8 +296,11 @@ tickets but the build lane (Builds, below); the tests drive it on fake T3's even
   minutes old) holds it until T3's next. A provider T3 reports `unsupported` for is ungated, as
   #122 had it. A job that ends on its provider's usage limit (a build's `usage-limit`, a review's
   `out-of-usage`) holds that provider, gated or not, until the reset T3 gave plus two minutes, or
-  an hour when T3 gave none, so the next job of the kind goes to its fallback (#155 F22). A start
-  restores these holds from the job log's ends (`UsageGate.limitsFrom`).
+  an hour when T3 gave none, so the next job of the kind goes to its fallback (#155 F22). A reading
+  T3 takes after the hold began decides instead, and one with room ends it, so a reset credit
+  sends jobs back to the provider (#155 F25); a provider T3 reads no usage for has no such
+  reading and stays held to the reset. A start restores these holds from the job log's ends
+  (`UsageGate.limitsFrom`), under the same rule.
 - **Which model** (`UsageGate.pick`): the kind's own; while that doesn't fit, its fallback if it
   has one and that fits (#152); else held with its own model's reason. `holds()` keeps each held
   job's reason and since when, for the dashboard.

@@ -12,8 +12,10 @@
 //   the same login meanwhile (then it teaches nothing).
 // - **Out of usage:** a job that ended on its provider's usage limit holds that provider until the
 //   reset T3 gave (and `AFTER_RESET_MS`), or `LIMIT_UNKNOWN_MS` with none, so the next job goes to
-//   the fallback, even on a provider T3 reads no usage for (#155 F22). The job log's ends restore
-//   it on a start (`limitsFrom`).
+//   the fallback, even on a provider T3 reads no usage for (#155 F22). A reading T3 takes after
+//   the hold began decides instead, and one with room ends it (a reset credit gives usage back
+//   early, #155 F25); a provider T3 reads no usage for has no such reading. The job log's ends
+//   restore it on a start (`limitsFrom`).
 // - **Whose login:** a job started before T3 has named its provider's login (a build watched again
 //   on a cold start, before T3's first catalog) is given it once T3 does, so it counts against
 //   that login whichever came first (#154 F10).
@@ -47,8 +49,9 @@ export class UsageGate {
   /** Ends of jobs whose login T3 hadn't named yet, by provider: their login's `lastEnd` once it does. */
   private unplacedEnd = new Map<string, Date>();
   private held = new Map<string, Held>();
-  /** Each provider a job ran out of usage on: until when it's held, and the reset T3 gave. */
-  private limited = new Map<string, { until: Date; resetAt: string | null }>();
+  /** Each provider a job ran out of usage on: since when (the job's end) and until when it's
+   *  held, and the reset T3 gave. */
+  private limited = new Map<string, { since: Date; until: Date; resetAt: string | null }>();
   private listeners = new Set<() => void>();
 
   constructor(source: CatalogSource, settings: () => Settings, log: CostLog, now = () => new Date()) {
@@ -97,12 +100,20 @@ export class UsageGate {
 
   /** Whether this job, on this model, fits now. */
   check(job: GateJob): Verdict {
-    const limit = this.limited.get(job.choice.provider);
-    if (limit && this.now() < limit.until) {
-      return { fits: false, until: limit.until, hold: { why: 'limit', kind: job.kind, provider: this.usage(job.choice.provider)?.name ?? job.choice.provider, at: limit.resetAt } };
-    }
-    this.placeJobs();
     const u = this.usage(job.choice.provider);
+    const limit = this.limited.get(job.choice.provider);
+    // a reading taken since the hold began decides instead of it: one with room ends the hold
+    const fresher = Boolean(limit && u?.windows.length && u.checkedAt && Date.parse(u.checkedAt) > limit.since.getTime());
+    if (limit && this.now() < limit.until && !fresher) {
+      return { fits: false, until: limit.until, hold: { why: 'limit', kind: job.kind, provider: u?.name ?? job.choice.provider, at: limit.resetAt } };
+    }
+    const v = this.checkReading(job, u);
+    if (limit && (v.fits || this.now() >= limit.until)) this.limited.delete(job.choice.provider);
+    return v;
+  }
+
+  private checkReading(job: GateJob, u: ProviderUsage | undefined): Verdict {
+    this.placeJobs();
     const catalog = this.source.current().catalog;
     const m = catalog ? model(catalog, job.choice) : undefined;
     return checkJob({
@@ -178,7 +189,7 @@ export class UsageGate {
     const reset = resetAt ? Date.parse(resetAt) : NaN;
     const until = new Date(Number.isNaN(reset) ? endedAt.getTime() + LIMIT_UNKNOWN_MS : reset + AFTER_RESET_MS);
     const was = this.limited.get(provider);
-    if (!was || until > was.until) this.limited.set(provider, { until, resetAt: Number.isNaN(reset) ? null : resetAt });
+    if (!was || until > was.until) this.limited.set(provider, { since: endedAt, until, resetAt: Number.isNaN(reset) ? null : resetAt });
   }
 
   /** The usage limits the job log's ends recorded, so a start holds what the last run held. */
