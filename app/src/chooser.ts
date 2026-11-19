@@ -111,12 +111,18 @@ export class Chooser {
       this.again = true;
       return this.passing;
     }
+    // the last check for another pass and the release are in one continuation, so a pass asked
+    // for at any moment either sets `again` before that check or finds no pass running (F2)
     this.passing = (async () => {
-      do {
-        this.again = false;
-        await this.passOnce();
-      } while (this.again && !this.stopped);
-    })().finally(() => { this.passing = null; });
+      try {
+        do {
+          this.again = false;
+          await this.passOnce();
+        } while (this.again && !this.stopped);
+      } finally {
+        this.passing = null;
+      }
+    })();
     return this.passing;
   }
 

@@ -6,7 +6,7 @@
 import { readFile } from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { BuildLane, type BuildRepo } from '../src/build-lane.ts';
-import { Chooser } from '../src/chooser.ts';
+import { Chooser, type RepoJobLane } from '../src/chooser.ts';
 import { ConflictLane } from '../src/conflict-lane.ts';
 import { FixLane } from '../src/fix-lane.ts';
 import type { Issue, ReviewPull } from '../src/github.ts';
@@ -300,5 +300,35 @@ describe('one job per repo', () => {
     clock = new Date('2026-11-20T13:03:00Z');
     await chooser.pass();
     expect(t3.launches.map((l) => l.title)).toEqual(['Queue runner build: app#1']);
+  });
+});
+
+describe('passes', () => {
+  test("a pass asked for while one ends is never lost, whatever moment it lands on (F2)", async () => {
+    // the request lands k microtasks after the last lane answered: before the pass's last check
+    // for another, between that check and its release, or after
+    for (let k = 0; k < 12; k++) {
+      let passes = 0;
+      let asked = false;
+      let c: Chooser | null = null;
+      let requested: Promise<void> = Promise.resolve();
+      const lane: RepoJobLane = {
+        recover() {}, owed() { passes++; }, busy: () => false, usageChanged: () => false, stop() {}, async idle() {},
+        async next() {
+          if (!asked) {
+            asked = true;
+            let p = Promise.resolve();
+            for (let i = 0; i < k; i++) p = p.then(() => {});
+            requested = p.then(() => { void c!.pass(); });
+          }
+          return null;
+        },
+      };
+      c = new Chooser({ repos: () => [APP], lanes: [lane], log, say: () => {} });
+      await c.pass();
+      await requested;
+      await c.idle();
+      expect(passes, `a pass asked for ${k} microtasks after the lane answered`).toBe(2);
+    }
   });
 });
