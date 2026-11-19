@@ -19,7 +19,9 @@ import { Deps } from '../review/deps.ts';
 import { ReviewLane } from '../review-lane.ts';
 import { FixLane } from '../fix-lane.ts';
 import { MergeLane } from '../merge-lane.ts';
+import { ChecksLane } from '../checks-lane.ts';
 import { ConflictLane } from '../conflict-lane.ts';
+import { StopDesk } from '../stops.ts';
 import { UsageGate } from '../usage-gate.ts';
 import { windowsPlatform } from '../platform/windows.ts';
 import { checkJobs, DEFAULT_JOBS } from '../jobs.ts';
@@ -135,17 +137,17 @@ async function main() {
   // (its pushed head is reviewed next); a merge tells the build lane (docs/app.md, Fix rounds and
   // merges). A conflict round that ends tells the review lane too; a review, a fix round or a merge
   // that ends tells the conflict lane, since each may free a conflicted PR's turn (Conflict rounds).
-  const lanes: { fixes?: FixLane; merges?: MergeLane; conflicts?: ConflictLane } = {};
+  const lanes: { fixes?: FixLane; merges?: MergeLane; conflicts?: ConflictLane; stops?: StopDesk } = {};
   const reviews = new ReviewLane({
     repos: () => servedRepos(repos.list()), github, git: new GitCli(), deps: new Deps(join(state, 'deps')),
     mcp: t3Doors!.mcp, ws: t3Doors!.ws, gate, catalog: () => catalog.current().catalog, jobs: () => settings.get().jobs,
     toolFree: () => settings.get().toolFreeInstances, user, log, stateDir: state, say,
-    ended: () => { void lanes.fixes?.pass(); void lanes.merges?.pass(); void lanes.conflicts?.pass(); },
+    ended: () => { void lanes.fixes?.pass(); void lanes.merges?.pass(); void lanes.conflicts?.pass(); void lanes.stops?.pass(); },
   });
   const fixes = new FixLane({
     repos: () => servedRepos(repos.list()), github, git: new GitCli(), mcp: t3Doors!.mcp, ws: t3Doors!.ws, gate,
     catalog: () => catalog.current().catalog, jobs: () => settings.get().jobs, user, log, exists: existsSync, say,
-    ended: () => { void reviews.pass(); void lanes.conflicts?.pass(); },
+    ended: () => { void reviews.pass(); void lanes.conflicts?.pass(); void lanes.stops?.pass(); },
   });
   const merges = new MergeLane({
     repos: () => servedRepos(repos.list()), github, git: new GitCli(), mcp: t3Doors!.mcp, log, say,
@@ -154,11 +156,24 @@ async function main() {
   const conflicts = new ConflictLane({
     repos: () => servedRepos(repos.list()), github, git: new GitCli(), mcp: t3Doors!.mcp, ws: t3Doors!.ws, gate,
     catalog: () => catalog.current().catalog, user, log, exists: existsSync, say,
-    ended: () => void reviews.pass(),
+    ended: () => { void reviews.pass(); void lanes.stops?.pass(); },
   });
   lanes.fixes = fixes;
   lanes.merges = merges;
   lanes.conflicts = conflicts;
+  // A failed check's one re-run and a base's failure (docs/app.md, Stops and decisions): checks
+  // that failed again tell the fix lane; a PR brought up to date tells the review and conflict
+  // lanes. What reaches the user is filed by the stop desk, whose answers send every lane a pass.
+  const checks = new ChecksLane({
+    repos: () => servedRepos(repos.list()), github, log, say,
+    failedAgain: () => void fixes.pass(), updated: () => { void reviews.pass(); void conflicts.pass(); },
+  });
+  const stops = new StopDesk({
+    repos: () => servedRepos(repos.list()), github, mcp: t3Doors!.mcp, ws: t3Doors!.ws, gate,
+    catalog: () => catalog.current().catalog, user, log, say,
+    answered: () => { void lane.pass(); void reviews.pass(); void fixes.pass(); void conflicts.pass(); void merges.pass(); },
+  });
+  lanes.stops = stops;
 
   const shell: Shell = {
     singleInstance(onSecondStart) {
@@ -225,6 +240,17 @@ async function main() {
   void merges.pass().then(() => {
     repos.onChange(() => void merges.pass());
     setInterval(() => void merges.pass(), 60_000);
+  });
+  // Checks are read every minute (GitHub runs them in its own time); stops are filed and their
+  // answers read every minute, and the decisions the log shows open are watched again first.
+  void checks.pass().then(() => {
+    repos.onChange(() => void checks.pass());
+    setInterval(() => void checks.pass(), 60_000);
+  });
+  void stops.start().then(() => {
+    gate.onChange(() => stops.usageChanged());
+    repos.onChange(() => void stops.pass());
+    setInterval(() => void stops.pass(), 60_000);
   });
   view.onChange((v) => win?.webContents.send(CHANNELS.changed, v));
   // The window only hides; the app lives in the tray until Quit.
