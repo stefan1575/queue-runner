@@ -21,6 +21,11 @@ export class FakeGitHub implements GitHubWork {
   async branches(repo: string, prefix: string) { return (this.branchList[repo] ?? []).filter((b) => b.startsWith(prefix)); }
   async openPulls(repo: string) { return structuredClone(this.pulls[repo] ?? []); }
   async issueComments(repo: string, n: number) { return structuredClone(this.comments[`${repo}#${n}`] ?? []); }
-  async pullForBranch(repo: string, branch: string) { return this.pullsFromBranch[`${repo}:${branch}`] ?? null; }
+  /** While above 0, each PR lookup fails (a GitHub blip) and counts it down. */
+  pullLookupFails = 0;
+  async pullForBranch(repo: string, branch: string) {
+    if (this.pullLookupFails > 0) { this.pullLookupFails--; throw new Error('gh api failed (1): HTTP 502'); }
+    return this.pullsFromBranch[`${repo}:${branch}`] ?? null;
+  }
   async defaultBranch(repo: string) { return this.defaults[repo] ?? 'main'; }
 }

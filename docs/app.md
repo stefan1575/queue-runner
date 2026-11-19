@@ -363,13 +363,16 @@ builds (`docs/flow.md`, `docs/claude-lane.md`). `src/build-lane.ts`, `src/picker
   minutes. In the desktop app a pass runs at start, when the served set changes, when T3 reads new
   usage while a build is held, and every 5 minutes (GitHub is polled for new tickets).
 - **The end comes from T3's thread events** (`src/t3/thread-end.ts`; The WebSocket API, below), not
-  polling: `done` (the run completed; `done-no-pr` when no PR came from the branch), `waiting` (a
+  polling: `done` (the run completed; `done-no-pr` when GitHub answered that no PR came from the
+  branch; a lookup that failed is never "none": the end has no `pr`, each pass, a start's
+  included, looks it up again, and a `pr` line records what it found), `waiting` (a
   pending runtime request: a question to the user), `usage-limit` (with T3's `resetAt`) or
   `failed` (with the error item's message). A stream that drops opens again after 5 seconds.
 - **The job log** is `jobs.jsonl` in the state folder (`src/job-log.ts`, today's `state.py` cut to
   a build): `start` (the model the gate let it in on, the cost it was let in at and T3's reading it
   was let in on, `cost` and `before`), `thread` (once T3 names it), `end` and, for a `needs-user`
-  end, `answered` once the user has answered; `settled` once its thread is settled.
+  end, `answered` once the user has answered; `settled` once its thread is settled; `pr` once a
+  PR lookup that failed at the end is done.
   Every build that started holds its issue but `not-started` (releasing is a later ticket). The
   usage before and after a job are its record in the gate's `usage.jsonl`, by the same job id: the
   gate counts the job from its let-in and measures it on T3's first reading after its end; a job

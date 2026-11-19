@@ -12,6 +12,8 @@
 //   holds its repo until an `answered` line says the user has answered.
 // - **To settle:** a job ended on a thread the app launched, that its end says to settle, with no
 //   `settled` line yet: an app that stopped between the two settles it on its next start (F9).
+// - **PR owed:** a build ended `done` whose PR lookup failed has no `pr` yet: it's looked up again
+//   until GitHub answers, and a `pr` line then records the PR or, with none, `done-no-pr` (F13).
 import { appendFile, mkdir, readFile, truncate } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import type { Cost, Reading } from './costs.ts';
@@ -46,6 +48,8 @@ export type JobEnd = {
   /** T3's status for the run (`completed`, `failed`...), when it ran. */
   status?: string;
   error?: string | null;
+  /** The PR opened from the job's branch, or null for none. Absent on a `done` end of a repo on
+   *  GitHub, its lookup failed and is owed (F13). */
   pr?: { number: number; url: string; state: string } | null;
   /** When the provider's limit resets, as T3 has it (a usage-limit end). */
   resetAt?: string | null;
@@ -80,7 +84,8 @@ type Event =
   | ({ event: 'thread'; job: string; at: string } & JobThread)
   | ({ event: 'end'; job: string; at: string } & JobEnd)
   | { event: 'answered'; job: string; at: string }
-  | { event: 'settled'; job: string; at: string };
+  | { event: 'settled'; job: string; at: string }
+  | { event: 'pr'; job: string; at: string; pr: JobEnd['pr'] };
 
 export class JobLog {
   private file: string;
@@ -130,6 +135,11 @@ export class JobLog {
       if (e.event === 'thread') this.all.set(e.job, { ...job, threadId: e.threadId, runId: e.runId, link: e.link });
       else if (e.event === 'answered') this.all.set(e.job, { ...job, answeredAt: e.at });
       else if (e.event === 'settled') this.all.set(e.job, { ...job, settledAt: e.at });
+      else if (e.event === 'pr') {
+        if (!job.end) return;
+        const { error: _, ...end } = job.end;
+        this.all.set(e.job, { ...job, end: { ...end, outcome: e.pr ? 'done' : 'done-no-pr', pr: e.pr } });
+      }
       else {
         const { event, job: _, ...end } = e;
         this.all.set(e.job, { ...job, end });
@@ -173,6 +183,12 @@ export class JobLog {
     return this.all.get(id)!;
   }
 
+  /** A done build's PR, looked up after a lookup that failed: with none it's `done-no-pr`. */
+  async pr(id: string, pr: JobEnd['pr']): Promise<Job> {
+    await this.append({ event: 'pr', job: id, at: this.now().toISOString(), pr: pr ?? null });
+    return this.all.get(id)!;
+  }
+
   jobs(): Job[] {
     return [...this.all.values()];
   }
@@ -190,6 +206,11 @@ export class JobLog {
    *  limit aside, which are left for the user (later tickets). */
   toSettle(): Job[] {
     return this.jobs().filter((j) => j.end && j.threadId && !j.settledAt && settles(j.end.outcome));
+  }
+
+  /** Builds ended `done` in a repo on GitHub whose PR lookup failed: looked up again (F13). */
+  prOwed(): Job[] {
+    return this.jobs().filter((j) => j.github && j.end?.outcome === 'done' && j.end.pr === undefined);
   }
 
   /** The repo's jobs that need the user and haven't had an answer: while there's one, the repo

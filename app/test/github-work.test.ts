@@ -52,6 +52,11 @@ describe('the rest', () => {
     expect(await gh.defaultBranch('o/r')).toBe('trunk');
   });
 
+  test("an answer that isn't a list of pages is a GitHubError, never no PR (F13)", async () => {
+    const odd = new GhGitHub(fakeGh({ 'repos/o/r/pulls?head=o:b&state=all&per_page=100': { message: 'Server Error' } }), () => true);
+    await expect(odd.pullForBranch('o/r', 'b')).rejects.toThrow(GitHubError);
+  });
+
   test('gh failing is a GitHubError with what it said', async () => {
     await expect(gh.issueState('o/r', 404)).rejects.toThrow(GitHubError);
     await expect(gh.issueState('o/r', 404)).rejects.toThrow(/HTTP 404/);

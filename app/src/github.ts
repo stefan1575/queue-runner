@@ -159,10 +159,12 @@ export class GhGitHub implements GitHub, GitHubAccount, GitHubLabels, GitHubWork
     }
   }
 
-  /** Every item of a paged REST list. */
+  /** Every item of a paged REST list. An answer that isn't a list of pages is an error, never
+   *  read as an empty list (a PR lookup would take it as no PR, F13). */
   private async all(endpoint: string): Promise<any[]> {
     const pages = await this.api(['--paginate', '--slurp', endpoint], endpoint);
-    return (Array.isArray(pages) ? pages : []).flat();
+    if (!Array.isArray(pages) || !pages.every(Array.isArray)) throw new GitHubError(`gh api ${endpoint} printed no list: ${JSON.stringify(pages).slice(0, 200)}`);
+    return pages.flat();
   }
 
   async readyIssues(repo: string): Promise<Issue[]> {

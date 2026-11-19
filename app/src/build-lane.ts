@@ -85,6 +85,8 @@ export class BuildLane {
   private watches = new Set<{ stop(): void }>();
   /** Settles under way, by job id. */
   private settling = new Map<string, Promise<void>>();
+  /** PR lookups owed after one failed, under way, by job id. */
+  private lookingUp = new Map<string, Promise<void>>();
   private resting = new Map<string, number>();
   private holdSaid = new Map<string, string>();
   /** The open-PR hold last said for each repo, so it's said once. */
@@ -134,8 +136,8 @@ export class BuildLane {
 
   /** Settles once every build under way has ended and been recorded (the tests wait on it). */
   async idle(): Promise<void> {
-    while (this.building.size || this.passing || this.settling.size) {
-      await Promise.allSettled([...this.building.values(), this.passing, ...this.settling.values()]);
+    while (this.building.size || this.passing || this.settling.size || this.lookingUp.size) {
+      await Promise.allSettled([...this.building.values(), this.passing, ...this.settling.values(), ...this.lookingUp.values()]);
     }
   }
 
@@ -165,6 +167,8 @@ export class BuildLane {
     // an end recorded and not settled: left by an app that stopped between the two, or a settle
     // that failed; tried each pass, on its own (a thread left in the sidebar holds no build)
     for (const job of this.d.log.toSettle()) if (job.kind === 'build') void this.settle(job);
+    // a done build whose PR lookup failed: looked up again each pass, a restart's first included
+    for (const job of this.d.log.prOwed()) if (job.kind === 'build') void this.lookUp(job);
     const now = this.now().getTime();
     const repos = this.d.repos()
       .map((r, i) => ({ r, i }))
@@ -314,13 +318,14 @@ export class BuildLane {
     this.d.gate.finished(job.id);
     const record: JobEnd = { outcome: end.outcome as JobEnd['outcome'], status: end.status };
     if (end.outcome === 'done' && github) {
-      // a job may open its PR and stop after; done without one is done-no-pr
+      // a job may open its PR and stop after; done without one is done-no-pr. A lookup that
+      // failed isn't "none": the end has no pr, and each pass looks it up again (F13)
       try {
         record.pr = await this.d.github.pullForBranch(github, job.branch);
+        if (!record.pr) record.outcome = 'done-no-pr';
       } catch (e) {
-        record.error = `PR lookup failed: ${(e as Error).message}`;
+        record.error = `PR lookup failed: ${(e as Error).message}; looked up again next pass`;
       }
-      if (!record.pr) record.outcome = 'done-no-pr';
     }
     if (end.outcome === 'failed') record.error = end.error;
     if (end.outcome === 'usage-limit') Object.assign(record, { resetAt: end.resetAt, error: end.error });
@@ -331,6 +336,24 @@ export class BuildLane {
     // Stopped between the two, the next start settles it (the log has no settled line)
     if (settles(record.outcome)) await this.settle(job);
     return ended;
+  }
+
+  /** A done build's PR, looked up again after a lookup failed; once at a time per job. A failure
+   *  is said and leaves it owed for the next pass. */
+  private lookUp(job: Job): Promise<void> {
+    const under = this.lookingUp.get(job.id);
+    if (under) return under;
+    const l = (async () => {
+      try {
+        const pr = await this.d.github.pullForBranch(job.github!, job.branch);
+        const done = await this.d.log.pr(job.id, pr);
+        this.d.say(`${job.title}: ${done.end!.outcome}${pr ? `, PR #${pr.number}` : ''}`);
+      } catch (e) {
+        this.d.say(`${job.title}: its PR lookup failed again (${(e as Error).message}); tried again next pass`);
+      }
+    })().finally(() => this.lookingUp.delete(job.id));
+    this.lookingUp.set(job.id, l);
+    return l;
   }
 
   /** Settles a thread this app launched, and records it; once at a time per job, and not again

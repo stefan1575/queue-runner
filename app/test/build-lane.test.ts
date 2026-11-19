@@ -287,6 +287,45 @@ describe('the end', () => {
     expect(organized().map((a) => a.threadId)).toEqual(['thread-1', 'thread-2']);
   });
 
+  test('a failed PR lookup is never taken as no PR: the end owes it, and a later pass records the PR (F13)', async () => {
+    gh.ready['owner/app'] = [issue(5)];
+    gh.pullsFromBranch['owner/app:claude/ticket-number-5-5'] = { number: 77, url: 'https://github.com/owner/app/pull/77', state: 'open' };
+    gh.pullLookupFails = 2; // the end's lookup and the pass right after it
+    await makeLane().pass();
+    await watching('thread-1');
+    t3.endRun('thread-1', 'completed');
+    await lane.idle();
+    const [job] = log.jobs();
+    expect(job!.end).toMatchObject({ outcome: 'done', error: expect.stringMatching(/PR lookup failed/) });
+    expect(job!.end!.pr).toBeUndefined();
+    expect(organized()).toEqual([{ threadId: 'thread-1', action: 'settle' }]);
+    await lane.pass();
+    await lane.idle();
+    expect(log.get(job!.id)!.end).toMatchObject({ outcome: 'done', pr: { number: 77 } });
+    expect(log.get(job!.id)!.end!.error).toBeUndefined();
+    // looked up once it's found: a pass after that reads nothing more
+    expect(log.prOwed()).toEqual([]);
+  });
+
+  test("a PR lookup owed when the app stopped is done on the next start; a read that finds none is done-no-pr (F13)", async () => {
+    gh.ready['owner/app'] = [issue(5)];
+    gh.pullLookupFails = 2;
+    await makeLane().pass();
+    await watching('thread-1');
+    t3.endRun('thread-1', 'completed');
+    await lane.idle();
+    lane.stop();
+    expect(log.jobs()[0]!.end!.outcome).toBe('done');
+    // restarted: the log as the stopped app left it
+    log = await JobLog.open(join(dir, 'jobs.jsonl'), undefined, jobFiles);
+    await makeLane().start();
+    await lane.idle();
+    expect(log.jobs()[0]!.end).toMatchObject({ outcome: 'done-no-pr', pr: null });
+    log = await JobLog.open(join(dir, 'jobs.jsonl'), undefined, jobFiles);
+    expect(log.jobs()[0]!.end).toMatchObject({ outcome: 'done-no-pr', pr: null });
+    expect(log.prOwed()).toEqual([]);
+  });
+
   test('a question to the user and a usage limit are recorded as such and left unsettled', async () => {
     gh.ready['owner/app'] = [issue(5), issue(6)];
     await makeLane().pass();
