@@ -69,8 +69,9 @@ describe('each rule is written once (#154)', () => {
   const brief = buildBrief(input);
   const flat = (t: string) => t.split(/\s+/).join(' ');
 
-  test('the brief carries the Before you push list, and goes through it before the push', () => {
+  test('the brief ends with the Before you push list, and goes through it before the push', () => {
     expect(brief).toContain(BEFORE_YOU_PUSH);
+    expect(brief.trimEnd().endsWith(BEFORE_YOU_PUSH.trimEnd())).toBe(true);
     const text = flat(brief);
     expect(text).toContain('go through Before you push (below), then push');
     expect(text).toContain('read to its last page');

@@ -56,8 +56,6 @@ $comments
   monitors). The runner does the waiting.
 ${USERS_TO_DECIDE}
 
-${BEFORE_YOU_PUSH}
-
 ## The PR body
 
 Keep it short, with no preamble.
@@ -82,7 +80,9 @@ Visible: <yes, what changes on screen | no, why nothing does>
 **Blast radius:** <a word or two: what could break>
 \`\`\`
 
-${SCREENSHOTS}`;
+${SCREENSHOTS}
+
+${BEFORE_YOU_PUSH}`;
 
 function agentsPointer(file: BuildBriefInput['agentsFile']): string {
   return file
