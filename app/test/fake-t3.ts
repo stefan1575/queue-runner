@@ -38,6 +38,8 @@ export class FakeT3 {
    *  items (an empty page, as T3 gives one now and then), before reads answer as they should. */
   readFailures = 0;
   emptyReads = 0;
+  /** How many reads of an item's text from an offset (a continuation) answer with no items. */
+  emptyContinuations = 0;
   /** Answers `t3_thread_launch` with this failure instead (T3 refusing it). */
   launchFailure: { code: string; message: string } | null = null;
   /** `t3_thread_launch` runs, then its answer is lost (the connection drops before it arrives). */
@@ -232,6 +234,7 @@ export class FakeT3 {
         return { ...item, text, textTruncated: more, nextTextOffset: more ? from + this.textChunk : null };
       };
       if (args.itemId) {
+        if (this.emptyContinuations > 0) { this.emptyContinuations--; return { result: { items: [] } }; }
         const item = (t.messages ?? []).find((m) => m.itemId === args.itemId);
         return { result: { items: item ? [cut(item, args.textOffset ?? 0)] : [] } };
       }

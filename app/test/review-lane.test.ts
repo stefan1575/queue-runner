@@ -253,6 +253,21 @@ describe('a review', () => {
     expect(log.jobs().at(-1)!.end).toMatchObject({ outcome: 'clean' });
   });
 
+  test('an empty continuation read is read again, never taken as the end of the reply (F15)', async () => {
+    t3.textChunk = 50;
+    t3.emptyContinuations = 1;
+    makeLane();
+    const passed = lane.pass();
+    await answer(1, reply([{ id: 'F1', tag: 'important', class: 'unchecked input', file: 'src/a.ts', line: 3, scenario: 'empty input crashes' }]));
+    await passed;
+    await until(() => retries.size > 0);
+    retryNow();
+    await until(() => log.jobs()[0]!.end !== undefined);
+    await lane.idle();
+    expect(log.jobs()[0]!.end).toMatchObject({ outcome: 'blocking' });
+    expect(lines.join('\n')).toMatch(/its reply couldn't be read \(T3 gave message \S+'s text from 50 empty\)/);
+  });
+
   test('the head moving since listing counts nothing', async () => {
     git.heads[4] = H2;
     makeLane();
