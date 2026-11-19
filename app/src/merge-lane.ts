@@ -24,7 +24,7 @@ import { rm } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import type { BuildRepo } from './build-lane.ts';
 import type { FixGit } from './git.ts';
-import { HeadMoved, type GitHubMerge, type GitHubReview, type ReviewPull } from './github.ts';
+import { HeadMoved, type GitHubMerge, type GitHubReview, type MergePull, type ReviewPull } from './github.ts';
 import { REVIEWED, type Job, type JobLog, type Step } from './job-log.ts';
 import { readReviews, runnerPost, type Comment } from './review/ledger.ts';
 import { ThreadSettler } from './settle.ts';
@@ -306,7 +306,13 @@ export class MergeLane {
     for (const n of [...known].sort((a, b) => a - b)) {
       if (this.stopped) return;
       if (listed.has(n) || done.has(n)) continue;
-      const now = await this.d.github.pull(repo.github!, n);
+      let now: MergePull;
+      try {
+        now = await this.d.github.pull(repo.github!, n);
+      } catch (e) { // one PR GitHub won't answer for holds up no other: said once, tried next pass
+        this.note(`${repo.github}#${n} notice`, `merge ${repo.title}#${n}`, `GitHub couldn't say whether it merged (${(e as Error).message})`);
+        continue;
+      }
       if (now.state === 'open') continue;
       const mark = this.marked(repo, n);
       if (now.state === 'merged') {
@@ -382,7 +388,8 @@ export class MergeLane {
     try {
       for (const w of await this.d.git.worktrees(repo.folder)) {
         if (!w.branch || !branches.includes(w.branch)) continue;
-        if (!(await this.d.git.isClean(w.path))) {
+        // a folder that's gone has nothing to lose: git only lists it until it's pruned
+        if ((this.d.exists ?? existsSync)(w.path) && !(await this.d.git.isClean(w.path))) {
           kept.add(w.branch);
           this.d.say(`${name}: worktree ${w.path} has uncommitted changes (or git couldn't say): left as it is, and its branch ${w.branch} kept`);
           continue;

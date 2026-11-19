@@ -337,12 +337,39 @@ describe('the clean-up removes only what the app made (F15)', () => {
     await answered();
     await review(1, H, 'clean');
     git.dirty.add(WT);
+    folders.add(WT); // the worktree's folder is there, with its changes
     await makeLane().pass();
     await lane.idle();
     expect(git.calls).not.toContain(`removeWorktree ${WT}`);
     expect(git.calls).not.toContain(`deleteBranch ${BRANCH}`);
     expect(git.calls).toContain('deleteBranch claude/fix-pr4-fffffff');
     expect(lines.some((l) => l.includes(`worktree ${WT} has uncommitted changes`))).toBe(true);
+  });
+});
+
+describe('the clean-up and the notice, read against Before you push', () => {
+  test("a worktree git still lists whose folder is gone has nothing to lose: it's removed (pruned), not left", async () => {
+    await built();
+    await answered();
+    await review(1, H, 'clean');
+    git.dirty.add(WT); // git can't say about a folder that isn't there
+    await makeLane().pass();
+    await lane.idle();
+    expect(git.calls).toContain(`removeWorktree ${WT}`);
+    expect(git.calls).toContain(`deleteBranch ${BRANCH}`);
+  });
+
+  test("a reviewed PR GitHub won't answer for holds up no other PR's merge: said once, tried next pass", async () => {
+    await built();
+    await answered();
+    const gone = await log.started({ kind: 'review', repo: 'p-app', github: 'owner/app', issue: 2, branch: 'y', base: 'main', title: 'r', choice: CHOICE, onFallback: false, sha: H2, round: 1, reviewer: 'r' });
+    await log.ended(gone.id, { outcome: 'blocking', verdict: 'blocking' });
+    await review(1, H, 'clean'); // PR #4: clean, mergeable; PR #2 isn't on GitHub (the fake answers 404)
+    await makeLane().pass();
+    await lane.pass();
+    await lane.idle();
+    expect(gh.posted.filter((p) => p.what === 'merge')).toEqual([{ what: 'merge', repo: 'owner/app', n: 4, sha: H }]);
+    expect(lines.filter((l) => l.includes("merge app#2: not now, GitHub couldn't say whether it merged"))).toHaveLength(1);
   });
 });
 
