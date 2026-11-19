@@ -78,7 +78,7 @@ describe('a failed check', () => {
     expect(steps('check-failed')).toEqual([]);
   });
 
-  test('a check no re-run reaches (a commit status, another app's) fails again at once', async () => {
+  test("a check no re-run reaches (a commit status, another app's) fails again at once", async () => {
     gh.failedRunsOn[H] = {};
     await lane.pass();
     expect(steps('check-failed')).toEqual([expect.objectContaining({ failed: ['tests'], runs: [0] })]);
