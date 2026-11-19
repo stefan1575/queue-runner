@@ -19,10 +19,13 @@
 //   branches removed, the PR's threads settled) is a `cleaned` line, and its folders T3 still held
 //   then are a `swept` line once they're gone. A merge started with no end (the app stopped
 //   mid-merge) is read from GitHub on the next pass; one merged and not cleaned is cleaned then.
-// - **Stops** (#157, for the stops ticket #158): a PR left for the user on its head H, with why: a
-//   conflict a conflict round couldn't resolve (it ended without a push), one back on the same base
-//   tip the last round merged, or too many rounds as the base keeps moving. One `stop` line per
-//   PR, head and cause; nothing more happens to it yet.
+// - **Stops** (#158): what the loop can't settle, left for the user on a PR (or a build's own
+//   issue): the cap (an Approach note), a question from a builder or a decision thread, a job with
+//   no saved thread id after a restart. A `stop` line, then `stop-noted` once a decision thread's
+//   Approach note is on the PR, `stop-filed` once it's in the PR's `needs-info` issue, and
+//   `stop-answered` once the user answered on GitHub (or the PR was merged or closed outside the
+//   app). While one is open its PR is held, and its repo starts no build (src/stops.ts).
+//   A `conflict` stop is an older app's (#157): never filed, and it holds nothing.
 import { appendFile, mkdir, readFile, truncate } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import type { Cost, Reading } from './costs.ts';
@@ -33,7 +36,9 @@ export type Outcome = 'done' | 'done-no-pr' | 'waiting' | 'usage-limit' | 'faile
   | ReviewedOutcome | 'out-of-usage' | 'head-moved'
   /** T3 may have started its thread, and the app has no id of it (#154, After a restart, don't
    *  guess): its repo starts nothing until the user answers. */
-  | 'needs-user';
+  | 'needs-user'
+  /** A decision thread's answer was read (#158): the action it chose is `action`. */
+  | 'decided';
 /** A review whose comment is on the PR: its head was reviewed. */
 export type ReviewedOutcome = 'clean' | 'blocking' | 'stop' | 'approach-note';
 export const REVIEWED: readonly Outcome[] = ['clean', 'blocking', 'stop', 'approach-note'];
@@ -70,6 +75,17 @@ export type JobStart = {
   /** A conflict round's (#157): the base branch's own tip as GitHub had it when the round started
    *  (its branches API, never the PR's `base.sha`), the base the round merges in. */
   baseSha?: string;
+  /** A fix round's cause when no review sent it (#158): a check that failed again after its one
+   *  re-run, whose failing log the brief carries. */
+  cause?: 'check';
+  /** A job that carries another on (#158): a build answered on GitHub goes on from the job `about`,
+   *  in its own thread (`resume.how` in-place) or a fresh one, and why. In place on a thread waiting
+   *  on a question, `answering` is the request it answered. A decision's `about` is its stop. */
+  about?: string;
+  resume?: { how: 'in-place' | 'fresh'; why: string };
+  answering?: string;
+  /** A decision thread's question (#158). */
+  question?: string;
   /** What the usage gate let the job in at, and T3's reading it was let in on: a job watched
    *  again after a restart is reserved and measured from these. Absent on a line an older app
    *  wrote, and on a job no gate let in (the live check's). */
@@ -96,6 +112,8 @@ export type JobEnd = {
   runDir?: string;
   /** A fix or conflict round's: the PR's head once it ended (null when GitHub couldn't say). */
   head?: string | null;
+  /** A decision's: the action it chose (`approach-note`, `stop`). */
+  action?: string;
 };
 export type Job = JobStart & { id: string; startedAt: string } & Partial<JobThread>
   & { end?: JobEnd & { at: string }; answeredAt?: string; settledAt?: string;
@@ -109,19 +127,54 @@ export type Job = JobStart & { id: string; startedAt: string } & Partial<JobThre
 export type StepOutcome = 'merged' | 'failed' | 'head-moved' | 'marked' | 'unmarked'
   /** A PR the app reviewed, closed without merging: noticed once, done with (#156 F14). */
   | 'closed';
-export type StepStart = { kind: 'merge' | 'ready'; repo: string; github: string; pr: number; branch: string; sha: string };
-export type StepEnd = { outcome: StepOutcome; error?: string | null; by?: 'app' | 'user'; commit?: string | null; why?: string };
+export type StepStart = {
+  /** A merge or a mark (#156); a failed check's re-run, a base failing the same checks (H held until
+   *  the base moves), the PR brought up to date with its base, and checks that failed again after
+   *  their re-run, which get a fix round (#158). */
+  kind: 'merge' | 'ready' | 'rerun' | 'base-hold' | 'update' | 'check-failed';
+  repo: string; github: string; pr: number; branch: string; sha: string;
+  /** A re-run's Actions run and the attempt that failed; a base hold's base tip; failed checks'
+   *  names and the Actions runs they're in. */
+  run?: number; attempt?: number; baseSha?: string; failed?: string[]; runs?: number[];
+};
+export type StepEnd = { outcome: StepOutcome | 'rerun' | 'updated' | 'refused'; error?: string | null; by?: 'app' | 'user'; commit?: string | null; why?: string };
 export type Step = StepStart & { id: string; startedAt: string; end?: StepEnd & { at: string }; cleanedAt?: string; left?: string[]; sweptAt?: string };
 
-/** A PR left for the user on its head (#157; the stops ticket, #158, acts on them). */
-export type StopStart = { cause: 'conflict'; repo: string; github: string; pr: number; sha: string; why: string; link: string | null };
-export type Stop = StopStart & { id: string; at: string };
+/** Why a PR (or a build's issue) is left for the user (#158). `conflict` is an older app's (#157),
+ *  never filed. */
+export type StopCause = 'cap' | 'question' | 'needs-user' | 'conflict';
+export type StopStart = {
+  cause: StopCause; repo: string; github: string;
+  /** The PR, or for a stop `on` a build's issue, the issue. */
+  pr: number;
+  /** The head it's on, null for an issue's. */
+  sha: string | null;
+  why: string; link: string | null;
+  /** Where it's recorded: the PR and its `needs-info` issue (the default), or a build's own issue. */
+  on?: 'pr' | 'issue';
+  /** The job it's about (a question's, a review's that hit the cap, one that needs the user). */
+  job?: string | null;
+};
+export type StopAnswer = 'issue-closed' | 'replied' | 'pr-closed';
+export type Stop = StopStart & {
+  id: string; at: string;
+  /** The Approach note (its comment) or the decision's question, once a decision gave it. */
+  noted?: { at: string; link: string | null; text: string };
+  /** In its `needs-info` issue (or the build's issue), and said on the PR. */
+  filed?: { at: string; issue: string };
+  answered?: { at: string; answer: StopAnswer; text: string | null };
+};
 
 export class JobLogError extends Error {}
 
 /** Whether a job's end settles its thread (#68 story 5): a question to the user and a usage limit
  *  are later tickets' to handle, so their threads are left as they are. */
 export const settles = (outcome: Outcome) => outcome !== 'waiting' && outcome !== 'usage-limit';
+
+/** Whether a job writes to its branch, or may again (one writer per PR): open, cut off by a usage
+ *  limit (it resumes), or waiting on a question nobody has answered yet. A question answered on
+ *  GitHub (#158) goes on as a later job, so the one that asked writes no more. */
+export const writes = (j: Job) => !j.end || j.end.outcome === 'usage-limit' || (j.end.outcome === 'waiting' && !j.answeredAt);
 
 /** The file calls the log makes: the disk, or a test's own in-memory folder (#202 F2). A missing
  *  file is read as an error with `code` 'ENOENT', as Node's is. */
@@ -149,7 +202,10 @@ type Event =
   | ({ event: 'step-end'; step: string; at: string } & StepEnd)
   | { event: 'cleaned'; step: string; at: string; left: string[] }
   | { event: 'swept'; step: string; at: string }
-  | ({ event: 'stop'; stop: string; at: string } & StopStart);
+  | ({ event: 'stop'; stop: string; at: string } & StopStart)
+  | { event: 'stop-noted'; stop: string; at: string; link: string | null; text: string }
+  | { event: 'stop-filed'; stop: string; at: string; issue: string }
+  | { event: 'stop-answered'; stop: string; at: string; answer: StopAnswer; text: string | null };
 
 export class JobLog {
   private file: string;
@@ -195,6 +251,14 @@ export class JobLog {
     if (e.event === 'stop') {
       const { event, stop, ...rest } = e;
       this.stops_.set(stop, { ...rest, id: stop });
+      return;
+    }
+    if (e.event === 'stop-noted' || e.event === 'stop-filed' || e.event === 'stop-answered') {
+      const st = this.stops_.get(e.stop);
+      if (!st) return;
+      if (e.event === 'stop-noted') this.stops_.set(e.stop, { ...st, noted: { at: e.at, link: e.link, text: e.text } });
+      else if (e.event === 'stop-filed') this.stops_.set(e.stop, { ...st, filed: { at: e.at, issue: e.issue } });
+      else this.stops_.set(e.stop, { ...st, answered: { at: e.at, answer: e.answer, text: e.text } });
       return;
     }
     if (e.event === 'step') {
@@ -316,10 +380,11 @@ export class JobLog {
     return [...this.steps_.values()];
   }
 
-  /** A PR left for the user on its head, written once: a stop already there for the same PR, head
-   *  and cause is that one, and nothing is written. */
+  /** A PR left for the user, written once: an open stop already there for the same PR (or issue),
+   *  head, cause and job is that one, and nothing is written. */
   async stopped(start: StopStart): Promise<Stop> {
-    const there = this.stopOn(start.repo, start.pr, start.sha, start.cause);
+    const there = this.stops().find((s) => !s.answered && s.repo === start.repo && s.pr === start.pr && s.sha === start.sha
+      && s.cause === start.cause && (s.job ?? null) === (start.job ?? null) && (s.on ?? 'pr') === (start.on ?? 'pr'));
     if (there) return there;
     const at = this.now().toISOString();
     const id = `stop-${at.replace(/[-:.]/g, '')}-${++this.n}`;
@@ -336,6 +401,36 @@ export class JobLog {
     return this.stops().find((s) => s.repo === repo && s.pr === pr && s.sha === sha && s.cause === cause);
   }
 
+  async stopNoted(id: string, link: string | null, text: string): Promise<Stop> {
+    await this.append({ event: 'stop-noted', stop: id, at: this.now().toISOString(), link, text });
+    return this.stops_.get(id)!;
+  }
+
+  async stopFiled(id: string, issue: string): Promise<Stop> {
+    await this.append({ event: 'stop-filed', stop: id, at: this.now().toISOString(), issue });
+    return this.stops_.get(id)!;
+  }
+
+  async stopAnswered(id: string, answer: StopAnswer, text: string | null): Promise<Stop> {
+    await this.append({ event: 'stop-answered', stop: id, at: this.now().toISOString(), answer, text });
+    return this.stops_.get(id)!;
+  }
+
+  /** The repo's stops waiting on the user (on PR or issue `pr`, if given): each holds its PR, and
+   *  any one holds the repo's builds (#158). An older app's `conflict` stop holds nothing. */
+  openStops(repo: string, pr?: number, on: 'pr' | 'issue' = 'pr'): Stop[] {
+    return this.stops().filter((s) => s.repo === repo && s.cause !== 'conflict' && !s.answered
+      && (pr === undefined || (s.pr === pr && (s.on ?? 'pr') === on)));
+  }
+
+  /** The newest stop on the PR the user answered (one cleared by a merge or close aside): what
+   *  released it, and what the next round on it is told first. */
+  lastAnswer(repo: string, pr: number): Stop | undefined {
+    return this.stops().filter((s) => s.repo === repo && s.pr === pr && (s.on ?? 'pr') === 'pr' && s.cause !== 'conflict'
+      && s.answered && s.answered.answer !== 'pr-closed')
+      .sort((a, b) => a.answered!.at.localeCompare(b.answered!.at)).at(-1);
+  }
+
   get(id: string): Job | undefined {
     return this.all.get(id);
   }
@@ -348,7 +443,9 @@ export class JobLog {
   /** Jobs ended on a thread the app launched whose thread isn't settled yet: a question or a usage
    *  limit aside, which are left for the user (later tickets). */
   toSettle(): Job[] {
-    return this.jobs().filter((j) => j.end && j.threadId && !j.settledAt && settles(j.end.outcome));
+    // a question answered on GitHub goes on as a later job: the thread that asked is settled (a
+    // message sent to it in place unsettles it, and that job's own end settles it again)
+    return this.jobs().filter((j) => j.end && j.threadId && !j.settledAt && (settles(j.end.outcome) || (j.end.outcome === 'waiting' && j.answeredAt)));
   }
 
   /** Builds ended `done` in a repo on GitHub whose PR lookup failed: looked up again (F13). */

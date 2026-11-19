@@ -193,7 +193,7 @@ describe('a review', () => {
     expect(t3.launches).toEqual([]);
     expect(lines).toEqual([
       `review app#4: not now, checks still running on ${H.slice(0, 7)} (tests)`,
-      `review app#4: not now, a check failed on ${H.slice(0, 7)} (tests)`,
+      `review app#4: not now, a check failed on ${H.slice(0, 7)} (tests): its re-run or fix round comes first`,
       `review app#4: not now, no checks reported on ${H.slice(0, 7)} yet`,
     ]);
   });

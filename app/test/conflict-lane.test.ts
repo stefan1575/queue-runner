@@ -8,7 +8,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import type { BuildRepo } from '../src/build-lane.ts';
-import { ConflictLane, MAX_CONFLICT_ROUNDS, NO_CHECKS_GRACE_MS, type ConflictLaneDoors } from '../src/conflict-lane.ts';
+import { CAP } from '../src/cap.ts';
+import { ConflictLane, NO_CHECKS_GRACE_MS, type ConflictLaneDoors } from '../src/conflict-lane.ts';
 import { MAX_FAILED_MERGES } from '../src/merge-lane.ts';
 import { MAX_FAILED } from '../src/review-lane.ts';
 import { GitHubError, type ReviewPull } from '../src/github.ts';
@@ -190,29 +191,33 @@ describe('a conflict round', () => {
     makeLane();
     await lane.pass();
     await until(() => t3.launches.length === 1);
-    expect(t3.launches[0].workspaceStrategy).toEqual({ type: 'worktree', baseRef: H, branch: 'claude/conflict-pr4-abcdef1' });
+    expect(t3.launches[0].workspaceStrategy).toEqual({ type: 'worktree', baseRef: H, branch: 'claude/conflict-pr4-abcdef1-b1b1b1b' });
     expect(t3.launches[0].message).toContain('`git push origin HEAD:claude/thing-3`');
     await until(() => rounds()[0]?.made !== undefined);
-    expect(rounds()[0]).toMatchObject({ workBranch: 'claude/conflict-pr4-abcdef1', made: ['claude/conflict-pr4-abcdef1'] });
+    expect(rounds()[0]).toMatchObject({ workBranch: 'claude/conflict-pr4-abcdef1-b1b1b1b', made: ['claude/conflict-pr4-abcdef1-b1b1b1b'] });
   });
 
-  test('a round that ends without a push is a stop recorded for the stops ticket, and H gets no other round', async () => {
+  test('a round that ends without a push files no stop: H gets another round once the base moves, and not before (#158)', async () => {
     makeLane();
     await lane.pass();
     await finish('thread-1', 4, null);
     await lane.idle();
-    expect(log.stops()).toEqual([expect.objectContaining({
-      cause: 'conflict', repo: APP.id, github: 'owner/app', pr: 4, sha: H, link: 't3://thread/thread-1',
-      why: expect.stringContaining("couldn't resolve it (it ended done without a push)"),
-    })]);
-    expect(lines.some((l) => l.includes('without a push: a stop for you'))).toBe(true);
+    expect(log.stops()).toEqual([]);
+    expect(lines.some((l) => l.includes('without a push: another round once main moves'))).toBe(true);
     await lane.pass();
     await lane.pass();
     expect(t3.launches).toHaveLength(1);
-    expect(log.stops()).toHaveLength(1);
+    expect(lines.at(-1)).toContain("the conflict round on abcdef1 couldn't resolve it (it ended done without a push), and main is still at b1b1b1b, which that round merged: another round once main moves");
+    // main moves: another round on the same head, on a branch of its own
+    gh.tip = B2;
+    await lane.pass();
+    await until(() => t3.launches.length === 2);
+    expect(rounds()[1]).toMatchObject({ sha: H, baseSha: B2 });
+    expect(t3.launches[1].workspaceStrategy).toEqual({ type: 'worktree', baseRef: H, branch: 'claude/conflict-pr4-abcdef1-b2b2b2b' });
+    expect(log.stops()).toEqual([]);
   });
 
-  test('a conflict back after the base moved gets another round; back on the same tip, a stop that holds', async () => {
+  test('a conflict back after the base moved gets another round; back on the same tip, it waits for the base, with no stop', async () => {
     makeLane();
     await lane.pass();
     // main moves on while round 1 runs, after it merged main at B1: its push conflicts again
@@ -220,18 +225,23 @@ describe('a conflict round', () => {
     await finish('thread-1', 4, H2, true);
     await until(() => t3.launches.length === 2);
     expect(rounds()[1]).toMatchObject({ sha: H2, baseSha: B2 });
-    expect(log.stops()).toEqual([]);
-    // round 2's push conflicts again, and main is still at B2: a stop, not a third round
+    // round 2's push conflicts again, and main is still at B2: it waits, no stop
     await finish('thread-2', 4, H3, true);
     await lane.idle();
     await lane.pass();
     expect(t3.launches).toHaveLength(2);
-    expect(log.stops()).toEqual([expect.objectContaining({ sha: H3, link: 't3://thread/thread-2', why: expect.stringContaining('merged main at b2b2b2b and main has not moved since') })]);
-    // a stop is the user's: main moving on later doesn't start another round on H3
-    gh.tip = B1;
+    expect(log.stops()).toEqual([]);
+    expect(lines.at(-1)).toContain('it conflicts again after the round on 1234567, and main is still at b2b2b2b');
+  });
+
+  test('a round that failed without a push gets another at once; each counts toward the cap', async () => {
+    makeLane();
     await lane.pass();
-    expect(t3.launches).toHaveLength(2);
-    expect(lines.at(-1)).toContain('conflict app#4: no conflict round now, left for you: it conflicts with main again at 9999999');
+    await until(() => t3.threadStreamCount('thread-1') > 0);
+    t3.endRun('thread-1', 'failed');
+    await until(() => t3.launches.length === 2);
+    expect(rounds()[0]!.end).toMatchObject({ outcome: 'failed', head: H });
+    expect(log.stops()).toEqual([]);
   });
 
   test("the base's tip is read from the branch, never the PR's base: a read that fails starts nothing and stops nothing", async () => {
@@ -250,8 +260,8 @@ describe('a conflict round', () => {
     await until(() => t3.launches.length === 2);
   });
 
-  test(`${MAX_CONFLICT_ROUNDS} rounds as the base keeps moving is a stop`, async () => {
-    for (let k = 0; k < MAX_CONFLICT_ROUNDS; k++) {
+  test(`the cap: past ${CAP - 1} rounds since the user's last answer, a conflict is a cap stop for a rethink, not another round`, async () => {
+    for (let k = 0; k < CAP - 1; k++) {
       const j = await log.started(job({ sha: String(k).repeat(40), baseSha: `${k}`.repeat(40) }));
       await log.ended(j.id, { outcome: 'done', head: String(k + 1).repeat(40) });
     }
@@ -259,7 +269,13 @@ describe('a conflict round', () => {
     makeLane();
     await lane.pass();
     expect(t3.launches).toEqual([]);
-    expect(log.stops()[0]!.why).toContain(`${MAX_CONFLICT_ROUNDS} conflict rounds, main keeps moving under it`);
+    expect(log.openStops(APP.id, 4)).toEqual([expect.objectContaining({ cause: 'cap', sha: H, why: expect.stringContaining(`${CAP - 1} rounds since your last answer`) })]);
+    // answered: the count starts again, and the round goes
+    clock = new Date('2026-11-19T12:05:00Z');
+    await log.stopAnswered(log.openStops(APP.id, 4)[0]!.id, 'replied', 'go on');
+    clock = new Date('2026-11-19T12:06:00Z');
+    await lane.pass();
+    await until(() => t3.launches.length === 1);
   });
 });
 
@@ -316,9 +332,13 @@ describe('one conflicted PR at a time, oldest first', () => {
       await goes5();
     });
 
-    test('a failed check on its head holds nothing', async () => {
+    test('a failed check on its head holds the others while its re-run or fix round is to come, and nothing once it is stopped for the user (#158)', async () => {
       await afterRound4();
       gh.checkStates[H2] = { state: 'failed', pending: [], failed: ['tests'] };
+      await lane.pass();
+      expect(t3.launches).toHaveLength(1);
+      expect(lines.some((l) => l.includes('a check failed on 1234567 (tests): its re-run or fix round comes first'))).toBe(true);
+      await log.stopped({ cause: 'question', repo: APP.id, github: 'owner/app', pr: 4, sha: H2, why: 'the fix round asked', link: null });
       await goes5();
     });
 
@@ -413,12 +433,12 @@ describe('one conflicted PR at a time, oldest first', () => {
     });
   });
 
-  test('a PR left for the user holds no other back', async () => {
+  test('a PR whose conflict waits for the base to move holds no other back: the next merge is what moves it', async () => {
     gh.reviewPulls['owner/app'] = [pull(4), pull(5)];
     gh.conflicting.add('owner/app#5');
     makeLane();
     await lane.pass();
-    await finish('thread-1', 4, null); // no push: a stop on #4
+    await finish('thread-1', 4, null); // no push: #4 waits for main to move
     await until(() => t3.launches.length === 2);
     expect(t3.launches[1].title).toBe('Queue runner conflict: app#5');
   });
@@ -483,12 +503,12 @@ describe('what waits', () => {
     await until(() => t3.launches.length === 1);
   });
 
-  test("a fork's PR gets no round: a stop, since it would push to this repo's branch of that name", async () => {
+  test("a fork's PR gets no round, since it would push to this repo's branch of that name: it's left for the user", async () => {
     gh.reviewPulls['owner/app'] = [pull(4, { headRepo: 'someone/app', branch: 'main' })];
     makeLane();
     await lane.pass();
     expect(t3.launches).toEqual([]);
-    expect(log.stops()[0]!.why).toContain("its head is in someone/app, not owner/app: no conflict round pushes to a fork's branch");
+    expect(lines.at(-1)).toContain("its head is in someone/app, not owner/app: no conflict round pushes to a fork's branch");
   });
 
   test('a fix round another lane starts on the branch while the round is fetched: the round starts nothing', async () => {

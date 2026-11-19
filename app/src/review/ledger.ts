@@ -23,8 +23,6 @@ export const MAX_NITS = 5;
 export const STATUSES = { fixed: 'Fixed', open: 'Still open', 'decline-accepted': 'Decline accepted', 'decline-kept': 'Decline kept open' } as const;
 export type Status = keyof typeof STATUSES | 'filed';
 export const OPEN: readonly Status[] = ['open', 'decline-kept'];
-/** From this review on, a blocking review comes to the user with an approach note. */
-export const APPROACH_REVIEW = 3;
 /** Every comment the runner posts outside a review carries a hidden line starting with this. */
 export const RUNNER_MARK = '<!-- queue-runner ';
 /** Where a comment's collapsed ledger starts. */
@@ -212,6 +210,10 @@ const trailer = (rnd: number, verdict: string, sha: string, findings: Finding[])
 
 // --- decide -----------------------------------------------------------------------------------
 
+/** What the review sends the PR to: a merge, a fix round, or (at the cap, src/cap.ts) the user with
+ *  an Approach note. `stop` is an older app's: a repeated class, a reopened finding or a kept
+ *  decline stopped the loop until #158, and now each is a fix round, its signal kept for the
+ *  Approach note's sources. */
 export type Outcome = 'stop' | 'approach-note' | 'merge' | 'fix';
 export type Signal = { signal: 'repeated-class' | 'reopened' | 'decline-kept'; ids: string[]; text: string };
 export type Decision = {
@@ -233,6 +235,8 @@ export type DecideInput = {
   reviewer: string;
   /** Who posts, for the byline: "Posted by the queue runner from <user>'s PC". */
   user: string;
+  /** Another round would pass the cap (src/cap.ts): still blocking, it's an Approach note. */
+  capped?: boolean;
 };
 
 /** Everything a review decides, from the PR's earlier reviews and the reply. An unreadable
@@ -354,10 +358,13 @@ export function decide(i: DecideInput): Decision {
     signals.push({ signal: 'reopened', ids: back.map((f) => f.id), text: back.map((f) => `${f.id} came back after it was ${label(f.reopened!)} in review ${closedIn(f.id)}`).join('; ') });
   }
   if (kept.length) signals.push({ signal: 'decline-kept', ids: kept, text: `The reviewer kept the decline of ${kept.join(', ')} open` });
-  const outcome: Outcome = signals.length ? 'stop' : important.length && rnd >= APPROACH_REVIEW ? 'approach-note' : important.length ? 'fix' : 'merge';
+  // a repeated class, a reopened finding or a kept decline is a fix round like any (#158): each is
+  // said, and kept for the Approach note's sources at the cap
+  const outcome: Outcome = important.length && i.capped ? 'approach-note' : important.length ? 'fix' : 'merge';
+  if (signals.length && outcome !== 'merge') notes.push(`**Signals for the Approach note, if it comes to one:** ${signals.map((s) => s.text).join('; ')}.`);
   notes.push('**Next:** ' + {
-    stop: `the loop stops here for ${i.user}: ${signals.map((s) => s.text).join('; ')}.`,
-    'approach-note': `review ${rnd} is still blocking, so an approach note goes to ${i.user} instead of a fix round.`,
+    stop: '',
+    'approach-note': `review ${rnd} is still blocking at the cap, so an approach note goes to ${i.user} instead of a fix round.`,
     merge: `the PR merges once its checks pass on ${sha.slice(0, 7)}.`,
     fix: "back to a fix round: fix every case of each Important finding's class, or decline it with the test that wouldn't fail.",
   }[outcome]);

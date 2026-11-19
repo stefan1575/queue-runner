@@ -21,14 +21,14 @@
 // checks that never report past NO_CHECKS_GRACE_MS, holds nothing (#157 F6, F7). One that conflicts again waits its own turn, so it holds back only
 // higher numbers: two such PRs never wait for each other.
 //
-// **A stop, not a round** (#91), only when another round wouldn't help: the round on H ended
-// without resolving it; or the PR conflicts again while the base's tip is still the one its last
-// round merged; or it had MAX_CONFLICT_ROUNDS rounds as the base keeps moving. A conflict after the
-// base moved, below that, gets another round. "The base moved" is read from the base branch's own
-// tip (GitHub's branches API), never the PR's `base.sha`, which GitHub refreshes only when the PR's
-// branch is pushed: after a stop it stays at the base the last round merged however far the base
-// has moved. A stop is a `stop` line in the job log, once per PR and head, for the stops ticket
-// (#158): nothing more happens to it yet.
+// **Another round once the base moves, never a stop** (#158): a conflict a round couldn't resolve
+// (it ended without a push, or the PR conflicts again) waits while the base's tip is still the one
+// that round merged, and gets another round once it moves. A round that failed gets another at
+// once. Each counts toward the cap (src/cap.ts): at it, the PR stops for a rethink instead, with
+// an Approach note. "The base moved" is read from the base branch's own tip (GitHub's branches
+// API), never the PR's `base.sha`, which GitHub refreshes only when the PR's branch is pushed: it
+// stays at the base the last round merged however far the base has moved. A round that stops on a
+// question is a stop for the user (src/stops.ts files it).
 //
 // **After a restart, don't guess** (#154): a round is tied to a thread only by the id T3 gave the
 // app's own launch. One the log shows open with its thread line is watched again; one without, and
@@ -42,7 +42,8 @@ import type { GitHubMerge, GitHubReview, ReviewPull } from './github.ts';
 import { fixNext } from './fix-lane.ts';
 import { mergeNext } from './merge-lane.ts';
 import { reviewNext } from './review-lane.ts';
-import { REVIEWED, settles, type Job, type JobEnd, type JobLog, type StopStart } from './job-log.ts';
+import { capReached, capText, roundsSinceAnswer } from './cap.ts';
+import { REVIEWED, settles, writes, type Job, type JobEnd, type JobLog } from './job-log.ts';
 import type { Catalog, ModelChoice } from './jobs.ts';
 import { launchJob } from './launch.ts';
 import { closedIssues, JOB_BRANCH_PREFIX } from './picker.ts';
@@ -73,19 +74,19 @@ export type ConflictLaneDoors = {
   now?: () => Date;
 };
 
-/** A PR that conflicted this many times as its base kept moving is a stop (today's #91 limit). */
-export const MAX_CONFLICT_ROUNDS = 5;
 /** How long a head a conflict round pushed, with no checks reported on it, still holds the repo's
  *  other conflicted PRs: CI reports within minutes, and a repo with none never does (#157 F7). */
 export const NO_CHECKS_GRACE_MS = 10 * 60_000;
 
 export const conflictTitle = (repo: BuildRepo, n: number) => `Queue runner conflict: ${repo.title}#${n}`;
-/** The local branch a round's new worktree is made on, from H; it never goes to origin: the round
- *  pushes to the PR's own branch. Not the fix round's name, so the two never meet on one head. */
-export const conflictBranch = (n: number, sha: string) => `${JOB_BRANCH_PREFIX}conflict-pr${n}-${sha.slice(0, 7)}`;
+/** The local branch a round's new worktree is made on, from H and the base tip it merges; it never
+ *  goes to origin: the round pushes to the PR's own branch. Not the fix round's name, so the two
+ *  never meet on one head, and the base's tip in it, since H gets another round once the base
+ *  moves (#158). */
+export const conflictBranch = (n: number, sha: string, base: string) => `${JOB_BRANCH_PREFIX}conflict-pr${n}-${sha.slice(0, 7)}-${base.slice(0, 7)}`;
 
 const join = (folder: string, name: string) => `${folder.replace(/[\\/]+$/, '')}/${name}`;
-const WRITING = (j: Job) => !j.end || j.end.outcome === 'waiting' || j.end.outcome === 'usage-limit';
+const WRITING = writes;
 /** A round that got as far as its thread (or may have): every end but `not-started`. */
 const RAN = (j: Job) => j.end?.outcome !== 'not-started';
 
@@ -245,19 +246,26 @@ export class ConflictLane {
     if (review?.end?.outcome === 'blocking' && !jobs.some((j) => j.kind === 'fix' && j.issue === pr.number && j.sha === h && RAN(j))) {
       return `review ${review.round} of ${h7} is blocking: its fix round comes first`;
     }
-    const stop = await this.conflictStop(repo, pr);
-    if (stop) {
-      await this.recordStop(`conflict ${repo.title}#${pr.number}`, { cause: 'conflict', repo: repo.id, github: repo.github!, pr: pr.number, sha: h, ...stop });
-      return `stopped for you: ${stop.why}`;
-    }
     const held = this.heldForUser(repo, pr);
     if (held) return `left for you: ${held}`;
+    const wait = await this.conflictWait(repo, pr);
+    if (wait) return wait;
     if ((this.resting.get(`${repo.github}#${pr.number}`) ?? 0) > this.now().getTime()) return 'its last round started no thread; it rests';
     for (const o of pulls) {
       if (o.number === pr.number || !(o.number < pr.number || conflicts.get(o.number) !== true)) continue;
       if (!jobs.some((j) => j.kind === 'conflict' && j.issue === o.number && RAN(j))) continue;
+      // one whose conflict waits for the base to move holds nothing: the next PR's merge is what
+      // moves it (#158)
+      if (conflicts.get(o.number) === true && await this.conflictWait(repo, o)) continue;
       const moving = await this.moving(repo, o);
       if (moving) return `PR #${o.number} had a conflict round and is still on its way to merging (${moving}): one conflicted PR at a time`;
+    }
+    // the cap (#158): no round past it; the PR stops for a rethink, and src/stops.ts files it
+    if (capReached(this.d.log, repo.id, pr.number)) {
+      const why = capText(roundsSinceAnswer(this.d.log, repo.id, pr.number), `${h7} conflicts with ${pr.base} again`);
+      await this.d.log.stopped({ cause: 'cap', repo: repo.id, github: repo.github!, pr: pr.number, sha: h, why, link: null });
+      this.d.say(`conflict ${repo.title}#${pr.number}: a stop for you, ${why}`);
+      return `stopped for you: ${why}`;
     }
     return null;
   }
@@ -308,56 +316,51 @@ export class ConflictLane {
       && j.sha === pr.headSha && j.end && REVIEWED.includes(j.end.outcome)).at(-1);
   }
 
-  /** Why the PR's head is left for the user, or null: a stop on it, a review that stops on it, a
-   *  fix or conflict round on it that ended without a push, or the PR marked ready for the user to
+  /** Why the PR's head is left for the user, or null: a stop on the PR (#158), a review on it that
+   *  went to them (the cap's approach note, or an older app's stop) and isn't answered, a fork's
+   *  head, a fix round on it that ended without a push, or the PR marked ready for the user to
    *  merge. Such a PR is on no way to merging that the app drives. */
   private heldForUser(repo: BuildRepo, pr: ReviewPull): string | null {
     const h = pr.headSha;
     const h7 = h.slice(0, 7);
-    const stop = this.d.log.stopOn(repo.id, pr.number, h, 'conflict');
+    const stop = this.d.log.openStops(repo.id, pr.number)[0];
     if (stop) return stop.why;
+    // a fork's head: a round would push to this repo's branch of that name (#156 N2)
+    if (pr.headRepo !== undefined && pr.headRepo?.toLowerCase() !== repo.github!.toLowerCase()) {
+      return `its head is in ${pr.headRepo ?? 'a fork GitHub no longer has'}, not ${repo.github}: no conflict round pushes to a fork's branch`;
+    }
+    const answered = this.d.log.lastAnswer(repo.id, pr.number)?.answered!.at ?? '';
     const review = this.newestReview(repo, pr);
-    if (review && (review.end!.outcome === 'stop' || review.end!.outcome === 'approach-note')) return `review ${review.round} of ${h7} ended ${review.end!.outcome}`;
-    const round = this.d.log.jobs().filter((j) => j.repo === repo.id && (j.kind === 'fix' || j.kind === 'conflict') && j.issue === pr.number
-      && j.sha === h && j.end && RAN(j) && !WRITING(j)).at(-1);
+    if (review && (review.end!.outcome === 'stop' || review.end!.outcome === 'approach-note') && review.end!.at > answered) return `review ${review.round} of ${h7} ended ${review.end!.outcome}`;
+    // a fix round that ended without a push asked the user (its question is a stop); a conflict
+    // round that couldn't resolve it waits for the base to move (conflictWait)
+    const round = this.d.log.jobs().filter((j) => j.repo === repo.id && j.kind === 'fix' && j.issue === pr.number
+      && j.sha === h && j.end && RAN(j) && !WRITING(j) && j.end.outcome !== 'failed' && j.startedAt > answered).at(-1);
     if (round) return `a ${round.kind} round on ${h7} ended ${round.end!.outcome} without a push`;
     const ready = this.d.log.steps().filter((s) => s.kind === 'ready' && s.repo === repo.id && s.pr === pr.number && s.end).at(-1);
     if (ready?.end?.outcome === 'marked' && ready.sha === h) return `${h7} is marked ready for you to merge`;
     return null;
   }
 
-  /** Why the conflict on H is a stop, or null while another round may still resolve it (#91). The
+  /** Why the conflict on H waits, or null when a round may go (#158): the PR's last round couldn't
+   *  resolve it (it ended without a push, or the PR conflicts again after it) and the base's tip is
+   *  still the one that round merged, so another round would merge the same thing. Once the base
+   *  moves, it gets another. A round that failed gets another at once (the cap bounds them). The
    *  base's tip is read from GitHub's branches API; that read failing throws, and the PR waits for
    *  the next pass: it's never taken as "the base moved". */
-  private async conflictStop(repo: BuildRepo, pr: ReviewPull): Promise<{ why: string; link: string | null } | null> {
+  private async conflictWait(repo: BuildRepo, pr: ReviewPull): Promise<string | null> {
     const h7 = pr.headSha.slice(0, 7);
-    // a fork's head: a round would push to this repo's branch of that name (#156 N2)
-    if (pr.headRepo !== undefined && pr.headRepo?.toLowerCase() !== repo.github!.toLowerCase()) {
-      return { why: `it conflicts with ${pr.base}, and its head is in ${pr.headRepo ?? 'a fork GitHub no longer has'}, not ${repo.github}: no conflict round pushes to a fork's branch`, link: null };
-    }
-    const rounds = this.d.log.jobs().filter((j) => j.kind === 'conflict' && j.repo === repo.id && j.issue === pr.number && RAN(j));
-    const onH = rounds.filter((j) => j.sha === pr.headSha && j.end).at(-1);
-    if (onH) {
-      return { why: `it conflicts with ${pr.base} at ${h7}, and the conflict round on ${h7} couldn't resolve it (it ended ${onH.end!.outcome} without a push)`, link: onH.link ?? null };
-    }
-    if (rounds.length >= MAX_CONFLICT_ROUNDS) {
-      return { why: `${rounds.length} conflict rounds, ${pr.base} keeps moving under it: it conflicts again at ${h7}`, link: rounds.at(-1)!.link ?? null };
-    }
-    const prev = rounds.filter((j) => j.sha !== pr.headSha).at(-1);
-    if (prev?.baseSha) {
-      const tip = await this.d.github.branchHead(repo.github!, pr.base);
-      if (tip === prev.baseSha) {
-        return { why: `it conflicts with ${pr.base} again at ${h7}, though the conflict round on ${prev.sha!.slice(0, 7)} merged ${pr.base} at ${prev.baseSha.slice(0, 7)} and ${pr.base} has not moved since`, link: prev.link ?? null };
-      }
-    }
-    return null;
-  }
-
-  /** A stop on the PR's head, recorded once and said once. */
-  private async recordStop(name: string, stop: StopStart) {
-    if (this.d.log.stopOn(stop.repo, stop.pr, stop.sha, stop.cause)) return;
-    await this.d.log.stopped(stop);
-    this.d.say(`${name}: a stop for you, ${stop.why}`);
+    const last = this.d.log.jobs().filter((j) => j.kind === 'conflict' && j.repo === repo.id && j.issue === pr.number && RAN(j) && j.end).at(-1);
+    if (!last?.baseSha) return null;
+    if (last.end!.outcome === 'failed' && (last.end!.head ?? last.sha) === last.sha) return null;
+    // a round that asked the user: answered (else it still writes), it gets another round
+    if (last.end!.outcome === 'waiting') return null;
+    const tip = await this.d.github.branchHead(repo.github!, pr.base);
+    if (tip !== last.baseSha) return null;
+    const what = last.sha === pr.headSha
+      ? `the conflict round on ${h7} couldn't resolve it (it ended ${last.end!.outcome} without a push)`
+      : `it conflicts again after the round on ${last.sha!.slice(0, 7)}`;
+    return `${what}, and ${pr.base} is still at ${last.baseSha.slice(0, 7)}, which that round merged: another round once ${pr.base} moves`;
   }
 
   /** One conflict round on H, start to end. */
@@ -382,7 +385,7 @@ export class ConflictLane {
         where = { kind: 'worktree' };
         worktreePath = own.path;
       } else {
-        where = { kind: 'new', work: conflictBranch(n, h) };
+        where = { kind: 'new', work: conflictBranch(n, h, baseSha) };
         if (await this.d.git.hasBranch(repo.folder, where.work)) throw new NotStarted(`a local branch ${where.work} is left from an earlier round`);
       }
       brief = await this.brief(repo, pr, where);
@@ -492,16 +495,10 @@ export class ConflictLane {
       }
     }
     const ended = await this.d.log.ended(job.id, record);
+    // a round that couldn't resolve it is no stop (#158): another round once the base moves
     const pushed = record.head && record.head !== job.sha ? `, pushed ${record.head.slice(0, 7)}: reviewed next`
-      : record.head === job.sha ? ', without a push: a stop for you' : '';
+      : record.head === job.sha ? `, without a push: another round once ${job.base} moves` : '';
     this.d.say(`${job.title} ended: ${record.outcome}${pushed} ${job.link ?? job.threadId}`);
-    // a round that ends without a push is a stop, for the stops ticket (#158)
-    if (record.head === job.sha) {
-      await this.recordStop(job.title, {
-        cause: 'conflict', repo: job.repo, github: job.github!, pr: job.issue, sha: job.sha!, link: job.link ?? null,
-        why: `it conflicts with ${job.base} at ${job.sha!.slice(0, 7)}, and the conflict round on it couldn't resolve it (it ended ${record.outcome} without a push)`,
-      });
-    }
     if (settles(record.outcome)) await this.settler.settle(job);
     return ended;
   }

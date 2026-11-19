@@ -31,7 +31,7 @@ describe('JobLog', () => {
     expect(await log.stopped({ ...stop, why: 'said again' })).toEqual(first);
     await log.stopped({ ...stop, sha: 'b'.repeat(40) });
     const again = await JobLog.open(file);
-    expect(again.stops().map((s) => [s.sha[0], s.why])).toEqual([['a', 'no push'], ['b', 'no push']]);
+    expect(again.stops().map((s) => [s.sha![0], s.why])).toEqual([['a', 'no push'], ['b', 'no push']]);
     expect(again.stopOn('p1', 4, 'a'.repeat(40), 'conflict')).toMatchObject({ why: 'no push', at: '2026-11-19T10:00:00.000Z' });
   });
 

@@ -85,33 +85,38 @@ describe('decide', () => {
     expect(d.unaddressed).toEqual(['F1']);
   });
 
-  test('a new Important finding in an earlier class stops for the user', () => {
+  // #158: none of these reaches the user; each is a fix round, its signals the Approach note's sources
+  test('a new Important finding in an earlier class is a fix round, not a stop: its signal is kept', () => {
     const r1 = posted(decide(input({ reply: reply([important('F1')]) })).body);
     const d = decide(input({ round: 2, earlier: [r1], reply: reply([important('F2', { file: 'src/b.ts' })], [{ id: 'F1', status: 'fixed' }]) }));
-    expect(d.outcome).toBe('stop');
+    expect(d.outcome).toBe('fix');
     expect(d.signals.map((s) => s.signal)).toEqual(['repeated-class']);
-    expect(d.body).toContain('the loop stops here for Pat');
+    expect(d.body).not.toContain('the loop stops here');
   });
 
-  test('a fixed finding raised again is reopened, a stop', () => {
+  test('a fixed finding raised again is reopened: a fix round, the signal kept', () => {
     const r1 = posted(decide(input({ reply: reply([important('F1')]) })).body);
     const r2 = posted(decide(input({ round: 2, earlier: [r1], reply: reply([], [{ id: 'F1', status: 'fixed' }]) })).body);
     const d = decide(input({ round: 3, earlier: [r1, r2], reply: reply([important('F1')]) }));
     expect(d.signals.map((s) => s.signal)).toEqual(['reopened']);
+    expect(d.outcome).toBe('fix');
   });
 
-  test('a decline kept open is a stop', () => {
+  test('a decline kept open stays an open finding, so the next fix round fixes it', () => {
     const r1 = posted(decide(input({ reply: reply([important('F1')]) })).body);
     const d = decide(input({ round: 2, earlier: [r1], reply: reply([], [{ id: 'F1', status: 'decline-kept' }]) }));
-    expect(d.outcome).toBe('stop');
+    expect(d.outcome).toBe('fix');
     expect(d.kept).toEqual(['F1']);
+    expect(d.findings).toEqual([expect.objectContaining({ id: 'F1', status: 'decline-kept' })]);
   });
 
-  test('review 3 still blocking is an approach note', () => {
+  test('still blocking at the cap is an approach note, whatever its number; below it, a fix round', () => {
     const r1 = posted(decide(input({ reply: reply([important('F1')]) })).body);
     const r2 = posted(decide(input({ round: 2, earlier: [r1], reply: reply([], [{ id: 'F1', status: 'open' }]) })).body);
-    const d = decide(input({ round: 3, earlier: [r1, r2], reply: reply([], [{ id: 'F1', status: 'open' }]) }));
+    expect(decide(input({ round: 3, earlier: [r1, r2], reply: reply([], [{ id: 'F1', status: 'open' }]) })).outcome).toBe('fix');
+    const d = decide(input({ round: 3, earlier: [r1, r2], capped: true, reply: reply([], [{ id: 'F1', status: 'open' }]) }));
     expect(d.outcome).toBe('approach-note');
+    expect(decide(input({ round: 3, earlier: [r1, r2], capped: true, reply: reply([], [{ id: 'F1', status: 'fixed' }]) })).outcome).toBe('merge');
   });
 
   test('a finding listed again under a new ID keeps its old one', () => {
