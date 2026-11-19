@@ -413,3 +413,58 @@ describe('an answer that says hold (#158 F1)', () => {
     expect(log.stops()[0]!.answered).toMatchObject({ answer: 'issue-closed' });
   });
 });
+
+describe('the Approach note lands, and a decision is recovered by its thread (#158 F3, F4)', () => {
+  test("a note whose post fails is posted again after the wait; the decision isn't recorded done until it lands", async () => {
+    await atTheCap();
+    const waits: (() => void)[] = [];
+    desk = new StopDesk({
+      repos: () => [APP], github: gh, mcp, ws, gate, catalog: () => catalog, user: async () => 'Pat', log,
+      say: (l) => lines.push(l), retry: (again) => { waits.push(again); return () => {}; },
+    });
+    await desk.pass();
+    await until(() => t3.threadStreamCount('thread-1') > 0);
+    const post = gh.postComment.bind(gh);
+    let fails = 1;
+    gh.postComment = async (repo, n, body) => {
+      if (body.startsWith('## Approach note') && fails-- > 0) throw new Error('gh failed (HTTP 502)');
+      return post(repo, n, body);
+    };
+    t3.say('thread-1', block({ action: 'approach-note', note: 'It lands.', recommend: 'rework' }));
+    t3.endRun('thread-1', 'completed');
+    await until(() => lines.some((l) => l.includes("its Approach note couldn't be posted")));
+    expect(log.jobs().find((j) => j.kind === 'decision')!.end).toBeUndefined();
+    for (const w of waits.splice(0)) w();
+    await desk.idle();
+    await desk.pass();
+    expect(posted('comment').filter((p) => p.body.startsWith('## Approach note'))).toHaveLength(1);
+    expect(log.stops()[0]!.noted?.text).toContain('The Approach note: https://');
+    expect(log.jobs().find((j) => j.kind === 'decision')!.end).toMatchObject({ outcome: 'decided', action: 'approach-note' });
+  });
+
+  test("on a start before the repo list has loaded, a decision with its saved thread is watched by that thread, and no second one starts", async () => {
+    await atTheCap();
+    makeDesk();
+    await desk.pass();
+    await until(() => t3.threadStreamCount('thread-1') > 0);
+    desk.stop();
+    // a new app whose repo list is still loading, then loaded
+    let repos: BuildRepo[] = [];
+    desk = new StopDesk({
+      repos: () => repos, github: gh, mcp, ws, gate, catalog: () => catalog, user: async () => 'Pat', log,
+      say: (l) => lines.push(l), retry: () => () => {},
+    });
+    await desk.start();
+    await until(() => t3.threadStreamCount('thread-1') > 0);
+    repos = [APP];
+    await desk.pass();
+    await desk.pass();
+    expect(t3.launches).toHaveLength(1);
+    t3.say('thread-1', block({ action: 'approach-note', note: 'Watched by its id.', recommend: 'hold' }));
+    t3.endRun('thread-1', 'completed');
+    await desk.idle();
+    await desk.pass();
+    expect(posted('comment').filter((p) => p.body.startsWith('## Approach note'))).toHaveLength(1);
+    expect(t3.launches).toHaveLength(1);
+  });
+});

@@ -131,6 +131,7 @@ export class StopDesk {
   /** Decision threads under way, by stop id. */
   private deciding = new Map<string, Promise<void>>();
   private watches = new Set<{ stop(): void }>();
+  private waits = new Set<() => void>();
 
   constructor(doors: StopDeskDoors) {
     this.d = doors;
@@ -150,6 +151,7 @@ export class StopDesk {
   stop() {
     this.stopped = true;
     for (const w of this.watches) w.stop();
+    for (const wake of [...this.waits]) wake();
   }
 
   async idle(): Promise<void> {
@@ -265,6 +267,9 @@ export class StopDesk {
     const key = stop.id;
     const name = `decision ${repo.title}#${stop.pr}`;
     // one that started no thread before is asked again; any other end files the stop as it is
+    // one open (watched again from start(), whatever the repo list said then) is the stop's only
+    // decision: never a second thread (#158 F4)
+    if (this.d.log.open().some((j) => j.kind === 'decision' && j.about === stop.id)) return;
     const done = this.d.log.jobs().filter((j) => j.kind === 'decision' && j.about === stop.id && j.end && j.end.outcome !== 'not-started').at(-1);
     if (done) {
       // a note posted before the app stopped, and not yet recorded: found by its mark
@@ -306,7 +311,7 @@ export class StopDesk {
     }
     const thread = { threadId: launched.threadId, runId: launched.runId, link: launched.link };
     await this.d.log.thread(job.id, thread);
-    this.track(stop.id, this.carryOn({ ...job, ...thread }, repo, stop));
+    this.track(stop.id, this.carryOn({ ...job, ...thread }, repo.github!, stop));
   }
 
   private async resume(job: Job, stop: Stop): Promise<void> {
@@ -316,12 +321,25 @@ export class StopDesk {
       await this.d.log.ended(job.id, { outcome: 'needs-user', error: 'the app stopped before T3 named its thread' });
       return;
     }
-    const repo = this.d.repos().find((r) => r.id === job.repo);
-    if (repo) await this.carryOn(job, repo, stop);
+    // by its saved thread id and the repo it ran in, whether or not the repo list has loaded (F4)
+    await this.carryOn(job, job.github ?? stop.github, stop);
   }
 
-  /** The decision thread watched to its end, its answer read once and acted on, the thread settled. */
-  private async carryOn(job: Job, repo: BuildRepo, stop: Stop): Promise<void> {
+  /** `retry`'s wait; stop() ends it at once. */
+  private wait(): Promise<void> {
+    return new Promise<void>((done) => {
+      let cancel = () => {};
+      const wake = () => { this.waits.delete(wake); cancel(); done(); };
+      this.waits.add(wake);
+      cancel = (this.d.retry ?? retryAfter(30_000))(wake);
+    });
+  }
+
+  /** The decision thread watched to its end, its answer read and acted on, then its end recorded
+   *  and its thread settled. The end is recorded only once its Approach note is on the PR (F3): a
+   *  post that fails is tried again after the wait, and an app stopped meanwhile reads the answer
+   *  again on its next start and finds a note already posted by its mark. */
+  private async carryOn(job: Job, github: string, stop: Stop): Promise<void> {
     const w = watchThreadEnd(this.d.ws, job.threadId!, job.runId ?? null, this.d.retry,
       (why) => this.d.say(`${job.title}: T3's thread stream dropped (${why}); opening it again`));
     this.watches.add(w);
@@ -349,25 +367,39 @@ export class StopDesk {
         if (!reply) empty++;
       } catch (e) {
         this.d.say(`${job.title}: its reply couldn't be read (${(e as Error).message}); asking again`);
-        await new Promise<void>((done) => { (this.d.retry ?? retryAfter(30_000))(done); });
+        await this.wait();
       }
     }
     const decided = reply ? readDecision(reply, APPROACH_NOTE) : { error: 'its reply was empty' };
     const ok = 'action' in decided && (decided.action !== 'approach-note' || RECOMMEND.includes(decided.fields.recommend!.toLowerCase()));
     const error = 'error' in decided ? decided.error : ok ? null : `its recommendation ${JSON.stringify(decided.fields.recommend)} isn't rework, fix on or hold`;
-    const ended = await this.d.log.ended(job.id, { outcome: 'decided', status: end.status, action: error ? 'stop' : (decided as { action: string }).action, error });
-    // settled once its answer is read (#68 story 6)
+    const action = error ? 'stop' : (decided as { action: string }).action;
+    // the note on the PR first, tried until it lands: the decision isn't done before it is (F3)
+    let url: string | null = null;
+    if (!error && action === 'approach-note' && 'fields' in decided) {
+      const body = `## Approach note\n\n${decided.fields.note}\n\n**Recommendation:** ${decided.fields.recommend!.toLowerCase()}.\n\n`
+        + `<sub>Written by a decision thread for ${await this.d.user()} at the cap (review ${CAP} still blocking): ${job.link ?? job.threadId}</sub>\n\n${noteMark(stop.id)}\n`;
+      for (;;) {
+        if (this.stopped) return; // its end isn't recorded: the next start reads it again
+        try {
+          url = await this.postOnce(github, stop.pr, noteMark(stop.id), body);
+          break;
+        } catch (e) {
+          this.d.say(`${job.title}: its Approach note couldn't be posted (${(e as Error).message}); trying again after a wait`);
+          await this.wait();
+        }
+      }
+    }
+    const ended = await this.d.log.ended(job.id, { outcome: 'decided', status: end.status, action, error });
+    // settled once its answer is read and acted on (#68 story 6)
     await this.settler.settle(ended);
     if (error || !('action' in decided)) return this.unnoted(stop, `the decision thread's answer couldn't be read: ${error}`);
     if (decided.action === 'stop') {
       await this.d.log.stopNoted(stop.id, null, `A decision thread couldn't write the Approach note and asks you instead:\n\n${quote(decided.fields.question!)}`);
       return;
     }
-    const body = `## Approach note\n\n${decided.fields.note}\n\n**Recommendation:** ${decided.fields.recommend!.toLowerCase()}.\n\n`
-      + `<sub>Written by a decision thread for ${await this.d.user()} at the cap (review ${CAP} still blocking): ${job.link ?? job.threadId}</sub>\n\n${noteMark(stop.id)}\n`;
-    const url = await this.postOnce(repo.github!, stop.pr, noteMark(stop.id), body);
     await this.d.log.stopNoted(stop.id, url, `The Approach note: ${url}. Recommendation: ${decided.fields.recommend!.toLowerCase()}.`);
-    this.d.say(`${repo.title}#${stop.pr}: the Approach note is on the PR: ${url}`);
+    this.d.say(`${github}#${stop.pr}: the Approach note is on the PR: ${url}`);
   }
 
   /** The cap stop goes to the user without a note, saying why. */
