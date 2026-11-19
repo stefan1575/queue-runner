@@ -49,7 +49,8 @@ import { launchJob } from './launch.ts';
 import { closedIssues, JOB_BRANCH_PREFIX } from './picker.ts';
 import { ThreadSettler } from './settle.ts';
 import type { T3Mcp } from './t3/mcp.ts';
-import type { Retry } from './t3/project-feed.ts';
+import { retryAfter, type Retry } from './t3/project-feed.ts';
+import { askedStop, roundQuestion } from './stops.ts';
 import { NoAnswer } from './t3/seams.ts';
 import { watchThreadEnd, type ThreadEnd } from './t3/thread-end.ts';
 import type { T3Ws } from './t3/ws.ts';
@@ -105,6 +106,7 @@ export class ConflictLane {
   private passing: Promise<void> | null = null;
   private again = false;
   private stopped = false;
+  private waits = new Set<() => void>();
 
   constructor(doors: ConflictLaneDoors) {
     this.d = doors;
@@ -124,6 +126,17 @@ export class ConflictLane {
   stop() {
     this.stopped = true;
     for (const w of this.watches) w.stop();
+    for (const wake of [...this.waits]) wake();
+  }
+
+  /** `retry`'s wait; stop() ends it at once. */
+  private wait(): Promise<void> {
+    return new Promise<void>((done) => {
+      let cancel = () => {};
+      const wake = () => { this.waits.delete(wake); cancel(); done(); };
+      this.waits.add(wake);
+      cancel = (this.d.retry ?? retryAfter(30_000))(wake);
+    });
   }
 
   usageChanged(): void {
@@ -355,6 +368,8 @@ export class ConflictLane {
     if (last.end!.outcome === 'failed' && (last.end!.head ?? last.sha) === last.sha) return null;
     // a round that asked the user: answered (else it still writes), it gets another round
     if (last.end!.outcome === 'waiting') return null;
+    // one that asked the user (a stop, open or answered): answered, it gets another round at once
+    if (last.end!.question) return null;
     const tip = await this.d.github.branchHead(repo.github!, pr.base);
     if (tip !== last.baseSha) return null;
     const what = last.sha === pr.headSha
@@ -494,9 +509,17 @@ export class ConflictLane {
         record.head = null; // the next pass reads the head from the PR list itself
       }
     }
+    // a choice only the user can make (its brief's ASK_BLOCK) is a stop, recorded with the end
+    // (#158 F2); a round that just couldn't resolve it is none: another round once the base moves
+    if (end.outcome === 'done' || end.outcome === 'failed') {
+      const q = await roundQuestion(this.d.mcp, job, () => this.wait(), () => this.stopped, this.d.say);
+      if (q === undefined) return job; // stopped: the next start watches it again
+      if (q) record.question = q;
+    }
     const ended = await this.d.log.ended(job.id, record);
-    // a round that couldn't resolve it is no stop (#158): another round once the base moves
-    const pushed = record.head && record.head !== job.sha ? `, pushed ${record.head.slice(0, 7)}: reviewed next`
+    if (record.question) await this.d.log.stopped(askedStop(ended, record.question));
+    const pushed = record.question ? ', with a question: a stop for you'
+      : record.head && record.head !== job.sha ? `, pushed ${record.head.slice(0, 7)}: reviewed next`
       : record.head === job.sha ? `, without a push: another round once ${job.base} moves` : '';
     this.d.say(`${job.title} ended: ${record.outcome}${pushed} ${job.link ?? job.threadId}`);
     if (settles(record.outcome)) await this.settler.settle(job);

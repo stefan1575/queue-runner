@@ -114,6 +114,9 @@ export type JobEnd = {
   head?: string | null;
   /** A decision's: the action it chose (`approach-note`, `stop`). */
   action?: string;
+  /** A fix or conflict round's question to the user, from its last reply's `queue-runner-question`
+   *  block (#158 F2): a stop on the PR. */
+  question?: string;
 };
 export type Job = JobStart & { id: string; startedAt: string } & Partial<JobThread>
   & { end?: JobEnd & { at: string }; answeredAt?: string; settledAt?: string;

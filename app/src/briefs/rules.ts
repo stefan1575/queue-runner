@@ -31,9 +31,14 @@ and fix what you find, with a test for each:
 export const USERS_TO_DECIDE = `- If something only $user can decide stops you: commit and push what you have, comment the
   question on the issue, swap its \`ready-for-agent\` label for \`needs-info\`, and end your turn.`;
 
+/** How an agent on a PR hands a question to the user (#158 F2): the runner reads only this block in
+ *  its last reply, and files the question as a stop that holds the PR until they answer. */
+export const ASK_BLOCK = `End that last reply with the question alone in a fenced block tagged \`queue-runner-question\`:
+  the runner reads only that block, puts it to $user as a stop, and holds the PR until they answer.`;
+
 /** The same, for a job on a PR (a fix round): the question goes on the PR. */
 export const USERS_TO_DECIDE_ON_PR = `- If something only $user can decide stops you: push what you have, comment the question on the
-  PR, and end your turn.`;
+  PR, and end your turn. ${ASK_BLOCK}`;
 
 /** When to take screenshots, and how to publish them where the review reads them. Today's brief
  *  names the runner's own screenshot script by its path; the app has no such script beside a

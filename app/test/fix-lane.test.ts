@@ -546,3 +546,41 @@ describe('what never reaches the user, the cap, and an answer (#158)', () => {
     expect(t3.sends[1].message).toContain('> Use the second option.');
   });
 });
+
+describe("a fixer's question (#158 F2)", () => {
+  const asks = (q: string) => `I pushed what I have.\n\n\`\`\`queue-runner-question\n${q}\n\`\`\`\n`;
+
+  test('a round that pushes and asks is a stop on the PR, recorded before the review lane hears of the end', async () => {
+    await builder();
+    await blocking(1, H, [finding({})]);
+    let stopsAtEnd: number | null = null;
+    makeLane({ ended: (j) => { ended.push(j); stopsAtEnd = log.openStops(APP.id, 4).length; } });
+    await lane.pass();
+    await until(() => t3.threadStreamCount('thread-b') > 0);
+    gh.heads[4] = H2;
+    t3.say('thread-b', asks('Keep v1 working too, or drop it?'));
+    t3.endRun('thread-b', 'completed');
+    await lane.idle();
+    expect(fixes()[0]!.end).toMatchObject({ outcome: 'done', head: H2, question: 'Keep v1 working too, or drop it?' });
+    expect(log.openStops(APP.id, 4)).toEqual([expect.objectContaining({ cause: 'question', job: fixes()[0]!.id, sha: H, why: expect.stringContaining('asks you: Keep v1 working too') })]);
+    expect(stopsAtEnd).toBe(1);
+  });
+
+  test("a reply with no question block asks nothing; one T3 can't read is read again, never taken as none", async () => {
+    await builder();
+    await blocking(1, H, [finding({})]);
+    const waits: (() => void)[] = [];
+    makeLane({ retry: (again) => { waits.push(again); return () => {}; } });
+    await lane.pass();
+    await until(() => t3.threadStreamCount('thread-b') > 0);
+    gh.heads[4] = H2;
+    t3.say('thread-b', asks('Which one?'));
+    t3.readFailures = 1;
+    t3.endRun('thread-b', 'completed');
+    await until(() => lines.some((l) => l.includes("couldn't be read for a question")));
+    expect(fixes()[0]!.end).toBeUndefined();
+    for (const w of waits.splice(0)) w();
+    await lane.idle();
+    expect(fixes()[0]!.end).toMatchObject({ question: 'Which one?' });
+  });
+});

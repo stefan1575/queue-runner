@@ -5,7 +5,7 @@
 // from the job log. Self-contained (docs/app.md, Rules), and Before you push comes from `rules.ts`.
 // What is the user's to decide is this brief's own: a conflict it can't resolve is never pushed
 // half done (the shared rule says to push what you have), it ends without a push.
-import { BEFORE_YOU_PUSH } from './rules.ts';
+import { ASK_BLOCK, BEFORE_YOU_PUSH } from './rules.ts';
 
 /** A conflict brief lists at most this many of the base's new commits, as today's does. */
 export const BASE_COMMITS = 30;
@@ -98,7 +98,7 @@ $threads
 - **If you can't resolve it** (the two sides' intent can't both hold, or it needs a choice only
   $user can make): don't push. Abort the merge (\`git merge --abort\`), comment on the PR
   (\`gh pr comment $number --repo $github\`) naming the conflicted files and the choice, and end
-  your turn. A round that ends without a push goes to $user as a stop.
+  your turn. ${ASK_BLOCK}
 
 ${BEFORE_YOU_PUSH}`;
 

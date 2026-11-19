@@ -2,7 +2,7 @@
 // push list from the same file as the other briefs'.
 import { describe, expect, test } from 'vitest';
 import { BASE_COMMITS, CONFLICT_TEMPLATE, conflictBrief, type ConflictBriefInput } from '../src/briefs/conflict.ts';
-import { BEFORE_YOU_PUSH, USERS_TO_DECIDE_ON_PR } from '../src/briefs/rules.ts';
+import { ASK_BLOCK, BEFORE_YOU_PUSH, USERS_TO_DECIDE_ON_PR } from '../src/briefs/rules.ts';
 
 const H = 'abcdef1234567890abcdef1234567890abcdef12';
 const input: ConflictBriefInput = {
@@ -54,10 +54,10 @@ describe('conflictBrief', () => {
     expect(own).toContain(`check \`HEAD\` is at the PR's head \`${H}\``);
   });
 
-  test("a conflict it can't resolve is never pushed: it aborts, says why on the PR, and ends as a stop", () => {
+  test("a conflict it can't resolve is never pushed: it aborts, says why on the PR, and asks in the question block (#158 F2)", () => {
     const text = flat(brief);
     expect(text).toContain("don't push. Abort the merge (`git merge --abort`)");
-    expect(text).toContain('A round that ends without a push goes to Robin as a stop.');
+    expect(text).toContain(flat(ASK_BLOCK.replaceAll('$user', 'Robin')));
     // the shared rule pushes what it has: not this brief's
     expect(brief).not.toContain(USERS_TO_DECIDE_ON_PR.replaceAll('$user', 'Robin'));
   });

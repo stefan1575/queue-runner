@@ -580,3 +580,25 @@ describe("after a restart, don't guess", () => {
     expect(t3.launches).toEqual([]);
   });
 });
+
+describe("a conflict agent's question (#158 F2)", () => {
+  test("a round that can't resolve it and asks the user is a stop; answered, another round goes at once, the base unmoved", async () => {
+    makeLane();
+    await lane.pass();
+    await until(() => t3.threadStreamCount('thread-1') > 0);
+    t3.say('thread-1', 'Aborted.\n\n```queue-runner-question\nKeep the PR\'s retry loop or main\'s new queue?\n```\n');
+    t3.endRun('thread-1', 'completed');
+    await lane.idle();
+    expect(rounds()[0]!.end).toMatchObject({ outcome: 'done', head: H, question: "Keep the PR's retry loop or main's new queue?" });
+    const stop = log.openStops(APP.id, 4)[0]!;
+    expect(stop).toMatchObject({ cause: 'question', job: rounds()[0]!.id });
+    await lane.pass();
+    expect(t3.launches).toHaveLength(1);
+    clock = new Date('2026-11-19T12:05:00Z');
+    await log.stopAnswered(stop.id, 'replied', "Keep main's queue.");
+    clock = new Date('2026-11-19T12:06:00Z');
+    await lane.pass();
+    await until(() => t3.launches.length === 2);
+    expect(gh.tip).toBe(B1);
+  });
+});

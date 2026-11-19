@@ -45,7 +45,8 @@ import { closedIssues, JOB_BRANCH_PREFIX } from './picker.ts';
 import { readReviews, state, type Finding, type Review } from './review/ledger.ts';
 import { ThreadSettler } from './settle.ts';
 import { ToolFailed, type T3Mcp } from './t3/mcp.ts';
-import type { Retry } from './t3/project-feed.ts';
+import { retryAfter, type Retry } from './t3/project-feed.ts';
+import { askedStop, roundQuestion } from './stops.ts';
 import { NoAnswer } from './t3/seams.ts';
 import { watchThreadEnd, type ThreadEnd } from './t3/thread-end.ts';
 import type { T3Ws } from './t3/ws.ts';
@@ -161,6 +162,7 @@ export class FixLane {
   private passing: Promise<void> | null = null;
   private again = false;
   private stopped = false;
+  private waits = new Set<() => void>();
   /** Writer threads T3 says are gone: their PRs' rounds go to fresh fixers. */
   private gone = new Set<string>();
 
@@ -182,6 +184,17 @@ export class FixLane {
   stop() {
     this.stopped = true;
     for (const w of this.watches) w.stop();
+    for (const wake of [...this.waits]) wake();
+  }
+
+  /** `retry`'s wait; stop() ends it at once. */
+  private wait(): Promise<void> {
+    return new Promise<void>((done) => {
+      let cancel = () => {};
+      const wake = () => { this.waits.delete(wake); cancel(); done(); };
+      this.waits.add(wake);
+      cancel = (this.d.retry ?? retryAfter(30_000))(wake);
+    });
   }
 
   usageChanged(): void {
@@ -579,8 +592,17 @@ export class FixLane {
         record.head = null; // the review lane reads the head itself; this is only what's said
       }
     }
+    // a question the fixer asked (its brief's ASK_BLOCK) is a stop, recorded with the end and
+    // before any lane hears of it, so a pushed head isn't reviewed with it unanswered (#158 F2)
+    if (end.outcome === 'done' || end.outcome === 'failed') {
+      const q = await roundQuestion(this.d.mcp, job, () => this.wait(), () => this.stopped, this.d.say);
+      if (q === undefined) return job; // stopped: the next start watches it again
+      if (q) record.question = q;
+    }
     const ended = await this.d.log.ended(job.id, record);
-    const pushed = record.head && record.head !== job.sha ? `, pushed ${record.head.slice(0, 7)}: reviewed next`
+    if (record.question) await this.d.log.stopped(askedStop(ended, record.question));
+    const pushed = record.question ? ', with a question: a stop for you'
+      : record.head && record.head !== job.sha ? `, pushed ${record.head.slice(0, 7)}: reviewed next`
       : record.head === job.sha ? `, without a push: the PR waits for you` : '';
     this.d.say(`${job.title} ended: ${record.outcome}${pushed} ${job.link ?? job.threadId}`);
     if (settles(record.outcome)) await this.settler.settle(job);

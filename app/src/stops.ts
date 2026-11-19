@@ -60,6 +60,37 @@ const RECOMMEND = ['rework', 'fix on', 'hold'];
 /** An answer whose first word is "hold": the user keeps the PR as it is (today's `hold`). */
 export const HOLD = /^\s*\**hold\b/i;
 
+const QUESTION = /^[ \t]*```+[ \t]*queue-runner-question[ \t]*\r?\n([\s\S]*?)^[ \t]*```+[ \t]*$/gm;
+
+/** The question in a reply's last `queue-runner-question` block (the briefs' ASK_BLOCK), or null. */
+export function readQuestion(reply: string | null): string | null {
+  const q = [...(reply ?? '').matchAll(QUESTION)].at(-1)?.[1]?.trim();
+  return q || null;
+}
+
+/** A round's question recorded as a stop on its PR, right as its end is: before any other lane hears
+ *  of the end, so its pushed head isn't reviewed with the question unanswered (#158 F2). */
+export function askedStop(job: Job, question: string): StopStart {
+  return { cause: 'question', repo: job.repo, github: job.github!, pr: job.issue, sha: job.sha ?? null, link: job.link ?? null, job: job.id,
+    why: `${job.title} asks you: ${question.split('\n')[0]!.slice(0, 200)}` };
+}
+
+/** A round's question, read from its thread's last reply once its run ended: a read that fails is
+ *  asked again after `wait`, never taken as no question; `undefined` once `stopped` (the end isn't
+ *  recorded, so the next start reads it again). */
+export async function roundQuestion(mcp: Pick<T3Mcp, 'call'>, job: Job, wait: () => Promise<void>, stopped: () => boolean,
+  say: (line: string) => void): Promise<string | null | undefined> {
+  for (;;) {
+    if (stopped()) return undefined;
+    try {
+      return readQuestion(await runReply(mcp, job.threadId!, job.runId ?? null));
+    } catch (e) {
+      say(`${job.title}: its last reply couldn't be read for a question (${(e as Error).message}); asking again`);
+      await wait();
+    }
+  }
+}
+
 /** The hidden line that ties a `needs-info` issue to its PR. */
 export const needsInfoMark = (github: string, pr: number) => `<!-- queue-runner-app needs-info ${github}#${pr} -->`;
 const stopMark = (id: string) => `<!-- queue-runner-app stop ${id} -->`;
@@ -378,8 +409,10 @@ export class StopDesk {
     const parts = [`**Stopped for ${user}** (${what}): ${stop.why}.`];
     if (stop.noted) parts.push(stop.noted.text);
     const job = stop.job ? this.d.log.get(stop.job) : undefined;
-    // a question's own words: the thread's last message (a read that fails is tried next pass)
-    if (stop.cause === 'question' && job?.threadId) {
+    // a question's own words: the block it asked in, else the thread's last message (a read that
+    // fails is tried next pass)
+    if (stop.cause === 'question' && job?.end?.question) parts.push(`The question:\n\n${quote(job.end.question)}`);
+    else if (stop.cause === 'question' && job?.threadId) {
       const last = await runReply(this.d.mcp, job.threadId, job.runId ?? null);
       if (last?.trim()) parts.push(`Its last message:\n\n${quote(last)}`);
     }
