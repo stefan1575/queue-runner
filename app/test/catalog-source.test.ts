@@ -1,27 +1,23 @@
 // T3's catalog as the app keeps it (#152): from `subscribeServerConfig`'s snapshot, kept current
 // by its later events, and asked again when the stream ends.
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { readFile } from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { T3Catalog } from '../src/t3/catalog-source.ts';
-import { runtimeAddress } from '../src/t3/real.ts';
 import { T3Ws } from '../src/t3/ws.ts';
 import { FakeT3 } from './fake-t3.ts';
 
 const snapshot = JSON.parse(await readFile(new URL('./fixtures/server-config.json', import.meta.url), 'utf8'));
-let dir: string;
 let t3: FakeT3;
 let ws: T3Ws;
-beforeEach(async () => {
-  dir = await mkdtemp(join(tmpdir(), 'qr-catalog-'));
+// T3's address is the fake's own, so a wait for T3's events waits on nothing but the fake (#202 F2).
+beforeEach(() => {
   t3 = new FakeT3();
   t3.serverConfig = snapshot;
-  const runtime = join(dir, 'server-runtime.json');
-  await writeFile(runtime, JSON.stringify({ origin: t3.origin }));
-  ws = new T3Ws(runtimeAddress(runtime), t3.cli, t3.http, t3.connect);
+  ws = new T3Ws(t3.address, t3.cli, t3.http, t3.connect);
 });
-afterEach(() => rm(dir, { recursive: true, force: true }));
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 const until = (f: () => boolean) => vi.waitFor(() => { if (!f()) throw new Error('not yet'); }, { timeout: 2000, interval: 5 });
 
@@ -62,12 +58,19 @@ describe("T3's catalog, kept current", () => {
   });
 
   test('a stream that ends says why, keeps the last catalog and is asked again', async () => {
-    const source = T3Catalog.start(ws, 10);
+    // The wait before asking again is on the fake clock, moved on by the test. `until` moves it
+    // on too, by 5 ms a check, hence a second to spare before the 30 s.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const source = T3Catalog.start(ws, 30_000);
     await until(() => source.current().catalog !== null);
     t3.dropSockets();
     await until(() => source.current().error !== undefined);
     expect(source.current().error).toMatch(/closed/);
     expect(source.current().catalog).not.toBeNull();
+    const asked = () => t3.frames.filter((f) => f.tag === 'subscribeServerConfig').length;
+    vi.advanceTimersByTime(29_000);
+    expect(asked()).toBe(1);
+    vi.advanceTimersByTime(1_000);
     await until(() => source.current().error === undefined);
     expect(t3.frames.filter((f) => f.tag === 'subscribeServerConfig')).toHaveLength(2);
     source.stop();

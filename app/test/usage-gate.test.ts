@@ -1,7 +1,7 @@
 // The usage gate on fake T3's usage events (#153): each job waits for room in the provider it runs
 // on, beside the jobs running on that provider's login, and a kind with a fallback runs on it
 // while its own provider is out.
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
@@ -10,7 +10,6 @@ import { holdText } from '../src/gate.ts';
 import { DEFAULT_JOBS, type Jobs, type ModelChoice } from '../src/jobs.ts';
 import { DEFAULT_SETTINGS, type Settings } from '../src/settings.ts';
 import { T3Catalog } from '../src/t3/catalog-source.ts';
-import { runtimeAddress } from '../src/t3/real.ts';
 import { T3Ws } from '../src/t3/ws.ts';
 import { UsageGate } from '../src/usage-gate.ts';
 import { FakeT3 } from './fake-t3.ts';
@@ -34,8 +33,9 @@ beforeEach(async () => {
   t3 = new FakeT3();
   t3.serverConfig = snapshot;
   providers = structuredClone(snapshot.config.providers);
-  await writeFile(join(dir, 'server-runtime.json'), JSON.stringify({ origin: t3.origin }));
-  source = T3Catalog.start(new T3Ws(runtimeAddress(join(dir, 'server-runtime.json')), t3.cli, t3.http, t3.connect), 10);
+  // T3's address is the fake's own, so `until` waits on nothing but the fake (#202 F2); the cost
+  // log is on disk, and each test awaits its writes (`gate.settled()`).
+  source = T3Catalog.start(new T3Ws(t3.address, t3.cli, t3.http, t3.connect), 10);
   settings = { ...DEFAULT_SETTINGS };
   gate = new UsageGate(source, () => settings, await CostLog.open(join(dir, 'usage.jsonl')), () => now);
   await until(() => source.current().usage.length > 0);

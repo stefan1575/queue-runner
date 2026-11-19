@@ -40,7 +40,9 @@ pnpm --dir app test
 ```
 
 CI runs both on Windows (`.github/workflows/tests.yml`, job `app`), beside the Python tests. A
-push to `main` runs them first (`docs/tests.md`, Main is tested before a push).
+push to `main` runs them first (`docs/tests.md`, Main is tested before a push). A PR that changes
+the Time format watcher or its tests also runs `test/time-format.test.ts` 50 times in a row
+(`.github/workflows/time-format-repeat.yml`), since those tests once failed CI now and then.
 
 **Tests check the code, never Stefan's settings** (#172). A test builds its own settings, in a
 temp folder or an in-memory store, and checks what the code does with them. No test reads the
@@ -50,6 +52,10 @@ main red (#169). `test/no-real-settings.test.ts` fails on a test file that reach
 home or app-data folders, `T3_HOME` or `T3CODE_HOME`, T3's real runtime file or CLI
 (`runtimeAddress()` or `t3Cli()` with no path), `config.toml`, or the real settings path, which
 the settings tickets export as `SETTINGS_PATH` (`test/real-settings.ts` lists them all).
+
+**Tests get time from a fake clock and files from a temp folder** (#202): none waits for real
+time to pass or a real file watcher to fire, and a `vi.waitFor` waits only on the test's own fakes (`FakeT3.address`, the settings in `test/memory-files.ts`), never on real file I/O, which a test awaits; `test/no-real-time.test.ts` fails a test that reads
+the real clock or runs on a real timer that no `vi.useFakeTimers()` around it fakes (a `toFake` list fakes only what it names), naming it (`test/real-time.ts`). Both checks read every app test file, `renderer/test/` included (`test/app-test-files.ts`).
 
 ## Rules for every rebuild ticket
 

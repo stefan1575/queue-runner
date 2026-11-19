@@ -1,36 +1,29 @@
 // T3's projects, kept from T3's events (#151): `subscribeShell`'s snapshot, then each project
 // added, changed or removed in T3, with no polling. Run against the fake T3 behind the real
-// WebSocket client.
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+// WebSocket client, with T3's address answered by the fake too, so every wait here is on the
+// fake and none on a real file read (#202 F2).
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { T3ProjectFeed } from '../src/t3/project-feed.ts';
-import { runtimeAddress } from '../src/t3/real.ts';
 import { T3Ws } from '../src/t3/ws.ts';
 import { FakeT3 } from './fake-t3.ts';
 
-let dir: string;
 let t3: FakeT3;
 let feeds: T3ProjectFeed[] = [];
 /** The retries the feed asked for, run by the test when it wants. */
 let retries: (() => void)[] = [];
 
-beforeEach(async () => {
-  dir = await mkdtemp(join(tmpdir(), 'qr-feed-'));
+beforeEach(() => {
   t3 = new FakeT3();
   t3.projects = [{ id: 'p1', title: 'sandbox', workspaceRoot: 'C:/sandbox' }];
-  await writeFile(join(dir, 'server-runtime.json'), JSON.stringify({ origin: t3.origin }));
 });
-afterEach(async () => {
+afterEach(() => {
   for (const f of feeds) f.stop();
   feeds = [];
   retries = [];
-  await rm(dir, { recursive: true, force: true });
 });
 
 function feed() {
-  const ws = new T3Ws(runtimeAddress(join(dir, 'server-runtime.json')), t3.cli, t3.http, t3.connect);
+  const ws = new T3Ws(t3.address, t3.cli, t3.http, t3.connect);
   const f = T3ProjectFeed.start(ws, (again) => { retries.push(again); return () => {}; });
   feeds.push(f);
   return f;
@@ -95,7 +88,7 @@ describe("T3's projects", () => {
   });
 
   test('T3 not running leaves no list and says why, and is tried again', async () => {
-    await rm(join(dir, 'server-runtime.json'));
+    t3.running = false;
     const f = feed();
     await vi.waitFor(() => expect(retries).toHaveLength(1));
     expect(f.current()).toBeNull();
