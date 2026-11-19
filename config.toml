@@ -35,6 +35,9 @@ bash = "C:/Program Files/Git/bin/bash.exe"
 # with ChatGPT's usage back: "turn on 6.1 Sol high now"; 2026-11-19: Sol is GPT-6.2 Sol, at high.
 [review]
 provider = "chatgpt"
+# Stefan, 2026-11-19: no Opus fallback for now; while Sol is out, PRs wait for Sol
+# (docs/reviews.md, Turning the fallback off).
+opus_fallback = false
 # An Opus review starts on this T3 provider instance, launched with no MCP tools, so it gets what a
 # Sol review gets (docs/reviews.md, A review has no outside tools; set up 2026-11-17). Unset, it's
 # claudeReviewer; empty or [claude]'s provider is an error: a review never gets the build's tools.

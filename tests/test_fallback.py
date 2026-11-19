@@ -465,6 +465,42 @@ class ReviewProviderConfigTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, r'\[review\] provider must be one of'):
             self.load('[review]\nprovider = "opus"\n')
 
+    def test_the_opus_fallback_is_on_unless_config_turns_it_off(self):
+        self.assertTrue(self.load('').review_opus_fallback)
+        self.assertFalse(self.load('[review]\nopus_fallback = false\n').review_opus_fallback)
+
+    def test_an_opus_fallback_that_isnt_true_or_false_is_an_error_naming_the_key(self):
+        with self.assertRaisesRegex(ValueError, r'\[review\] opus_fallback must be true or false'):
+            self.load('[review]\nopus_fallback = "no"\n')
+
+
+class NoFallbackTest(unittest.TestCase):
+    """`[review] opus_fallback = false` (Stefan, 2026-11-19): while Sol is out, PRs wait for Sol."""
+
+    def setUp(self):
+        FallbackTest.setUp(self)
+        self.config = dataclasses.replace(self.config, review_opus_fallback=False)
+
+    use, sol_out = FallbackTest.use, FallbackTest.sol_out
+
+    def runner(self, t3):
+        return Runner(self.config, github=self.gh, t3=t3, git=self.git, out=io.StringIO(),
+                      log_line=lambda line: None, sol=FakeSol([]))
+
+    def test_while_sol_is_out_no_opus_review_starts(self):
+        self.sol_out(resume=datetime.datetime(2099, 1, 1))
+        t3 = FakeT3([(0, 'completed', reply())])
+        r = self.runner(t3)
+        self.assertIsNone(r.reviewer.fallback)
+        self.assertEqual(r.reviewer.review_pass(), 'idle')
+        self.assertEqual(t3.starts, [])
+        self.assertEqual([j for j in r.jobs.jobs() if j.issue == 20], [])
+
+    def test_claude_reviewing_every_pr_still_gets_its_opus_thread(self):
+        # opus_fallback is only about while Sol is out: `provider = "claude"` still runs Opus.
+        self.config = dataclasses.replace(self.config, review_provider='claude')
+        self.assertIsNotNone(self.runner(FakeT3([])).reviewer.fallback)
+
 
 class FallbackFixRoundTest(unittest.TestCase):
     """A blocking fallback review starts a fix round through the real Runner, as Sol's would."""

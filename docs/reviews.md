@@ -217,6 +217,16 @@ doesn't wait: a PR that needs a review gets one from a T3 thread on the Claude m
   review names Claude's model, and the work lists and the Inbox's timelines say a review was
   Opus's.
 
+### Turning the fallback off (`[review] opus_fallback`)
+
+Stefan, 2026-11-19: off for now, while builds check their own work before the PR
+(`templates/build.md`, Before you push): an Opus review of an Opus build would be the same model
+checking twice. `opus_fallback = false` gives the Runner's Reviewer no fallback, so while Sol is
+out a PR waits for Sol, as it did before #69, and the dashboard's wait says reviews wait for it.
+It's `true` when unset, anything but true or false stops the runner at load naming the key, and
+it doesn't touch `provider = "claude"` (below), where Opus reviews every PR. Back on: remove the
+line or set it `true` on main.
+
 ### Claude reviews every PR (`[review] provider`)
 
 Issue #76 (Stefan, 2026-11-16: "Claude for now, until I say so, a full override"). A patch to

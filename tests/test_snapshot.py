@@ -771,6 +771,16 @@ class SnapshotsTest(unittest.TestCase):
         self.clock.tick(hours=1)
         self.assertIsNone(self.snapshots().facts().sol_wait)
 
+    def test_chatgpt_out_of_usage_says_opus_reviews_only_while_the_fallback_is_on(self):
+        job = self.jobs.started(kind='review', repo='leads-dashboard', issue=210, branch=None, title='t')
+        resume = NOW + datetime.timedelta(minutes=30)
+        self.jobs.ended(job.id, exit_code=None, outcome='out-of-usage', resume_at=resume.isoformat())
+        self.assertIn('Opus reviews in its place', self.snapshots().facts().sol_wait.reason)
+        self.config = replace(self.config, review_opus_fallback=False)
+        reason = self.snapshots().facts().sol_wait.reason
+        self.assertNotIn('Opus', reason)
+        self.assertIn('reviews wait for it', reason)
+
     def test_a_chatgpt_resume_with_no_offset_is_local_time_and_still_builds(self):
         # The Sol lane wrote one like this on 2026-11-16, and the snapshot stopped being written.
         job = self.jobs.started(kind='review', repo='leads-dashboard', issue=210, branch=None, title='t')

@@ -745,7 +745,8 @@ class Snapshots:
             claude_wait=runner.claude_wait if runner is not None else self._limit_wait(log, now),
             repo_waits=dict(runner.repo_waits) if runner is not None else {},
             # Sol's out-of-usage wait holds no review back while Claude reviews (issue #76).
-            sol_wait=None if self.config.review_provider == 'claude' else self._sol_wait(log, now),
+            sol_wait=None if self.config.review_provider == 'claude' else self._sol_wait(
+                log, now, self.config.review_opus_fallback),
             titles=dict(runner.titles) if runner is not None else {},
             threads=threads, runner=self.info, calls=self.calls.all(),
             claude_usage=self.claude.reading() if self.claude else None,
@@ -814,9 +815,12 @@ class Snapshots:
                     'limit; it resumes after this')
 
     @staticmethod
-    def _sol_wait(log, now) -> Wait | None:
+    def _sol_wait(log, now, opus_fallback=True) -> Wait | None:
         resume = log.sol_resume_at()
         if resume and _when(resume) > now:
+            if not opus_fallback:
+                return Wait(_when(resume), 'ChatGPT ran out of usage: reviews wait for it, '
+                            'until 10 minutes after its reset')
             return Wait(_when(resume), 'ChatGPT ran out of usage: Opus reviews in its place, '
                         "through Claude's usage gate, until 10 minutes after its reset")
         return None

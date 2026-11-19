@@ -160,12 +160,15 @@ class Runner:
             self.effort.say = self.say
         self.toaster = toaster or NoToaster()
         # While Sol is out of usage, the Sol lane's reviews run as Opus threads in T3, through
-        # the same usage gate as the Claude lane's jobs (issue #69).
-        from .fallback import OpusFallback
+        # the same usage gate as the Claude lane's jobs (issue #69), unless config.toml turns the
+        # fallback off (`[review] opus_fallback = false`): then they wait for Sol.
+        from .fallback import OpusFallback, chosen
+        opus = config.review_opus_fallback or chosen(config)
         self.reviewer = Reviewer(config, github=github, git=git, sol=sol, jobs=self.jobs,
                                  say=self.say, toaster=self.toaster, deps=deps,
                                  fallback=OpusFallback(config, t3=t3, gate=gate,
-                                                       effort=self.effort, beside=self),
+                                                       effort=self.effort, beside=self)
+                                 if opus else None,
                                  t3=t3, sol_usage=sol_usage) if sol is not None else None
         self.fixer = Fixer(config, github=github, git=git, jobs=self.jobs)
         stopper = Stopper(config, github=github, jobs=self.jobs, say=self.say,
