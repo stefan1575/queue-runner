@@ -20,3 +20,13 @@ export function stateFolder(machineFile: string, fallback: string): string {
   if (typeof folder !== 'string' || !folder) throw new Error(`${machineFile} names no stateFolder`);
   return folder;
 }
+
+/** The desktop app's own folder in `appData` (Electron's `userData`: the app's productName). */
+export const APP_DATA_NAME = 'Queue runner';
+
+/** The state folder the app already uses, read and never written: for a check run beside the app
+ *  (the live review check reads the user's settings there). An app never started has none. */
+export function savedStateFolder(machineFile: string): string {
+  if (!existsSync(machineFile)) throw new Error(`${machineFile} isn't there: start the desktop app once, or name its state folder`);
+  return stateFolder(machineFile, '');
+}

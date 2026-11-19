@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import { DEFAULT_JOBS, JOB_KINDS, kindModels, type Jobs } from '../src/jobs.ts';
-import { JobError, launchJob } from '../src/launch.ts';
+import { JobError, launchJob, noToolsRefusal } from '../src/launch.ts';
 import { catalogFromConfig } from '../src/t3/catalog.ts';
 import { T3Mcp } from '../src/t3/mcp.ts';
 import { runtimeAddress } from '../src/t3/real.ts';
@@ -98,5 +98,18 @@ describe('launching a job', () => {
     expect(t3.launches).toEqual([]);
     await launchJob(mcp, catalog, { ...job, kind: 'review', choice, toolFree: [y.provider, x.provider] });
     expect(t3.launches.map((l) => l.modelSelection.instanceId)).toEqual([x.provider]);
+    // listed, but the instance builds run on: it has their tools, so nothing launches
+    await expect(launchJob(mcp, catalog, { ...job, kind: 'review', choice, toolFree: [x.provider], buildInstance: x.provider })).rejects.toThrow(/the instance builds run on/);
+    expect(t3.launches).toHaveLength(1);
+  });
+});
+
+describe('which instance a review may run on', () => {
+  test("only the user's list says: the review's own choice, or a build instance it isn't, never makes one tool-free", () => {
+    expect(noToolsRefusal('withTools', [], 'builder')).toMatch(/isn't one of the instances set up without outside tools/);
+    expect(noToolsRefusal('withTools', ['reviewer'], 'builder')).toMatch(/isn't one of the instances/);
+    expect(noToolsRefusal('builder', ['builder'], 'builder')).toMatch(/the instance builds run on/);
+    expect(noToolsRefusal('reviewer', ['reviewer'], 'builder')).toBeNull();
+    expect(noToolsRefusal('reviewer', ['reviewer'], null)).toBeNull();
   });
 });

@@ -13,12 +13,15 @@
 // **writes to GitHub**: it pushes the branch and opens the PR, then closes it and deletes the
 // branch at the end. It runs with neither only to print this.
 //
-// `--run <instance>:<model>` names the instance and model, and the instance must be one set up
-// without outside tools (docs/reviews.md): naming it here is the check's `toolFreeInstances`, and
-// launchJob refuses any other. There's no default: T3's own may have every tool.
+// `--run <instance>:<model>` names the instance and model. **Naming it doesn't make it tool-free:**
+// the instance must be one the app's saved settings name in `toolFreeInstances`, and not the one
+// its builds run on (docs/reviews.md), or the check refuses before it reads GitHub; launchJob asks
+// the same again. The settings are the desktop app's, in the state folder its machine file
+// (`%APPDATA%/Queue runner/machine.json`) names, or the folder `--state` names. There's no default
+// instance: T3's own may have every tool.
 //
-//     pnpm --dir app live:review -- --pr N --run <instance>:<model>
-//     pnpm --dir app live:review -- --open-pr --run <instance>:<model>
+//     pnpm --dir app live:review -- --pr N --run <instance>:<model> [--state <folder>]
+//     pnpm --dir app live:review -- --open-pr --run <instance>:<model> [--state <folder>]
 import { execFileSync } from 'node:child_process';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -26,10 +29,13 @@ import { join } from 'node:path';
 import { GitCli } from '../src/git.ts';
 import { GhGitHub } from '../src/github.ts';
 import { JobLog } from '../src/job-log.ts';
-import { DEFAULT_JOBS, model, type Catalog, type ModelChoice } from '../src/jobs.ts';
+import { noToolsRefusal } from '../src/launch.ts';
+import { kindModels, model, type Catalog, type ModelChoice } from '../src/jobs.ts';
 import { Deps } from '../src/review/deps.ts';
 import { DryRunPoster } from '../src/review/post.ts';
 import { ReviewLane, reviewerName } from '../src/review-lane.ts';
+import { SettingsStore } from '../src/settings.ts';
+import { APP_DATA_NAME, savedStateFolder } from '../src/state-folder.ts';
 import { catalogFromConfig } from '../src/t3/catalog.ts';
 import { T3Mcp } from '../src/t3/mcp.ts';
 import { fetchHttp, nodeConnect, runtimeAddress, t3Cli } from '../src/t3/real.ts';
@@ -54,10 +60,11 @@ const run = (cwd: string, program: string, ...args: string[]) => execFileSync(pr
 const asked = arg('--pr');
 const openPr = process.argv.includes('--open-pr');
 if (!arg('--run') || (asked === undefined) === !openPr) {
-  console.log('usage: live:review -- (--pr N | --open-pr) --run <instance>:<model>\n'
+  console.log('usage: live:review -- (--pr N | --open-pr) --run <instance>:<model> [--state <folder>]\n'
     + '  --pr N      review open PR N in the sandbox; writes nothing to GitHub\n'
     + '  --open-pr   open a small PR of its own to review (pushes a branch and opens a PR, closed and deleted at the end)\n'
-    + '  --run      an instance set up without outside tools, and a model on it');
+    + "  --run       an instance the app's settings name as set up without outside tools, and a model on it\n"
+    + "  --state     the app's state folder, if not the one its machine file names");
   process.exit(2);
 }
 
@@ -71,6 +78,15 @@ const [provider, ...rest] = arg('--run')!.split(':');
 const m = model(catalog, { provider: provider!, model: rest.join(':') });
 if (!m) throw new Error(`T3 has no model ${rest.join(':')} on ${provider}`);
 const choice: ModelChoice = { provider: provider!, model: m.id, effort: m.efforts[0]?.id ?? null };
+
+// the user's word on which instances have no outside tools, from the app's own settings
+const settings = (await SettingsStore.open(arg('--state') ?? savedStateFolder(join(process.env.APPDATA ?? '', APP_DATA_NAME, 'machine.json')))).get();
+const buildInstance = kindModels(settings.jobs, 'build', catalog).choice?.provider ?? null;
+const refused = noToolsRefusal(choice.provider, settings.toolFreeInstances, buildInstance);
+if (refused) {
+  console.log(`refusing: ${refused}`);
+  process.exit(2);
+}
 
 const state = await mkdtemp(join(tmpdir(), 'qr-live-review-'));
 const clone = join(state, 'clone');
@@ -101,10 +117,10 @@ try {
   const log = await JobLog.open(join(state, 'jobs.jsonl'));
   const said: string[] = [];
   const noGate = { pick: () => { throw new Error('not asked'); }, check: () => ({ fits: true as const, cost: {} }), started() {}, finished() {}, dropped() {}, forget() {} };
-  const jobs = { ...DEFAULT_JOBS, review: { own: choice, fallback: null } };
+  const jobs = { ...settings.jobs, review: { own: choice, fallback: null } };
   const lane = new ReviewLane({
     repos: () => [], github, git: new GitCli(), deps: new Deps(join(state, 'deps')), mcp, ws, gate: noGate as any,
-    catalog: () => catalog, jobs: () => jobs, toolFree: () => [choice.provider],
+    catalog: () => catalog, jobs: () => jobs, toolFree: () => settings.toolFreeInstances,
     user: async () => 'the live check', log, stateDir: state, poster: new DryRunPoster((l) => said.push(l)),
     say: (l) => { said.push(l); console.log(`  ${l}`); },
   });

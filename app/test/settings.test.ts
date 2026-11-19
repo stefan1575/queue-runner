@@ -6,7 +6,8 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, test } from 'vitest';
 import { DEFAULT_JOBS } from '../src/jobs.ts';
 import { DEFAULT_SETTINGS, SettingsError, SettingsStore } from '../src/settings.ts';
-import { stateFolder } from '../src/state-folder.ts';
+import { existsSync } from 'node:fs';
+import { savedStateFolder, stateFolder } from '../src/state-folder.ts';
 
 let dirs: string[] = [];
 afterEach(async () => {
@@ -39,6 +40,15 @@ describe('the state folder', () => {
     const machine = join(d, 'machine.json');
     await writeFile(machine, '{not json');
     expect(() => stateFolder(machine, join(d, 'state'))).toThrow(/machine\.json/);
+  });
+
+  test("a check beside the app reads the app's machine file, and never writes one", async () => {
+    const d = await temp();
+    const machine = join(d, 'machine.json');
+    expect(() => savedStateFolder(machine)).toThrow(/start the desktop app once/);
+    expect(existsSync(machine)).toBe(false);
+    await writeFile(machine, JSON.stringify({ stateFolder: join(d, 'elsewhere') }));
+    expect(savedStateFolder(machine)).toBe(join(d, 'elsewhere'));
   });
 });
 

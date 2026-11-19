@@ -7,9 +7,10 @@
 //
 // **A review has no outside tools** (docs/reviews.md): the app can't see an instance's tools
 // without naming its driver, so the user names the instances set up without them
-// (`toolFreeInstances`, src/settings.ts), and a review launches only on one of those. That is
-// checked here, at the one launch every review goes through (the lane and the live check alike),
-// and it fails closed: no list, or an instance not on it, launches nothing.
+// (`toolFreeInstances`, src/settings.ts), and a review launches only on one of those, never on
+// the instance builds run on. That is checked here, at the one launch every review goes through
+// (the lane and the live check alike), and it fails closed: no list, or an instance not on it,
+// launches nothing.
 import { model, usable, type Catalog, type JobKind, type ModelChoice } from './jobs.ts';
 import type { T3Mcp } from './t3/mcp.ts';
 
@@ -26,8 +27,10 @@ export type Job = {
   worktree?: { baseRef: string; branch: string };
   /** What it runs on: the choice the gate let in. */
   choice: ModelChoice;
-  /** A review's: the instances set up without outside tools. A review on any other launches nothing. */
+  /** A review's: the instances set up without outside tools, and the one builds run on. A review
+   *  on one not listed, or on the build's, launches nothing. */
   toolFree?: readonly string[];
+  buildInstance?: string | null;
   /** The job log's id: its mark heads the message, so the thread is known as this job's
    *  (`src/t3/job-thread.ts`) even when the app stops before it logs the thread's id. */
   jobId?: string;
@@ -47,12 +50,22 @@ export function modelSelection(choice: ModelChoice, catalog: Catalog) {
   };
 }
 
-/** Why a review won't run on this instance. */
-export const toolsHeld = (instance: string) =>
-  `the review would run on ${instance}, which isn't one of the instances set up without outside tools (toolFreeInstances in the settings; docs/reviews.md)`;
+/** Why a review won't run on `instance` (named `label` to the user), or null when it may: the
+ *  instance must be one the user named as set up without outside tools (`toolFree`, their saved
+ *  `toolFreeInstances`, never inferred from the review's own choice), and never the one builds
+ *  run on (`buildInstance`), which has their tools whatever the list says. The lane, launchJob
+ *  and the live check all ask this. */
+export function noToolsRefusal(instance: string, toolFree: readonly string[], buildInstance: string | null, label = instance): string | null {
+  if (!toolFree.includes(instance)) return `the review would run on ${label}, which isn't one of the instances set up without outside tools (toolFreeInstances in the settings; docs/reviews.md)`;
+  if (instance === buildInstance) return `the review would run on ${label}, the instance builds run on, which has their tools: a review needs an instance set up without outside tools (docs/reviews.md)`;
+  return null;
+}
 
 export async function launchJob(mcp: Pick<T3Mcp, 'call'>, catalog: Catalog, job: Job): Promise<Launched> {
-  if (job.kind === 'review' && !job.toolFree?.includes(job.choice.provider)) throw new JobError(toolsHeld(job.choice.provider));
+  if (job.kind === 'review') {
+    const why = noToolsRefusal(job.choice.provider, job.toolFree ?? [], job.buildInstance ?? null);
+    if (why) throw new JobError(why);
+  }
   const choice = usable(job.choice, catalog);
   // never another model in its place: a choice T3 can't run now launches nothing
   if (!choice || choice.effort !== job.choice.effort) {

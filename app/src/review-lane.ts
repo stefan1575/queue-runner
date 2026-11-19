@@ -28,7 +28,7 @@ import type { GitHubReview, ReviewPull } from './github.ts';
 import { prRef, type ReviewGit } from './git.ts';
 import { REVIEWED, type Job, type JobEnd, type JobLog } from './job-log.ts';
 import { kindModels, model, provider, type Catalog, type Jobs, type ModelChoice } from './jobs.ts';
-import { launchJob, toolsHeld } from './launch.ts';
+import { launchJob, noToolsRefusal } from './launch.ts';
 import { closedIssues } from './picker.ts';
 import type { Deps } from './review/deps.ts';
 import { testsNote } from './review/deps.ts';
@@ -235,11 +235,8 @@ export class ReviewLane {
     if (!v.fits) held = holdText(v.hold, (d) => d.toISOString());
     else if (!catalog) held = "T3's providers aren't known yet";
     else {
-      const build = kindModels(this.d.jobs(), 'build', catalog).choice;
-      if (!this.d.toolFree().includes(v.choice.provider)) held = toolsHeld(provider(catalog, v.choice.provider)?.label ?? v.choice.provider);
-      else if (build && build.provider === v.choice.provider) {
-        held = `the review would run on ${provider(catalog, v.choice.provider)?.label ?? v.choice.provider}, the instance builds run on, which has their tools: a review needs an instance set up without outside tools (docs/reviews.md)`;
-      }
+      const build = kindModels(this.d.jobs(), 'build', catalog).choice?.provider ?? null;
+      held = noToolsRefusal(v.choice.provider, this.d.toolFree(), build, provider(catalog, v.choice.provider)?.label ?? v.choice.provider);
     }
     if (held) {
       if (this.holdSaid !== held) this.d.say(`review ${repo.title}#${pr.number} waits: ${held}`);
@@ -303,7 +300,8 @@ export class ReviewLane {
         });
         await write('brief.md', brief);
         this.d.say(`${name}: ${reviewer} reviews ${h.slice(0, 7)} (review ${round}) in ${runDir}`);
-        const launched = await launchJob(this.d.mcp, catalog, { kind: 'review', projectId: repo.id, title, brief, choice: letIn.choice, toolFree: this.d.toolFree(), jobId: job.id });
+        const launched = await launchJob(this.d.mcp, catalog, { kind: 'review', projectId: repo.id, title, brief, choice: letIn.choice, toolFree: this.d.toolFree(),
+          buildInstance: kindModels(this.d.jobs(), 'build', catalog).choice?.provider ?? null, jobId: job.id });
         const thread = { threadId: launched.threadId, runId: launched.runId, link: launched.link };
         ran_.thread = thread;
         await this.d.log.thread(job.id, thread);

@@ -398,7 +398,10 @@ every open PR in a served repo without a review on its newest commit gets one, w
   each instance's launch arguments (`subscribeServerConfig`'s `settings.providerInstances`, seen
   live 2026-11-19), but reading them would name a driver in code, so the list is the user's word.
   `launchJob` enforces it for every review, the lane's and the live check's alike, and fails
-  closed: a review on an instance not listed launches nothing. The lane asks first, so such a
+  closed: a review on an instance not listed, or on the one builds run on, launches nothing. The
+  rule is one function, `noToolsRefusal` (`src/launch.ts`), which the lane, `launchJob` and the
+  live check all ask; the list it takes is always the saved setting, never derived from the
+  review's own choice. The lane asks first, so such a
   review waits and says why rather than failing; nor does one run on the instance builds run on,
   which has their tools, whatever the list says. The setting is in `settings.json` only, not yet
   on the Settings page; a Codex instance for reviews needs its MCP servers off in T3 (codex-sol.sh
@@ -621,7 +624,7 @@ is killed is code -1 with Node's reason in stderr, never a gh exit code (so is t
   worktree on the job branch on the asked model, and it was settled. **Run 2026-11-19** on Haiku
   5.5 at low: all ok, in about 20 seconds.
 - `app/live/review.ts` (`pnpm --dir app live:review -- (--pr N | --open-pr) --run
-  <instance>:<model>`): today's `scripts/live_review.py` for the app, dry run. One real review of
+  <instance>:<model> [--state <folder>]`): today's `scripts/live_review.py` for the app, dry run. One real review of
   one open PR in `stefan1575/queue-runner-sandbox` only (it refuses another clone), through
   `ReviewLane.review` with a `DryRunPoster`, after saying what adoption would decide (the sandbox
   has no CI, so it reviews anyway). The PR's clone is fresh in a temp folder; the thread runs in
@@ -629,8 +632,13 @@ is killed is code -1 with Node's reason in stderr, never a gh exit code (so is t
   PR and writes nothing to GitHub. `--open-pr` instead opens a small PR of its own (one function
   with an off-by-one), which writes to GitHub: it pushes a branch and opens the PR, then closes it
   and deletes the branch at the end. With neither (or both) it prints its usage and does nothing.
-  `--run` is required: its instance must be one set up without outside tools, and it's the check's
-  `toolFreeInstances` (T3's default may have every tool, so there's none by default). It checks a
+  `--run` is required (T3's default may have every tool, so there's none by default), and naming
+  an instance there doesn't make it tool-free: the check reads the desktop app's saved settings
+  (the state folder `%APPDATA%/Queue runner/machine.json` names, Electron's `userData` for the
+  app's productName, or `--state <folder>`) and refuses, before it reads GitHub, an instance not
+  in its `toolFreeInstances` or the one its builds run on. Seen 2026-11-19 with an empty
+  `--state`: `refusing: the review would run on claudeAgent, which isn't one of the instances set
+  up without outside tools`, exit 2. It checks a
   verdict was read from the ledger, the comment names its reviewer, nothing was posted and no
   `sol-review` set, the thread ran on the asked model and was settled, and the checkout is gone.
   **Run 2026-11-19** on `claudeReviewer` Haiku 5.5 at low: all ok, sandbox #4 reviewed blocking in
