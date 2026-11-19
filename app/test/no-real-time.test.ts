@@ -79,6 +79,43 @@ describe('no test runs on the real clock', () => {
     ]);
   });
 
+  it('excuses only what a toFake list fakes', () => {
+    const source = [
+      "test('the retry', () => {",
+      "  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });",
+      "  setTimeout(f, 500);",
+      "  const t = Date.now();",
+      "  const d = new Date();",
+      "  const p = performance.now();",
+      "  setInterval(f, 50);",
+      "});",
+      "test('on Date only', () => {",
+      "  vi.useFakeTimers({ toFake: ['Date'] });",
+      "  const t = Date.now();",
+      "  setTimeout(f, 500);",
+      "});",
+    ].join('\n');
+    expect(realTimeUses(source).map((hit) => hit.split(':')[0])).toEqual(['4', '5', '6', '7', '12']);
+  });
+
+  it('excuses nothing a fake clock never fakes, or one that follows the real clock', () => {
+    const source = [
+      "beforeEach(() => { vi.useFakeTimers(); });",
+      "test('uptime', () => { const u = process.uptime(); });",
+      "test('node timers', async () => { const { setTimeout: sleep } = await import('node:timers/promises'); });",
+      "test('advancing', () => { vi.useFakeTimers({ shouldAdvanceTime: true }); });",
+      "describe('advancing with the real clock', () => {",
+      "  beforeEach(() => { vi.useFakeTimers({ shouldAdvanceTime: true }); });",
+      "  test('ticks', () => { setTimeout(f, 500); });",
+      "});",
+      "test('a config the check cannot read', () => { vi.useFakeTimers(config); expect(Date.now()).toBe(0); });",
+    ].join('\n');
+    // The file's own fake clock fakes everything, so only what nothing fakes is a use.
+    expect(realTimeUses(source).map((hit) => hit.split(':')[0])).toEqual(['2', '3']);
+    const alone = source.split('\n').slice(3).join('\n');
+    expect(realTimeUses(alone).map((hit) => hit.split(':')[0])).toEqual(['4', '6']);
+  });
+
   it('reads a renderer test as JSX', () => {
     const source = [
       "test('the stamp', () => {",
