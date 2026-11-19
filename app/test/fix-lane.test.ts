@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import type { BuildRepo } from '../src/build-lane.ts';
 import { CAP } from '../src/cap.ts';
 import { FixLane, type FixLaneDoors } from '../src/fix-lane.ts';
+import { Writers } from '../src/writers.ts';
 import type { MergePull, ReviewPull } from '../src/github.ts';
 import { JobLog, type Job } from '../src/job-log.ts';
 import { DEFAULT_JOBS, type Jobs, type ModelChoice } from '../src/jobs.ts';
@@ -600,5 +601,35 @@ describe("a failed round's retry on the same head (#158 F8)", () => {
     expect(t3.launches[1].workspaceStrategy).toMatchObject({ type: 'worktree', baseRef: H, branch: 'claude/fix-pr4-abcdef1-2' });
     await until(() => Boolean(fixes()[1]?.made));
     expect(fixes()[1]!.made).toEqual(['claude/fix-pr4-abcdef1-2']);
+  });
+});
+
+describe('one writer per PR (#158 F6)', () => {
+  test('a writer started on the branch while the fix round got ready is caught just before the send or launch', async () => {
+    await blocking(2, H, [finding({ raised: 1 })]); // a fresh fixer
+    const fetchPr = git.fetchPr.bind(git);
+    git.fetchPr = async (f, n, b) => {
+      // another lane, not sharing the reservation, starts a conflict round on the branch meanwhile
+      await log.started({ kind: 'conflict', repo: APP.id, github: 'owner/app', issue: 4, branch: BRANCH, base: 'main', title: 'Queue runner conflict: app#4', choice: FIX, onFallback: false, sha: H });
+      return fetchPr(f, n, b);
+    };
+    makeLane();
+    await lane.pass();
+    await lane.idle();
+    expect(t3.launches).toEqual([]);
+    expect(fixes()[0]!.end).toMatchObject({ outcome: 'not-started', error: `a conflict job started on ${BRANCH} meanwhile` });
+  });
+
+  test('a branch another lane has reserved gets no round until it gives it back', async () => {
+    await blocking(2, H, [finding({ raised: 1 })]);
+    const writers = new Writers();
+    writers.claim(APP.id, BRANCH, 'the conflict round on PR #4');
+    makeLane({ writers });
+    await lane.pass();
+    expect(t3.launches).toEqual([]);
+    expect(lines).toContain(`fix app#4: no fix round now, the conflict round on PR #4 is getting ready to write to ${BRANCH}`);
+    writers.release(APP.id, BRANCH, 'the conflict round on PR #4');
+    await lane.pass();
+    await until(() => t3.launches.length === 1);
   });
 });

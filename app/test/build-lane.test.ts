@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { BuildLane, servedRepos, type BuildLaneDoors, type BuildRepo } from '../src/build-lane.ts';
+import { Writers } from '../src/writers.ts';
 import { CostLog } from '../src/cost-log.ts';
 import type { Git } from '../src/git.ts';
 import type { Issue } from '../src/github.ts';
@@ -788,5 +789,28 @@ describe('a build that stopped on a question, answered on GitHub (#158)', () => 
     await lane.pass();
     await lane.idle();
     expect(carried()[0]!.end).toMatchObject({ outcome: 'needs-user' });
+  });
+});
+
+describe('a carried-on build is one writer per PR too (#158 F6)', () => {
+  test('a branch another lane has reserved holds the carry-on until it gives it back', async () => {
+    const BRANCH = 'claude/ticket-number-7-7';
+    const job = await log.started({ kind: 'build', repo: APP.id, github: 'owner/app', issue: 7, branch: BRANCH, base: 'origin/main', title: 'Queue runner build: app#7', choice: BUILD, onFallback: false });
+    await log.thread(job.id, { threadId: 'thread-b', runId: 'run-b', link: null });
+    t3.threadState['thread-b'] = { id: 'thread-b', projectId: APP.id, runs: [{ id: 'run-b', threadId: 'thread-b', ordinal: 1, rootNodeId: 'n', status: 'completed' }], runtimeRequests: [], turnItems: [],
+      providerTurns: [{ startedAt: '2026-11-19T11:50:00Z', tokenUsage: { usedTokens: 1000 } }] };
+    await log.ended(job.id, { outcome: 'done-no-pr', pr: null });
+    const stop = await log.stopped({ cause: 'question', repo: APP.id, github: 'owner/app', pr: 7, sha: null, why: 'asked', link: null, on: 'issue', job: job.id });
+    await log.stopAnswered(stop.id, 'replied', 'Go on.');
+    await log.answered(job.id);
+    const writers = new Writers();
+    writers.claim(APP.id, BRANCH, 'the fix round on PR #9');
+    makeLane({ writers, now: () => new Date('2026-11-19T12:00:00Z') });
+    await lane.pass();
+    expect(t3.sends).toEqual([]);
+    expect(lines).toContain(`Queue runner build: app#7 carries on once the fix round on PR #9 is done with ${BRANCH}`);
+    writers.release(APP.id, BRANCH, 'the fix round on PR #9');
+    await lane.pass();
+    await until(() => t3.sends.length === 1);
   });
 });

@@ -22,6 +22,7 @@ import { MergeLane } from '../merge-lane.ts';
 import { ChecksLane } from '../checks-lane.ts';
 import { ConflictLane } from '../conflict-lane.ts';
 import { StopDesk } from '../stops.ts';
+import { Writers } from '../writers.ts';
 import { UsageGate } from '../usage-gate.ts';
 import { windowsPlatform } from '../platform/windows.ts';
 import { checkJobs, DEFAULT_JOBS } from '../jobs.ts';
@@ -128,9 +129,11 @@ async function main() {
   gate.limitsFrom(log.jobs()); // a provider the last run saw run out stays held until its reset
   const say = (line: string) => console.log(`${new Date().toISOString()} ${line}`);
   const user = async () => briefName(view.get()) ?? 'the user';
+  // one writer per PR: the one reservation every lane that writes to a PR's branch shares (#158 F6)
+  const writers = new Writers();
   const lane = new BuildLane({
     repos: () => servedRepos(repos.list()), github, git: new GitCli(), mcp: t3Doors!.mcp, ws: t3Doors!.ws, gate,
-    catalog: () => catalog.current().catalog, jobs: () => settings.get().jobs, user, log, exists: existsSync, say,
+    catalog: () => catalog.current().catalog, jobs: () => settings.get().jobs, user, log, exists: existsSync, say, writers,
   });
   // The review lane (docs/app.md, Reviews): every open PR in a served repo, one review at a time.
   // A review that ends tells the fix and merge lanes; a fix round that ends tells the review lane
@@ -146,7 +149,7 @@ async function main() {
   });
   const fixes = new FixLane({
     repos: () => servedRepos(repos.list()), github, git: new GitCli(), mcp: t3Doors!.mcp, ws: t3Doors!.ws, gate,
-    catalog: () => catalog.current().catalog, jobs: () => settings.get().jobs, user, log, exists: existsSync, say,
+    catalog: () => catalog.current().catalog, jobs: () => settings.get().jobs, user, log, exists: existsSync, say, writers,
     ended: () => { void reviews.pass(); void lanes.conflicts?.pass(); void lanes.stops?.pass(); },
   });
   const merges = new MergeLane({
@@ -155,7 +158,7 @@ async function main() {
   });
   const conflicts = new ConflictLane({
     repos: () => servedRepos(repos.list()), github, git: new GitCli(), mcp: t3Doors!.mcp, ws: t3Doors!.ws, gate,
-    catalog: () => catalog.current().catalog, user, log, exists: existsSync, say,
+    catalog: () => catalog.current().catalog, user, log, exists: existsSync, say, writers,
     ended: () => { void reviews.pass(); void lanes.stops?.pass(); },
   });
   lanes.fixes = fixes;

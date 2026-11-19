@@ -40,6 +40,7 @@ import { settles, type Job, type JobEnd, type JobLog, type Stop } from './job-lo
 import { resumeChoice, threadNow } from './resume.ts';
 import { ToolFailed } from './t3/mcp.ts';
 import { runReply } from './t3/thread-reply.ts';
+import { otherWriter, Writers } from './writers.ts';
 import type { Catalog, Jobs } from './jobs.ts';
 import { launchJob } from './launch.ts';
 import { pick, type BuildTicket } from './picker.ts';
@@ -83,6 +84,8 @@ export type BuildLaneDoors = {
   /** A dropped thread stream's wait before it's opened again. */
   retry?: Retry;
   now?: () => Date;
+  /** One writer per PR, shared by every lane that writes to a PR's branch (F6). */
+  writers?: Writers;
 };
 
 /** The repos the lane builds in: those switched to Served that have a GitHub remote. An
@@ -111,10 +114,12 @@ export class BuildLane {
   private passing: Promise<void> | null = null;
   private again = false;
   private stopped = false;
+  private writers: Writers;
   private now: () => Date;
 
   constructor(doors: BuildLaneDoors) {
     this.d = doors;
+    this.writers = doors.writers ?? new Writers();
     this.now = doors.now ?? (() => new Date());
     this.settler = new ThreadSettler(doors.mcp, doors.log, doors.say);
   }
@@ -199,10 +204,22 @@ export class BuildLane {
       // a build the user answered on GitHub carries on first (#158)
       const owed = this.carryOwed(repo);
       if (owed) {
+        // one writer per PR (F6): the build's branch is reserved before anything is prepared
+        const me = `the carried-on ${owed.job.title}`;
+        const holder = this.writers.claim(repo.id, owed.job.branch, me);
+        if (holder) {
+          const text = `${owed.job.title} carries on once ${holder} is done with ${owed.job.branch}`;
+          if (this.holdSaid.get(repo.id) !== text) this.d.say(text);
+          this.holdSaid.set(repo.id, text);
+          continue;
+        }
         const v = this.carryGate(repo, owed);
-        if (!v) continue;
+        if (!v) { this.writers.release(repo.id, owed.job.branch, me); continue; }
         await new Promise<void>((launched) => {
-          this.track(repo.id, this.carryOn(repo, owed.job, owed.stop, v, launched).finally(launched));
+          this.track(repo.id, this.carryOn(repo, owed.job, owed.stop, v, launched).finally(() => {
+            launched();
+            this.writers.release(repo.id, owed.job.branch, me);
+          }));
         });
         continue;
       }
@@ -319,8 +336,11 @@ export class BuildLane {
     this.d.gate.started({ id: job.id, kind: 'build', choice: job.choice }, letIn.cost, before);
     this.d.say(`${old.title}: ${choice.inPlace ? 'carrying it on in place' : 'carrying it on in a fresh thread'}, ${choice.why}`);
     if (choice.inPlace) {
-      // asked again after T3's read: a repo switched off meanwhile gets nothing sent
+      // asked again after T3's read: a repo switched off meanwhile gets nothing sent, nor a branch
+      // another job writes to now (F6)
       if (!isServed(this.d.repos(), repo)) return this.notStarted(job, 'not-started', `${repo.title} is no longer served`);
+      const other = otherWriter(this.d.log, job);
+      if (other) return this.notStarted(job, 'not-started', `a ${other.kind} job started on ${job.branch} meanwhile`);
       const thread = { threadId: old.threadId!, runId: answering ? old.runId ?? null : null, link: old.link ?? null };
       try {
         if (answering) {
@@ -372,6 +392,8 @@ export class BuildLane {
         carryOn: { question, answer, link: old.link ?? null, work },
       });
       if (!isServed(this.d.repos(), repo)) return await this.notStarted(job, 'not-started', `${repo.title} is no longer served`);
+      const other = otherWriter(this.d.log, job);
+      if (other) return await this.notStarted(job, 'not-started', `a ${other.kind} job started on ${job.branch} meanwhile`);
       try {
         launched = await launchJob(this.d.mcp, catalog, {
           kind: 'build', projectId: repo.id, title: job.title, brief, choice: letIn.choice,

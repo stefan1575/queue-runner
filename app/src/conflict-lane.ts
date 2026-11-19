@@ -51,6 +51,7 @@ import { ThreadSettler } from './settle.ts';
 import type { T3Mcp } from './t3/mcp.ts';
 import { retryAfter, type Retry } from './t3/project-feed.ts';
 import { askedStop, roundQuestion } from './stops.ts';
+import { otherWriter, Writers } from './writers.ts';
 import { NoAnswer } from './t3/seams.ts';
 import { watchThreadEnd, type ThreadEnd } from './t3/thread-end.ts';
 import type { T3Ws } from './t3/ws.ts';
@@ -73,6 +74,8 @@ export type ConflictLaneDoors = {
   restMs?: number;
   retry?: Retry;
   now?: () => Date;
+  /** One writer per PR, shared by every lane that writes to a PR's branch (F6). */
+  writers?: Writers;
 };
 
 /** How long a head a conflict round pushed, with no checks reported on it, still holds the repo's
@@ -107,9 +110,11 @@ export class ConflictLane {
   private again = false;
   private stopped = false;
   private waits = new Set<() => void>();
+  private writers: Writers;
 
   constructor(doors: ConflictLaneDoors) {
     this.d = doors;
+    this.writers = doors.writers ?? new Writers();
     this.now = doors.now ?? (() => new Date());
     this.settler = new ThreadSettler(doors.mcp, doors.log, doors.say);
   }
@@ -232,13 +237,25 @@ export class ConflictLane {
         if (!why && unknown) why = `GitHub hasn't said yet whether the older PR #${unknown.number} conflicts: oldest first`;
         if (why) { this.note(key, name, why); continue; }
         first = pr;
+        // one writer per PR (F6): the branch is reserved before anything is prepared, against every
+        // lane that writes to it, and given back once the round has ended or started nothing
+        const me = `the conflict round on PR #${pr.number}`;
+        const holder = this.writers.claim(repo.id, pr.branch, me);
+        if (holder) { this.note(key, name, `${holder} is getting ready to write to ${pr.branch}`); continue; }
         // the gate counts the round from now; the pass goes on once T3 has it
         const v = this.d.gate.pick(`conflict:${key}`, 'conflict');
-        if (!v.fits) { this.note(key, name, `waits: ${holdText(v.hold, (d) => d.toISOString())}`); continue; }
+        if (!v.fits) {
+          this.writers.release(repo.id, pr.branch, me);
+          this.note(key, name, `waits: ${holdText(v.hold, (d) => d.toISOString())}`);
+          continue;
+        }
         this.d.gate.forget(`conflict:${key}`);
         this.why.set(key, null);
         await new Promise<void>((launched) => {
-          this.track(key, this.round(repo, pr, v, launched).finally(launched));
+          this.track(key, this.round(repo, pr, v, launched).finally(() => {
+            launched();
+            this.writers.release(repo.id, pr.branch, me);
+          }));
         });
       }
     }
@@ -421,8 +438,8 @@ export class ConflictLane {
     if (!this.d.repos().some((r) => r.id === repo.id)) return this.notStarted(job, `${repo.title} is no longer served`);
     // one writer per PR, asked again after the slow steps: a job another lane started on the PR
     // meanwhile (a fix round on its branch, a review of it) goes on alone
-    const other = this.d.log.jobs().find((j) => j.id !== job.id && j.repo === repo.id
-      && ((j.kind !== 'review' && j.branch === pr.branch && WRITING(j)) || (j.kind === 'review' && j.issue === n && !j.end)));
+    const other = otherWriter(this.d.log, job)
+      ?? this.d.log.jobs().find((j) => j.repo === repo.id && j.kind === 'review' && j.issue === n && !j.end);
     if (other) return this.notStarted(job, `a ${other.kind} job started on PR #${n} meanwhile`);
     const catalog = this.d.catalog();
     if (!catalog) return this.notStarted(job, "T3's providers aren't known yet");

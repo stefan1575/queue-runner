@@ -47,6 +47,7 @@ import { ThreadSettler } from './settle.ts';
 import { ToolFailed, type T3Mcp } from './t3/mcp.ts';
 import { retryAfter, type Retry } from './t3/project-feed.ts';
 import { askedStop, roundQuestion } from './stops.ts';
+import { otherWriter, Writers } from './writers.ts';
 import { NoAnswer } from './t3/seams.ts';
 import { watchThreadEnd, type ThreadEnd } from './t3/thread-end.ts';
 import type { T3Ws } from './t3/ws.ts';
@@ -70,6 +71,8 @@ export type FixLaneDoors = {
   restMs?: number;
   retry?: Retry;
   now?: () => Date;
+  /** One writer per PR, shared by every lane that writes to a PR's branch (F6). */
+  writers?: Writers;
 };
 
 export const fixTitle = (repo: BuildRepo, n: number) => `Queue runner fix: ${repo.title}#${n}`;
@@ -163,11 +166,13 @@ export class FixLane {
   private again = false;
   private stopped = false;
   private waits = new Set<() => void>();
+  private writers: Writers;
   /** Writer threads T3 says are gone: their PRs' rounds go to fresh fixers. */
   private gone = new Set<string>();
 
   constructor(doors: FixLaneDoors) {
     this.d = doors;
+    this.writers = doors.writers ?? new Writers();
     this.now = doors.now ?? (() => new Date());
     this.settler = new ThreadSettler(doors.mcp, doors.log, doors.say);
   }
@@ -284,16 +289,24 @@ export class FixLane {
           await this.forked(repo, pr, blocking);
           continue;
         }
+        // one writer per PR (F6): the branch is reserved before anything is prepared, against every
+        // lane that writes to it, and given back once the round has ended or started nothing
+        const me = `the fix round on PR #${pr.number}`;
+        const holder = this.writers.claim(repo.id, pr.branch, me);
+        if (holder) { this.note(key, name, `${holder} is getting ready to write to ${pr.branch}`); continue; }
         const plan = this.plan(repo, pr, blocking, ready.reviews);
         const cause: Cause = blocking ? { review: blocking, reviews: ready.reviews, direction: ready.direction }
           : { failed: failed!, reviews: ready.reviews, direction: ready.direction };
         // the gate counts the round from now; the pass goes on once T3 has it, so the next PR's
         // verdict counts this one
         const letIn = this.letIn(key, name, plan);
-        if (!letIn) continue;
+        if (!letIn) { this.writers.release(repo.id, pr.branch, me); continue; }
         this.why.set(key, null);
         await new Promise<void>((launched) => {
-          this.track(key, this.round(repo, pr, cause, plan, letIn, launched).finally(launched));
+          this.track(key, this.round(repo, pr, cause, plan, letIn, launched).finally(() => {
+            launched();
+            this.writers.release(repo.id, pr.branch, me);
+          }));
         });
       }
     }
@@ -403,6 +416,9 @@ export class FixLane {
     });
     this.d.gate.started({ id: job.id, kind: 'fix', choice: letIn.choice }, letIn.cost);
     if (!this.d.repos().some((r) => r.id === repo.id)) return this.notStarted(job, `${repo.title} is no longer served`);
+    // asked again just before the send or launch, after the slow steps (F6)
+    const other = otherWriter(this.d.log, job);
+    if (other) return this.notStarted(job, `a ${other.kind} job started on ${pr.branch} meanwhile`);
     let thread: { threadId: string; runId: string | null; link: string | null };
     try {
       if (plan.send) {

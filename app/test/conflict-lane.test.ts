@@ -10,6 +10,9 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import type { BuildRepo } from '../src/build-lane.ts';
 import { CAP } from '../src/cap.ts';
 import { ConflictLane, NO_CHECKS_GRACE_MS, type ConflictLaneDoors } from '../src/conflict-lane.ts';
+import { FixLane } from '../src/fix-lane.ts';
+import { DEFAULT_JOBS } from '../src/jobs.ts';
+import { Writers } from '../src/writers.ts';
 import { MAX_FAILED_MERGES } from '../src/merge-lane.ts';
 import { MAX_FAILED } from '../src/review-lane.ts';
 import { GitHubError, type ReviewPull } from '../src/github.ts';
@@ -84,6 +87,7 @@ class FakeGate {
     return this.room ? { fits: true as const, choice: CONFLICT, onFallback: false, cost: { five_hour: 40 } }
       : { fits: false as const, until: null, hold: { why: 'reading' as const, provider: 'Claude', checkedAt: null, stale: 'none' as const } };
   }
+  check() { return { fits: true as const, cost: { five_hour: 40 } }; }
   started(job: { id: string; kind: string; choice: ModelChoice }) { this.calls.push(`started ${job.kind} ${job.choice.model}`); }
   finished(id: string) { this.calls.push(`finished ${id}`); }
   dropped(id: string) { this.calls.push(`dropped ${id}`); }
@@ -607,5 +611,51 @@ describe("a conflict agent's question (#158 F2)", () => {
     // the answer goes into the next conflict brief (F9)
     expect(t3.launches[1].message).toContain("## Direction first\n\nPat answered the PR's stop, and this round starts from it:\n\n> Keep main's queue.");
     expect(t3.launches[0].message).not.toContain('Direction first');
+  });
+});
+
+describe('one writer per PR across lanes (#158 F6)', () => {
+  test('a check fixer and a conflict round on one PR: the lane that reserved the branch first goes, the other waits until it has ended', async () => {
+    const writers = new Writers();
+    await log.stepStarted({ kind: 'check-failed', repo: APP.id, github: 'owner/app', pr: 4, branch: 'claude/thing-3', sha: H, failed: ['tests'], runs: [0] });
+    // the fixer's fetch is slow: it has reserved the branch and is still getting ready
+    let fetched = () => {};
+    const slow = new Promise<void>((r) => { fetched = r; });
+    const fetchPr = git.fetchPr.bind(git);
+    let first = true;
+    git.fetchPr = async (f, n, b) => { if (first) { first = false; await slow; } return fetchPr(f, n, b); };
+    const fixes = new FixLane({
+      repos: () => [repoNow], github: gh as any, git, mcp, ws, gate: gate as any, catalog: () => catalog,
+      jobs: () => ({ ...DEFAULT_JOBS, fix: { own: CONFLICT, fallback: null } }), user: async () => 'Pat', log, exists: () => true,
+      say: (l) => lines.push(l), retry: () => () => {}, writers, now: () => clock,
+    });
+    const fixing = fixes.pass();
+    await until(() => writers.holder(APP.id, 'claude/thing-3') !== undefined);
+    makeLane({ writers });
+    await lane.pass();
+    expect(t3.launches).toEqual([]);
+    expect(lines).toContain('conflict app#4: no conflict round now, the fix round on PR #4 is getting ready to write to claude/thing-3');
+    fetched();
+    await fixing;
+    await until(() => t3.launches.length === 1);
+    expect(t3.launches[0].title).toBe('Queue runner fix: app#4');
+    // while the fix round runs, the conflict lane still starts nothing on the branch
+    await lane.pass();
+    expect(t3.launches).toHaveLength(1);
+    fixes.stop();
+  });
+
+  test('a writer started on the branch while a round got ready is caught just before the launch', async () => {
+    const fetchPr = git.fetchPr.bind(git);
+    git.fetchPr = async (f, n, b) => {
+      // another lane, not sharing the reservation, starts a job on the branch meanwhile
+      await log.started(job({ kind: 'build', title: 'Queue runner build: app#3', sha: undefined }));
+      return fetchPr(f, n, b);
+    };
+    makeLane();
+    await lane.pass();
+    await lane.idle();
+    expect(t3.launches).toEqual([]);
+    expect(rounds()[0]!.end).toMatchObject({ outcome: 'not-started', error: 'a build job started on PR #4 meanwhile' });
   });
 });
