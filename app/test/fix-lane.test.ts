@@ -408,6 +408,28 @@ describe('a send whose outcome is not known (F4)', () => {
   });
 });
 
+describe('a round that asks a question (#210 F5)', () => {
+  test('is watched on through an answer given in T3, its repo held, and the end its thread finishes on recorded in its place', async () => {
+    await builder();
+    await blocking(1, H, [finding({})]);
+    makeLane();
+    await chooser.pass();
+    await until(() => t3.threadStreamCount('thread-b') > 0);
+    const job = fixes()[0]!;
+    t3.askUser('thread-b');
+    await until(() => log.get(job.id)!.end?.outcome === 'waiting');
+    await chooser.pass();
+    expect(lines).toContain("app: no new job now, Queue runner fix: app#4 waits on a question, and runs again once it's answered: held until its thread finishes");
+    expect(ended).toEqual([]); // the review lane hears of the round once its thread has finished
+    t3.answerInT3('thread-b');
+    gh.heads[4] = H2;
+    t3.endRun('thread-b', 'completed');
+    await chooser.idle();
+    expect(log.get(job.id)!.end).toMatchObject({ outcome: 'done', head: H2 });
+    expect(ended.map((j) => j.id)).toEqual([job.id]);
+  });
+});
+
 describe("after a restart, don't guess", () => {
   test("a send whose answer was lost, on a thread that can't be read after, stays open and is read again on a later pass; its repo starts nothing meanwhile (#210 F6)", async () => {
     await builder();

@@ -163,6 +163,11 @@ export class FixLane implements RepoJobLane {
       if (job.kind !== 'fix') continue;
       this.track(`${job.github}#${job.issue}`, this.resume(job));
     }
+    // one waiting on a question: watched until its thread has finished again (#210 F5)
+    for (const job of this.d.log.waiting()) {
+      if (job.kind !== 'fix' || !job.threadId) continue;
+      this.track(`${job.github}#${job.issue}`, this.untilFinished(job));
+    }
   }
 
   stop() {
@@ -519,9 +524,21 @@ export class FixLane implements RepoJobLane {
     return this.watch(job);
   }
 
-  private async watch(job: Job): Promise<Job> {
-    const w = watchThreadEnd(this.d.ws, job.threadId!, job.runId ?? null, this.d.retry,
-      (why) => this.d.say(`${job.title}: T3's thread stream dropped (${why}); opening it again`), new Set(job.knownRuns ?? []));
+  /** A round waiting on a question: watched until its thread has finished again (the user may
+   *  answer it in T3, not only through the app), its repo held meanwhile, and that end recorded
+   *  in the question's place (#210 F5). A thread that can't be read holds it too: the watch opens
+   *  its stream again until T3 answers. */
+  private untilFinished(job: Job): Promise<Job> {
+    if (this.stopped) return Promise.resolve(job);
+    this.d.say(`${job.title} waits on a question: nothing else starts in ${job.github ?? job.repo} until its thread ${job.link ?? job.threadId} has finished, answered in T3 or here`);
+    return this.watch(job, true);
+  }
+
+  private async watch(job: Job, asked = false): Promise<Job> {
+    // after a question, the thread's newest run since the send: an answer may go on in its run or
+    // start a new one
+    const w = watchThreadEnd(this.d.ws, job.threadId!, asked ? null : job.runId ?? null, this.d.retry,
+      (why) => this.d.say(`${job.title}: T3's thread stream dropped (${why}); opening it again`), new Set(job.knownRuns ?? []), asked ? 'wait' : 'end');
     this.watches.add(w);
     let end: ThreadEnd;
     try {
@@ -529,7 +546,8 @@ export class FixLane implements RepoJobLane {
     } finally {
       this.watches.delete(w);
     }
-    this.d.gate.finished(job.id, end.outcome === 'usage-limit' ? { resetAt: end.resetAt } : undefined);
+    // the gate measured the job at its question; the run on the answer isn't let in again
+    if (!asked) this.d.gate.finished(job.id, end.outcome === 'usage-limit' ? { resetAt: end.resetAt } : undefined);
     const record: JobEnd = { outcome: end.outcome as JobEnd['outcome'], status: end.status };
     if (end.outcome === 'failed') record.error = end.error;
     if (end.outcome === 'usage-limit') Object.assign(record, { resetAt: end.resetAt, error: end.error });
@@ -545,6 +563,7 @@ export class FixLane implements RepoJobLane {
     const pushed = record.head && record.head !== job.sha ? `, pushed ${record.head.slice(0, 7)}: reviewed next`
       : record.head === job.sha ? `, without a push: the PR waits for you` : '';
     this.d.say(`${job.title} ended: ${record.outcome}${pushed} ${job.link ?? job.threadId}`);
+    if (record.outcome === 'waiting') return this.untilFinished(ended);
     if (settles(record.outcome)) await this.settler.settle(job);
     return ended;
   }

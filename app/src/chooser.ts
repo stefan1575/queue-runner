@@ -8,8 +8,9 @@
 //
 //   settle first: every job the log shows open is recovered by its lane (`recover`) before the
 //   first choice  ->  each pass: each lane's owed bookkeeping (settles, PR lookups)  ->  the
-//   served repos that have no job open (in the log or under way in a lane), none needing
-//   the user, no done build's PR lookup owed, and no job a usage limit cut off before its reset
+//   served repos that have no job open (in the log or under way in a lane), none waiting on a
+//   question until its thread has finished again, none needing the user, no done build's PR
+//   lookup owed, and no job a usage limit cut off before its reset
 //   ->  the repo that waited longest first (`waited`), the served order breaking a tie
 //   ->  in each: a fix round, a conflict round, a build, the first lane with one; a lane whose
 //       job waits (the gate, a fork's PR now needing the user) leaves the repo for the next pass,
@@ -100,7 +101,8 @@ export class Chooser {
   }
 
   /** The user has answered a job that needed them (the Inbox ticket's to ask): its repo is free
-   *  again, and a pass runs. */
+   *  again, and a pass runs. A job waiting on a question isn't freed by it: its thread runs on the
+   *  answer, and its repo stays held until the thread has finished (`held`, #210 F5). */
   async answered(jobId: string): Promise<void> {
     if (!this.d.log.get(jobId)?.answeredAt) await this.d.log.answered(jobId);
     await this.pass();
@@ -149,6 +151,10 @@ export class Chooser {
     const jobs = this.d.log.jobs().filter((j) => j.repo === repo.id);
     const open = jobs.find((j) => REPO_JOB_KINDS.includes(j.kind) && !j.end);
     if (open) return `${open.title} is its job (one job per repo)`;
+    // a question: the user may answer it in T3, and the thread runs again. Held until its lane
+    // records the end the thread finishes on, whatever `answered` says (#210 F5)
+    const asking = jobs.find((j) => REPO_JOB_KINDS.includes(j.kind) && j.end?.outcome === 'waiting');
+    if (asking) return `${asking.title} waits on a question, and runs again once it's answered: held until its thread finishes`;
     if (this.d.lanes.some((l) => l.busy(repo))) return 'its job is under way (one job per repo)';
     const user = this.d.log.needingUser(repo.id)[0];
     if (user) return `${user.title} needs you first`;

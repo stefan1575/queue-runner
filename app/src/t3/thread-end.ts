@@ -58,9 +58,12 @@ export type Watch = {
 };
 
 /** Watches one thread until `runId` ends or stops on a question (with no `runId`, its newest run
- *  not in `known`). `onDown` hears why a stream dropped, before it's opened again. */
+ *  not in `known`). `onDown` hears why a stream dropped, before it's opened again. With
+ *  `questions: 'wait'` a question isn't an end: the watch goes on until the run has ended (a job
+ *  left waiting, which runs again once the user answers it in T3; #210 F5). */
 export function watchThreadEnd(ws: Pick<T3Ws, 'subscribe'>, threadId: string, runId: string | null,
-  retry: Retry = retryAfter(5_000), onDown: (why: string) => void = () => {}, known: ReadonlySet<string> = new Set()): Watch {
+  retry: Retry = retryAfter(5_000), onDown: (why: string) => void = () => {}, known: ReadonlySet<string> = new Set(),
+  questions: 'end' | 'wait' = 'end'): Watch {
   let stopped = false;
   let close = () => {};
   let rejectStop: (e: Error) => void = () => {};
@@ -86,7 +89,7 @@ export function watchThreadEnd(ws: Pick<T3Ws, 'subscribe'>, threadId: string, ru
           else return;
         } else return;
         const got = endOf(state, runId, known);
-        if (!got) return;
+        if (!got || (got.outcome === 'waiting' && questions === 'wait')) return;
         found = true;
         sub.close();
         resolve(got);

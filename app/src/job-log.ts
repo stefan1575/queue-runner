@@ -8,6 +8,8 @@
 //   holds nothing, so the next pass tries it again.
 // - **Who waited longest:** a repo's last job end, a `not-started` aside (#50).
 // - **Open jobs:** a start with no end, left by an app that stopped mid-job.
+// - **Waiting:** a `waiting` end (a question to the user) is followed by the job's real end, a
+//   second `end` line, once its thread has finished again (#210 F5).
 // - **Needing the user:** a `needs-user` end (T3 may have started a thread the app has no id of)
 //   holds its repo until an `answered` line says the user has answered.
 // - **To settle:** a job ended on a thread the app launched, that its end says to settle, with no
@@ -349,6 +351,13 @@ export class JobLog {
    *  limit aside, which are left for the user (later tickets). */
   toSettle(): Job[] {
     return this.jobs().filter((j) => j.end && j.threadId && !j.settledAt && settles(j.end.outcome));
+  }
+
+  /** Jobs whose end is a question to the user: their thread runs again once the user answers it
+   *  in T3, so each is watched until its thread has finished again, and that end recorded in its
+   *  place (#210 F5). */
+  waiting(): Job[] {
+    return this.jobs().filter((j) => j.end?.outcome === 'waiting');
   }
 
   /** Builds ended `done` in a repo on GitHub whose PR lookup failed: looked up again (F13). */

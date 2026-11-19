@@ -360,15 +360,66 @@ describe('the end', () => {
     await makeLane().pass();
     await watching('thread-1');
     t3.askUser('thread-1');
+    await until(() => log.jobs()[0]!.end?.outcome === 'waiting');
+    expect(log.jobs()[0]!.end).toMatchObject({ outcome: 'waiting', request: 'user_input' });
+    expect(organized()).toEqual([]);
+    // answered in T3 and finished: then the next build, which a usage limit stops
+    t3.answerInT3('thread-1');
+    t3.endRun('thread-1', 'completed');
     await until(() => t3.launches.length === 2);
     await watching('thread-2');
     t3.hitUsageLimit('thread-2', '2026-11-19T15:00:00.000Z');
     await chooser.idle();
-    expect(log.jobs().map((j) => j.end)).toMatchObject([
-      { outcome: 'waiting', request: 'user_input' },
-      { outcome: 'usage-limit', resetAt: '2026-11-19T15:00:00.000Z' },
-    ]);
-    expect(organized()).toEqual([]);
+    expect(log.jobs()[1]!.end).toMatchObject({ outcome: 'usage-limit', resetAt: '2026-11-19T15:00:00.000Z' });
+    expect(organized().map((a) => a.threadId)).toEqual(['thread-1']);
+  });
+
+  test("a build waiting on a question holds its repo while it runs again on an answer given in T3, and its real end is recorded in the question's place (#210 F5)", async () => {
+    gh.ready['owner/app'] = [issue(5), issue(6)];
+    await makeLane().pass();
+    await watching('thread-1');
+    t3.askUser('thread-1');
+    await until(() => log.jobs()[0]!.end?.outcome === 'waiting');
+    await chooser.pass();
+    expect(t3.launches).toHaveLength(1);
+    expect(lines).toContain("app: no new job now, Queue runner build: app#5 waits on a question, and runs again once it's answered: held until its thread finishes");
+    // the user answers in T3, not through the app: the thread runs again, and nothing starts beside it
+    t3.answerInT3('thread-1');
+    await chooser.pass();
+    expect(t3.launches).toHaveLength(1);
+    // it asks again, and is answered again: still held
+    t3.askUser('thread-1');
+    t3.answerInT3('thread-1');
+    await chooser.pass();
+    expect(t3.launches).toHaveLength(1);
+    gh.pullsFromBranch['owner/app:claude/ticket-number-5-5'] = { number: 9, url: 'https://github.com/owner/app/pull/9', state: 'open' };
+    t3.endRun('thread-1', 'completed');
+    await until(() => log.jobs()[0]!.end?.outcome === 'done');
+    expect(log.jobs()[0]!.end).toMatchObject({ outcome: 'done', pr: { number: 9 } });
+    await until(() => organized().length === 1);
+    expect(organized()[0]).toEqual({ threadId: 'thread-1', action: 'settle' });
+  });
+
+  test("after a restart a build left waiting holds its repo, also while its thread can't be read, until the thread shows it finished (#210 F5)", async () => {
+    gh.ready['owner/app'] = [issue(6)];
+    const waiting = await log.started({ kind: 'build', repo: 'p-app', github: 'owner/app', issue: 5, branch: 'claude/x-5', base: 'main', title: 'Queue runner build: app#5', choice: BUILD, onFallback: false });
+    await log.thread(waiting.id, { threadId: 'thread-w', runId: 'run-w', link: 't3://thread/thread-w' });
+    await log.ended(waiting.id, { outcome: 'waiting', request: 'user_input' });
+    // T3 can't read the thread yet
+    await makeLane().start();
+    await chooser.pass();
+    expect(t3.launches).toEqual([]);
+    await until(() => lines.some((l) => l.startsWith("Queue runner build: app#5: T3's thread stream dropped")));
+    expect(t3.launches).toEqual([]);
+    // the user answers through the app: the repo is still held, its thread may run on the answer
+    await chooser.answered(waiting.id);
+    expect(t3.launches).toEqual([]);
+    // T3 reads it again: its run ran on the answer and has finished
+    t3.threadState['thread-w'] = { id: 'thread-w', projectId: 'p-app', runtimeRequests: [], turnItems: [], runs: [{ id: 'run-w', threadId: 'thread-w', ordinal: 1, rootNodeId: 'n', status: 'completed' }] };
+    retryNow();
+    await until(() => t3.launches.length === 1);
+    expect(log.get(waiting.id)!.end).toMatchObject({ outcome: 'done-no-pr' });
+    expect(t3.launches[0].title).toBe('Queue runner build: app#6');
   });
 
   test("a leftover branch of the job's name holds the job and says so; T3 is never asked", async () => {
@@ -520,7 +571,9 @@ describe('an app that stopped between recording an end and settling its thread (
     log = await JobLog.open(join(dir, 'jobs.jsonl'), undefined, jobFiles);
     await makeLane().start();
     await chooser.idle();
-    expect(organized()).toEqual([{ threadId: 't-1', action: 'settle' }, { threadId: 't-2', action: 'settle' }]);
+    // the question's thread shows its run finished: its real end replaces the question, and it's
+    // settled as that end says (#210 F5); the usage limit and the job needing the user are left
+    expect(organized().map((a) => a.threadId).sort()).toEqual(['t-1', 't-2', 't-3']);
     expect([done, failed].map((j) => log.get(j.id)!.settledAt)).toEqual([expect.any(String), expect.any(String)]);
     // recorded on disk, so a start after this one settles nothing again
     log = await JobLog.open(join(dir, 'jobs.jsonl'), undefined, jobFiles);

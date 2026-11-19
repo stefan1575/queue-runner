@@ -347,7 +347,8 @@ whose branch a job of the repo's writes to (Reviews; Fix rounds and merges).
   ticket's: until then it holds its repo until its reset (T3's `resetAt` and 2 minutes, or an hour
   after its end with none, as the gate holds its provider), and then the repo goes on.
 - **Which repos:** each pass takes every served repo but one with a job open (in the job log, or
-  under way in a lane: recovering, starting or running), one with a job that needs the user and
+  under way in a lane: recovering, starting or running), one with a job waiting on a question
+  (until its thread has finished again: below), one with a job that needs the user and
   no answer (`Chooser.answered` frees it; the Inbox ticket asks), or one with a done build whose
   PR lookup failed and is owed. The repo whose last job ended longest ago goes first (`waited`:
   builds, fix and conflict rounds only, `not-started` ones aside), the served order breaking a
@@ -356,6 +357,15 @@ whose branch a job of the repo's writes to (Reviews; Fix rounds and merges).
   but no longer than 10 minutes (`LAUNCH_WAIT_MS`; every step of a launch has its own timeout):
   past that it goes on to the other repos, and the repo stays held while its job is under way.
   Why a repo got nothing is said once, until it changes.
+- **A question holds its repo until its thread finishes** (#210 F5, porting `run.py`'s
+  `settle`): a build, fix or conflict round that ends `waiting` may run again as soon as the user
+  answers it, in T3 itself as much as through the app, so its lane watches the thread on (its
+  newest run, past any further question) and its repo starts nothing meanwhile, `answered` or
+  not. A thread that can't be read holds it too: its stream is opened again until T3 answers.
+  Once the run has ended, its real end (`done`, `failed`...) is recorded in the question's place
+  and the thread is settled as that end says. After a restart each lane watches its jobs left
+  `waiting` the same way. The gate measured the job at its question; the run on the answer isn't
+  let in again.
 - **Settle first:** on start each lane recovers every job of its kind the log shows open (`recover`:
   each lane's After a restart, don't guess, below) before the first choice, and the repo is held
   meanwhile. A recovery that can't tell (a T3 or GitHub read failed) leaves a `needs-user` end,
@@ -428,7 +438,8 @@ builds (`docs/flow.md`, `docs/claude-lane.md`). `src/build-lane.ts`, `src/picker
   `failed` (with the error item's message). A stream that drops opens again after 5 seconds.
 - **The job log** is `jobs.jsonl` in the state folder (`src/job-log.ts`, today's `state.py` cut to
   a build): `start` (the model the gate let it in on, the cost it was let in at and T3's reading it
-  was let in on, `cost` and `before`), `thread` (once T3 names it), `end` and, for a `needs-user`
+  was let in on, `cost` and `before`), `thread` (once T3 names it), `end` (a `waiting` one is
+  followed by a second `end`, the one its thread finished on) and, for a `needs-user`
   end, `answered` once the user has answered; `settled` once its thread is settled; `pr` once a
   PR lookup that failed at the end is done.
   Every build that started holds its issue but `not-started` (releasing is a later ticket). The
@@ -437,8 +448,10 @@ builds (`docs/flow.md`, `docs/claude-lane.md`). `src/build-lane.ts`, `src/picker
   that got no thread is dropped from the gate unmeasured.
 - **Settling:** once the end is recorded, the thread is settled (`t3_thread_organize {threadId,
   action: settle}`; #68 story 5). Only threads the app launched are settled (story 13): the id
-  comes from its own launch. One waiting on a question is left for the Inbox ticket and one
-  stopped by a usage limit for the limits ticket; both are recorded as such and left unsettled.
+  comes from its own launch. One waiting on a question is recorded as such, left unsettled and
+  watched until its thread has finished on the user's answer, then its real end replaces it (How
+  jobs are chosen, above); one stopped by a usage limit is the limits ticket's, recorded as such
+  and left unsettled.
   A settle is recorded (`settled`); an end with none (the app stopped between the two, or the
   settle failed) is settled on the next pass, a start's included. A log from before `settled`
   lines settles its ended builds' threads once more on the first start, which leaves a settled

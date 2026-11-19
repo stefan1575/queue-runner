@@ -188,6 +188,15 @@ export class FakeT3 {
     this.threadEvent(threadId, 'run', { ...run, status: 'waiting' });
   }
 
+  /** The user answers the thread's question in T3 itself: the request resolved, the run running
+   *  again. */
+  answerInT3(threadId: string) {
+    for (const r of this.threadState[threadId]!.runtimeRequests.filter((x: any) => x.status === 'pending')) {
+      this.threadEvent(threadId, 'runtime-request', { ...r, status: 'resolved' });
+    }
+    this.threadEvent(threadId, 'run', { ...this.run(threadId), status: 'running' });
+  }
+
   /** The thread's run fails on the provider's usage limit, as T3 records it: a failed error item
    *  on the run's root node with the failure's class, then the run failed. */
   hitUsageLimit(threadId: string, resetAt: string | null) {

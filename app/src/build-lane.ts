@@ -11,6 +11,9 @@
 //   ->  its end from T3's thread events (src/t3/thread-end.ts)  ->  the end recorded in the job log
 //   ->  the thread settled (#68 story 5), unless it waits on a question (the Inbox ticket's) or
 //       stopped on a usage limit (the limits ticket's)  ->  the settle recorded in the job log
+//   ->  one that waits on a question is watched on: the user may answer it in T3, and its thread
+//       runs again. Its repo stays held until the thread has finished again, and that end is
+//       recorded in its place (#210 F5), also after a restart
 //
 // The app settles only threads it launched (story 13): the thread id comes from its own launch,
 // never from a thread's title, branch or project. A job the log shows open, left by an app that
@@ -113,12 +116,17 @@ export class BuildLane implements RepoJobLane {
     this.settler = new ThreadSettler(doors.mcp, doors.log, doors.say);
   }
 
-  /** Watches again each build the log shows open (an app that stopped mid-job); the chooser's
-   *  first pass settles each one it shows ended and not settled (`owed`). */
+  /** Watches again each build the log shows open (an app that stopped mid-job), and each one
+   *  waiting on a question until its thread has finished again; the chooser's first pass settles
+   *  each one it shows ended and not settled (`owed`). */
   recover(): void {
     for (const job of this.d.log.open()) {
       if (job.kind !== 'build' || this.building.has(job.repo)) continue;
       this.track(job.repo, this.resume(job));
+    }
+    for (const job of this.d.log.waiting()) {
+      if (job.kind !== 'build' || !job.threadId || this.building.has(job.repo)) continue;
+      this.track(job.repo, this.untilFinished(job));
     }
   }
 
@@ -307,9 +315,20 @@ export class BuildLane implements RepoJobLane {
     return this.watch(job, job.github);
   }
 
-  private async watch(job: Job, github: string | null): Promise<Job> {
-    const w = watchThreadEnd(this.d.ws, job.threadId!, job.runId ?? null, this.d.retry,
-      (why) => this.d.say(`${job.title}: T3's thread stream dropped (${why}); opening it again`));
+  /** A build waiting on a question: watched until its thread has finished again (the user may
+   *  answer it in T3, not only through the app), its repo held meanwhile, and that end recorded
+   *  in the question's place (#210 F5). A thread that can't be read holds it too: the watch opens
+   *  its stream again until T3 answers. */
+  private untilFinished(job: Job): Promise<Job> {
+    if (this.stopped) return Promise.resolve(job);
+    this.d.say(`${job.title} waits on a question: nothing else starts in ${job.github ?? job.repo} until its thread ${job.link ?? job.threadId} has finished, answered in T3 or here`);
+    return this.watch(job, job.github, true);
+  }
+
+  private async watch(job: Job, github: string | null, asked = false): Promise<Job> {
+    // after a question, the thread's newest run: an answer may go on in its run or start a new one
+    const w = watchThreadEnd(this.d.ws, job.threadId!, asked ? null : job.runId ?? null, this.d.retry,
+      (why) => this.d.say(`${job.title}: T3's thread stream dropped (${why}); opening it again`), new Set(), asked ? 'wait' : 'end');
     this.watches.add(w);
     let end: ThreadEnd;
     try {
@@ -317,7 +336,8 @@ export class BuildLane implements RepoJobLane {
     } finally {
       this.watches.delete(w);
     }
-    this.d.gate.finished(job.id, end.outcome === 'usage-limit' ? { resetAt: end.resetAt } : undefined);
+    // the gate measured the job at its question; the run on the answer isn't let in again
+    if (!asked) this.d.gate.finished(job.id, end.outcome === 'usage-limit' ? { resetAt: end.resetAt } : undefined);
     const record: JobEnd = { outcome: end.outcome as JobEnd['outcome'], status: end.status };
     if (end.outcome === 'done' && github) {
       // a job may open its PR and stop after; done without one is done-no-pr. A lookup that
@@ -334,8 +354,9 @@ export class BuildLane implements RepoJobLane {
     if (end.outcome === 'waiting') record.request = end.request;
     const ended = await this.d.log.ended(job.id, record);
     this.d.say(`${job.title} ended: ${record.outcome}${record.pr ? `, PR #${record.pr.number}` : ''} ${job.link ?? job.threadId}`);
-    // recorded first, then settled (story 5); a question or a usage limit is a later ticket's.
-    // Stopped between the two, the next start settles it (the log has no settled line)
+    if (record.outcome === 'waiting') return this.untilFinished(ended);
+    // recorded first, then settled (story 5); a usage limit is a later ticket's. Stopped between
+    // the two, the next start settles it (the log has no settled line)
     if (settles(record.outcome)) await this.settler.settle(job);
     return ended;
   }

@@ -330,10 +330,17 @@ describe('one conflicted PR at a time, oldest first', () => {
       await goes5();
     });
 
-    test('a question to the user on its branch holds nothing', async () => {
+    test('a question to the user on its branch holds nothing; the repo waits only while that job may run again on its answer (#210 F5)', async () => {
       await afterRound4();
       const fix = await log.started(job({ kind: 'fix', title: 'Queue runner fix: app#4', sha: H2, round: 1 }));
       await log.ended(fix.id, { outcome: 'waiting', request: 'user_input' });
+      // the conflict lane's own rule holds nothing for #5
+      expect(await lane.next(repoNow)).toMatchObject({ launch: expect.any(Function) });
+      // the question's job runs again once it's answered in T3: no round goes beside it
+      await chooser.pass();
+      expect(t3.launches).toHaveLength(1);
+      // its lane records the end its thread finished on, waiting on the user: then #5's round
+      await log.ended(fix.id, { outcome: 'done', head: H2 });
       await goes5();
     });
 
@@ -504,8 +511,11 @@ describe('what waits', () => {
     const fix = await log.started(job({ kind: 'fix', title: 'Queue runner fix: app#4', round: 1, sha: H2 }));
     await log.ended(fix.id, { outcome: 'waiting' });
     makeLane();
-    await chooser.pass();
+    expect(await lane.next(repoNow)).toBeNull();
     expect(lines.at(-1)).toBe('conflict app#4: no conflict round now, a fix job is writing to claude/thing-3');
+    // and the chooser holds the repo until that job's thread has finished (#210 F5)
+    await chooser.pass();
+    expect(lines.at(-1)).toBe("app: no new job now, Queue runner fix: app#4 waits on a question, and runs again once it's answered: held until its thread finishes");
     expect(t3.launches).toEqual([]);
   });
 
