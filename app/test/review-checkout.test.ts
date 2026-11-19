@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, expect, test } from 'vitest';
 import { GitCli, prRef } from '../src/git.ts';
 import { Deps, READY, testsNote, type Install } from '../src/review/deps.ts';
+import { REAL_GIT_MS } from './real-git.ts';
 
 let dir: string;
 let clone: string;
@@ -35,7 +36,7 @@ beforeEach(async () => {
   git(work, 'push', '-q', 'origin', 'HEAD:refs/pull/4/head');
   clone = join(dir, 'clone');
   git(dir, 'clone', '-q', origin, clone);
-});
+}, REAL_GIT_MS);
 afterEach(async () => {
   await rm(dir, { recursive: true, force: true });
 });
@@ -53,7 +54,7 @@ test("the PR's head is fetched, checked out detached, diffed and removed with it
   await g.removeCheckout(clone, wt, prRef(4));
   await expect(stat(wt)).rejects.toThrow();
   expect(git(clone, 'worktree', 'list')).not.toContain('app-pr4');
-});
+}, REAL_GIT_MS);
 
 test('no evidence branch is no screenshots; one with the PR folder is copied out', async () => {
   const g = new GitCli();
@@ -68,7 +69,7 @@ test('no evidence branch is no screenshots; one with the PR folder is copied out
   git(work, 'push', '-q', 'origin', 'evidence');
   expect(await g.evidence(clone, 4, join(dir, 'ev'))).toEqual(['after-x.png']);
   expect([...(await readFile(join(dir, 'ev', 'after-x.png')))]).toEqual([0x89, 0x50, 0x00, 0xff]);
-});
+}, REAL_GIT_MS);
 
 test('dependencies install once into the cache, link into the checkout and survive its removal', async () => {
   const g = new GitCli();
@@ -98,7 +99,7 @@ test('dependencies install once into the cache, link into the checkout and survi
   expect((await deps.prepare('app', wt)).how).toMatch(/^cached /);
   expect(installs).toHaveLength(1);
   await g.removeCheckout(clone, wt);
-});
+}, REAL_GIT_MS);
 
 test('a failed install is a note, and the review goes on without it', async () => {
   const wt = join(dir, 'clone');
@@ -107,4 +108,10 @@ test('a failed install is a note, and the review goes on without it', async () =
   expect(p).toMatchObject({ ready: false, how: 'failed' });
   expect(p.note).toContain('the install failed (`ci --no-audit --no-fund` from `package-lock.json`: exit 1: npm ERR! boom)');
   expect(testsNote(p)).toContain("so its JavaScript tests can't run here");
+});
+
+test('the cases on a real git, and the real repos made before each, have time for its processes on a loaded machine (#210 F10)', ({ task }) => {
+  const real = task.file.tasks.filter((t) => t.type === 'test' && /fetched, checked out|evidence branch|install once/.test(t.name));
+  expect(real).toHaveLength(3);
+  for (const t of real) expect([t.name, (t as typeof task).timeout]).toEqual([t.name, REAL_GIT_MS]);
 });

@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { GitCli, GitError } from '../src/git.ts';
+import { REAL_GIT_MS } from './real-git.ts';
 
 test('fetch asks origin for the base into origin/<base>; a failure is a GitError with what git said', async () => {
   const calls: string[][] = [];
@@ -106,11 +107,17 @@ test("a single-branch clone of main fetching trunk gets origin/trunk, which its 
   expect(tracking(clone, 'trunk')).toBeNull();
   await new GitCli().fetch(clone, 'trunk');
   expect(tracking(clone, 'trunk')).toBe(trunk);
-});
+}, REAL_GIT_MS);
 
 test("a clone whose origin/<base> is behind has it moved to origin's newest", async () => {
   const { clone, trunk } = await origin(['--branch', 'main']);
   git(clone, 'update-ref', 'refs/remotes/origin/trunk', 'refs/remotes/origin/main');
   await new GitCli().fetch(clone, 'trunk');
   expect(tracking(clone, 'trunk')).toBe(trunk);
+}, REAL_GIT_MS);
+
+test('the cases on a real git have time for its processes on a loaded machine, not the default 5 seconds (#210 F10)', ({ task }) => {
+  const real = task.file.tasks.filter((t) => t.type === 'test' && /single-branch clone|clone whose origin/.test(t.name));
+  expect(real).toHaveLength(2);
+  for (const t of real) expect([t.name, (t as typeof task).timeout]).toEqual([t.name, REAL_GIT_MS]);
 });
