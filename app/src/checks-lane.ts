@@ -32,6 +32,8 @@ export type ChecksLaneDoors = {
 };
 
 const PASSED = new Set(['success', 'neutral', 'skipped']);
+/** GitHub turning a request down (a 4xx), as gh says it: not a blip, so not asked again. */
+const REFUSED = /\bHTTP 4\d\d\b/;
 
 export class ChecksLane {
   private d: ChecksLaneDoors;
@@ -165,13 +167,17 @@ export class ChecksLane {
     return `${again.map((a) => a.name).join(', ')} failed again on ${h7} after the re-run: a fix round with the failing log`;
   }
 
-  /** Re-runs a run's failed jobs, its step written first; GitHub refusing ends it failed, so it never loops. */
+  /** Re-runs a run's failed jobs, its step written first. It counts once GitHub took it (#158 F7):
+   *  GitHub refusing it (a 4xx) ends it failed, so it never loops; any other failure (a blip, no
+   *  answer) leaves it unended, and the next pass reads the run and asks again if it didn't take. */
   private async rerun(repo: BuildRepo, pr: ReviewPull, id: number, attempt: number, started?: Step) {
     const st = started ?? await this.step(repo, pr, 'rerun', { run: id, attempt });
     try {
       await this.d.github.rerunFailed(repo.github!, id);
     } catch (e) {
-      await this.d.log.stepEnded(st.id, { outcome: 'failed', error: (e as Error).message });
+      const why = (e as Error).message;
+      if (REFUSED.test(why)) await this.d.log.stepEnded(st.id, { outcome: 'failed', error: why });
+      else this.d.say(`${repo.title}#${pr.number}: the re-run of run ${id} didn't go through (${why}); asked again next pass`);
       return;
     }
     await this.d.log.stepEnded(st.id, { outcome: 'rerun' });

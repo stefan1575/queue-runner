@@ -93,10 +93,25 @@ describe('a failed check', () => {
     expect(gh.posted.filter((p) => p.what === 'rerun')).toEqual([]);
   });
 
-  test('a re-run GitHub refused is failed, so it never loops', async () => {
-    gh.failing.add('rerun');
+  test('a re-run GitHub refused (its 4xx) is failed, so it never loops', async () => {
+    gh.rerunRefused = 'HTTP 403: Unable to re-run this workflow run';
     await lane.pass();
     expect(steps('rerun')[0]!.end).toMatchObject({ outcome: 'failed' });
+    await lane.pass();
+    expect(steps('check-failed')).toHaveLength(1);
+  });
+
+  test("a re-run request that failed for a moment didn't count: it's asked again, and the check gets no fix round meanwhile (#158 F7)", async () => {
+    gh.rerunFails = 1;
+    await lane.pass();
+    expect(steps('rerun')).toEqual([expect.objectContaining({ run: 77 })]);
+    expect(steps('rerun')[0]!.end).toBeUndefined();
+    await lane.pass();
+    expect(steps('check-failed')).toEqual([]);
+    expect(gh.posted.filter((p) => p.what === 'rerun')).toHaveLength(1);
+    expect(steps('rerun')[0]!.end).toMatchObject({ outcome: 'rerun' });
+    // its attempt 2 fails: now it's a fix round's
+    gh.runs[77] = { id: 77, attempt: 2, status: 'completed', conclusion: 'failure' };
     await lane.pass();
     expect(steps('check-failed')).toHaveLength(1);
   });

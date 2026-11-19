@@ -106,8 +106,13 @@ export class FakeReviewGitHub extends FakeGitHub implements GitHubPosts, GitHubR
     if (!r) throw new GitHubError(`gh api failed (1): HTTP 404 (run ${id})`);
     return { ...r };
   }
+  /** Each re-run request fails with this while above 0 (a blip: HTTP 502), or `rerunRefused` (GitHub's 4xx). */
+  rerunFails = 0;
+  rerunRefused: string | null = null;
   async rerunFailed(repo: string, id: number) {
     this.fail('rerun');
+    if (this.rerunRefused) throw new GitHubError(`gh api POST rerun-failed-jobs failed (1): ${this.rerunRefused}`);
+    if (this.rerunFails > 0) { this.rerunFails--; throw new GitHubError('gh api POST rerun-failed-jobs failed (1): HTTP 502'); }
     this.posted.push({ what: 'rerun', repo, id });
     const r = this.runs[id]!;
     this.runs[id] = { ...r, attempt: r.attempt + 1, status: 'in_progress', conclusion: null };
