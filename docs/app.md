@@ -54,7 +54,7 @@ home or app-data folders, `T3_HOME` or `T3CODE_HOME`, T3's real runtime file or 
 the settings tickets export as `SETTINGS_PATH` (`test/real-settings.ts` lists them all).
 
 **Tests get time from a fake clock and files from a temp folder** (#202): none waits for real
-time to pass or a real file watcher to fire, and a `vi.waitFor` waits only on the test's own fakes (`FakeT3.address`, the settings in `test/memory-files.ts`), never on real file I/O, which a test awaits; `test/no-real-time.test.ts` fails a test that reads
+time to pass or a real file watcher to fire, and a `vi.waitFor` waits only on the test's own fakes (`FakeT3.address`, the settings and the job log in `test/memory-files.ts`), never on real file I/O, which a test awaits; `test/no-real-time.test.ts` fails a test that reads
 the real clock or runs on a real timer that no `vi.useFakeTimers()` around it fakes (a `toFake` list fakes only what it names), naming it (`test/real-time.ts`). Both checks read every app test file, `renderer/test/` included (`test/app-test-files.ts`).
 
 ## Rules for every rebuild ticket
@@ -336,12 +336,14 @@ builds (`docs/flow.md`, `docs/claude-lane.md`). `src/build-lane.ts`, `src/picker
   `claude/<slug>-<issue>`, titled `Queue runner build: <project>#<n>`. The served set is asked
   again after the GitHub reads and right before the launch call: a repo switched off meanwhile
   gets no gate verdict, or is `not-started`.
-- **A launch with no answer** (the call sent, its answer lost) may still have started a thread,
-  so it isn't taken as not started: after one retry wait the job's thread is looked for in T3's
-  shell snapshot (`orchestration.subscribeShell`; the live build check reads a thread's `branch`
-  there), by the job's own title and branch, and its project when the thread names one. Found, it's recorded and watched like a
-  launched one; absent, the job is `not-started`; while T3 can't be read, the job stays open, its
-  repo busy and its place in the gate kept, looked for again after each wait.
+- **After a restart, don't guess** (#154): a job is tied to a thread only by the thread id T3
+  gave its own launch, never by a thread's title, branch or project. A launch that was sent and
+  whose answer was lost (the connection dropped, T3 answered 5xx or unreadably: `NoAnswer`,
+  `src/t3/seams.ts`) may still have started a thread, so it isn't taken as not started: the job
+  ends `needs-user`, is dropped from the gate unmeasured, holds its issue, and its repo starts
+  nothing until the user answers (`BuildLane.answered`, an `answered` line in the job log; the
+  Inbox ticket asks). A launch T3 refused, or one that failed before the call was sent, started
+  nothing: `not-started`.
 - **One build per repo, repos side by side** (#50): each pass takes every served repo with no build
   running, the one whose last job ended longest ago first (the job log's `lastEnded`). Each asks
   the usage gate first (`UsageGate.pick`, kind `build`); a held one says its reason once and waits.
@@ -355,7 +357,8 @@ builds (`docs/flow.md`, `docs/claude-lane.md`). `src/build-lane.ts`, `src/picker
   `failed` (with the error item's message). A stream that drops opens again after 5 seconds.
 - **The job log** is `jobs.jsonl` in the state folder (`src/job-log.ts`, today's `state.py` cut to
   a build): `start` (the model the gate let it in on, the cost it was let in at and T3's reading it
-  was let in on, `cost` and `before`), `thread` (once T3 names it) and `end`.
+  was let in on, `cost` and `before`), `thread` (once T3 names it), `end` and, for a `needs-user`
+  end, `answered` once the user has answered.
   Every build that started holds its issue but `not-started` (releasing is a later ticket). The
   usage before and after a job are its record in the gate's `usage.jsonl`, by the same job id: the
   gate counts the job from its let-in and measures it on T3's first reading after its end; a job
@@ -367,8 +370,9 @@ builds (`docs/flow.md`, `docs/claude-lane.md`). `src/build-lane.ts`, `src/picker
 - **An app that stopped mid-build:** on start, each build the log shows open is watched again to
   its end before any pass (so its repo still has one build), reserved in the gate at its logged
   `cost` and measured from its logged `before`, never from a reading taken mid-run (a line with
-  neither, an older app's, is measured as teaching nothing). One T3 never named a thread for is
-  looked for as an unanswered launch is, and `not-started` only once T3's threads show none.
+  neither, an older app's, is measured as teaching nothing). One with no saved thread id
+  needs the user, as a lost launch answer does (After a restart, don't guess, above): no thread
+  is adopted for it, and its repo starts nothing until the user answers.
 - **The app's log** is its console for now (`say`): a line per start, hold, end and failure.
 
 ## Setup

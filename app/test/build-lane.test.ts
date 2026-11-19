@@ -2,7 +2,7 @@
 // ticket is picked, let in by the usage gate, launched in a worktree from origin/<base> on the
 // build kind's model, its end learned from T3's thread events and recorded, then its thread
 // settled. Two served repos build side by side, one build each.
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
@@ -13,7 +13,6 @@ import type { Issue } from '../src/github.ts';
 import { JobLog } from '../src/job-log.ts';
 import { DEFAULT_JOBS, type Jobs, type ModelChoice } from '../src/jobs.ts';
 import { T3Mcp } from '../src/t3/mcp.ts';
-import { runtimeAddress } from '../src/t3/real.ts';
 import { catalogFromConfig } from '../src/t3/catalog.ts';
 import { T3Catalog } from '../src/t3/catalog-source.ts';
 import { T3Ws } from '../src/t3/ws.ts';
@@ -21,6 +20,7 @@ import { DEFAULT_SETTINGS, type Settings } from '../src/settings.ts';
 import { UsageGate } from '../src/usage-gate.ts';
 import { FakeGitHub } from './fake-github.ts';
 import { FakeT3 } from './fake-t3.ts';
+import { memoryJobFiles } from './memory-files.ts';
 
 const snapshot = JSON.parse(await readFile(new URL('./fixtures/server-config.json', import.meta.url), 'utf8'));
 const catalog = catalogFromConfig(snapshot.config);
@@ -61,7 +61,11 @@ let git: FakeGit;
 let log: JobLog;
 let mcp: T3Mcp;
 let ws: T3Ws;
+let jobFiles: ReturnType<typeof memoryJobFiles>;
 let lines: string[];
+/** The lane's retry waits, run when the test says: no real timer (#202). */
+let retries: Set<() => void>;
+const retryNow = () => { const due = [...retries]; retries.clear(); for (const f of due) f(); };
 let served: BuildRepo[];
 let jobs: Jobs;
 let lane: BuildLane;
@@ -70,14 +74,16 @@ beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), 'qr-lane-'));
   t3 = new FakeT3();
   t3.serverConfig = snapshot;
-  await writeFile(join(dir, 'server-runtime.json'), JSON.stringify({ origin: t3.origin }));
-  const address = runtimeAddress(join(dir, 'server-runtime.json'));
-  mcp = new T3Mcp(address, t3.cli, t3.http);
-  ws = new T3Ws(address, t3.cli, t3.http, t3.connect);
+  // T3's address and the job log are the test's own, so each wait is on a fake (#202 F2); the
+  // usage gate's cost log stays on disk, and its tests await it
+  mcp = new T3Mcp(t3.address, t3.cli, t3.http);
+  ws = new T3Ws(t3.address, t3.cli, t3.http, t3.connect);
   gh = new FakeGitHub();
   git = new FakeGit();
-  log = await JobLog.open(join(dir, 'jobs.jsonl'));
+  jobFiles = memoryJobFiles();
+  log = await JobLog.open(join(dir, 'jobs.jsonl'), undefined, jobFiles);
   lines = [];
+  retries = new Set();
   served = [APP];
   jobs = { ...DEFAULT_JOBS, build: { own: BUILD, fallback: null } };
 });
@@ -90,7 +96,7 @@ function makeLane(part: Partial<BuildLaneDoors> = {}): BuildLane {
   lane = new BuildLane({
     repos: () => served, github: gh, git, mcp, ws, gate: new RoomyGate() as any, catalog: () => catalog, jobs: () => jobs,
     user: async () => 'Robin', log, exists: (p) => p === 'C:/code/app/AGENTS.md', say: (l) => lines.push(l),
-    retry: (again) => { const t = setTimeout(again, 5); return () => clearTimeout(t); }, ...part,
+    retry: (again) => { retries.add(again); return () => { retries.delete(again); }; }, ...part,
   });
   return lane;
 }
@@ -231,7 +237,7 @@ describe('the end', () => {
     // recorded, then settled: the settle is the last call, on the thread the app launched
     expect(organized()).toEqual([{ threadId: 'thread-1', action: 'settle' }]);
     expect(t3.toolCalls.at(-1)!.tool).toBe('t3_thread_organize');
-    const saved = (await readFile(join(dir, 'jobs.jsonl'), 'utf8')).trim().split('\n').map((l) => JSON.parse(l));
+    const saved = jobFiles.files.get(join(dir, 'jobs.jsonl'))!.trim().split('\n').map((l) => JSON.parse(l));
     expect(saved.map((e) => e.event)).toEqual(['start', 'thread', 'end']);
     expect(gate.calls).toEqual(['pick build:owner/app#5', `started ${job!.id}`, `finished ${job!.id}`]);
     // the issue stays held: a pass after the end builds nothing more
@@ -293,43 +299,37 @@ describe('the end', () => {
     expect(t3.launches).toEqual([]); // resting
   });
 
-  test("a launch whose answer never came is found in T3's threads and watched: the repo stays busy and the gate keeps it", async () => {
+  test("a launch whose answer never came needs the user: nothing is adopted, and its repo starts nothing else until the user answers", async () => {
     gh.ready['owner/app'] = [issue(5), issue(6)];
-    t3.launchAnswerLost = true;
+    t3.launchAnswerLost = true; // T3 starts thread-1, and its answer is lost on the way
     const gate = new RoomyGate();
     await makeLane({ gate: gate as any, restMs: 0 }).pass();
-    await watching('thread-1');
-    expect(log.jobs()[0]).toMatchObject({ issue: 5, threadId: 'thread-1' });
-    expect(log.jobs()[0]!.end).toBeUndefined();
-    expect(lane.running()).toEqual(['p-app']);
-    t3.launchAnswerLost = false;
-    await lane.pass(); // #6 waits for #5's thread
-    expect(t3.launches).toHaveLength(1);
-    expect(gate.calls.some((c) => c.startsWith('dropped'))).toBe(false);
-    t3.endRun('thread-1', 'completed');
-    await until(() => t3.launches.length === 2);
-    expect(log.jobs()[0]!.end?.outcome).toBe('done-no-pr');
-    expect(organized()[0]).toEqual({ threadId: 'thread-1', action: 'settle' });
-  });
-
-  test("a launch whose answer never came, while T3's threads can't be read either, leaves the job open and its repo busy until they can", async () => {
-    gh.ready['owner/app'] = [issue(5), issue(6)];
-    t3.launchAnswerLost = true;
-    let down = true;
-    const flaky = {
-      subscribe: ws.subscribe.bind(ws),
-      first: async (tag: string, payload?: object) => { if (down) throw new Error('T3 is down'); return ws.first(tag, payload); },
-    };
-    await makeLane({ ws: flaky as any, restMs: 0 }).pass();
-    await until(() => lines.some((l) => /can't tell whether T3 started/.test(l)));
-    expect(log.jobs()[0]!.end).toBeUndefined();
-    expect(lane.running()).toEqual(['p-app']);
+    await lane.idle();
+    const [job] = log.jobs();
+    expect(job).toMatchObject({ issue: 5, end: { outcome: 'needs-user', error: expect.stringMatching(/answer was lost/) } });
+    expect(job!.threadId).toBeUndefined();
+    // T3 has a thread of this job's title and branch, and the lane never touches it
+    expect(t3.threadState['thread-1']).toMatchObject({ title: 'Queue runner build: app#5', branch: 'claude/ticket-number-5-5' });
+    expect(t3.threadStreamCount('thread-1')).toBe(0);
+    expect(organized()).toEqual([]);
+    expect(lines.join('\n')).toMatch(/app#5 needs you/);
+    expect(gate.calls.at(-1)).toBe(`dropped ${job!.id}`);
+    expect(log.heldIssues('p-app')).toEqual(new Set([5]));
+    // no second build in the repo, however many passes, until the user answers
     t3.launchAnswerLost = false;
     await lane.pass();
+    await lane.pass();
     expect(t3.launches).toHaveLength(1);
-    down = false;
-    await watching('thread-1');
-    expect(log.jobs()[0]!.threadId).toBe('thread-1');
+    await lane.answered(job!.id); // its pass waits for the launch
+    expect(t3.launches.map((l) => l.title)).toEqual(['Queue runner build: app#5', 'Queue runner build: app#6']);
+  });
+
+  test("a launch that never reached T3's tool call is not-started: nothing can have begun", async () => {
+    gh.ready['owner/app'] = [issue(5)];
+    const down = { call: async () => { throw new Error("T3's server can't be reached"); } };
+    await makeLane({ mcp: down as any }).pass();
+    await lane.idle();
+    expect(log.jobs()[0]!.end).toMatchObject({ outcome: 'not-started' });
   });
 
   test('a stream that drops is opened again and still hears the end', async () => {
@@ -337,7 +337,8 @@ describe('the end', () => {
     await makeLane().pass();
     await watching('thread-1');
     t3.endThreadStreams();
-    await until(() => lines.some((l) => /stream dropped/.test(l)));
+    await until(() => lines.some((l) => /stream dropped/.test(l)) && retries.size > 0);
+    retryNow();
     await watching('thread-1');
     t3.endRun('thread-1', 'completed');
     await lane.idle();
@@ -346,20 +347,30 @@ describe('the end', () => {
 });
 
 describe('an app that stopped mid-build', () => {
-  test("a build the log shows open with no thread id is found in T3's threads by its title and branch, and watched", async () => {
+  test("a build the log shows open with no thread id needs the user: no thread is adopted by its title, branch or project, and its repo starts nothing", async () => {
     gh.ready['owner/app'] = [issue(7)];
     const open = await log.started({ kind: 'build', repo: 'p-app', github: 'owner/app', issue: 5, branch: 'claude/x-5', base: 'origin/main', title: 'Queue runner build: app#5', choice: BUILD, onFallback: false });
-    t3.threadState['its-thread'] = { id: 'its-thread', projectId: 'p-app', title: 'Queue runner build: app#5', branch: 'claude/x-5', runtimeRequests: [], turnItems: [], runs: [{ id: 'r', ordinal: 1, rootNodeId: 'n', status: 'running' }] };
-    await makeLane().start();
-    await watching('its-thread');
+    // a thread of the same title, branch and project: maybe this job's, maybe another client's
+    t3.threadState['look-alike'] = { id: 'look-alike', projectId: 'p-app', title: 'Queue runner build: app#5', branch: 'claude/x-5', runtimeRequests: [], turnItems: [], runs: [{ id: 'r', ordinal: 1, rootNodeId: 'n', status: 'completed' }] };
+    const gate = new RoomyGate();
+    await makeLane({ gate: gate as any }).start();
+    await lane.idle();
+    expect(log.get(open.id)).toMatchObject({ end: { outcome: 'needs-user', error: expect.stringMatching(/stopped before T3 named its thread/) } });
+    expect(log.get(open.id)!.threadId).toBeUndefined();
+    expect(t3.threadStreamCount('look-alike')).toBe(0);
+    expect(organized()).toEqual([]);
     expect(t3.launches).toEqual([]);
-    expect(log.get(open.id)).toMatchObject({ threadId: 'its-thread' });
-    t3.endRun('its-thread', 'completed');
-    await until(() => t3.launches.length === 1);
-    expect(log.get(open.id)!.end?.outcome).toBe('done-no-pr');
+    expect(gate.calls).toEqual([`started ${open.id}`, `dropped ${open.id}`]);
+    // a later start (the app restarted again) still holds the repo: the answer is the user's
+    lane.stop();
+    log = await JobLog.open(join(dir, 'jobs.jsonl'), undefined, jobFiles);
+    await makeLane().start();
+    expect(t3.launches).toEqual([]);
+    await lane.answered(open.id);
+    expect(t3.launches.map((l) => l.title)).toEqual(['Queue runner build: app#7']);
   });
 
-  test("a build the log shows open is watched again to its end, and holds its repo meanwhile; one T3 never named is not-started", async () => {
+  test("a build the log shows open is watched again to its end, and holds its repo meanwhile; one T3 never named needs the user", async () => {
     gh.ready['owner/app'] = [issue(7)];
     const start = (issue: number, repo = 'p-app') => ({ kind: 'build' as const, repo, github: 'owner/app', issue, branch: `claude/x-${issue}`, base: 'origin/main', title: `Queue runner build: app#${issue}`, choice: BUILD, onFallback: false });
     const open = await log.started(start(5));
@@ -368,8 +379,7 @@ describe('an app that stopped mid-build', () => {
     t3.threadState['old-thread'] = { id: 'old-thread', projectId: 'p-app', runtimeRequests: [], turnItems: [], runs: [{ id: 'old-run', ordinal: 1, rootNodeId: 'n', status: 'running' }] };
     await makeLane().start();
     expect(t3.launches).toEqual([]); // app's one build is the open one
-    await until(() => log.get(lost.id)!.end !== undefined); // once T3's threads show it has none
-    expect(log.get(lost.id)!.end).toMatchObject({ outcome: 'not-started' });
+    expect(log.get(lost.id)!.end).toMatchObject({ outcome: 'needs-user' });
     await watching('old-thread');
     t3.endRun('old-thread', 'completed');
     await until(() => t3.launches.length === 1); // then app's next ticket
@@ -411,7 +421,7 @@ describe('an app that stopped mid-build, measured', () => {
     // the app restarts mid-run, with the provider at 25% by now
     now = new Date('2026-11-18T19:10:00Z');
     await readAt('2026-11-18T19:09:00.000Z', 25);
-    log = await JobLog.open(join(dir, 'jobs.jsonl'));
+    log = await JobLog.open(join(dir, 'jobs.jsonl'), undefined, jobFiles);
     const again = new UsageGate(source, () => settings, await CostLog.open(costs), () => now);
     const started = vi.spyOn(again, 'started');
     makeLane({ gate: again, catalog: () => source.current().catalog });

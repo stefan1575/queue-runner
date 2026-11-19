@@ -2,7 +2,7 @@
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, test } from 'vitest';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { runtimeAddress } from '../src/t3/real.ts';
 import { watchThreadEnd } from '../src/t3/thread-end.ts';
 import { T3Ws } from '../src/t3/ws.ts';
@@ -26,21 +26,24 @@ afterEach(async () => {
   await rm(dir, { recursive: true, force: true });
 });
 
-const tick = () => new Promise((r) => setTimeout(r, 20));
+/** Waits on the fake T3's own state, never on real time (#202). */
+const until = (f: () => boolean) => vi.waitFor(() => { if (!f()) throw new Error('not yet'); });
+/** The watch's stream is open on the fake, so an event T3 sends now reaches it. */
+const streaming = () => until(() => t3.threadStreamCount('t') === 1);
+/** The fake answers in microtasks: once they have all run, a watch that hasn't ended is pending. */
+const flush = async () => { for (let i = 0; i < 50; i++) await Promise.resolve(); };
 /** Resolves `watch.end` or says it's still pending. */
-const settled = (p: Promise<unknown>) => Promise.race([p, tick().then(() => 'pending')]);
+const settled = (p: Promise<unknown>) => Promise.race([p, flush().then(() => 'pending')]);
 
 describe('watchThreadEnd', () => {
   test('waits on the run named, through a passing waiting status, until it completes', async () => {
     const w = watchThreadEnd(ws, 't', 'r2');
-    await tick();
-    expect(t3.threadStreamCount('t')).toBe(1);
+    await streaming();
     t3.threadEvent('t', 'run', { ...t3.threadState.t!.runs[1], status: 'waiting' });
     expect(await settled(w.end)).toBe('pending');
     t3.endRun('t', 'completed');
     expect(await w.end).toEqual({ outcome: 'done', status: 'completed' });
-    await tick();
-    expect(t3.threadStreamCount('t')).toBe(0);
+    await until(() => t3.threadStreamCount('t') === 0);
   });
 
   test('a run that already ended is known from the snapshot', async () => {
@@ -49,21 +52,21 @@ describe('watchThreadEnd', () => {
 
   test('a pending question to the user is waiting', async () => {
     const w = watchThreadEnd(ws, 't', 'r2');
-    await tick();
+    await streaming();
     t3.askUser('t');
     expect(await w.end).toEqual({ outcome: 'waiting', status: 'running', request: 'user_input' });
   });
 
   test("a failure of class usage_limit on the run's root is a usage limit, with T3's reset", async () => {
     const w = watchThreadEnd(ws, 't', 'r2');
-    await tick();
+    await streaming();
     t3.hitUsageLimit('t', '2026-11-19T15:00:00.000Z');
     expect(await w.end).toEqual({ outcome: 'usage-limit', status: 'failed', resetAt: '2026-11-19T15:00:00.000Z', error: "You've hit your limit" });
   });
 
   test('any other end is failed, with its error', async () => {
     const w = watchThreadEnd(ws, 't', 'r2');
-    await tick();
+    await streaming();
     t3.threadEvent('t', 'turn-item', { id: 'e', type: 'error', status: 'failed', runId: 'r2', nodeId: 'n2', failure: { class: 'provider_error', message: 'boom' } });
     t3.endRun('t', 'failed');
     expect(await w.end).toEqual({ outcome: 'failed', status: 'failed', error: 'boom' });
@@ -77,10 +80,9 @@ describe('watchThreadEnd', () => {
     const downs: string[] = [];
     let again: (() => void) | null = null;
     const w = watchThreadEnd(ws, 't', 'r2', (f) => { again = f; return () => {}; }, (why) => downs.push(why));
-    await tick();
+    await streaming();
     t3.endThreadStreams();
-    await tick();
-    expect(downs).toHaveLength(1);
+    await until(() => downs.length === 1);
     t3.endRun('t', 'completed'); // while no stream is open
     again!();
     expect(await w.end).toEqual({ outcome: 'done', status: 'completed' });
@@ -88,10 +90,9 @@ describe('watchThreadEnd', () => {
 
   test('stop() ends the watch and closes its stream', async () => {
     const w = watchThreadEnd(ws, 't', 'r2');
-    await tick();
+    await streaming();
     w.stop();
     await expect(w.end).rejects.toThrow(/stopped watching/);
-    await tick();
-    expect(t3.threadStreamCount('t')).toBe(0);
+    await until(() => t3.threadStreamCount('t') === 0);
   });
 });

@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { T3Mcp } from '../src/t3/mcp.ts';
 import { runtimeAddress } from '../src/t3/real.ts';
-import { T3Error, Unauthorized } from '../src/t3/seams.ts';
+import { NoAnswer, T3Error, Unauthorized } from '../src/t3/seams.ts';
 import { LABEL } from '../src/t3/sign-in.ts';
 import { T3Ws } from '../src/t3/ws.ts';
 import { FakeT3 } from './fake-t3.ts';
@@ -87,6 +87,46 @@ describe('signing in to MCP', () => {
 
   it('says a failed tool\'s code and message', async () => {
     await expect(mcp().call('t3_nope', {})).rejects.toThrow('t3_nope failed: unknown: no such tool');
+  });
+});
+
+describe('a tool call whose answer is lost (#154)', () => {
+  /** A client whose HTTP answers the tool call itself with `answer`; every other request is T3's. */
+  const client = (answer: () => Promise<{ status: number; headers: Record<string, string>; text: string }>) =>
+    new T3Mcp(runtimeAddress(runtime), t3.cli, async (url, req) => (
+      new URL(url).pathname === '/mcp' && JSON.parse(req.body ?? '{}').method === 'tools/call' ? answer() : t3.http(url, req)));
+
+  it('is NoAnswer when it was sent and the connection dropped, or T3 answered 5xx, unreadably or with no result', async () => {
+    const answers = [
+      async () => { throw new Error('socket hang up'); },
+      async () => ({ status: 502, headers: {}, text: 'bad gateway' }),
+      async () => ({ status: 200, headers: { 'content-type': 'application/json' }, text: '{"jsonrpc":' }),
+      async () => ({ status: 200, headers: { 'content-type': 'application/json' }, text: '{"jsonrpc":"2.0","id":2}' }),
+    ];
+    for (const answer of answers) {
+      await expect(client(answer).call('t3_thread_launch', {})).rejects.toBeInstanceOf(NoAnswer);
+    }
+  });
+
+  it('is a plain refusal, not NoAnswer, when T3 answered no: a 4xx, a JSON-RPC error, a failed tool', async () => {
+    const answers = [
+      async () => ({ status: 400, headers: {}, text: 'bad request' }),
+      async () => ({ status: 200, headers: { 'content-type': 'application/json' }, text: '{"jsonrpc":"2.0","id":2,"error":{"message":"no"}}' }),
+    ];
+    for (const answer of answers) {
+      const e = await client(answer).call('t3_thread_launch', {}).catch((x) => x);
+      expect(e).toBeInstanceOf(T3Error);
+      expect(e).not.toBeInstanceOf(NoAnswer);
+    }
+    const failed = await mcp().call('t3_nope', {}).catch((x) => x);
+    expect(failed).not.toBeInstanceOf(NoAnswer);
+  });
+
+  it('is not NoAnswer when T3 was never reached: nothing was sent', async () => {
+    await rm(runtime);
+    const e = await mcp().call('t3_thread_launch', {}).catch((x) => x);
+    expect(e).toBeInstanceOf(T3Error);
+    expect(e).not.toBeInstanceOf(NoAnswer);
   });
 });
 

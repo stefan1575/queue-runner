@@ -9,14 +9,13 @@
 //   ->  the thread settled (#68 story 5), unless it waits on a question (the Inbox ticket's) or
 //       stopped on a usage limit (the limits ticket's)
 //
-// The app settles only threads it launched (story 13): the thread id comes from its own launch.
-// A launch whose answer never came may still have started a thread, so it isn't taken as not
-// started: the job's thread is looked for in T3's threads (by its title and branch, both the
-// job's own), watched if it's there and not-started only once T3 says it isn't; while T3 can't
-// be read the job stays open, holding its repo and its place in the gate. A job the log shows
-// open, left by an app that stopped mid-job, is watched again to its end, its thread looked for
-// the same way when the log has none. A repo whose job started no thread rests
-// `restMs` before it's tried again. The usage the job was let in on and T3's first reading after
+// The app settles only threads it launched (story 13): the thread id comes from its own launch,
+// never from a thread's title, branch or project. A job the log shows open, left by an app that
+// stopped mid-job, is watched again to its end on the thread id it saved. A job T3 may have
+// started a thread for that the app has no id of (its launch was sent and the answer lost, or the
+// app stopped before the id was saved) needs the user (#154, After a restart, don't guess): it's
+// recorded as such and its repo starts nothing until the user answers (`answered`). A repo whose
+// job started no thread rests `restMs` before it's tried again. The usage the job was let in on and T3's first reading after
 // it are the gate's cost record (`usage.jsonl`, by the same job id); both the reading and the cost
 // it was let in at are in its start line, so a job watched again after a restart keeps them.
 import { buildBrief } from './briefs/build.ts';
@@ -26,11 +25,12 @@ import type { GitHubWork } from './github.ts';
 import type { Git } from './git.ts';
 import type { Job, JobEnd, JobLog } from './job-log.ts';
 import type { Catalog, Jobs } from './jobs.ts';
-import { JobError, launchJob } from './launch.ts';
+import { launchJob } from './launch.ts';
 import { pick, type BuildTicket } from './picker.ts';
 import type { Repo } from './repos.ts';
-import { retryAfter, type Retry } from './t3/project-feed.ts';
+import type { Retry } from './t3/project-feed.ts';
 import type { T3Mcp } from './t3/mcp.ts';
+import { NoAnswer } from './t3/seams.ts';
 import { watchThreadEnd, type ThreadEnd } from './t3/thread-end.ts';
 import type { T3Ws } from './t3/ws.ts';
 import type { UsageGate } from './usage-gate.ts';
@@ -45,7 +45,7 @@ export type BuildLaneDoors = {
   github: GitHubWork;
   git: Git;
   mcp: Pick<T3Mcp, 'call'>;
-  ws: Pick<T3Ws, 'subscribe' | 'first'>;
+  ws: Pick<T3Ws, 'subscribe'>;
   gate: Pick<UsageGate, 'pick' | 'reading' | 'started' | 'finished' | 'dropped' | 'forget'>;
   catalog: () => Catalog | null;
   jobs: () => Jobs;
@@ -58,8 +58,7 @@ export type BuildLaneDoors = {
   say: (line: string) => void;
   /** How long a repo whose job started no thread rests (ms). */
   restMs?: number;
-  /** A dropped thread stream's wait before it's opened again; also the wait before T3's threads
-   *  are read again, when a launch went unanswered and they couldn't be read. */
+  /** A dropped thread stream's wait before it's opened again. */
   retry?: Retry;
   now?: () => Date;
 };
@@ -112,6 +111,13 @@ export class BuildLane {
     if (this.holdSaid.size) void this.pass();
   }
 
+  /** The user has answered a job that needed them (the Inbox ticket's to ask): its repo is free
+   *  again, and a pass runs. Its issue stays held, as every started build's does. */
+  async answered(jobId: string): Promise<void> {
+    await this.d.log.answered(jobId);
+    await this.pass();
+  }
+
   /** The repos with a build running, by T3 project id. */
   running(): string[] {
     return [...this.building.keys()];
@@ -150,7 +156,8 @@ export class BuildLane {
     const now = this.now().getTime();
     const repos = this.d.repos()
       .map((r, i) => ({ r, i }))
-      .filter(({ r }) => r.github && !this.building.has(r.id) && (this.resting.get(r.id) ?? 0) <= now)
+      .filter(({ r }) => r.github && !this.building.has(r.id) && (this.resting.get(r.id) ?? 0) <= now
+        && !this.d.log.needingUser(r.id).length)
       .sort((a, b) => this.waited(a.r) - this.waited(b.r) || a.i - b.i)
       .map(({ r }) => r);
     for (const repo of repos) {
@@ -228,10 +235,10 @@ export class BuildLane {
           worktree: { baseRef: ticket.base, branch: ticket.branch }, onFallback: letIn.onFallback, choice: letIn.choice,
         });
       } catch (e) {
-        // JobError: nothing was sent. Any other failure came from the launch call, and T3 may
-        // have started the thread before its answer was lost
-        if (e instanceof JobError) throw e;
-        return await this.adopt(job, `its launch went unanswered (${(e as Error).message})`, onLaunched, true);
+        // sent and its answer lost: T3 may have started the thread, and nothing says which one
+        // it is. Any other failure (nothing sent, or a refusal T3 answered) started nothing
+        if (e instanceof NoAnswer) return await this.needsUser(job, (e as Error).message);
+        throw e;
       }
     } catch (e) {
       return await notStarted('not-started', (e as Error).message);
@@ -249,55 +256,23 @@ export class BuildLane {
     return this.d.log.ended(job.id, { outcome, error });
   }
 
-  /** The job's thread in T3, by its title and branch (both the job's own), or null when T3 has
-   *  none. Throws when T3's threads can't be read. */
-  private async findThread(job: Job): Promise<{ threadId: string; link: string | null } | null> {
-    const shell = await this.d.ws.first('orchestration.subscribeShell', {});
-    const threads: any[] = [...(shell?.snapshot?.threads ?? []), ...(shell?.snapshot?.archivedThreads ?? [])];
-    const t = threads.find((x) => x?.title === job.title && x?.branch === job.branch && (x.projectId === undefined || x.projectId === job.repo));
-    return t ? { threadId: t.id, link: null } : null;
+  /** A job T3 may have started a thread for, with no thread id the app could watch: recorded as
+   *  needing the user, never matched to a thread by its title, branch or project. It's dropped
+   *  from the gate unmeasured (nothing measures a run the app can't see), and its repo starts
+   *  nothing until the user answers. */
+  private needsUser(job: Job, why: string): Promise<Job> {
+    this.d.gate.dropped(job.id);
+    this.d.say(`${job.title} needs you: ${why}. T3 may have started its thread; nothing else starts in ${job.github ?? job.repo} until you answer.`);
+    return this.d.log.ended(job.id, { outcome: 'needs-user', error: why });
   }
 
-  /** A job whose launch T3 never answered (or never named, for an app that stopped): its thread
-   *  is looked for, watched if found, not-started only once T3 says there's none. While T3 can't
-   *  be read the job stays open and its repo busy; looked for again after each wait. Right after
-   *  a launch, one wait comes first, so a thread T3 is still making isn't missed. */
-  private async adopt(job: Job, why: string, onLaunched: () => void = () => {}, waitFirst = false): Promise<Job> {
-    onLaunched(); // the gate counts it and its repo is busy: the pass goes on to the next repo
-    // a launch just sent may still be making its thread: one wait before T3's threads are read
-    if (waitFirst && !(await this.wait())) return this.d.log.get(job.id)!;
-    for (;;) {
-      let found;
-      try {
-        found = await this.findThread(job);
-      } catch (e) {
-        this.d.say(`${job.title}: ${why}; can't tell whether T3 started its thread (${(e as Error).message}), so nothing else starts in its repo`);
-        if (!(await this.wait())) return this.d.log.get(job.id)!; // stopped: the next start looks again
-        continue;
-      }
-      if (!found) return this.notStarted(job, 'not-started', `${why}, and T3 has no thread of it`);
-      await this.d.log.thread(job.id, { threadId: found.threadId, runId: null, link: found.link });
-      this.d.say(`${job.title}: ${why}; T3 has its thread ${found.threadId}, watched`);
-      return this.watch({ ...job, threadId: found.threadId, runId: null, link: found.link }, job.github);
-    }
-  }
-
-  /** One retry wait; false if the lane stopped meanwhile. */
-  private wait(): Promise<boolean> {
-    return new Promise((resolve) => {
-      const w = { stop: () => { cancel(); this.watches.delete(w); resolve(false); } };
-      const cancel = (this.d.retry ?? retryAfter(5_000))(() => { this.watches.delete(w); resolve(!this.stopped); });
-      this.watches.add(w);
-    });
-  }
-
-  /** A build the log shows open: watched to its end, its thread looked for in T3 when the log
-   *  has none. */
+  /** A build the log shows open: watched to its end on the thread id it saved; with none, it
+   *  needs the user. */
   private async resume(job: Job): Promise<Job> {
     // reserved and measured as it was let in; a line with no record of that (an older app's)
     // teaches nothing rather than measure from a reading taken mid-run
     this.d.gate.started({ id: job.id, kind: job.kind, choice: job.choice }, job.cost ?? {}, job.before ?? reading(null, []));
-    if (!job.threadId) return this.adopt(job, 'the app stopped before T3 named its thread');
+    if (!job.threadId) return this.needsUser(job, 'the app stopped before T3 named its thread');
     this.d.say(`Watching ${job.title} again: ${job.link ?? job.threadId}`);
     return this.watch(job, job.github);
   }

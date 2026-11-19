@@ -8,12 +8,17 @@
 //   holds nothing, so the next pass tries it again.
 // - **Who waited longest:** a repo's last job end, a `not-started` aside (#50).
 // - **Open jobs:** a start with no end, left by an app that stopped mid-job.
+// - **Needing the user:** a `needs-user` end (T3 may have started a thread the app has no id of)
+//   holds its repo until an `answered` line says the user has answered.
 import { appendFile, mkdir, readFile, truncate } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import type { Cost, Reading } from './costs.ts';
 import type { JobKind, ModelChoice } from './jobs.ts';
 
-export type Outcome = 'done' | 'done-no-pr' | 'waiting' | 'usage-limit' | 'failed' | 'branch-exists' | 'not-started';
+export type Outcome = 'done' | 'done-no-pr' | 'waiting' | 'usage-limit' | 'failed' | 'branch-exists' | 'not-started'
+  /** T3 may have started its thread, and the app has no id of it (#154, After a restart, don't
+   *  guess): its repo starts nothing until the user answers. */
+  | 'needs-user';
 
 export type JobStart = {
   kind: JobKind;
@@ -45,35 +50,53 @@ export type JobEnd = {
   /** The question's kind (a waiting end). */
   request?: string;
 };
-export type Job = JobStart & { id: string; startedAt: string } & Partial<JobThread> & { end?: JobEnd & { at: string } };
+export type Job = JobStart & { id: string; startedAt: string } & Partial<JobThread>
+  & { end?: JobEnd & { at: string }; answeredAt?: string };
 
 export class JobLogError extends Error {}
+
+/** The file calls the log makes: the disk, or a test's own in-memory folder (#202 F2). A missing
+ *  file is read as an error with `code` 'ENOENT', as Node's is. */
+export type JobLogFiles = {
+  read(file: string): Promise<string>;
+  append(file: string, text: string): Promise<void>;
+  truncate(file: string, bytes: number): Promise<void>;
+};
+
+export const DISK: JobLogFiles = {
+  read: (file) => readFile(file, 'utf8'),
+  append: async (file, text) => { await mkdir(dirname(file), { recursive: true }); await appendFile(file, text); },
+  truncate: (file, bytes) => truncate(file, bytes),
+};
 
 type Event =
   | ({ event: 'start'; job: string; at: string } & JobStart)
   | ({ event: 'thread'; job: string; at: string } & JobThread)
-  | ({ event: 'end'; job: string; at: string } & JobEnd);
+  | ({ event: 'end'; job: string; at: string } & JobEnd)
+  | { event: 'answered'; job: string; at: string };
 
 export class JobLog {
   private file: string;
+  private files: JobLogFiles;
   private all = new Map<string, Job>();
   private writing: Promise<void> = Promise.resolve();
   private now: () => Date;
   private n = 0;
 
-  private constructor(file: string, now: () => Date) {
+  private constructor(file: string, now: () => Date, files: JobLogFiles) {
     this.file = file;
     this.now = now;
+    this.files = files;
   }
 
-  static async open(file: string, now = () => new Date()): Promise<JobLog> {
+  static async open(file: string, now = () => new Date(), files: JobLogFiles = DISK): Promise<JobLog> {
     let text = '';
     try {
-      text = await readFile(file, 'utf8');
+      text = await files.read(file);
     } catch (e) {
       if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw new JobLogError(`${file} can't be read: ${(e as Error).message}`);
     }
-    const log = new JobLog(file, now);
+    const log = new JobLog(file, now, files);
     const lines = text.split('\n');
     lines.forEach((line, i) => {
       if (!line.trim()) return;
@@ -86,7 +109,7 @@ export class JobLog {
       }
       log.fold(e);
     });
-    if (text && !text.endsWith('\n')) await truncate(file, Buffer.byteLength(text.slice(0, text.lastIndexOf('\n') + 1)));
+    if (text && !text.endsWith('\n')) await files.truncate(file, Buffer.byteLength(text.slice(0, text.lastIndexOf('\n') + 1)));
     return log;
   }
 
@@ -98,6 +121,7 @@ export class JobLog {
       const job = this.all.get(e.job);
       if (!job) return;
       if (e.event === 'thread') this.all.set(e.job, { ...job, threadId: e.threadId, runId: e.runId, link: e.link });
+      else if (e.event === 'answered') this.all.set(e.job, { ...job, answeredAt: e.at });
       else {
         const { event, job: _, ...end } = e;
         this.all.set(e.job, { ...job, end });
@@ -107,10 +131,7 @@ export class JobLog {
 
   private append(e: Event): Promise<void> {
     this.fold(e);
-    const write = this.writing.then(async () => {
-      await mkdir(dirname(this.file), { recursive: true });
-      await appendFile(this.file, `${JSON.stringify(e)}\n`);
-    });
+    const write = this.writing.then(() => this.files.append(this.file, `${JSON.stringify(e)}\n`));
     this.writing = write.catch(() => {});
     return write;
   }
@@ -132,6 +153,12 @@ export class JobLog {
     return this.all.get(id)!;
   }
 
+  /** The user has answered a job that needed them: its repo is free again. */
+  async answered(id: string): Promise<Job> {
+    await this.append({ event: 'answered', job: id, at: this.now().toISOString() });
+    return this.all.get(id)!;
+  }
+
   jobs(): Job[] {
     return [...this.all.values()];
   }
@@ -143,6 +170,12 @@ export class JobLog {
   /** Builds started and not ended: left by an app that stopped mid-job, or running now. */
   open(): Job[] {
     return this.jobs().filter((j) => !j.end);
+  }
+
+  /** The repo's jobs that need the user and haven't had an answer: while there's one, the repo
+   *  starts nothing. */
+  needingUser(repo: string): Job[] {
+    return this.jobs().filter((j) => j.repo === repo && j.end?.outcome === 'needs-user' && !j.answeredAt);
   }
 
   /** Issues the picker leaves alone in this repo: a build open on them, or one that ended any

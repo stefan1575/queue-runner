@@ -1,7 +1,7 @@
 // T3's MCP endpoint (`/mcp`), called directly: one tool call per MCP session, closed after it,
 // as today's runner calls it (queue_runner/t3_mcp.py). The address is re-read on every call;
 // a token T3 refuses (401) is replaced once, and a token minted on another address is never sent.
-import { T3Error, Unauthorized, type Address, type Cli, type Http } from './seams.ts';
+import { NoAnswer, T3Error, Unauthorized, type Address, type Cli, type Http } from './seams.ts';
 import { signInMcp } from './sign-in.ts';
 
 const PROTOCOL = '2025-06-18';
@@ -17,9 +17,12 @@ function rpcResult(text: string, contentType: string): any {
   } catch {
     throw new T3Error(`T3 sent an unreadable MCP answer: ${text.slice(0, 200)}`);
   }
-  if (msg.error) throw new T3Error(`T3's MCP endpoint refused the call: ${msg.error.message}`);
+  if (msg.error) throw new Refused(`T3's MCP endpoint refused the call: ${msg.error.message}`);
   return msg.result;
 }
+
+/** T3 answered, refusing the call: it didn't run it. */
+class Refused extends T3Error {}
 
 export class T3Mcp {
   private token: string | null = null;
@@ -85,6 +88,7 @@ export class T3Mcp {
     if (id !== undefined) msg.id = id;
     const got = await this.send(`${origin}/mcp`, 'POST', headers, JSON.stringify(msg));
     if (got.status === 401 || got.status === 403) throw new Unauthorized(`T3 refused the app's MCP token (${got.status})`);
+    if (got.status >= 400 && got.status < 500) throw new Refused(`T3's MCP endpoint answered ${got.status} to ${method}: ${got.text.slice(0, 300)}`);
     if (got.status >= 400) throw new T3Error(`T3's MCP endpoint answered ${got.status} to ${method}: ${got.text.slice(0, 300)}`);
     return { headers: got.headers, result: id === undefined ? undefined : rpcResult(got.text, got.headers['content-type'] ?? '') };
   }
@@ -97,7 +101,15 @@ export class T3Mcp {
     let result;
     try {
       await this.rpc(origin, token, session, 'notifications/initialized');
-      result = (await this.rpc(origin, token, session, 'tools/call', { name: tool, arguments: args }, 2)).result;
+      try {
+        result = (await this.rpc(origin, token, session, 'tools/call', { name: tool, arguments: args }, 2)).result;
+      } catch (e) {
+        // sent: a refusal T3 answered (a 4xx, a JSON-RPC error) means it didn't run; anything
+        // else (no answer, a 5xx, an answer that can't be read) means it may have
+        if (e instanceof Unauthorized || e instanceof Refused) throw e;
+        throw new NoAnswer(`${tool} was sent and its answer was lost: ${(e as Error).message}`);
+      }
+      if (!result || typeof result !== 'object') throw new NoAnswer(`${tool} was sent and T3 answered with no result`);
     } finally {
       if (session) {
         // ends the MCP session, as the spec has a client do; a refusal leaves it to expire
@@ -106,7 +118,6 @@ export class T3Mcp {
         }).catch(() => undefined);
       }
     }
-    if (!result || typeof result !== 'object') throw new T3Error(`T3 sent no result for ${tool}`);
     if (result.isError) {
       let text: string = (result.content ?? []).find((c: any) => c?.text)?.text ?? '';
       try {
