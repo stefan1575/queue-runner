@@ -464,7 +464,18 @@ export class ConflictLane {
       landed: await this.d.git.log(repo.folder, pr.headSha, base),
       diffstat: await this.d.git.diffstat(repo.folder, base, pr.headSha),
       threads,
+      // the user's answer to the PR's stop, told to the first conflict round after it (F9)
+      direction: this.direction(repo, pr),
     });
+  }
+
+  /** The user's answer to the PR's last stop, if no conflict round has run since it. */
+  private direction(repo: BuildRepo, pr: ReviewPull): string | null {
+    const answer = this.d.log.lastAnswer(repo.id, pr.number);
+    if (!answer) return null;
+    const since = answer.answered!.at;
+    const ran = this.d.log.jobs().some((j) => j.kind === 'conflict' && j.repo === repo.id && j.issue === pr.number && j.startedAt > since && RAN(j));
+    return ran ? null : answer.answered!.text ?? 'They closed its needs-info issue: carry on.';
   }
 
   /** A round let in that started nothing: dropped from the gate, and the PR rests. */

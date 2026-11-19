@@ -5,7 +5,7 @@
 // from the job log. Self-contained (docs/app.md, Rules), and Before you push comes from `rules.ts`.
 // What is the user's to decide is this brief's own: a conflict it can't resolve is never pushed
 // half done (the shared rule says to push what you have), it ends without a push.
-import { ASK_BLOCK, BEFORE_YOU_PUSH } from './rules.ts';
+import { ASK_BLOCK, BEFORE_YOU_PUSH, directionFirst } from './rules.ts';
 
 /** A conflict brief lists at most this many of the base's new commits, as today's does. */
 export const BASE_COMMITS = 30;
@@ -33,6 +33,8 @@ export type ConflictBriefInput = {
   landed: { sha: string; subject: string }[];
   diffstat: string;
   threads: { kind: string; startedAt: string; outcome: string; link: string }[];
+  /** What the user said when they answered the PR's stop (#158 F9): told first. */
+  direction?: string | null;
 };
 
 const TEMPLATE = `Conflict round on PR #$number in $github: $title
@@ -40,7 +42,7 @@ const TEMPLATE = `Conflict round on PR #$number in $github: $title
 The queue runner started this job because the PR's head $sha7 conflicts with \`$base\`, so it can't
 merge. Merge \`$base\` in, resolve the conflict, and push. $user isn't watching it live. Everything
 you need is below or in the repo. There are no handoff files.
-
+$direction
 ## Where you are
 
 $where
@@ -126,6 +128,7 @@ export function conflictBrief(i: ConflictBriefInput): string {
   const shown = i.landed.slice(-BASE_COMMITS);
   const older = i.landed.length - shown.length;
   const values: Record<string, string> = {
+    direction: directionFirst(i.user, i.direction),
     number: String(i.number), github: i.github, title: i.title, sha7: i.sha.slice(0, 7),
     base: i.base, branch: i.branch, user: i.user, where: where(i), agents: agentsPointer(i.agentsFile),
     body: i.body.trim() || '(The PR has no description.)',

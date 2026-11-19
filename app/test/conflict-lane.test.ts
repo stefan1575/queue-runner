@@ -604,5 +604,8 @@ describe("a conflict agent's question (#158 F2)", () => {
     await lane.pass();
     await until(() => t3.launches.length === 2);
     expect(gh.tip).toBe(B1);
+    // the answer goes into the next conflict brief (F9)
+    expect(t3.launches[1].message).toContain("## Direction first\n\nPat answered the PR's stop, and this round starts from it:\n\n> Keep main's queue.");
+    expect(t3.launches[0].message).not.toContain('Direction first');
   });
 });

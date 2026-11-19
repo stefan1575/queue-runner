@@ -31,6 +31,14 @@ and fix what you find, with a test for each:
 export const USERS_TO_DECIDE = `- If something only $user can decide stops you: commit and push what you have, comment the
   question on the issue, swap its \`ready-for-agent\` label for \`needs-info\`, and end your turn.`;
 
+/** The user's answer to the PR's stop, first in every brief of a round it leads to (#158 F9): a
+ *  fix round's and a conflict round's alike. Empty with no answer to tell. */
+export function directionFirst(user: string, answer: string | null | undefined): string {
+  if (!answer?.trim()) return '';
+  const quoted = answer.trim().split('\n').map((l) => `> ${l}`).join('\n');
+  return `\n## Direction first\n\n${user} answered the PR's stop, and this round starts from it:\n\n${quoted}\n`;
+}
+
 /** How an agent on a PR hands a question to the user (#158 F2): the runner reads only this block in
  *  its last reply, and files the question as a stop that holds the PR until they answer. */
 export const ASK_BLOCK = `End that last reply with the question alone in a fenced block tagged \`queue-runner-question\`:

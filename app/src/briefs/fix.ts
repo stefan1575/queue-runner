@@ -8,7 +8,7 @@
 // `rules.ts`, written there once.
 import { STATUSES, type Finding } from '../review/ledger.ts';
 import { openLine } from './review.ts';
-import { BEFORE_YOU_PUSH, SCREENSHOTS, USERS_TO_DECIDE_ON_PR } from './rules.ts';
+import { BEFORE_YOU_PUSH, directionFirst, SCREENSHOTS, USERS_TO_DECIDE_ON_PR } from './rules.ts';
 
 /** Where the round works: in the thread that wrote the PR (`thread`), a fresh fixer in the PR's
  *  own worktree (`worktree`), or a fresh fixer in a new worktree at H on the local branch `work`,
@@ -165,7 +165,6 @@ function checksFound(i: FixBriefInput): string {
     + (logs.join('\n\n') || 'No log could be read.');
 }
 
-const quote = (text: string) => text.trim().split('\n').map((l) => `> ${l}`).join('\n');
 
 /** Fills the template: each `$name` once, with nothing in a filled value read again. */
 export function fixBrief(i: FixBriefInput): string {
@@ -185,7 +184,7 @@ export function fixBrief(i: FixBriefInput): string {
     because: checks
       ? `checks on the PR's head ${i.sha.slice(0, 7)} failed, and failed again after their one re-run (${(i.checks ?? []).map((c) => c.name).join(', ') || 'no name given'})`
       : `review ${i.round} of the PR's head ${i.sha.slice(0, 7)} is blocking`,
-    direction: i.direction?.trim() ? `\n## Direction first\n\n${i.user} answered the PR's stop, and this round starts from it:\n\n${quote(i.direction)}\n` : '',
+    direction: directionFirst(i.user, i.direction),
     found: checks ? checksFound(i) : REVIEW_FOUND.replace(/\$([a-z]+)/g, (whole, name: string) => found[name] ?? whole),
     number: String(i.number), github: i.github, title: i.title, sha7: i.sha.slice(0, 7),
     base: i.base, branch: i.branch, user: i.user,
