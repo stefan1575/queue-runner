@@ -163,6 +163,9 @@ export class GitHubPoster implements Poster {
   private now: () => Date;
   /** Each file the post writes beside the run (`comment.md`, `pr-body.md`, `followup-<id>.md`). */
   private write: (name: string, text: string) => Promise<void>;
+  /** Each review comment whose status landed: while its row keeps failing, the status isn't set
+   *  again on every try, toward GitHub's cap of statuses per commit (#155 N2). */
+  private statusSet = new Set<string>();
 
   constructor(gh: GitHubPosts, say: (line: string) => void, write: (name: string, text: string) => Promise<void> = async () => {}, now = () => new Date()) {
     this.gh = gh;
@@ -190,8 +193,11 @@ export class GitHubPoster implements Poster {
     const name = `review ${repo}#${n}`;
     const failed: string[] = [];
     try { // on H, the commit reviewed, whatever the PR's head is by now
-      await this.gh.setStatus(repo, d.sha, STATUS_CONTEXT, d.status.state, d.status.description, url);
-      this.say(`${name}: ${STATUS_CONTEXT} ${d.status.state} on ${d.sha.slice(0, 7)}`);
+      if (!this.statusSet.has(url)) {
+        await this.gh.setStatus(repo, d.sha, STATUS_CONTEXT, d.status.state, d.status.description, url);
+        this.statusSet.add(url);
+        this.say(`${name}: ${STATUS_CONTEXT} ${d.status.state} on ${d.sha.slice(0, 7)}`);
+      }
     } catch (e) {
       failed.push(`setting ${STATUS_CONTEXT} on ${d.sha.slice(0, 7)} failed (${(e as Error).message})`);
     }

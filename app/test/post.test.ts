@@ -86,6 +86,18 @@ describe('GitHubPoster', () => {
     await poster.finish('owner/app', 4, d(), url);
     expect(gh.posted.map((p) => p.what)).toEqual(['comment', 'body', 'status']); // the row isn't added twice
   });
+
+  test('while the row keeps failing, sol-review is set once, not again on every try (N2)', async () => {
+    const gh = new FakeReviewGitHub();
+    const poster = new GitHubPoster(gh, () => {});
+    const url = await poster.post('owner/app', 4, d());
+    gh.failing.add('body');
+    await expect(poster.finish('owner/app', 4, d(), url)).rejects.toThrow(FinishFailed);
+    await expect(poster.finish('owner/app', 4, d(), url)).rejects.toThrow(/^adding the Review row/);
+    gh.failing.delete('body');
+    await poster.finish('owner/app', 4, d(), url);
+    expect(gh.posted.map((p) => p.what)).toEqual(['comment', 'status', 'body']);
+  });
 });
 
 describe('the Review table', () => {
