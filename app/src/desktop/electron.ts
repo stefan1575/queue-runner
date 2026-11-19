@@ -17,6 +17,8 @@ import { GhGitHub, ghCli } from '../github.ts';
 import { JobLog } from '../job-log.ts';
 import { Deps } from '../review/deps.ts';
 import { ReviewLane } from '../review-lane.ts';
+import { FixLane } from '../fix-lane.ts';
+import { MergeLane } from '../merge-lane.ts';
 import { UsageGate } from '../usage-gate.ts';
 import { windowsPlatform } from '../platform/windows.ts';
 import { checkJobs, DEFAULT_JOBS } from '../jobs.ts';
@@ -128,11 +130,27 @@ async function main() {
     catalog: () => catalog.current().catalog, jobs: () => settings.get().jobs, user, log, exists: existsSync, say,
   });
   // The review lane (docs/app.md, Reviews): every open PR in a served repo, one review at a time.
+  // A review that ends tells the fix and merge lanes; a fix round that ends tells the review lane
+  // (its pushed head is reviewed next); a merge tells the build lane (docs/app.md, Fix rounds and
+  // merges).
+  const lanes: { fixes?: FixLane; merges?: MergeLane } = {};
   const reviews = new ReviewLane({
     repos: () => servedRepos(repos.list()), github, git: new GitCli(), deps: new Deps(join(state, 'deps')),
     mcp: t3Doors!.mcp, ws: t3Doors!.ws, gate, catalog: () => catalog.current().catalog, jobs: () => settings.get().jobs,
     toolFree: () => settings.get().toolFreeInstances, user, log, stateDir: state, say,
+    ended: () => { void lanes.fixes?.pass(); void lanes.merges?.pass(); },
   });
+  const fixes = new FixLane({
+    repos: () => servedRepos(repos.list()), github, git: new GitCli(), mcp: t3Doors!.mcp, ws: t3Doors!.ws, gate,
+    catalog: () => catalog.current().catalog, jobs: () => settings.get().jobs, user, log, exists: existsSync, say,
+    ended: () => void reviews.pass(),
+  });
+  const merges = new MergeLane({
+    repos: () => servedRepos(repos.list()), github, git: new GitCli(), mcp: t3Doors!.mcp, log, say,
+    merged: () => void lane.pass(), headMoved: () => void reviews.pass(),
+  });
+  lanes.fixes = fixes;
+  lanes.merges = merges;
 
   const shell: Shell = {
     singleInstance(onSecondStart) {
@@ -180,6 +198,18 @@ async function main() {
     gate.onChange(() => reviews.usageChanged());
     repos.onChange(() => void reviews.pass());
     setInterval(() => void reviews.pass(), 60_000);
+  });
+  // Fix rounds the log shows open are watched again first; then a pass on usage, the repos and
+  // every minute, beside the reviews. Merges and marks pass on the same minute (checks and replies
+  // are read from GitHub), and on the repos changing.
+  void fixes.start().then(() => {
+    gate.onChange(() => fixes.usageChanged());
+    repos.onChange(() => void fixes.pass());
+    setInterval(() => void fixes.pass(), 60_000);
+  });
+  void merges.pass().then(() => {
+    repos.onChange(() => void merges.pass());
+    setInterval(() => void merges.pass(), 60_000);
   });
   view.onChange((v) => win?.webContents.send(CHANNELS.changed, v));
   // The window only hides; the app lives in the tray until Quit.

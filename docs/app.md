@@ -9,8 +9,10 @@ Repositories, below), knows which model does each kind of job and launches it (#
 models, below), gates every job on its provider's usage, keeping your share of each week
 (#153; Usage, below), has a Setup page that says what's missing before it can work (#162; Setup,
 below), ships as a Windows installer built by CI on a version tag (#164; The installer,
-below), builds a served repo's next ticket into a PR (#154; Builds, below), and reviews every
-open PR on its newest commit, posting the review with its ledger (#155; Reviews, below).
+below), builds a served repo's next ticket into a PR (#154; Builds, below), reviews every
+open PR on its newest commit, posting the review with its ledger (#155; Reviews, below), and
+closes the loop: a blocking review gets a fix round, and a clean one merges or is marked ready to
+merge (#156; Fix rounds and merges, below).
 
 ## Run it
 
@@ -22,6 +24,7 @@ pnpm --dir app live:launch        # the live launch check, sandbox only (Live ch
 pnpm --dir app live:usage         # each provider's usage as the app reads it; acts on no project
 pnpm --dir app live:build         # the live build check, sandbox only (Live checks, below)
 pnpm --dir app live:review        # the live review check, GitHub sandbox, dry run (Live checks, below)
+pnpm --dir app live:merge         # the live merge check, GitHub sandbox, review stubbed clean (Live checks, below)
 pnpm --dir app desktop            # builds and opens the desktop app (The desktop app, below)
 pnpm --dir app installer          # builds the Windows installer into installer-dist/ (The installer, below)
 ```
@@ -363,8 +366,8 @@ builds (`docs/flow.md`, `docs/claude-lane.md`). `src/build-lane.ts`, `src/picker
   nothing: `not-started`.
 - **One ticket at a time per repo** (#179): no build while the repo has an open PR, whoever
   opened it, read before the ticket is picked and again right before the launch (a PR opened
-  meanwhile makes the job `not-started`). Clean means merged. The app merges nothing yet, so it
-  has no live steps to wait on: the merge ticket adds that wait.
+  meanwhile makes the job `not-started`). Clean means merged (Fix rounds and merges, below); merged
+  is the end, with no live steps to wait on (#68), and a merge passes the build lane at once.
 - **One build per repo, repos side by side** (#50): each pass takes every served repo with no build
   running, the one whose last job ended longest ago first (the job log's `lastEnded`). Each asks
   the usage gate first (`UsageGate.pick`, kind `build`); a held one says its reason once and waits.
@@ -512,7 +515,115 @@ every open PR in a served repo without a review on its newest commit gets one, w
 - **The review lane and the build lane** share the repo's one ticket at a time (#179): the build
   lane starts nothing while a PR is open, and the review lane reviews that PR; a review waits while
   a build writes to its branch, and a job of either lane that needs the user holds both.
-- **Not yet:** merging a clean review and fix rounds (#156), conflict rounds (#157), stops (#158).
+- **Not yet:** conflict rounds (#157), stops (#158). A review that ends tells the fix and merge
+  lanes (`ended`), so a blocking one gets its round and a clean one merges without waiting for the
+  minute's pass.
+
+## Fix rounds and merges
+
+The loop closed (#156; `docs/flow.md` The review loop and Merge, ported, with the owner's
+2026-11-19 decisions on the ticket): a blocking review goes back to the builder to fix, the new head
+is reviewed by a fresh reviewer, and a clean head merges, or waits for the user where they merge.
+`src/fix-lane.ts`, `src/briefs/fix.ts`, `src/merge-lane.ts`, the PR steps in `src/job-log.ts`, the
+merge half of `src/github.ts` and `src/git.ts`.
+
+- **Which PRs get a round** (`FixLane`): the app's newest review of the PR's head H is `blocking`
+  (a `stop` or `approach-note` goes to the user, #158), it's still the PR's newest review comment,
+  no round ran on H yet (one per head: a round that ended without a push leaves the PR at H, which
+  was reviewed already, so it waits for the user), and nothing writes to the branch (a build or fix
+  open, waiting on a question or cut off by a usage limit: one writer per PR, and the review lane
+  waits on a fix round the same way). A repo with a job that needs the user starts none.
+- **Back to the builder:** the round goes to the thread that wrote the PR, its build's or the
+  fresh fixer's that took over since, with `t3_thread_send {threadId, message, mode: queue}`
+  (`queue` starts a new turn and never steers one), so it starts with that thread's context. The
+  gate is asked about the model that thread runs on (`UsageGate.check`, kind `fix`), since that's
+  what the turn spends; held, it waits and says why once. The start line keeps the thread's runs
+  before the send (`knownRuns`, from `orchestration.getThreadProjection`), and the round's end is
+  its new run's: the run id T3's answer names, else the newest run not among them, so a restart
+  finds it too.
+- **A fresh fixer instead,** a new thread on the fix kind's settings (`UsageGate.pick`, kind `fix`,
+  its fallback while its provider has no room), titled `Queue runner fix: <project>#<n>`, when
+  the review marks an earlier Important finding still open (`raised` before this round: the
+  writer has shown it's stuck there), when no thread of the app's wrote the PR (a person opened
+  it, or the build needs the user), or when T3 says the writer thread is gone (#156 F3), however it
+  says so: the runs read before the send failing with "not found", or, when that read fails
+  otherwise, T3's MCP answering `t3_thread_read` with `not_found`; or when T3 refuses the send
+  because the thread can't take a turn (#156 F9). The installed T3's `sendToThread` (read
+  2026-11-19 in its `server.asar`) answers, before it dispatches anything, `thread_not_found` for
+  a deleted thread, `thread_not_sendable` for an archived one and `invalid_request` for a provider
+  instance that's switched off; each sends a fresh fixer. A *settled* thread isn't checked there,
+  so the builder's thread, which the app settles at its end, still takes the round. T3's answer to
+  a send is `{delivery}` only, with no run id.
+  A thread that's there but couldn't be read rests the PR and is tried again. It works in the PR's own worktree when `git worktree list` shows one on the
+  PR's branch (T3's `existing_worktree`), else in a new worktree at H on
+  `claude/fix-pr<n>-<sha7>` that pushes `HEAD` to the PR's branch, as today's runner does. A
+  fresh fixer then writes the PR: the next round goes back to its thread.
+- **The brief** (`src/briefs/fix.ts`): `templates/fix.md` ported, built from sources, never a
+  handoff file: the open Important findings, their classes (fix every case of each), the nits,
+  what earlier reviews settled, the PR's body, commits and files, the earlier threads' links. It
+  says whether it's the writer's thread or a fresh fixer, and why. Fix or decline (a comment
+  naming the finding's ID, the reason and the evidence); a screenshot finding is shot as the build
+  brief's Screenshots say. It ends with the same Before you push list, the screenshot rule and
+  what's the user's to decide (on the PR), from `src/briefs/rules.ts`.
+- **Its end** comes from T3's thread events, as a build's; then the PR's head is read again (the
+  end's `head`): pushed, the review lane is told (`ended`) and reviews the new head in a new
+  thread; not pushed, it waits for the user. The thread is settled unless it waits on a question
+  or stopped on a usage limit.
+- **A send whose outcome isn't known is never `not-started`** (#156 F4): its answer lost
+  (`NoAnswer`), T3 answering a failure after it may have taken it (`ToolFailed`: T3 answers
+  `orchestration_error` when it takes a send and can't read the run back), or the app stopped
+  before T3 answered (found on restart). The thread is read: a run it didn't have before the send
+  is the round's, watched to its end; the thread gone means nothing ran, and a fresh fixer
+  follows; anything else (no new run, or the thread can't be read) ends `needs-user`. Only a
+  refusal before the tool ran (a 4xx, a refused token) or a call never sent is `not-started`.
+- **After a restart, don't guess** (as Builds): a round the log shows open with its thread line is
+  watched again; a send without one is read as above; a fresh fixer's launch without one, or one
+  whose answer was lost, ends `needs-user`, and the repo starts nothing until the user answers
+  (`FixLane.answered`).
+- **A fork's PR gets no fixer** (#156 N2): a head in another repo than the PR's (GitHub's
+  `head.repo`, or none for a deleted fork) would have a fixer push to this repo's branch of that
+  name, a fork's `main` being this repo's `main`. Its blocking review ends a round on H as
+  `needs-user`, so the repo starts nothing until the user answers, and H gets no round after.
+- **Merging** (`MergeLane`), where the runner merges (`merge: runner`): a clean review on the
+  newest commit, checks passed on it, nothing open. Just before merging the PR is read again: still
+  open at H, not a draft, nothing writing to its branch, the repo not held for the user, fewer than
+  2 failed merges on H, its newest review comment the clean one on H, checks passed on H
+  (`sol-review` not counted), no conflict, nothing said since the clean review (bots and the
+  runner's posts aside) and no unresolved review thread (GraphQL, every page). Then
+  `PUT pulls/<n>/merge {sha: H, merge_method: merge}`: GitHub's 409 (the head moved meanwhile) is
+  `head-moved`, nothing merges, and the review lane is told so the new head is reviewed.
+- **"I merge" repos** (`merge: me`, the default): the re-checked clean PR gets `ready-to-merge`
+  (it was `ready-for-stefan`) once per head and is never merged by the app. The mark comes off when
+  the head moves, the review isn't clean any more or the re-check fails (a reply included). The
+  platform's notifications are a later ticket, so the log line names the PR for now.
+- **Merges noticed** (#156 F14), in every repo: each PR the app reviewed or marked that's gone from
+  the open list is read once, whatever its label history. Merged (by the user, or by hand where
+  the runner merges), its merge is recorded (`by: user`) and cleaned up like the app's, its label
+  removed; closed unmerged, it's recorded `closed` and a mark on it comes off. Either way it's done
+  with and never read again; GitHub's list lagging (still open) leaves it for the next pass.
+- **After a merge, only what the app made** (#156 F15): a build's launch, and a fresh fixer's in
+  a new worktree, write a `made` line for the branch T3 made (with its worktree) right after the
+  launch. A `branch-exists` build, a fixer in the PR's own worktree and a round sent to a thread
+  made nothing. The clean-up removes only branches with a `made` line from the PR's own jobs: its
+  fix rounds (by the PR's number and branch) and its build, the one whose end names the PR or the
+  one that made the PR's head branch, ended before the merge was recorded and names no other PR
+  (#156 F11: a build that opened its PR and then failed has none on its end). It never touches a
+  branch another job of the app's is on (one still running, or ended on another PR: a new build
+  reusing the name). It removes the worktrees `git worktree list` shows on those branches, but
+  never one with uncommitted changes (`git status --porcelain`, or git failing to say): that is
+  left, said in the log, and its branch kept. Every thread of those jobs, reviews included, is
+  settled: the merge is the latest point one can still be open (#68, story 7). Then a `cleaned`
+  line; a worktree git keeps listing, or a settle that failed, leaves it owed for the next pass. T3
+  may hold an emptied worktree folder until its thread settles (`docs/t3.md`): such folders are
+  kept in the `cleaned` line and swept on later passes (`swept`). Merged is the end: no
+  after-merge steps (#68).
+- **PR steps in the job log:** a merge or a mark is a `step` line and its `step-end` (`merged`,
+  `failed`, `head-moved`, `marked`, `unmarked`, `closed`), apart from jobs: it runs on no model, so the gate
+  never counts it. A merge step with no end (the app stopped mid-merge) is read from GitHub on the
+  next pass: merged, or failed. A read that fails is said and tried next pass, never taken as
+  merged or gone.
+- **When:** the fix lane watches open rounds again at start, then passes on usage, the repos, each
+  review's end and every minute; the merge lane on each review's end, the repos and every minute.
 
 ## Setup
 
@@ -722,6 +833,22 @@ is killed is code -1 with Node's reason in stderr, never a gh exit code (so is t
   about 30 seconds (F1, the loop bound, shown by running the function). **Run again 2026-11-19**
   with `--pr 5` after review 1's fixes, same model: all ok, blocking; with no flags it printed its
   usage and did nothing.
+- `app/live/merge.ts` (`pnpm --dir app live:merge`): today's `scripts/live_merge.py` for the app,
+  the merge path against `stefan1575/queue-runner-sandbox` only, in the T3 project cloned from it
+  (found by its remote, as the review check's). The review is stubbed clean: no thread runs, and
+  the clean reviews are decided from a clean reply and posted as the lane posts them. **It writes to
+  GitHub:** a branch made in a worktree of the project's folder, as a build's, and its PR, a `ci`
+  status on each head; review 1 clean on H1, then a push: the merge lane must not merge, and a merge
+  naming H1 must get GitHub's 409; then review 2 clean on H2 and the lane merges: merged at H2 with
+  a merge commit (two parents), one merge step, cleaned up, the worktree gone from `git worktree
+  list` and the local branch deleted. The PR's branch is deleted on GitHub at the end. **Run
+  2026-11-19:** all ok, sandbox PR #6 (H1 b6d200a refused with 409; merged at 5f18b12, merge commit
+  e1c88e5). **Run again 2026-11-19** after #156 F11 (the clean-up finds the build by its branch):
+  all ok, sandbox PR #7 (H1 5544615 refused with 409; merged at 4cae92e, merge commit 56bc728,
+  worktree and local branch gone). **Run again 2026-11-19** after #156 F15 (the clean-up removes
+  only what a `made` line records; the check records its build's): all ok, sandbox PR #8 (H1
+  f266f22 refused with 409; merged at a82bd12, merge commit 2135b76, worktree and local branch
+  gone).
 - `app/live/usage.ts` (`pnpm --dir app live:usage [-- --minutes N]`): acts on no project. It
   subscribes to T3's server config and prints each connected provider's windows as the app reads
   them, then each `providerStatuses` event that changes one, for N minutes (5 by default). **Run

@@ -428,6 +428,32 @@ describe('a review', () => {
     expect(log.jobs().at(-1)).toMatchObject({ reviewer: 'Claude Opus 5.5 High, fallback while Codex is out of usage' });
   });
 
+  test('a fix round writing to the branch holds the review; the head it pushed gets a fresh reviewer, and the lane says the review ended (#156)', async () => {
+    gh.comments['owner/app#4'] = [{ author: 'me', createdAt: '2026-11-19T11:00:00Z', body: `<!-- queue-runner-app review round=1 verdict=blocking sha=${H.slice(0, 7)} findings=W10= -->` }];
+    const earlier = await log.started({ kind: 'review', repo: 'p-app', github: 'owner/app', issue: 4, branch: 'claude/add-a-thing-3', base: 'main', title: 'r', choice: REVIEW, onFallback: false, sha: H, round: 1, reviewer: 'r' });
+    await log.thread(earlier.id, { threadId: 'old-review', runId: 'r', link: null });
+    await log.ended(earlier.id, { outcome: 'blocking', verdict: 'blocking' });
+    const fix = await log.started({ kind: 'fix', repo: 'p-app', github: 'owner/app', issue: 4, branch: 'claude/add-a-thing-3', base: 'main', title: 'f', choice: BUILD, onFallback: false, sha: H, round: 1, to: 'thread-b' });
+    gh.reviewPulls['owner/app'] = [pull({ headSha: H2 })];
+    gh.checkStates[H2] = { state: 'passed', pending: [], failed: [] };
+    git.heads[4] = H2;
+    const ended: string[] = [];
+    makeLane({ ended: (j) => ended.push(`${j.round} ${j.end!.outcome}`) });
+    await lane.pass();
+    expect(t3.launches).toEqual([]);
+    expect(lines).toContain('review app#4: not now, a fix job is still writing to its branch');
+    await log.ended(fix.id, { outcome: 'done', head: H2 });
+    const passed = lane.pass();
+    await answer(1, reply([]));
+    await passed;
+    await lane.idle();
+    // a new thread, never a send to the review thread before it
+    expect(t3.launches).toHaveLength(1);
+    expect(t3.sends).toEqual([]);
+    expect(t3.launches[0].message).toContain(H2);
+    expect(ended).toEqual(['2 clean']);
+  });
+
   test('a dry run posts nothing', async () => {
     makeLane({ poster: new DryRunPoster((l) => lines.push(l)) });
     const passed = lane.pass();

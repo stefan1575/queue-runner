@@ -2,7 +2,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { T3Mcp } from '../src/t3/mcp.ts';
+import { T3Mcp, ToolFailed } from '../src/t3/mcp.ts';
 import { runtimeAddress } from '../src/t3/real.ts';
 import { NoAnswer, T3Error, Unauthorized } from '../src/t3/seams.ts';
 import { LABEL } from '../src/t3/sign-in.ts';
@@ -87,6 +87,10 @@ describe('signing in to MCP', () => {
 
   it('says a failed tool\'s code and message', async () => {
     await expect(mcp().call('t3_nope', {})).rejects.toThrow('t3_nope failed: unknown: no such tool');
+    // and keeps T3's code, so a caller can tell a refusal from an unclear outcome (#156 F9)
+    const e = await mcp().call('t3_nope', {}).catch((x) => x);
+    expect(e).toBeInstanceOf(ToolFailed);
+    expect(e.code).toBe('unknown');
   });
 });
 

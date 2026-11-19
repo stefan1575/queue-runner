@@ -3,7 +3,7 @@
 import { readdir, readFile } from 'node:fs/promises';
 import { describe, expect, test } from 'vitest';
 import { BUILD_TEMPLATE, buildBrief, type BuildBriefInput } from '../src/briefs/build.ts';
-import { BEFORE_YOU_PUSH, SCREENSHOTS, USERS_TO_DECIDE } from '../src/briefs/rules.ts';
+import { BEFORE_YOU_PUSH, SCREENSHOTS, USERS_TO_DECIDE, USERS_TO_DECIDE_ON_PR } from '../src/briefs/rules.ts';
 
 const input: BuildBriefInput = {
   github: 'owner/app', number: 42, title: 'Add a thing', body: '  Do the thing.\n', branch: 'claude/add-a-thing-42',
@@ -89,8 +89,9 @@ describe('each rule is written once (#154)', () => {
     const dir = new URL('../src/briefs/', import.meta.url);
     const files = (await readdir(dir)).filter((f) => f.endsWith('.ts') && f !== 'rules.ts');
     expect(files).toContain('build.ts');
+    expect(files).toContain('fix.ts');
     // a line from each rule, as written: found in a brief file means the rule was copied there
-    const marks = [BEFORE_YOU_PUSH, SCREENSHOTS, USERS_TO_DECIDE].map((r) => r.split('\n').find((l) => l.length > 60)!);
+    const marks = [BEFORE_YOU_PUSH, SCREENSHOTS, USERS_TO_DECIDE, USERS_TO_DECIDE_ON_PR].map((r) => r.split('\n').find((l) => l.length > 60)!);
     for (const f of files) {
       const text = await readFile(new URL(f, dir), 'utf8');
       for (const m of marks) expect(text, `${f} copies "${m}"`).not.toContain(m);

@@ -50,6 +50,17 @@ describe('watchThreadEnd', () => {
     expect(await watchThreadEnd(ws, 't', 'r1').end).toEqual({ outcome: 'done', status: 'completed' });
   });
 
+  test("with no run named, the runs known before a send are left out: their end isn't the new run's (#156)", async () => {
+    t3.threadState.t!.runs = [{ id: 'r1', ordinal: 1, rootNodeId: 'n1', status: 'completed' }];
+    const w = watchThreadEnd(ws, 't', null, undefined, undefined, new Set(['r1']));
+    await streaming();
+    expect(await settled(w.end)).toBe('pending');
+    t3.threadEvent('t', 'run', { id: 'r3', ordinal: 2, rootNodeId: 'n3', status: 'running' });
+    expect(await settled(w.end)).toBe('pending');
+    t3.endRun('t', 'completed');
+    expect(await w.end).toEqual({ outcome: 'done', status: 'completed' });
+  });
+
   test('a pending question to the user is waiting', async () => {
     const w = watchThreadEnd(ws, 't', 'r2');
     await streaming();
