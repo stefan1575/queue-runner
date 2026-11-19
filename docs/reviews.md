@@ -1,6 +1,7 @@
 # Reviews
 
 The Sol lane: a review pass, Sol through codex-sol.sh, the Opus reviewer, and running tests inside a review.
+The app's port, where every review is a T3 thread: `docs/app.md`, Reviews.
 
 ## A Sol pass
 

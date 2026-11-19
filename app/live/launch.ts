@@ -58,8 +58,8 @@ console.log(`T3 connects ${catalog.providers.map((p) => p.id).join(', ')}; launc
 
 for (const choice of runs) {
   const option = model(catalog, choice)!.effortOption;
-  const launched = await launchJob(mcp, { ...DEFAULT_JOBS, default: choice }, catalog, {
-    kind: 'ask', projectId, title: `Queue runner app launch check (${choice.model} at ${choice.effort})`, brief: BRIEF,
+  const launched = await launchJob(mcp, catalog, {
+    kind: 'ask', choice, projectId, title: `Queue runner app launch check (${choice.model} at ${choice.effort})`, brief: BRIEF,
   });
   console.log(`${choice.provider} ${choice.model}: launched ${launched.threadId} asking ${option}=${choice.effort}`);
   for (;;) {

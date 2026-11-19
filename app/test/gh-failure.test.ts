@@ -1,5 +1,9 @@
 // gh failing (not signed in, offline, not installed) is not a folder with no GitHub repo (review 1's F1).
-import { describe, expect, it } from 'vitest';
+import { writeFileSync } from 'node:fs';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { run } from '../src/app.ts';
 import { GhGitHub, GitHubError, ghAt, type Gh } from '../src/github.ts';
 
@@ -45,5 +49,31 @@ describe('gh failures', () => {
     expect(await run(['--list'], { mcp, ws, github }, (s) => { out += s; })).toBe(1);
     expect(out).not.toContain('no GitHub remote');
     expect(out).toContain('queue-runner\n  C:/q\n  gh failed: gh repo view failed (4) in C:/q: To get started');
+  });
+});
+
+describe("gh's output is read whole, however long", () => {
+  let dir: string;
+  beforeEach(async () => { dir = await mkdtemp(join(tmpdir(), 'qr-gh-')); });
+  afterEach(async () => { await rm(dir, { recursive: true, force: true }); });
+  // gh played by node: it prints `out` whatever it's asked
+  const printing = (out: unknown) => {
+    const file = join(dir, `out-${Math.random()}.json`);
+    writeFileSync(file, JSON.stringify(out));
+    return ghAt(process.execPath, ['-e', `process.stdout.write(require('fs').readFileSync(${JSON.stringify(file)}))`]);
+  };
+
+  it('two pages of 100 passing check runs with long summaries, over 1 MiB together, pass the gate', async () => {
+    // the same pages answer both reads, so each carries an empty `statuses` too
+    const page = (k: number) => ({ total_count: 200, statuses: [], check_runs: Array.from({ length: 100 }, (_, i) => ({
+      name: `check ${k}-${i}`, status: 'completed', conclusion: 'success', output: { summary: 'x'.repeat(6000) } })) });
+    const gh = new GhGitHub(printing([page(1), page(2)]), here);
+    expect(await gh.checks('o/r', 'abc')).toEqual({ state: 'passed', pending: [], failed: [] });
+  });
+
+  it("a PR's comments over 1 MiB are every one read", async () => {
+    const comments = Array.from({ length: 300 }, (_, i) => ({ user: { login: 'a' }, created_at: `t${i}`, body: 'y'.repeat(5000) }));
+    const gh = new GhGitHub(printing([comments.slice(0, 100), comments.slice(100, 200), comments.slice(200)]), here);
+    expect((await gh.issueComments('o/r', 1)).length).toBe(300);
   });
 });

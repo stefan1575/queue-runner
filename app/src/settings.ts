@@ -22,6 +22,9 @@ export type Settings = {
   repos: Record<string, RepoChoice> | null;
   /** Whether Setup has been shown: it opens by itself on the app's first start only (#162). */
   setupSeen: boolean;
+  /** The T3 provider instances (`instanceId`s) set up without outside tools: the only ones a
+   *  review launches on (#155, docs/reviews.md). Empty: no review runs. */
+  toolFreeInstances: string[];
 };
 
 /** Who merges a served repo's clean PRs. */
@@ -31,7 +34,7 @@ export type Merger = 'runner' | 'me';
 export type RepoChoice = { served: boolean; merge: Merger; seen: boolean };
 export type SettingsPatch = Partial<Settings>;
 
-export const DEFAULT_SETTINGS: Settings = { name: null, dateStyle: 'month-first', startWithWindows: true, jobs: DEFAULT_JOBS, shares: {}, repos: null, setupSeen: false };
+export const DEFAULT_SETTINGS: Settings = { name: null, dateStyle: 'month-first', startWithWindows: true, jobs: DEFAULT_JOBS, shares: {}, repos: null, setupSeen: false, toolFreeInstances: [] };
 
 /** A change the page never offers: an unknown key or a value of the wrong kind. */
 export class SettingsError extends Error {}
@@ -59,6 +62,8 @@ const CHECKS: { [K in keyof Settings]: (v: unknown) => Settings[K] | undefined }
   shares: checkShares,
   repos: (v) => repoChoices(v, false),
   setupSeen: (v) => (typeof v === 'boolean' ? v : undefined),
+  toolFreeInstances: (v) => (Array.isArray(v) && v.every((x) => typeof x === 'string' && x.trim() !== '')
+    ? [...new Set(v.map((x: string) => x.trim()))] : undefined),
 };
 const KEYS = Object.keys(CHECKS) as (keyof Settings)[];
 

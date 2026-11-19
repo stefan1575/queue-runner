@@ -49,7 +49,7 @@ class RoomyGate {
   pick(id: string) { this.calls.push(`pick ${id}`); return { fits: true as const, ...this.admits, cost: { five_hour: 10 } }; }
   reading() { return { checkedAt: null, windows: {} }; }
   started(job: { id: string }) { this.calls.push(`started ${job.id}`); }
-  finished(id: string) { this.calls.push(`finished ${id}`); }
+  finished(id: string, limit?: { resetAt: string | null }) { this.calls.push(`finished ${id}${limit ? ` out of usage until ${limit.resetAt}` : ''}`); }
   dropped(id: string) { this.calls.push(`dropped ${id}`); }
   forget() {}
 }
@@ -128,6 +128,15 @@ describe('picking and launching', () => {
     expect(launch.message).toContain("Read the repo's `AGENTS.md` first");
     expect(launch.message).not.toMatch(/\bskills?\b|~\/|\b[A-Za-z]:[\\/]|evidence\.py/i);
     expect(lane.running()).toEqual(['p-app']);
+  });
+
+  test('a setting changed after the gate let the build in leaves it on the model let in', async () => {
+    gh.ready['owner/app'] = [issue(11)];
+    const other = { provider: 'codex', model: 'gpt-6.2-sol', effort: 'high' };
+    git.fetch = async () => { jobs = { ...jobs, build: { own: other, fallback: null } }; };
+    await makeLane().pass();
+    expect(t3.launches[0].modelSelection).toMatchObject({ instanceId: 'claudeAgent', model: 'claude-opus-5-5' });
+    expect(log.jobs()[0]!.choice).toEqual(BUILD);
   });
 
   test("an unserved repo's tickets are never picked", async () => {
@@ -252,6 +261,17 @@ describe('picking and launching', () => {
 });
 
 describe('the end', () => {
+  test("a usage-limit end tells the gate its provider is out until T3's reset (#155 F22)", async () => {
+    gh.ready['owner/app'] = [issue(5)];
+    const gate = new RoomyGate();
+    await makeLane({ gate: gate as any }).pass();
+    await watching('thread-1');
+    t3.hitUsageLimit('thread-1', '2026-11-19T15:00:00.000Z');
+    await lane.idle();
+    const [job] = log.jobs();
+    expect(gate.calls).toContain(`finished ${job!.id} out of usage until 2026-11-19T15:00:00.000Z`);
+  });
+
   test("a thread's end arrives as a T3 event and is recorded; then the thread is settled", async () => {
     gh.ready['owner/app'] = [issue(5)];
     gh.pullsFromBranch['owner/app:claude/ticket-number-5-5'] = { number: 77, url: 'https://github.com/owner/app/pull/77', state: 'open' };
@@ -390,6 +410,16 @@ describe('the end', () => {
     expect(t3.launches).toHaveLength(1);
     await lane.answered(job!.id); // its pass waits for the launch
     expect(t3.launches.map((l) => l.title)).toEqual(['Queue runner build: app#5', 'Queue runner build: app#6']);
+  });
+
+  test('a review that needs the user holds builds in its repo too, and only there', async () => {
+    gh.ready['owner/app'] = [issue(5)];
+    const review = await log.started({ kind: 'review', repo: 'p-app', github: 'owner/app', issue: 4, branch: 'claude/x-3', base: 'main', title: 'Queue runner review: app#4', choice: BUILD, onFallback: false });
+    await log.ended(review.id, { outcome: 'needs-user', error: 'lost' });
+    await makeLane().pass();
+    expect(t3.launches).toEqual([]);
+    await lane.answered(review.id);
+    expect(t3.launches.map((l) => l.title)).toEqual(['Queue runner build: app#5']);
   });
 
   test("a launch that never reached T3's tool call is not-started: nothing can have begun", async () => {

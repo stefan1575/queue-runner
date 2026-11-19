@@ -31,6 +31,7 @@ import { settles, type Job, type JobEnd, type JobLog } from './job-log.ts';
 import type { Catalog, Jobs } from './jobs.ts';
 import { launchJob } from './launch.ts';
 import { pick, type BuildTicket } from './picker.ts';
+import { ThreadSettler } from './settle.ts';
 import type { Repo } from './repos.ts';
 import type { Retry } from './t3/project-feed.ts';
 import type { T3Mcp } from './t3/mcp.ts';
@@ -83,8 +84,7 @@ export class BuildLane {
   private d: BuildLaneDoors;
   private building = new Map<string, Promise<Job>>();
   private watches = new Set<{ stop(): void }>();
-  /** Settles under way, by job id. */
-  private settling = new Map<string, Promise<void>>();
+  private settler: ThreadSettler;
   /** PR lookups owed after one failed, under way, by job id. */
   private lookingUp = new Map<string, Promise<void>>();
   private resting = new Map<string, number>();
@@ -99,6 +99,7 @@ export class BuildLane {
   constructor(doors: BuildLaneDoors) {
     this.d = doors;
     this.now = doors.now ?? (() => new Date());
+    this.settler = new ThreadSettler(doors.mcp, doors.log, doors.say);
   }
 
   /** Watches again each build the log shows open and settles each one it shows ended and not
@@ -136,8 +137,8 @@ export class BuildLane {
 
   /** Settles once every build under way has ended and been recorded (the tests wait on it). */
   async idle(): Promise<void> {
-    while (this.building.size || this.passing || this.settling.size || this.lookingUp.size) {
-      await Promise.allSettled([...this.building.values(), this.passing, ...this.settling.values(), ...this.lookingUp.values()]);
+    while (this.building.size || this.passing || this.settler.pending().length || this.lookingUp.size) {
+      await Promise.allSettled([...this.building.values(), this.passing, ...this.settler.pending(), ...this.lookingUp.values()]);
     }
   }
 
@@ -166,7 +167,7 @@ export class BuildLane {
   private async passOnce() {
     // an end recorded and not settled: left by an app that stopped between the two, or a settle
     // that failed; tried each pass, on its own (a thread left in the sidebar holds no build)
-    for (const job of this.d.log.toSettle()) if (job.kind === 'build') void this.settle(job);
+    this.settler.owed('build');
     // a done build whose PR lookup failed: looked up again each pass, a restart's first included
     for (const job of this.d.log.prOwed()) if (job.kind === 'build') void this.lookUp(job);
     const now = this.now().getTime();
@@ -258,9 +259,9 @@ export class BuildLane {
       if (!isServed(this.d.repos(), repo)) return await notStarted('not-started', `${repo.title} is no longer served`);
       this.d.say(`Starting ${job.title} on ${ticket.branch} from ${ticket.base}`);
       try {
-        launched = await launchJob(this.d.mcp, this.d.jobs(), catalog, {
+        launched = await launchJob(this.d.mcp, catalog, {
           kind: 'build', projectId: repo.id, title: job.title, brief,
-          worktree: { baseRef: ticket.base, branch: ticket.branch }, onFallback: letIn.onFallback, choice: letIn.choice,
+          worktree: { baseRef: ticket.base, branch: ticket.branch }, choice: letIn.choice,
         });
       } catch (e) {
         // sent and its answer lost: T3 may have started the thread, and nothing says which one
@@ -315,7 +316,7 @@ export class BuildLane {
     } finally {
       this.watches.delete(w);
     }
-    this.d.gate.finished(job.id);
+    this.d.gate.finished(job.id, end.outcome === 'usage-limit' ? { resetAt: end.resetAt } : undefined);
     const record: JobEnd = { outcome: end.outcome as JobEnd['outcome'], status: end.status };
     if (end.outcome === 'done' && github) {
       // a job may open its PR and stop after; done without one is done-no-pr. A lookup that
@@ -334,7 +335,7 @@ export class BuildLane {
     this.d.say(`${job.title} ended: ${record.outcome}${record.pr ? `, PR #${record.pr.number}` : ''} ${job.link ?? job.threadId}`);
     // recorded first, then settled (story 5); a question or a usage limit is a later ticket's.
     // Stopped between the two, the next start settles it (the log has no settled line)
-    if (settles(record.outcome)) await this.settle(job);
+    if (settles(record.outcome)) await this.settler.settle(job);
     return ended;
   }
 
@@ -354,31 +355,5 @@ export class BuildLane {
     })().finally(() => this.lookingUp.delete(job.id));
     this.lookingUp.set(job.id, l);
     return l;
-  }
-
-  /** Settles a thread this app launched, and records it; once at a time per job, and not again
-   *  once recorded. A failure is said, never raised: a thread left in the sidebar stops no lane,
-   *  and the next pass tries it again. */
-  private settle(job: Job): Promise<void> {
-    const under = this.settling.get(job.id);
-    if (under) return under;
-    if (this.d.log.get(job.id)?.settledAt) return Promise.resolve();
-    const s = this.settleOnce(job).finally(() => this.settling.delete(job.id));
-    this.settling.set(job.id, s);
-    return s;
-  }
-
-  private async settleOnce(job: Job) {
-    try {
-      await this.d.mcp.call('t3_thread_organize', { threadId: job.threadId, action: 'settle' });
-    } catch (e) {
-      this.d.say(`${job.title}: settling its thread ${job.threadId} failed (${(e as Error).message}); left as it is, tried again next pass`);
-      return;
-    }
-    try {
-      await this.d.log.settled(job.id);
-    } catch (e) {
-      this.d.say(`${job.title}: its settle couldn't be recorded (${(e as Error).message}); it's settled again next pass`);
-    }
   }
 }

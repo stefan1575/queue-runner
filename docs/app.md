@@ -9,7 +9,8 @@ Repositories, below), knows which model does each kind of job and launches it (#
 models, below), gates every job on its provider's usage, keeping your share of each week
 (#153; Usage, below), has a Setup page that says what's missing before it can work (#162; Setup,
 below), ships as a Windows installer built by CI on a version tag (#164; The installer,
-below), and builds a served repo's next ticket into a PR (#154; Builds, below).
+below), builds a served repo's next ticket into a PR (#154; Builds, below), and reviews every
+open PR on its newest commit, posting the review with its ledger (#155; Reviews, below).
 
 ## Run it
 
@@ -20,6 +21,7 @@ pnpm --dir app live:sign-in       # the live sign-in check (Live checks, below)
 pnpm --dir app live:launch        # the live launch check, sandbox only (Live checks, below)
 pnpm --dir app live:usage         # each provider's usage as the app reads it; acts on no project
 pnpm --dir app live:build         # the live build check, sandbox only (Live checks, below)
+pnpm --dir app live:review        # the live review check, GitHub sandbox, dry run (Live checks, below)
 pnpm --dir app desktop            # builds and opens the desktop app (The desktop app, below)
 pnpm --dir app installer          # builds the Windows installer into installer-dist/ (The installer, below)
 ```
@@ -75,8 +77,8 @@ the real clock or runs on a real timer that no `vi.useFakeTimers()` around it fa
   (`afterEach` with `rm(..., {recursive: true, force: true})`).
 - **The Python runner keeps serving Stefan's repos until the cutover ticket.** The app acts only
   on projects switched to Served (Repositories ticket), and until the cutover only the sandbox
-  project ("queue-runner sandbox") and the GitHub sandbox `stefan1575/queue-runner-sandbox` are
-  ever switched on, by live checks.
+  project ("queue-runner sandbox") and the GitHub sandbox `stefan1575/queue-runner-sandbox` (its
+  T3 project "queue-runner sandbox GitHub") are ever switched on, by live checks.
 - **Port, don't redesign.** Today's runner and its docs (`docs/flow.md`, `docs/claude-lane.md`,
   `docs/reviews.md`, `docs/stops.md`, `docs/usage.md`, `docs/dashboard.md`) are the behaviour to
   port, with #68's changes on top. A rule you'd change is a comment on #68, not a quiet change.
@@ -244,8 +246,10 @@ Which model does each kind of job (#152: #120's shape on #36's page, as the 2026
   model doesn't offer is the model's default.
 - **Launching** (`launchJob`): `t3_thread_launch` with `{projectId, title, message, runtimeMode:
   full-access, modelSelection: {instanceId, model, options: [{id: <the model's effort option>,
-  value}]}, workspaceStrategy?: {type: worktree, baseRef, branch}}`, on the kind's model or,
-  asked, its fallback (docs/t3.md: Codex ignores `effort`, so the id matters).
+  value}]}, workspaceStrategy?: {type: worktree, baseRef, branch}}`, on the choice the usage gate
+  let in (the kind's model or its fallback), never the settings read again: a setting changed
+  after the gate answered can't move the job. A choice T3 can't run by then launches nothing
+  (docs/t3.md: Codex ignores `effort`, so the id matters).
 - **The page** (Settings, Models): Default, then one row per kind, each "Follows Default" until
   set (an undo goes back), with its fallback under its model. The three dropdowns are fixed
   widths, so changing a provider moves nothing (#36). Models carries a blue count in the page
@@ -290,7 +294,13 @@ tickets but the build lane (Builds, below); the tests drive it on fake T3's even
   one reason (`holdText`: "Claude's 5-hour window resets at 14:20; this build needs about 60%").
   No reading to decide on (none, one from before the last job on that login ended, or one over 30
   minutes old) holds it until T3's next. A provider T3 reports `unsupported` for is ungated, as
-  #122 had it.
+  #122 had it. A job that ends on its provider's usage limit (a build's `usage-limit`, a review's
+  `out-of-usage`) holds that provider, gated or not, until the reset T3 gave plus two minutes, or
+  an hour when T3 gave none, so the next job of the kind goes to its fallback (#155 F22). A reading
+  T3 takes after the hold began decides instead, and one with room ends it, so a reset credit
+  sends jobs back to the provider (#155 F25); a provider T3 reads no usage for has no such
+  reading and stays held to the reset. A start restores these holds from the job log's ends
+  (`UsageGate.limitsFrom`), under the same rule.
 - **Which model** (`UsageGate.pick`): the kind's own; while that doesn't fit, its fallback if it
   has one and that fits (#152); else held with its own model's reason. `holds()` keeps each held
   job's reason and since when, for the dashboard.
@@ -392,6 +402,117 @@ builds (`docs/flow.md`, `docs/claude-lane.md`). `src/build-lane.ts`, `src/picker
   needs the user, as a lost launch answer does (After a restart, don't guess, above): no thread
   is adopted for it, and its repo starts nothing until the user answers.
 - **The app's log** is its console for now (`say`): a line per start, hold, end and failure.
+
+## Reviews
+
+The review half of the loop (#155; `docs/flow.md` The review loop, `docs/reviews.md`, ported):
+every open PR in a served repo without a review on its newest commit gets one, whoever opened it.
+`src/review-lane.ts`, `src/review/ledger.ts`, `src/review/post.ts`, `src/briefs/review.ts`,
+`src/review/deps.ts`, `src/t3/thread-reply.ts`, the review half of `src/git.ts` and `src/github.ts`.
+
+- **Adoption** (`ReviewLane.whyNot`, cheapest first): not while a build writes to the PR's branch
+  (open, waiting on a question, or cut off by a usage limit); not once the app reviewed its head H
+  (`clean`, `blocking`, `stop`, `approach-note` in the job log); not after two failed reviews on H;
+  not while one of the app's own review comments is on H already; and only once H's checks
+  passed, `sol-review` not counted (`checks`: check runs and commit statuses). Why not is said once
+  per PR. Lowest number first, repo by repo. Conflicts aren't looked at: GitHub runs no
+  `pull_request` checks on a PR that conflicts, so it waits on its checks (#157 adds conflict
+  rounds). Stops (#158) aren't filed yet: a `stop` or `approach-note` is recorded and posted, and
+  nothing more happens.
+- **One review at a time** (#106 runs them at once later). Each asks the usage gate
+  (`UsageGate.pick`, kind `review`): the kind's own model, or its fallback while that provider has
+  no room (#69); held, it says the gate's reason once and the pass ends. A pass runs at start (after
+  an open review is carried on with), on T3's usage and the repos changing, after each review
+  (but not after one whose head moved, so a stale list can't loop it), and every minute.
+- **No outside tools** (`docs/reviews.md`, A review has no outside tools): a review runs only on
+  a T3 provider instance the user named as set up without them, the `toolFreeInstances` setting
+  (instance ids; empty on a new install, so no review runs until one is named), as today's
+  fallback reviews run only on the instance `[review]` names (#127: `claudeReviewer`). T3 serves
+  each instance's launch arguments (`subscribeServerConfig`'s `settings.providerInstances`, seen
+  live 2026-11-19), but reading them would name a driver in code, so the list is the user's word.
+  `launchJob` enforces it for every review, the lane's and the live check's alike, and fails
+  closed: a review on an instance not listed, or on the one builds run on, launches nothing. The
+  rule is one function, `noToolsRefusal` (`src/launch.ts`), which the lane, `launchJob` and the
+  live check all ask; the list it takes is always the saved setting, never derived from the
+  review's own choice. The lane asks first, so such a
+  review waits and says why rather than failing; nor does one run on the instance builds run on,
+  which has their tools, whatever the list says. The setting is in `settings.json` only, not yet
+  on the Settings page; a Codex instance for reviews needs its MCP servers off in T3 (codex-sol.sh
+  did that). Setting one up and listing it is the cutover's.
+- **The checkout:** the PR's head is fetched into `refs/queue-runner/pr<n>` with `origin/<base>`
+  (a head that moved since listing is `head-moved`, nothing counts), and checked out detached at
+  `<state>/checkouts/<repo>-pr<n>`, its dependencies linked in from `<state>/deps/`
+  (`src/review/deps.ts`: one `npm ci` or `bun install --frozen-lockfile` per lockfile key, the
+  three newest kept per repo). It's removed after the review, `node_modules` unlinked first.
+- **The thread:** `launchJob` with kind `review`, its working folder the checkout of H (T3's
+  `workspaceStrategy: {type: existing_worktree, worktreePath}`: the checkout is a worktree of the
+  project's repo), titled `Queue runner review: <project>#<n>`. The brief (`src/briefs/review.ts`,
+  `templates/review.md` and today's `_brief`) names the checkout too, leaves the project's clone
+  alone, and asks for no posts, no questions and tests in the foreground. Its inputs are in `<state>/runs/<repo>-pr<n>-r<K>-<time>/`, as today's: the diffs,
+  `pr.md`, each closed issue with its comments, `conversation.md`, `evidence/`. Its end comes
+  from T3's thread events (Builds); its reply is the run's last assistant message, read whole
+  through `t3_thread_read` (`view: messages`, paged, then `textOffset` while truncated; T3's CLI's
+  `runResultText`). A read that fails (T3 or GitHub busy a moment) is asked again after a wait,
+  never taken as no reply, and so is one T3 cuts short: a continuation or a later message page
+  that comes back empty, a page short of its limit that says there's more (T3 fills every page
+  that does, #155 F20), or "more" with no position or offset to go on from, is read again, never taken as the reply's end; a reply that comes back empty is read again, and only three empty reads
+  in a row are the thread's own. A question, a failure or that empty reply fails the review; a
+  usage limit is `out-of-usage` and the next review waits on the gate. A step before the launch
+  that fails (a git, GitHub or T3 step, a launch T3 refused, or the repo no longer served when it's
+  asked again right before the launch) launched nothing: `not-started`, which doesn't count
+  against H, and the PR rests 5 minutes.
+- **Decide and post** (`src/review/ledger.ts`, `src/review/post.ts`, today's `ledger.py` and
+  `post.py`): the verdict from the reply's last `sol-findings` block; clean means no Important
+  finding open. **What blocks** (#155): an Important finding needs its file and line and how it
+  comes up in real use (its `scenario`), or, for a problem that isn't a bug, a cost and the rule
+  it breaks; one without is read as a nit. The brief tells the reviewer a bug that needs a made-up
+  situation is a nit. A missing or thin screenshot is a nit: the reviewer marks that finding
+  `"missing_screenshot": true`, and only the mark counts, never its wording (F16); a shot that shows the screen
+  wrong is Important, and text-only output needs none. Then each new Pre-existing finding filed once as a `needs-triage` issue, the
+  comment (its visible ledger and hidden marker), `sol-review` on H only, and a row in the app's
+  Review table in the PR body, on every repo (#36): Step (the comment's link), Reviewer, Time,
+  Commit, Verdict. The comment and the Reviewer cell name who reviewed: the model and effort as T3 labels
+  them, and on the fallback `, fallback while <provider> is out of usage` (`reviewerName`). gh writes send their JSON on stdin (`--input -`). A comment
+  that fails to post is posted again after a wait, unless the PR's comments show it got there
+  after all. Once the comment is on the PR, the status and the row are tried again after each
+  wait until both land, the job left open meanwhile: a stop or a restart carries on there, finds
+  the comment posted, and sets them (F14). The run folder keeps `brief.md`, `reply.md`, `comment.md`, `decision.json`.
+- **It starts clean** (#155): the app reads only what it posted itself. Its review comments carry
+  their own marker (`<!-- queue-runner-app review round=N verdict=V sha=H findings=<base64> -->`);
+  the Python runner's and the old script's (`<!-- sol-pr-review`) and hand-posted ones
+  (`<!-- sol-review`) are never read, so a PR one of them reviewed gets a fresh review 1 (they
+  still count as the runner's posts, not something a person said). Its Review table sits between
+  `<!-- queue-runner-app review-table -->` and `<!-- /queue-runner-app review-table -->`, and only
+  that table is ever changed: a body without it gets one at the end of its `## Review` section
+  (below the Python runner's table, which is left as it is), or a new section after `## Evidence`.
+  Markers and headings inside a fenced block are only text. A follow-up issue is known as the
+  app's by its own mark (`<!-- queue-runner-app finding <repo>#<n> <id> -->`) or the same title,
+  never by another runner's footer, whose finding IDs are its own reviews'.
+  Each is filed before the comment, and a filing that fails (or open issues that can't be read)
+  holds the comment back: the post is tried again after the wait, as a comment that fails to post
+  is, and on a restart, so a review never finishes with a follow-up unfiled (#155 F24). The
+  ledger's `unfiled` is the Python runner's and older comments' only.
+- **The job log:** kind `review`, `issue` the PR, with `sha`, `round`, `reviewer`, the `cost` it
+  was let in at, its `runDir`, its `checkout` and the repo's `folder`; its end `clean`, `blocking`,
+  `stop`, `approach-note` (with `verdict`, `signals`, `link`), `failed`, `out-of-usage`,
+  `head-moved`, `not-started` or `needs-user`. Once the end is recorded the thread is settled, whatever the end
+  (nobody answers a review thread), with the builds' settle (`src/settle.ts`: a `settled` line,
+  and an end with none settled on the next pass).
+- **After a restart, don't guess** (as Builds): a review the log shows open whose thread id was
+  saved carries on with that thread, before any other review starts: watched to its end, its reply
+  read, decided and posted from its start line and the run folder's `review.json` (what deciding
+  needs that the start line doesn't hold), its checkout removed and its thread settled. One posted
+  before the app stopped (the app's own comment for its round and H is on the PR) is recorded, not
+  posted again; its `sol-review` is set again and its row added if the body lacks it. One with no saved thread id (the app stopped before T3 named it) and a launch whose
+  answer was lost (`NoAnswer`) end `needs-user`: no thread is ever matched to it by title, branch,
+  project or anything listed in T3, its checkout stays for the thread T3 may have started, and its
+  repo starts nothing, review or build, until the user answers (`ReviewLane.answered`; the Inbox
+  ticket asks). A start line without a run folder (an earlier app's) has its thread watched to
+  its end and counts `failed`.
+- **The review lane and the build lane** share the repo's one ticket at a time (#179): the build
+  lane starts nothing while a PR is open, and the review lane reviews that PR; a review waits while
+  a build writes to its branch, and a job of either lane that needs the user holds both.
+- **Not yet:** merging a clean review and fix rounds (#156), conflict rounds (#157), stops (#158).
 
 ## Setup
 
@@ -573,6 +694,34 @@ is killed is code -1 with Node's reason in stderr, never a gh exit code (so is t
   asked. It checks the end was `done`, the branch is on `origin`, the thread ran in its own
   worktree on the job branch on the asked model, and it was settled. **Run 2026-11-19** on Haiku
   5.5 at low: all ok, in about 20 seconds.
+- `app/live/review.ts` (`pnpm --dir app live:review -- (--pr N | --open-pr) --run
+  <instance>:<model> [--state <folder>]`): today's `scripts/live_review.py` for the app, dry run. One real review of
+  one open PR in `stefan1575/queue-runner-sandbox` only (it refuses another clone), through
+  `ReviewLane.review` with a `DryRunPoster`, after saying what adoption would decide (the sandbox
+  has no CI, so it reviews anyway). The review runs in the one T3 project whose folder is a clone of
+  the GitHub sandbox, found by that remote, not by title (it refuses none or several; #155 F21):
+  "queue-runner sandbox GitHub", at `~/.queue-runner/gh-sandbox/repo`, set up by hand like the build
+  check's. The build check's "queue-runner sandbox" (a local bare origin) is never it. Its checkout of the head is a worktree of that
+  folder, removed at the end: T3 binds `existing_worktree` only to one of the project's own `git
+  worktree list` paths (its launch's `assertProjectWorktree`, read in the installed server
+  2026-11-19), so a checkout of a clone elsewhere is refused before a review starts (#155 F18).
+  When T3 refuses the launch anyway, the check prints `T3 didn't start the review:` and its reason. `--pr N` reviews that
+  PR and writes nothing to GitHub. `--open-pr` instead opens a small PR of its own (one function
+  with an off-by-one), which writes to GitHub: it pushes a branch and opens the PR, then closes it
+  and deletes the branch at the end. With neither (or both) it prints its usage and does nothing.
+  `--run` is required (T3's default may have every tool, so there's none by default), and naming
+  an instance there doesn't make it tool-free: the check reads the desktop app's saved settings
+  (the state folder `%APPDATA%/Queue runner/machine.json` names, Electron's `userData` for the
+  app's productName, or `--state <folder>`) and refuses, before it reads GitHub, an instance not
+  in its `toolFreeInstances` or the one its builds run on. Seen 2026-11-19 with an empty
+  `--state`: `refusing: the review would run on claudeAgent, which isn't one of the instances set
+  up without outside tools`, exit 2. It checks a
+  verdict was read from the ledger, the comment names its reviewer, nothing was posted and no
+  `sol-review` set, the thread ran on the asked model and was settled, and the checkout is gone.
+  **Run 2026-11-19** on `claudeReviewer` Haiku 5.5 at low: all ok, sandbox #4 reviewed blocking in
+  about 30 seconds (F1, the loop bound, shown by running the function). **Run again 2026-11-19**
+  with `--pr 5` after review 1's fixes, same model: all ok, blocking; with no flags it printed its
+  usage and did nothing.
 - `app/live/usage.ts` (`pnpm --dir app live:usage [-- --minutes N]`): acts on no project. It
   subscribes to T3's server config and prints each connected provider's windows as the app reads
   them, then each `providerStatuses` event that changes one, for N minutes (5 by default). **Run

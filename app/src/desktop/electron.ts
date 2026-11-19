@@ -15,6 +15,8 @@ import { CostLog } from '../cost-log.ts';
 import { GitCli } from '../git.ts';
 import { GhGitHub, ghCli } from '../github.ts';
 import { JobLog } from '../job-log.ts';
+import { Deps } from '../review/deps.ts';
+import { ReviewLane } from '../review-lane.ts';
 import { UsageGate } from '../usage-gate.ts';
 import { windowsPlatform } from '../platform/windows.ts';
 import { checkJobs, DEFAULT_JOBS } from '../jobs.ts';
@@ -117,11 +119,19 @@ async function main() {
   // The build lane (docs/app.md, Builds): served repos only; until the cutover only the sandboxes
   // are ever served (Rules).
   const gate = new UsageGate(catalog, () => settings.get(), await CostLog.open(join(state, 'usage.jsonl')));
+  const log = await JobLog.open(join(state, 'jobs.jsonl'));
+  gate.limitsFrom(log.jobs()); // a provider the last run saw run out stays held until its reset
+  const say = (line: string) => console.log(`${new Date().toISOString()} ${line}`);
+  const user = async () => briefName(view.get()) ?? 'the user';
   const lane = new BuildLane({
     repos: () => servedRepos(repos.list()), github, git: new GitCli(), mcp: t3Doors!.mcp, ws: t3Doors!.ws, gate,
-    catalog: () => catalog.current().catalog, jobs: () => settings.get().jobs,
-    user: async () => briefName(view.get()) ?? 'the user', log: await JobLog.open(join(state, 'jobs.jsonl')),
-    exists: existsSync, say: (line) => console.log(`${new Date().toISOString()} ${line}`),
+    catalog: () => catalog.current().catalog, jobs: () => settings.get().jobs, user, log, exists: existsSync, say,
+  });
+  // The review lane (docs/app.md, Reviews): every open PR in a served repo, one review at a time.
+  const reviews = new ReviewLane({
+    repos: () => servedRepos(repos.list()), github, git: new GitCli(), deps: new Deps(join(state, 'deps')),
+    mcp: t3Doors!.mcp, ws: t3Doors!.ws, gate, catalog: () => catalog.current().catalog, jobs: () => settings.get().jobs,
+    toolFree: () => settings.get().toolFreeInstances, user, log, stateDir: state, say,
   });
 
   const shell: Shell = {
@@ -163,6 +173,13 @@ async function main() {
       if (key !== servedKey) { servedKey = key; void lane.pass(); }
     });
     setInterval(() => void lane.pass(), 5 * 60_000);
+  });
+  // An open review the log shows is carried on with first; then a pass on each change that may
+  // let one start, and every minute for PRs and their checks, as today's runner polls them.
+  void reviews.start().then(() => {
+    gate.onChange(() => reviews.usageChanged());
+    repos.onChange(() => void reviews.pass());
+    setInterval(() => void reviews.pass(), 60_000);
   });
   view.onChange((v) => win?.webContents.send(CHANNELS.changed, v));
   // The window only hides; the app lives in the tray until Quit.

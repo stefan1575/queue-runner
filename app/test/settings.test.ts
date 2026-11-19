@@ -6,7 +6,8 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, test } from 'vitest';
 import { DEFAULT_JOBS } from '../src/jobs.ts';
 import { DEFAULT_SETTINGS, SettingsError, SettingsStore } from '../src/settings.ts';
-import { stateFolder } from '../src/state-folder.ts';
+import { existsSync } from 'node:fs';
+import { savedStateFolder, stateFolder } from '../src/state-folder.ts';
 import { memoryFiles } from './memory-files.ts';
 
 let dirs: string[] = [];
@@ -41,13 +42,28 @@ describe('the state folder', () => {
     await writeFile(machine, '{not json');
     expect(() => stateFolder(machine, join(d, 'state'))).toThrow(/machine\.json/);
   });
+
+  test("a check beside the app reads the app's machine file, and never writes one", async () => {
+    const d = await temp();
+    const machine = join(d, 'machine.json');
+    expect(() => savedStateFolder(machine)).toThrow(/start the desktop app once/);
+    expect(existsSync(machine)).toBe(false);
+    await writeFile(machine, JSON.stringify({ stateFolder: join(d, 'elsewhere') }));
+    expect(savedStateFolder(machine)).toBe(join(d, 'elsewhere'));
+  });
 });
 
 describe('the settings', () => {
   test('a new install has the defaults', async () => {
     const store = await SettingsStore.open(await temp());
     expect(store.get()).toEqual(DEFAULT_SETTINGS);
-    expect(DEFAULT_SETTINGS).toEqual({ name: null, dateStyle: 'month-first', startWithWindows: true, jobs: DEFAULT_JOBS, shares: {}, repos: null, setupSeen: false });
+    expect(DEFAULT_SETTINGS).toEqual({ name: null, dateStyle: 'month-first', startWithWindows: true, jobs: DEFAULT_JOBS, shares: {}, repos: null, setupSeen: false, toolFreeInstances: [] });
+  });
+
+  test('the tool-free instances are a list of instance ids; anything else is refused', async () => {
+    const store = await SettingsStore.open(await temp());
+    expect((await store.set({ toolFreeInstances: [' reviewer ', 'reviewer', 'other'] })).toolFreeInstances).toEqual(['reviewer', 'other']);
+    for (const bad of ['reviewer', [''], [3], null]) await expect(store.set({ toolFreeInstances: bad as any })).rejects.toThrow(SettingsError);
   });
 
   test("kept in the files it's given, a test's in-memory folder as well as the disk", async () => {

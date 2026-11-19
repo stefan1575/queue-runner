@@ -108,6 +108,90 @@ describe('every job waits for room in its own provider', () => {
     if (!held.fits) expect(held.until?.toISOString()).toBe('2026-11-18T20:54:50.000Z');
   });
 
+  test("a review that ran out of usage on a provider T3 reads no usage for holds it until the reset: the next goes to the fallback (#155 F22)", async () => {
+    await t3Reads('2026-11-18T19:06:00Z', () => {
+      window('claudeAgent', 'five_hour').usedPercent = 10;
+      providers.find((p) => p.instanceId === 'codex').usageLimits = { checkedAt: null, windows: [], unavailable: { reason: 'unsupported' } };
+    });
+    now = new Date('2026-11-18T19:06:30Z');
+    jobs({ review: { own: SOL, fallback: OPUS } });
+    const first = gate.pick('review a#1', 'review');
+    expect(first).toMatchObject({ fits: true, choice: SOL }); // ungated
+    gate.started({ id: 'r1', kind: 'review', choice: SOL }, {});
+    gate.finished('r1', { resetAt: '2026-11-18T21:00:00.000Z' });
+    expect(gate.pick('review a#2', 'review')).toMatchObject({ fits: true, choice: OPUS, onFallback: true });
+    jobs({ review: { own: SOL, fallback: null } });
+    const held = gate.pick('review a#2', 'review');
+    expect(held).toMatchObject({ fits: false, hold: { why: 'limit', provider: 'Codex', at: '2026-11-18T21:00:00.000Z' } });
+    if (!held.fits) {
+      expect(held.until?.toISOString()).toBe('2026-11-18T21:02:00.000Z');
+      expect(holdText(held.hold, (d) => d.toISOString().slice(11, 16))).toBe('a job on Codex ran out of usage; it resets at 21:00');
+    }
+    now = new Date('2026-11-18T21:02:00Z');
+    expect(gate.pick('review a#2', 'review')).toMatchObject({ fits: true, choice: SOL });
+  });
+
+  // F25: a reading T3 takes after a usage-limit hold began, with room (a reset credit gave usage
+  // back early), ends the hold; the lanes ask the gate by kind, each with or without a fallback
+  for (const kind of ['build', 'review'] as const) {
+    for (const withFallback of [true, false]) {
+      test(`a ${kind} ${withFallback ? 'with a fallback goes back to its own model' : 'with no fallback stops waiting and starts'} once a fresher reading shows room (#155 F25)`, async () => {
+        await t3Reads('2026-11-18T19:06:00Z', () => {
+          window('claudeAgent', 'five_hour').usedPercent = 10;
+          window('codex', 'primary').usedPercent = 10;
+        });
+        now = new Date('2026-11-18T19:06:30Z');
+        jobs({ [kind]: { own: OPUS, fallback: withFallback ? SOL : null } });
+        gate.started({ id: 'j1', kind, choice: OPUS }, {});
+        gate.finished('j1', { resetAt: '2026-11-19T23:00:00.000Z' });
+        const id = `${kind} a#2`;
+        if (withFallback) expect(gate.pick(id, kind)).toMatchObject({ fits: true, choice: SOL, onFallback: true });
+        else expect(gate.pick(id, kind)).toMatchObject({ fits: false, hold: { why: 'limit' } });
+        await t3Reads('2026-11-18T19:20:00Z', () => { window('claudeAgent', 'five_hour').usedPercent = 5; });
+        now = new Date('2026-11-18T19:20:30Z');
+        expect(gate.pick(id, kind)).toMatchObject({ fits: true, choice: OPUS, onFallback: false });
+      });
+    }
+  }
+
+  test('a fresher reading with no room holds on its own window; a hold restored from the log ends on a reading with room (F25)', async () => {
+    await t3Reads('2026-11-18T19:06:00Z', () => { window('claudeAgent', 'five_hour').usedPercent = 100; });
+    now = new Date('2026-11-18T19:06:30Z');
+    jobs({ build: { own: OPUS, fallback: null } });
+    gate.limitsFrom([{ id: 'j0', kind: 'build', choice: OPUS, startedAt: '2026-11-18T19:00:00.000Z', end: { outcome: 'usage-limit', at: '2026-11-18T19:05:00.000Z', resetAt: '2026-11-19T23:00:00.000Z' } } as any]);
+    expect(gate.pick('build a#1', 'build')).toMatchObject({ fits: false, hold: { why: 'window' } }); // read at 19:06, after the hold began
+    await t3Reads('2026-11-18T19:20:00Z', () => { window('claudeAgent', 'five_hour').usedPercent = 5; });
+    now = new Date('2026-11-18T19:20:30Z');
+    expect(gate.pick('build a#1', 'build')).toMatchObject({ fits: true, choice: OPUS });
+  });
+
+  test('a provider T3 reads no usage for stays held to the reset, whatever T3 reads later (F25)', async () => {
+    const ungated = () => { providers.find((p) => p.instanceId === 'codex').usageLimits = { checkedAt: null, windows: [], unavailable: { reason: 'unsupported' } }; };
+    await t3Reads('2026-11-18T19:06:00Z', ungated);
+    now = new Date('2026-11-18T19:06:30Z');
+    jobs({ review: { own: SOL, fallback: null } });
+    gate.started({ id: 'r1', kind: 'review', choice: SOL }, {});
+    gate.finished('r1', { resetAt: '2026-11-18T21:00:00.000Z' });
+    await t3Reads('2026-11-18T19:20:00Z', ungated);
+    now = new Date('2026-11-18T19:20:30Z');
+    expect(gate.pick('review a#1', 'review')).toMatchObject({ fits: false, hold: { why: 'limit' } });
+  });
+
+  test('a start holds what the job log says ran out of usage; with no reset time, for an hour', async () => {
+    await t3Reads('2026-11-18T19:06:00Z', () => {
+      providers.find((p) => p.instanceId === 'codex').usageLimits = { checkedAt: null, windows: [], unavailable: { reason: 'unsupported' } };
+    });
+    now = new Date('2026-11-18T19:06:30Z');
+    jobs({ review: { own: SOL, fallback: null } });
+    const job = (outcome: string, at: string, resetAt: string | null) => ({ id: at, kind: 'review', choice: SOL, startedAt: at, end: { outcome, at, resetAt } }) as any;
+    gate.limitsFrom([job('clean', '2026-11-18T18:00:00.000Z', null), job('out-of-usage', '2026-11-18T18:30:00.000Z', null)]);
+    const held = gate.pick('review a#1', 'review');
+    expect(held).toMatchObject({ fits: false, hold: { why: 'limit', at: null } });
+    if (!held.fits) expect(held.until?.toISOString()).toBe('2026-11-18T19:30:00.000Z');
+    now = new Date('2026-11-18T19:30:00Z');
+    expect(gate.pick('review a#1', 'review')).toMatchObject({ fits: true, choice: SOL });
+  });
+
   test("a job's cost is measured on T3's first reading after it ends, and the next job of its kind waits for that reading", async () => {
     await t3Reads('2026-11-18T19:06:00Z', () => { window('claudeAgent', 'five_hour').usedPercent = 10; });
     now = new Date('2026-11-18T19:06:30Z');

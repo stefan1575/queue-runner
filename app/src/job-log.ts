@@ -20,9 +20,14 @@ import type { Cost, Reading } from './costs.ts';
 import type { JobKind, ModelChoice } from './jobs.ts';
 
 export type Outcome = 'done' | 'done-no-pr' | 'waiting' | 'usage-limit' | 'failed' | 'branch-exists' | 'not-started'
+  // a review's (#155): H reviewed (its decision), or nothing counts
+  | ReviewedOutcome | 'out-of-usage' | 'head-moved'
   /** T3 may have started its thread, and the app has no id of it (#154, After a restart, don't
    *  guess): its repo starts nothing until the user answers. */
   | 'needs-user';
+/** A review whose comment is on the PR: its head was reviewed. */
+export type ReviewedOutcome = 'clean' | 'blocking' | 'stop' | 'approach-note';
+export const REVIEWED: readonly Outcome[] = ['clean', 'blocking', 'stop', 'approach-note'];
 
 export type JobStart = {
   kind: JobKind;
@@ -36,6 +41,15 @@ export type JobStart = {
   title: string;
   choice: ModelChoice;
   onFallback: boolean;
+  /** A review's: the commit it reviews, its round, and who reviews as its comment names them;
+   *  its run folder, its checkout and the repo's folder that checkout is of, so a review the app
+   *  was cut off from carries on with its thread after a restart. */
+  sha?: string;
+  round?: number;
+  reviewer?: string;
+  runDir?: string;
+  checkout?: string;
+  folder?: string;
   /** What the usage gate let the job in at, and T3's reading it was let in on: a job watched
    *  again after a restart is reserved and measured from these. Absent on a line an older app
    *  wrote, and on a job no gate let in (the live check's). */
@@ -55,6 +69,11 @@ export type JobEnd = {
   resetAt?: string | null;
   /** The question's kind (a waiting end). */
   request?: string;
+  /** A review's: its verdict, why it stops, its comment and its run folder. */
+  verdict?: 'clean' | 'blocking';
+  signals?: string[];
+  link?: string | null;
+  runDir?: string;
 };
 export type Job = JobStart & { id: string; startedAt: string } & Partial<JobThread>
   & { end?: JobEnd & { at: string }; answeredAt?: string; settledAt?: string };
@@ -197,7 +216,7 @@ export class JobLog {
     return this.all.get(id);
   }
 
-  /** Builds started and not ended: left by an app that stopped mid-job, or running now. */
+  /** Jobs started and not ended: left by an app that stopped mid-job, or running now. */
   open(): Job[] {
     return this.jobs().filter((j) => !j.end);
   }

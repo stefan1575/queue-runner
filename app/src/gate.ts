@@ -13,6 +13,8 @@ import { windowCounts, windowName, type ProviderUsage } from './usage.ts';
 export const STALE_AFTER_MS = 30 * 60_000;
 /** A job held to a reset waits this long past it, for T3's next reading. */
 export const AFTER_RESET_MS = 2 * 60_000;
+/** A provider a job ran out of usage on, with no reset time from T3, is held this long. */
+export const LIMIT_UNKNOWN_MS = 60 * 60_000;
 
 export type GateJob = { id: string; kind: JobKind; choice: ModelChoice };
 /** A job running: its login (`ProviderUsage.account`) and its expected cost there, counted whole
@@ -27,6 +29,9 @@ export type Hold =
   | { why: 'share'; kind: JobKind; window: string; kept: number; need: number; at: string | null }
   /** It fits alone but not beside the jobs running there: it waits for one to end. */
   | { why: 'running'; kind: JobKind; window: string; running: number; need: number; jobs: string[] }
+  /** A job on this provider ended on its usage limit: it waits for the reset T3 gave then (#155
+   *  F22). It holds a provider T3 reads no usage for too, which nothing else would. */
+  | { why: 'limit'; kind: JobKind; provider: string; at: string | null }
   /** No reading to decide on: it waits for T3's next one. */
   | { why: 'reading'; provider: string; checkedAt: string | null; stale: 'none' | 'before-end' | 'old' };
 
@@ -97,6 +102,7 @@ export function holdText(h: Hold, when: (d: Date) => string): string {
       ? `T3 hasn't read ${h.provider}'s usage since the last job there ended (last read ${at})`
       : `T3 last read ${h.provider}'s usage at ${at}, over ${STALE_AFTER_MS / 60_000} minutes ago`;
   }
+  if (h.why === 'limit') return `a job on ${h.provider} ran out of usage; ${h.at ? `it resets at ${when(new Date(h.at))}` : 'T3 gave no time it resets'}`;
   const needs = `this ${h.kind} needs about ${pct(h.need)}`;
   if (h.why === 'window') return h.at ? `${h.window} resets at ${when(new Date(h.at))}; ${needs}` : `${h.window} is ${pct(h.used)} used; ${needs}`;
   if (h.why === 'share') return `${pct(h.kept)} of ${h.window} is kept for you${h.at ? ` until ${when(new Date(h.at))}` : ', and T3 gives no time it resets'}; ${needs}`;
