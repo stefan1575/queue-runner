@@ -1,0 +1,39 @@
+# The Time format watcher's tests, 50 times in a row on Windows (#202): they failed CI now and
+# then while they waited on real file timing, so a PR that changes the watcher or its tests shows
+# they still pass every time, not just once. Each run is a fresh Vitest process.
+name: time-format-repeat
+on:
+  pull_request:
+    paths:
+      - .github/workflows/time-format-repeat.yml
+      - app/src/t3/time-format.ts
+      - app/test/time-format.test.ts
+jobs:
+  fifty-runs:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: app
+        shell: bash
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.22.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+          cache-dependency-path: app/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - name: time-format.test.ts, 50 times in a row
+        run: |
+          for i in $(seq 1 50); do
+            echo "::group::run $i of 50"
+            pnpm exec vitest run test/time-format.test.ts || { echo "::error::run $i of 50 failed"; exit 1; }
+            echo "::endgroup::"
+          done
+          echo "50 of 50 runs passed"
