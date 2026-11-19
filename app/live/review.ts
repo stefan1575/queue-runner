@@ -115,6 +115,9 @@ try {
   const pr = (await github.pullsToReview(GITHUB)).find((p) => p.number === n);
   if (!pr) throw new Error(`#${n} is not an open PR in ${GITHUB}`);
   const before = (await github.issueComments(GITHUB, n)).length;
+  // an open sandbox PR may carry sol-review from an earlier review: compared, not expected empty
+  const statuses = () => run(clone, 'gh', 'api', `repos/${GITHUB}/commits/${pr.headSha}/statuses`, '-q', '[.[] | select(.context == "sol-review")] | length');
+  const statusesBefore = statuses();
   const log = await JobLog.open(join(state, 'jobs.jsonl'));
   const said: string[] = [];
   const noGate = { pick: () => { throw new Error('not asked'); }, check: () => ({ fits: true as const, cost: {} }), started() {}, finished() {}, dropped() {}, forget() {} };
@@ -138,8 +141,8 @@ try {
   check('the comment carries the ledger and names its reviewer', comment.includes('```sol-findings') && comment.includes(`· ${m.label}`), comment.split('\n')[0]);
   check("the comment carries the app's own marker, and reads back", readReviews([{ author: 'app', createdAt: '', body: comment }]).length === 1 && comment.includes('<!-- queue-runner-app review '));
   check('nothing was posted', (await github.issueComments(GITHUB, n)).length === before && said.some((l) => l.startsWith('dry run:')));
-  const statuses = run(clone, 'gh', 'api', `repos/${GITHUB}/commits/${pr.headSha}/statuses`, '-q', '[.[] | select(.context == "sol-review")] | length');
-  check('no sol-review status was set', statuses === '0', statuses);
+  const statusesAfter = statuses();
+  check('no sol-review status was set', statusesAfter === statusesBefore, `${statusesBefore} before, ${statusesAfter} after`);
   const shell = await ws.first('orchestration.subscribeShell', {});
   const thread = [...(shell.snapshot?.threads ?? []), ...(shell.snapshot?.archivedThreads ?? [])].find((t: any) => t.id === job.threadId);
   check('its thread is settled', Boolean(thread?.settledAt) || thread?.settledOverride === 'settled', `settledAt ${thread?.settledAt ?? null}`);
