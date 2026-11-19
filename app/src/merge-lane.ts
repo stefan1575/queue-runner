@@ -5,7 +5,8 @@
 //   clean on H  ->  the re-check, read afresh just before: still open at H, not a draft, nothing
 //   writing to its branch, its repo not held for the user, fewer than 2 failed merges on H, its
 //   newest review comment the clean one on H, checks passed on H (`sol-review` not counted), no
-//   conflict, nothing said since that review, no unresolved review thread
+//   conflict (GitHub's `mergeable` true: null, not known yet, waits for a later pass), nothing said
+//   since that review, no unresolved review thread
 //   ->  the runner merges: a `merge` step, then GitHub's merge naming H (`sha`, a merge commit).
 //       GitHub's 409 (the head moved meanwhile) is `head-moved`: nothing merged, the new head is
 //       reviewed (`headMoved`)
@@ -32,6 +33,9 @@ import type { T3Mcp } from './t3/mcp.ts';
 
 /** The label on a PR that's ready for the user to merge (#156: it was `ready-for-stefan`). */
 export const READY = 'ready-to-merge';
+/** The re-check's answer while GitHub hasn't worked out whether the PR conflicts: wait, and read
+ *  it again next pass. Not a reason to take a mark off. */
+const MERGEABLE_UNKNOWN = "GitHub hasn't worked out yet whether it conflicts; read again next pass";
 /** Failed merges on one head before the lane leaves it until a new head. */
 export const MAX_FAILED_MERGES = 2;
 
@@ -179,6 +183,9 @@ export class MergeLane {
       return `checks on ${h7} are ${checks.state}${more ? ` (${more})` : ''}`;
     }
     if (pr.mergeable === false) return `it conflicts with ${pr.base}`;
+    // GitHub still working it out is not known yet (#157 F5): no merge or mark on a guess, and a
+    // mark already on stays
+    if (pr.mergeable === null) return MERGEABLE_UNKNOWN;
     const said = saidSince([...comments, ...await this.d.github.reviewReplies(github, n)], last.at);
     if (said.length) {
       const who = [...new Set(said.map((c) => c.author))].join(', ');
@@ -286,7 +293,7 @@ export class MergeLane {
       const why = pr.headSha !== last.sha ? `the head moved from ${last.sha.slice(0, 7)} to ${pr.headSha.slice(0, 7)}: it's reviewed first`
         : !this.cleanOnHead(repo, pr.number, pr.headSha) ? `its review of ${pr.headSha.slice(0, 7)} is no longer clean`
         : await this.whyNot(repo, pr.number, pr.headSha);
-      if (why) await this.unmark(repo, last, why);
+      if (why && why !== MERGEABLE_UNKNOWN) await this.unmark(repo, last, why);
     }
   }
 

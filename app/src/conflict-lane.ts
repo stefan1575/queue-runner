@@ -3,7 +3,8 @@
 // the conflict kind's settings, in the PR's own worktree (or a new one at H), that merges the base
 // in, resolves the conflict and pushes; a fresh reviewer then reviews the new head (the review lane).
 //
-//   GitHub says H can't merge (`mergeable: false`; null, still working it out, is no conflict yet)
+//   GitHub says H can't merge (`mergeable: false`; null, still working it out, is not known yet:
+//   that PR, and every newer one, waits for GitHub's answer on a later pass)
 //   ->  nothing writes to the branch, no review of the PR is running, H's blocking review has had
 //       its fix round, nothing on H is left for the user, it's no stop  ->  oldest first, one at a
 //       time  ->  the gate (kind `conflict`)  ->  the PR's head fetched (moved: nothing starts), the
@@ -165,23 +166,35 @@ export class ConflictLane {
       if (this.stopped) return;
       if (!repo.github || this.d.log.needingUser(repo.id).length) continue;
       let pulls: ReviewPull[];
-      // GitHub's word on each open PR: it conflicts, or not (null, still working it out, is not yet).
-      // One read failing leaves the repo for the next pass: who goes first needs them all.
-      const conflicts = new Map<number, boolean>();
+      // GitHub's word on each open PR: it conflicts (true), or not (false), or it's still working it
+      // out (null: not known yet, read again next pass). One read failing leaves the repo for the
+      // next pass: who goes first needs them all.
+      const conflicts = new Map<number, boolean | null>();
       try {
         pulls = (await this.d.github.pullsToReview(repo.github)).sort((a, b) => a.number - b.number);
-        for (const pr of pulls) conflicts.set(pr.number, (await this.d.github.pull(repo.github, pr.number)).mergeable === false);
+        for (const pr of pulls) {
+          const mergeable = (await this.d.github.pull(repo.github, pr.number)).mergeable;
+          conflicts.set(pr.number, mergeable === null ? null : !mergeable);
+        }
       } catch (e) {
         this.note(`${repo.github}`, repo.title, `GitHub couldn't be read for conflicts (${(e as Error).message})`);
         continue;
       }
       this.why.delete(repo.github);
       let first: ReviewPull | null = null;
+      // oldest first: a PR GitHub hasn't answered for may conflict, so no newer one goes before it
+      let unknown: ReviewPull | null = null;
       for (const pr of pulls) {
         if (this.stopped) return;
         const key = `${repo.github}#${pr.number}`;
         const name = `conflict ${repo.title}#${pr.number}`;
         if (this.running.has(key)) continue;
+        if (conflicts.get(pr.number) === null) {
+          // the PR's own writer or review aside, nothing acts on it until GitHub says
+          unknown ??= pr;
+          this.note(key, name, `GitHub hasn't worked out yet whether ${pr.headSha.slice(0, 7)} conflicts with ${pr.base}; read again next pass`);
+          continue;
+        }
         if (!conflicts.get(pr.number)) { this.why.delete(key); continue; }
         // one conflicted PR at a time: a round running in the repo holds every other
         const running = [...this.running.keys()].find((k) => k.startsWith(`${repo.github}#`));
@@ -192,6 +205,7 @@ export class ConflictLane {
           why = `reading it failed (${(e as Error).message})`;
         }
         if (!why && first) why = `PR #${first.number} resolves its conflict first: one conflicted PR at a time`;
+        if (!why && unknown) why = `GitHub hasn't said yet whether the older PR #${unknown.number} conflicts: oldest first`;
         if (why) { this.note(key, name, why); continue; }
         first = pr;
         // the gate counts the round from now; the pass goes on once T3 has it
@@ -208,7 +222,7 @@ export class ConflictLane {
 
   /** Why the conflicting PR gets no round now, or null: cheapest first. A stop found here is
    *  recorded. */
-  private async whyNot(repo: BuildRepo, pr: ReviewPull, pulls: ReviewPull[], conflicts: Map<number, boolean>): Promise<string | null> {
+  private async whyNot(repo: BuildRepo, pr: ReviewPull, pulls: ReviewPull[], conflicts: Map<number, boolean | null>): Promise<string | null> {
     const h = pr.headSha;
     const h7 = h.slice(0, 7);
     const jobs = this.d.log.jobs().filter((j) => j.repo === repo.id);
@@ -232,7 +246,7 @@ export class ConflictLane {
     const other = pulls.find((o) => o.number !== pr.number
       && jobs.some((j) => j.kind === 'conflict' && j.issue === o.number && RAN(j))
       && !this.heldForUser(repo, o)
-      && (o.number < pr.number || !conflicts.get(o.number)));
+      && (o.number < pr.number || conflicts.get(o.number) !== true));
     if (other) return `PR #${other.number} had a conflict round and hasn't merged or stopped yet: one conflicted PR at a time`;
     return null;
   }

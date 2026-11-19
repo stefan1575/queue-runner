@@ -316,12 +316,27 @@ describe('what waits', () => {
     expect(t3.launches).toEqual([]);
   });
 
-  test("GitHub still working out whether it merges is no conflict yet; a read that fails starts nothing", async () => {
-    gh.conflicting.clear();
+  test("GitHub still working out whether a PR merges (null) is not known yet: neither it nor a newer conflicting PR goes first (F5)", async () => {
+    gh.reviewPulls['owner/app'] = [pull(4), pull(5)];
+    gh.computing.add('owner/app#4');
+    gh.conflicting.add('owner/app#5');
     makeLane();
     await lane.pass();
-    gh.conflicting.add('owner/app#4');
+    expect(t3.launches).toEqual([]);
+    expect(lines).toEqual([
+      "conflict app#4: no conflict round now, GitHub hasn't worked out yet whether abcdef1 conflicts with main; read again next pass",
+      "conflict app#5: no conflict round now, GitHub hasn't said yet whether the older PR #4 conflicts: oldest first",
+    ]);
+    // GitHub answers: #4 conflicts, and it goes first
+    gh.computing.clear();
+    await lane.pass();
+    await until(() => t3.launches.length === 1);
+    expect(t3.launches[0].title).toBe('Queue runner conflict: app#4');
+  });
+
+  test("a PR read that fails starts nothing", async () => {
     gh.pullFails = 1;
+    makeLane();
     await lane.pass();
     expect(t3.launches).toEqual([]);
     expect(lines.some((l) => l.includes("GitHub couldn't be read for conflicts"))).toBe(true);

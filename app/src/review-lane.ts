@@ -1,7 +1,7 @@
 // The review lane (#155; today's `queue_runner/review.py`, ported, docs/flow.md The review loop):
 // every open PR in a served repo without a review on its newest commit H gets one, whoever opened
-// it, once the checks on H pass (`sol-review` not counted) and H doesn't conflict with its base
-// (#157: a conflict round comes first). One review at a time for now (#106 runs them at once
+// it, once the checks on H pass (`sol-review` not counted) and GitHub says H doesn't conflict
+// with its base (#157: a conflict round comes first; not known yet waits too). One review at a time for now (#106 runs them at once
 // later). A review:
 //
 //   the usage gate lets it in, on the review kind's model or, while that provider has no room, its
@@ -294,8 +294,11 @@ export class ReviewLane {
     if (checks.state === 'none') return `no checks reported on ${h7} yet`;
     if (checks.state === 'failed') return `a check failed on ${h7} (${checks.failed.join(', ')})`;
     // a head that conflicts with its base gets a conflict round first (#157), as today's runner
-    // waits: its pushed head is what's reviewed. GitHub still working it out (null) is no conflict
-    if ((await this.d.github.pull(repo.github!, pr.number)).mergeable === false) return `${h7} conflicts with ${pr.base}: a conflict round (or a stop) comes first`;
+    // waits: its pushed head is what's reviewed. GitHub still working it out (null) isn't known
+    // yet: it's read again on a later pass, never reviewed ahead of a conflict round (#157 F5)
+    const mergeable = (await this.d.github.pull(repo.github!, pr.number)).mergeable;
+    if (mergeable === false) return `${h7} conflicts with ${pr.base}: a conflict round (or a stop) comes first`;
+    if (mergeable === null) return `GitHub hasn't worked out yet whether ${h7} conflicts with ${pr.base}; read again next pass`;
     return null;
   }
 
