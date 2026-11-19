@@ -2,8 +2,8 @@
 // one rule for picking a job up in the thread it ran in, or in a fresh one. It reads only what T3
 // measures at the moment the job resumes, from the thread's projection
 // (`orchestration.getThreadProjection`): its provider turns, each with `startedAt` and
-// `tokenUsage.usedTokens` (T3's schema, read in its server 2026-11-20). Today's runner read
-// Claude's transcripts for the same two numbers; the app reads only T3.
+// `tokenUsage.usedTokens` (T3's schema, read in its server 2026-11-20). Today's runner read the
+// provider's own transcripts for the same two numbers; the app reads only T3.
 //
 // - **Warm** (its last request started under WARM_FOR_MS ago): in place, any size. The provider's
 //   prompt cache lasts an hour from a request's start; 55 minutes is the research's margin under it.
