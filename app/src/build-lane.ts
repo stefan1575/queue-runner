@@ -13,7 +13,8 @@
 // The app settles only threads it launched (story 13): the thread id comes from its own launch,
 // never from a thread's title, branch or project. A job the log shows open, left by an app that
 // stopped mid-job, is watched again to its end on the thread id it saved; one whose end was
-// recorded and whose thread wasn't settled yet (or whose settle failed) is settled. A job T3 may have
+// recorded and whose thread wasn't settled yet is settled, and a settle that failed is tried again
+// each pass. A job T3 may have
 // started a thread for that the app has no id of (its launch was sent and the answer lost, or the
 // app stopped before the id was saved) needs the user (#154, After a restart, don't guess): it's
 // recorded as such and its repo starts nothing until the user answers (`answered`). A repo whose
@@ -82,8 +83,8 @@ export class BuildLane {
   private d: BuildLaneDoors;
   private building = new Map<string, Promise<Job>>();
   private watches = new Set<{ stop(): void }>();
-  /** Settles of jobs an earlier app ended and didn't settle, under way. */
-  private settling = new Set<Promise<void>>();
+  /** Settles under way, by job id. */
+  private settling = new Map<string, Promise<void>>();
   private resting = new Map<string, number>();
   private holdSaid = new Map<string, string>();
   /** The open-PR hold last said for each repo, so it's said once. */
@@ -104,11 +105,6 @@ export class BuildLane {
     for (const job of this.d.log.open()) {
       if (job.kind !== 'build' || this.building.has(job.repo)) continue;
       this.track(job.repo, this.resume(job));
-    }
-    for (const job of this.d.log.toSettle()) {
-      if (job.kind !== 'build') continue;
-      const s = this.settle(job).finally(() => this.settling.delete(s));
-      this.settling.add(s);
     }
     return this.pass();
   }
@@ -139,7 +135,7 @@ export class BuildLane {
   /** Settles once every build under way has ended and been recorded (the tests wait on it). */
   async idle(): Promise<void> {
     while (this.building.size || this.passing || this.settling.size) {
-      await Promise.allSettled([...this.building.values(), this.passing, ...this.settling]);
+      await Promise.allSettled([...this.building.values(), this.passing, ...this.settling.values()]);
     }
   }
 
@@ -166,6 +162,9 @@ export class BuildLane {
   }
 
   private async passOnce() {
+    // an end recorded and not settled: left by an app that stopped between the two, or a settle
+    // that failed; tried each pass, on its own (a thread left in the sidebar holds no build)
+    for (const job of this.d.log.toSettle()) if (job.kind === 'build') void this.settle(job);
     const now = this.now().getTime();
     const repos = this.d.repos()
       .map((r, i) => ({ r, i }))
@@ -334,19 +333,29 @@ export class BuildLane {
     return ended;
   }
 
-  /** Settles a thread this app launched, and records it. A failure is said, never raised: a
-   *  thread left in the sidebar stops no lane, and the next start tries it again. */
-  private async settle(job: Job) {
+  /** Settles a thread this app launched, and records it; once at a time per job, and not again
+   *  once recorded. A failure is said, never raised: a thread left in the sidebar stops no lane,
+   *  and the next pass tries it again. */
+  private settle(job: Job): Promise<void> {
+    const under = this.settling.get(job.id);
+    if (under) return under;
+    if (this.d.log.get(job.id)?.settledAt) return Promise.resolve();
+    const s = this.settleOnce(job).finally(() => this.settling.delete(job.id));
+    this.settling.set(job.id, s);
+    return s;
+  }
+
+  private async settleOnce(job: Job) {
     try {
       await this.d.mcp.call('t3_thread_organize', { threadId: job.threadId, action: 'settle' });
     } catch (e) {
-      this.d.say(`${job.title}: settling its thread ${job.threadId} failed (${(e as Error).message}); left as it is until the app starts again`);
+      this.d.say(`${job.title}: settling its thread ${job.threadId} failed (${(e as Error).message}); left as it is, tried again next pass`);
       return;
     }
     try {
       await this.d.log.settled(job.id);
     } catch (e) {
-      this.d.say(`${job.title}: its settle couldn't be recorded (${(e as Error).message}); the next start settles it again`);
+      this.d.say(`${job.title}: its settle couldn't be recorded (${(e as Error).message}); it's settled again next pass`);
     }
   }
 }

@@ -452,16 +452,15 @@ describe('an app that stopped between recording an end and settling its thread (
     expect(organized()).toEqual([]);
   });
 
-  test('a settle that fails is said and left unrecorded, so the next start tries it again', async () => {
+  test('a settle that fails is said and left unrecorded, so the next pass tries it again', async () => {
     const job = await ended(1, 'done', 'gone-thread');
     delete t3.threadState['gone-thread'];
     await makeLane().start();
     await lane.idle();
     expect(lines.join('\n')).toMatch(/settling its thread gone-thread failed/);
     expect(log.get(job.id)!.settledAt).toBeUndefined();
-    lane.stop();
     t3.threadState['gone-thread'] = { id: 'gone-thread', projectId: 'p-app', runtimeRequests: [], turnItems: [], runs: [] };
-    await makeLane().start();
+    await lane.pass();
     await lane.idle();
     expect(organized().map((a) => a.threadId)).toEqual(['gone-thread', 'gone-thread']);
     expect(log.get(job.id)!.settledAt).toEqual(expect.any(String));

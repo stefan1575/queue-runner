@@ -379,8 +379,9 @@ builds (`docs/flow.md`, `docs/claude-lane.md`). `src/build-lane.ts`, `src/picker
   comes from its own launch. One waiting on a question is left for the Inbox ticket and one
   stopped by a usage limit for the limits ticket; both are recorded as such and left unsettled.
   A settle is recorded (`settled`); an end with none (the app stopped between the two, or the
-  settle failed) is settled on the next start. A log from before `settled` lines settles its
-  ended builds' threads once more on the first start, which leaves a settled thread as it is.
+  settle failed) is settled on the next pass, a start's included. A log from before `settled`
+  lines settles its ended builds' threads once more on the first start, which leaves a settled
+  thread as it is.
 - **An app that stopped mid-build:** on start, each build the log shows open is watched again to
   its end before any pass (so its repo still has one build), reserved in the gate at its logged
   `cost` and measured from its logged `before`, never from a reading taken mid-run (a line with
