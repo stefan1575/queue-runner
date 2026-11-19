@@ -303,6 +303,63 @@ describe('one job per repo', () => {
   });
 });
 
+describe('a T3 that stalls (F4)', () => {
+  test("a fix round whose writer thread's runs T3 never answers starts nothing at the deadline, and the pass goes on to the next repo", async () => {
+    served = [APP, LIB];
+    gh.reviewPulls['owner/app'] = [pull(APP, 4)];
+    await builder(APP, 4, 'thread-b');
+    await blocking(APP, 4);
+    // lib's last job ended when app's did: app goes first (the served order)
+    const l = await log.started({ kind: 'build', repo: LIB.id, github: 'owner/lib', issue: 8, branch: 'claude/x-8', base: 'main', title: 'Queue runner build: lib#8', choice: BUILD, onFallback: false });
+    await log.ended(l.id, { outcome: 'done-no-pr' });
+    gh.ready['owner/lib'] = [issue(2)];
+    // T3 takes the projection read and never answers it, its socket left open
+    const connect = t3.connect;
+    const stalling: typeof t3.connect = (url, h, on) => connect(url, h, { ...on, message: (text) => {
+      const m = JSON.parse(text);
+      if (m._tag !== 'Exit' || !t3.frames.some((f) => f.id === m.requestId && f.tag === 'orchestration.getThreadProjection')) on.message(text);
+    } });
+    let late: (() => void) | null = null;
+    ws = new T3Ws(t3.address, t3.cli, t3.http, stalling, (f) => { late = f; return () => { late = null; }; });
+    makeChooser();
+    const pass = chooser.pass();
+    await until(() => late !== null);
+    expect(t3.launches).toHaveLength(0); // lib waits behind app's launch
+    late!();
+    await pass;
+    expect(t3.launches.map((x) => x.title)).toEqual(['Queue runner build: lib#2']);
+    expect(t3.sends).toHaveLength(0);
+    expect(lines.some((x) => x.startsWith('fix app#4 not started:') && x.includes('sent no answer to orchestration.getThreadProjection in time'))).toBe(true);
+  });
+
+  test("a launch that doesn't return holds the pass no longer than its wait; its repo stays held while its job is under way", async () => {
+    served = [APP, LIB];
+    const asked: string[] = [];
+    const launching = new Set<string>();
+    const lane: RepoJobLane = {
+      recover() {}, owed() {}, usageChanged: () => false, stop() {}, async idle() {},
+      busy: (r) => launching.has(r.id),
+      async next(r) {
+        asked.push(r.title);
+        if (r.id !== APP.id) return null;
+        return { launch: () => { launching.add(r.id); return new Promise<void>(() => {}); } };
+      },
+    };
+    let late: (() => void) | null = null;
+    const c = new Chooser({ repos: () => served, lanes: [lane], log, say: (x) => lines.push(x), launchWait: (f) => { late = f; return () => { late = null; }; } });
+    const pass = c.pass();
+    await until(() => late !== null);
+    expect(asked).toEqual(['app']);
+    late!();
+    await pass;
+    expect(asked).toEqual(['app', 'lib']);
+    expect(lines).toContain('app: no new job now, its job is still being launched; the pass went on to the other repos');
+    await c.pass();
+    expect(asked).toEqual(['app', 'lib', 'lib']);
+    expect(lines).toContain('app: no new job now, its job is under way (one job per repo)');
+  });
+});
+
 describe('passes', () => {
   test("a pass asked for while one ends is never lost, whatever moment it lands on (F2)", async () => {
     // the request lands k microtasks after the last lane answered: before the pass's last check

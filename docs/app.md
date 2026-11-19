@@ -350,13 +350,15 @@ whose branch a job of the repo's writes to (Reviews; Fix rounds and merges).
   PR lookup failed and is owed. The repo whose last job ended longest ago goes first (`waited`:
   builds, fix and conflict rounds only, `not-started` ones aside), the served order breaking a
   tie, so when the gate has room for one more, the repo that waited longest gets it. A pass waits
-  for each job it starts to be launched, so the gate counts it before the next repo's verdict.
+  for each job it starts to be launched, so the gate counts it before the next repo's verdict,
+  but no longer than 10 minutes (`LAUNCH_WAIT_MS`; every step of a launch has its own timeout):
+  past that it goes on to the other repos, and the repo stays held while its job is under way.
   Why a repo got nothing is said once, until it changes.
 - **Settle first:** on start each lane recovers every job of its kind the log shows open (`recover`:
   each lane's After a restart, don't guess, below) before the first choice, and the repo is held
   meanwhile. A recovery that can't tell (a T3 or GitHub read failed) leaves a `needs-user` end,
   which holds the repo too.
-- **A read that fails while choosing** (a lane's GitHub reads, or T3's) leaves that repo for the
+- **A read that fails while choosing** (a lane's GitHub reads, or T3's; a launch that throws too) leaves that repo for the
   next pass, said in the log: it never counts as nothing to do in that repo, so a later lane in the
   order isn't asked, and it never holds back another repo.
 - **Passes don't overlap:** one asked for while one runs (a timer and a job's end at once) runs
@@ -827,7 +829,10 @@ is a T3Error with its `code: message`. Projects: `t3_project_list {cursor, limit
   stream answers `{"_tag":"Chunk","requestId":"1","values":[...]}`, which the client acks with
   `{"_tag":"Ack","requestId":"1"}` before T3 sends the next; it ends with
   `{"_tag":"Exit","requestId","exit":{"_tag":"Success"|"Failure",...}}`. A `Ping` is answered
-  `Pong`; a `Defect` or `ClientProtocolError` fails the call.
+  `Pong`; a `Defect` or `ClientProtocolError` fails the call. A one-shot call (`request`, a
+  method that answers once; `first`, a stream's first value) that T3 hasn't answered a minute
+  after it was sent (`ONE_SHOT_MS`) is closed and fails with a `T3Error`: T3 can stall one with
+  its socket open, and nothing else would end it (#210 F4). Streams have no deadline.
 - **`orchestration.subscribeShell`** (scope `orchestration:read`; the bare `subscribeShell` dies
   with "Unknown request tag"). Seen live 2026-11-19 against T3 0.1.9: a whole snapshot `{kind:
   "snapshot", snapshot: {projects, threads, archivedThreads, ...}}` (10 projects, 697 threads,

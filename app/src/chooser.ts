@@ -22,6 +22,7 @@ import type { BuildRepo } from './build-lane.ts';
 import { AFTER_RESET_MS, LIMIT_UNKNOWN_MS } from './gate.ts';
 import type { Job, JobLog } from './job-log.ts';
 import type { JobKind } from './jobs.ts';
+import { retryAfter, type Retry } from './t3/project-feed.ts';
 
 /** What a lane answers for a repo: a job to start (`launch` resolves once T3 has it, or once it
  *  started nothing; the lane tracks it to its end), a job that waits (the repo starts nothing else
@@ -44,6 +45,12 @@ export interface RepoJobLane {
   idle(): Promise<void>;
 }
 
+/** How long a pass waits for a job it started to be launched before it goes on to the next repo.
+ *  Every step of a launch has its own timeout (git, gh, T3's HTTP and one-shot requests), so this
+ *  only bounds their sum: no launch holds the pass for every other repo (#210 F4). The job stays
+ *  under way in its lane, so its repo stays held. */
+export const LAUNCH_WAIT_MS = 10 * 60_000;
+
 /** The kinds that are a repo's one job at a time (#158's jobs join them). */
 export const REPO_JOB_KINDS: readonly JobKind[] = ['build', 'fix', 'conflict'];
 
@@ -54,11 +61,14 @@ export type ChooserDoors = {
   log: JobLog;
   say: (line: string) => void;
   now?: () => Date;
+  /** A launch's wait in a pass: LAUNCH_WAIT_MS (a seam the tests run). */
+  launchWait?: Retry;
 };
 
 export class Chooser {
   private d: ChooserDoors;
   private now: () => Date;
+  private launchWait: Retry;
   private passing: Promise<void> | null = null;
   private again = false;
   private stopped = false;
@@ -68,6 +78,7 @@ export class Chooser {
   constructor(doors: ChooserDoors) {
     this.d = doors;
     this.now = doors.now ?? (() => new Date());
+    this.launchWait = doors.launchWait ?? retryAfter(LAUNCH_WAIT_MS);
   }
 
   /** Settle first: each lane recovers the jobs the log shows open, then the first pass. */
@@ -150,6 +161,18 @@ export class Chooser {
     return null;
   }
 
+  /** The pass's wait for a launch: `done`, or `late` past LAUNCH_WAIT_MS (the launch goes on, in
+   *  its lane). A launch that fails throws, as a read does. */
+  private async launched(launch: Promise<void>): Promise<'done' | 'late'> {
+    let cancel = () => {};
+    const late = new Promise<'late'>((resolve) => { cancel = this.launchWait(() => resolve('late')); });
+    try {
+      return await Promise.race([launch.then(() => 'done' as const), late]);
+    } finally {
+      cancel();
+    }
+  }
+
   private note(repo: BuildRepo, why: string | null) {
     if (why === null) { this.said.delete(repo.id); return; }
     if (this.said.get(repo.id) !== why) this.d.say(`${repo.title}: no new job now, ${why}`);
@@ -171,16 +194,17 @@ export class Chooser {
         let next: Next;
         try {
           next = await lane.next(repo);
+          if (this.stopped) return;
+          if (next === null) continue;
+          // the job let in is counted by the gate from now: the pass goes on once T3 has it, so
+          // the next repo's verdict counts this one; one that takes too long is left to its lane
+          if ('launch' in next && await this.launched(next.launch()) === 'late') {
+            failed = 'its job is still being launched; the pass went on to the other repos';
+          }
         } catch (e) {
           // a read that failed is never "nothing to do": the repo is left for the next pass
           failed = `${(e as Error).message}; tried again next pass`;
-          break;
         }
-        if (this.stopped) return;
-        if (next === null) continue;
-        // the job let in is counted by the gate from now: the pass goes on once T3 has it, so the
-        // next repo's verdict counts this one
-        if ('launch' in next) await next.launch();
         break;
       }
       this.note(repo, failed);

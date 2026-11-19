@@ -3,10 +3,15 @@
 // stream answers `{_tag: "Chunk", requestId, values: [...]}`, which the client acks with
 // `{_tag: "Ack", requestId}` before the next, and ends with `{_tag: "Exit", requestId, exit}`.
 // The upgrade needs `?orchestrationProtocol=2` and a client session's bearer token.
+import { retryAfter, type Retry } from './project-feed.ts';
 import { T3Error, type Address, type Cli, type Connect, type Http, type Socket } from './seams.ts';
 import { signInWebSocket } from './sign-in.ts';
 
 export const ORCHESTRATION_PROTOCOL = 2;
+/** How long a one-shot request (`request`, `first`) waits for T3's answer once it's sent. T3
+ *  answers them at once; one that hasn't in a minute has stalled with its socket open, and is
+ *  closed and failed rather than hold its caller (#210 F4). Signing in has its own timeouts. */
+export const ONE_SHOT_MS = 60_000;
 
 export type Subscription = {
   close(): void;
@@ -25,17 +30,27 @@ export class T3Ws {
   private cli: Cli;
   private http: Http;
   private connect: Connect;
+  /** A one-shot request's deadline, from its send: ONE_SHOT_MS (a seam the tests run). */
+  private deadline: Retry;
 
-  constructor(address: Address, cli: Cli, http: Http, connect: Connect) {
+  constructor(address: Address, cli: Cli, http: Http, connect: Connect, deadline: Retry = retryAfter(ONE_SHOT_MS)) {
     this.address = address;
     this.cli = cli;
     this.http = http;
     this.connect = connect;
+    this.deadline = deadline;
   }
 
   /** Subscribes to a stream method; `onValue` gets each value T3 sends. A socket that never
    *  opens (T3 refused the token, or moved) is tried once more on a new sign-in. */
   subscribe(tag: string, payload: object, onValue: (value: any) => void, onExit?: (value: unknown) => void): Subscription {
+    return this.open(tag, payload, onValue, onExit, false);
+  }
+
+  /** `subscribe`; a one-shot's stream also fails with a T3Error, its socket closed, when T3 hasn't
+   *  ended it by the deadline after the request went out. */
+  private open(tag: string, payload: object, onValue: (value: any) => void, onExit: ((value: unknown) => void) | undefined,
+    oneShot: boolean): Subscription {
     let socket: Socket | null = null;
     let closing = false;
     const done = new Promise<void>((resolve, reject) => {
@@ -45,9 +60,11 @@ export class T3Ws {
         const id = String(this.nextId++);
         const url = `${origin.replace(/^http/, 'ws')}/ws?orchestrationProtocol=${ORCHESTRATION_PROTOCOL}`;
         let ended = false;
+        let late = () => {};
         const end = (error?: Error) => {
           if (ended) return;
           ended = true;
+          late();
           socket?.close();
           if (error) reject(error); else resolve();
         };
@@ -55,6 +72,7 @@ export class T3Ws {
           open: () => {
             if (closing) return end();
             socket!.send(JSON.stringify({ _tag: 'Request', id, tag, payload, headers: [] }));
+            if (oneShot) late = this.deadline(() => end(new T3Error(`T3 sent no answer to ${tag} in time, with its socket open; the request was closed`)));
           },
           message: (text) => {
             let msg;
@@ -103,24 +121,26 @@ export class T3Ws {
     };
   }
 
-  /** A method that answers once (not a stream): the value of T3's Exit. */
+  /** A method that answers once (not a stream): the value of T3's Exit. One T3 doesn't answer by
+   *  the deadline fails (ONE_SHOT_MS). */
   async request(tag: string, payload: object = {}): Promise<any> {
     let got: unknown;
-    const sub = this.subscribe(tag, payload, () => {}, (v) => { got = v; });
+    const sub = this.open(tag, payload, () => {}, (v) => { got = v; }, true);
     await sub.done;
     return got;
   }
 
-  /** The stream's first value, then the subscription closed. */
+  /** The stream's first value, then the subscription closed; none by the deadline fails
+   *  (ONE_SHOT_MS). */
   async first(tag: string, payload: object = {}): Promise<any> {
     let got: any;
     let has = false;
-    const sub = this.subscribe(tag, payload, (v) => {
+    const sub = this.open(tag, payload, (v) => {
       if (has) return;
       got = v;
       has = true;
       sub.close();
-    });
+    }, undefined, true);
     await sub.done;
     if (!has) throw new T3Error(`T3 ended ${tag} without sending anything`);
     return got;

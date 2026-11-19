@@ -1,7 +1,7 @@
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { T3Mcp, ToolFailed } from '../src/t3/mcp.ts';
 import { runtimeAddress } from '../src/t3/real.ts';
 import { NoAnswer, T3Error, Unauthorized } from '../src/t3/seams.ts';
@@ -167,6 +167,30 @@ describe('the WebSocket API', () => {
 
   it("fails a method T3 ends with a Failure", async () => {
     await expect(ws().request('orchestration.noSuchMethod')).rejects.toThrow(/T3 ended orchestration.noSuchMethod/);
+  });
+
+  it("fails a one-shot request T3 doesn't answer by its deadline, its socket closed (#210 F4)", async () => {
+    // T3 takes the request and never ends it, its socket left open
+    const connect = t3.connect;
+    let stalled = true;
+    let closed = 0;
+    t3.connect = (url, h, on) => {
+      const socket = connect(url, h, { ...on, message: (text) => { if (!stalled || JSON.parse(text)._tag !== 'Exit') on.message(text); } });
+      return { send: (t) => socket.send(t), close: () => { closed++; socket.close(); } };
+    };
+    let late: (() => void) | null = null;
+    const client = new T3Ws(runtimeAddress(runtime), t3.cli, t3.http, t3.connect, (f) => { late = f; return () => { late = null; }; });
+    const asked = client.request('orchestration.getThreadProjection', { threadId: 't1' });
+    await vi.waitFor(() => { if (!late) throw new Error('not sent yet'); });
+    late!();
+    await expect(asked).rejects.toThrow(T3Error);
+    await expect(asked).rejects.toThrow(/sent no answer to orchestration.getThreadProjection in time/);
+    expect(closed).toBe(1);
+    // one T3 answers in time cancels its deadline
+    stalled = false;
+    t3.wsMethods['orchestration.getThreadProjection'] = (p) => ({ thread: { id: p.threadId } });
+    expect(await client.request('orchestration.getThreadProjection', { threadId: 't1' })).toEqual({ thread: { id: 't1' } });
+    expect(late).toBeNull();
   });
 
   it('fails when T3 keeps refusing the socket', async () => {
