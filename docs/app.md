@@ -836,7 +836,9 @@ is killed is code -1 with Node's reason in stderr, never a gh exit code (so is t
   a merge commit (two parents), one merge step, cleaned up, the worktree gone from `git worktree
   list` and the local branch deleted. The PR's branch is deleted on GitHub at the end. **Run
   2026-11-19:** all ok, sandbox PR #6 (H1 b6d200a refused with 409; merged at 5f18b12, merge commit
-  e1c88e5).
+  e1c88e5). **Run again 2026-11-19** after #156 F11 (the clean-up finds the build by its branch):
+  all ok, sandbox PR #7 (H1 5544615 refused with 409; merged at 4cae92e, merge commit 56bc728,
+  worktree and local branch gone).
 - `app/live/usage.ts` (`pnpm --dir app live:usage [-- --minutes N]`): acts on no project. It
   subscribes to T3's server config and prints each connected provider's windows as the app reads
   them, then each `providerStatuses` event that changes one, for N minutes (5 by default). **Run
