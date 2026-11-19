@@ -61,6 +61,15 @@ BASE = 'base'
 # `held`, then `updated` (brought up to date with the base once it passed), `update-failed` (GitHub
 # refused, a conflict: the conflict round's) or `moved` (its head moved, or it closed, meanwhile).
 BASE_HOLD = 'base-hold'
+# A PR stopped for a failed check on H, updated from its base once the base moved, to be checked
+# again on the new head (issue #199): `updated` (waiting on the new head's checks), then `passed`
+# (the stop settled, its issue closed) or `failed-again` (the new head's own failed-check stop);
+# `update-failed` (GitHub refused: a conflict), or `not-started` (GitHub didn't answer: tried
+# again next pass). Once per PR and base head.
+RECHECK = 'recheck'
+# A failed-check stop's `answer` once the PR passed its checks after that update: the runner's
+# answer, not Stefan's.
+PASSED_AFTER_UPDATE = 'passed-after-update'
 # An Actions run's conclusions that pass (as `github._PASSED`).
 PASSED = ('success', 'neutral', 'skipped')
 KINDS = {
@@ -353,10 +362,12 @@ class Stopper:
         """Files each stop on the PR's head that isn't filed yet. GitHub failing is said; the
         next pass tries again."""
         try:
+            self.recheck(repo, pr)
             self.hold_for_base(repo, pr)
             self.retry_checks(repo, pr)
             for kind, why, link in self.new_stops(repo, pr):
-                self.file(repo, pr, kind, why, link)
+                self.file(repo, pr, kind, why, link,
+                          base=self._base_head(repo, pr) if kind == 'failed-check' else None)
         except Exception as e:
             self.say(f'stop {repo.name}#{pr.number}: checking for stops failed '
                      f'({type(e).__name__}: {e})')
@@ -556,16 +567,142 @@ class Stopper:
         self.say(f'stop {repo.name}#{pr.number}: not now, {repo.base} fails {names} too: held '
                  f'at {pr.head_sha[:7]} until {repo.base} passes')
 
+    # --- a failed check, checked again once the base moved (issue #199) ------------------------
+
+    def _base_head(self, repo, pr) -> str | None:
+        """The head of the PR's base now, or None when GitHub doesn't say."""
+        try:
+            return self.github.branch_head(repo, pr.base or repo.base)
+        except Exception:
+            return None
+
+    def recheck(self, repo, pr) -> None:
+        """Issue #199: a PR stopped for a failed check on H whose base has moved since is brought
+        up to date with its base (GitHub's update-branch, as for a base hold), once per base
+        head, so a failure the base has since fixed never waits on Stefan. Then the new head's
+        checks decide: passing settles the stop (`_after_update`); failing is #93's re-run and
+        then a stop, as on any head. Left alone, said once: a PR with another stop open, one that
+        moved from H, a Claude job writing to it, a conflict (the conflict round's), a red base,
+        or a base that hasn't moved. A stop filed before #199 has no base recorded: its base
+        counts as moved, as a conflict round's record without one does."""
+        n, h = pr.number, pr.head_sha
+        name = f'stop {repo.name}#{n}'
+        rechecks = self.jobs.on(RECHECK, repo.name, n)
+        if rechecks and rechecks[-1].outcome == 'updated':
+            self._after_update(repo, pr, rechecks[-1], name)
+            return
+        stops = self.jobs.open_stops(repo.name, n)
+        failed = [s for s in stops if s.stop == 'failed-check']
+        if not failed:
+            return
+        stop, branch = failed[-1], pr.base or repo.base
+        key, h7 = f'recheck {repo.name}#{n}', h[:7]
+        if others := [s for s in stops if s.stop != 'failed-check']:
+            return self.say_once(key, f'{name}: not checked again on a newer {branch}: it has '
+                                 f'another stop for Stefan ({others[-1].stop})')
+        if stop.sha != h:
+            return self.say_once(key, f'{name}: not checked again on a newer {branch}: it moved '
+                                 f'from {stop.sha[:7]}, where it stopped, to {h7}')
+        try:
+            base = self.github.branch_head(repo, branch)
+        except Exception as e:
+            return self.say_once(key, f'{name}: reading {branch} to check it again failed ({e}); '
+                                 'next pass')
+        if stop.base == base:
+            return self.say_once(key, f'{name}: not checked again: {branch} has not moved since '
+                                 f'its check failed (still {base[:7]})')
+        if any(j.base == base and j.outcome != NOT_STARTED for j in rechecks):
+            return self.say_once(key, f'{name}: updated from {branch} at {base[:7]} and checked '
+                                 'again already: left for Stefan')
+        if branch == repo.base and repo.name in self._red:
+            return self.say_once(key, f'{name}: not checked again yet: {branch} fails its own '
+                                 'checks')
+        if writer := self.jobs.writer(repo.name, pr.branch):
+            return self.say_once(key, f'{name}: not checked again on {branch} at {base[:7]} yet: '
+                                 f'{writer.title} is writing to the PR')
+        if self.github.has_conflict(repo, n):
+            return self.say_once(key, f'{name}: not checked again on {branch} at {base[:7]}: it '
+                                 'conflicts, so a conflict round comes first')
+        job = self.jobs.started(kind=RECHECK, repo=repo.name, issue=n, branch=pr.branch,
+                                title=f'Queue runner recheck: {repo.name}#{n}', sha=h, base=base,
+                                about=stop.id, reason=stop.reason)
+        try:
+            self.github.update_branch(repo, n, h)
+        except Exception as e:
+            how = 'update-failed' if refused(e) else NOT_STARTED
+            self.jobs.ended(job.id, exit_code=None, outcome=how, link=stop.link,
+                            reason=stop.reason, error=f'{type(e).__name__}: {e}')
+            self.say(f'{name}: {branch} moved to {base[:7]}, but updating the PR from it failed '
+                     f'({e}); ' + ('left for Stefan' if how == 'update-failed' else 'next pass'))
+            return
+        self.jobs.ended(job.id, exit_code=None, outcome='updated', link=stop.link,
+                        reason=stop.reason)
+        self.say(f'{name}: {branch} moved to {base[:7]} since its check failed on {h7}: updated '
+                 'the PR from it, to check it again')
+
+    def _after_update(self, repo, pr, job, name) -> None:
+        """A recheck's update landed (the PR moved past H): its new head's checks passing settle
+        the stop (a comment on its issue, the issue closed, the stop answered), so the PR goes
+        back to review; a failed-check stop filed on the new head (after #93's re-run) ends the
+        recheck. Pending, or failed with its re-run still going: the next pass looks again. A
+        comment or close that fails is tried again next pass, the comment not posted twice."""
+        h = pr.head_sha
+        if h == job.sha:
+            return   # GitHub hasn't made the new merge commit yet
+        if self.jobs.stopped(repo.name, pr.number, h, 'failed-check'):
+            self.jobs.ended(job.id, exit_code=None, outcome='failed-again', link=job.link,
+                            reason=job.reason, head=h)
+            self.say(f'{name}: a check fails on {h[:7]} too, after the update: left for Stefan')
+            return
+        if self.github.checks(repo, h).state != 'passed':
+            return
+        open_stops = self.jobs.open_stops(repo.name, pr.number)
+        stops = [s for s in open_stops if s.stop == 'failed-check']
+        branch, h7 = pr.base or repo.base, h[:7]
+        if job.link and any(s.link == job.link for s in stops):
+            i = number_of(job.link)
+            mark = f'{RUNNER_MARK}recheck passed pr={pr.number} sha={h} -->'
+            try:
+                if not any(mark in c.body for c in self.github.issue_comments(repo, i)):
+                    self.github.post_comment(repo, i, (
+                        f'**{branch} moved, and the checks pass on the new head.** PR '
+                        f'#{pr.number} stopped for a failed check on {job.sha[:7]}; once '
+                        f'{branch} moved to {job.base[:7]}, the queue runner updated the PR '
+                        f'from it, and its checks pass on {h7}. Closed by the queue runner; '
+                        f'the PR is back in review.\n\n{mark}\n'))
+                # Another kind of stop on the same issue (filed since) is still Stefan's.
+                if not any(s.link == job.link for s in open_stops if s.stop != 'failed-check'):
+                    self.github.close_completed(repo, i)
+            except Exception as e:
+                self.say(f'{name}: the checks pass on {h7}, but closing {job.link} failed ({e}); '
+                         'next pass')
+                return
+        for s in stops:
+            self.jobs.ended(s.id, exit_code=None, outcome='answered', link=s.link,
+                            reason=s.reason, answer=PASSED_AFTER_UPDATE)
+        self.jobs.ended(job.id, exit_code=None, outcome='passed', link=job.link,
+                        reason=job.reason, head=h)
+        self.say(f'{name}: the checks pass on {h7} after updating it from {branch}: its stop '
+                 'is settled, and the PR is back in review')
+
+    def say_once(self, key: str, line: str) -> None:
+        """Said once per key and line: a PR left alone the same way, pass after pass."""
+        if self._said_base.get(key) != line:
+            self._said_base[key] = line
+            self.say(line)
+
     # --- filing -------------------------------------------------------------------------------
 
     def file(self, repo, pr, kind: str, why: str, link: str | None = None,
-             after: str | None = None) -> str:
+             after: str | None = None, base: str | None = None) -> str:
         """Files one stop: the PR's `needs-info` issue (opened, or a comment on the open one),
         a comment on the PR, a toast. 'filed', or 'failed' if the issue couldn't be filed (then
-        nothing counts, and the next pass files it)."""
+        nothing counts, and the next pass files it). `base`, the head of the PR's base when a
+        check failed, tells a recheck whether the base has moved since (issue #199)."""
         n, h, name = pr.number, pr.head_sha, f'stop {repo.name}#{pr.number}'
         job = self.jobs.started(kind='stop', repo=repo.name, issue=n, branch=pr.branch,
-                                title=f'Queue runner stop: {repo.name}#{n}', sha=h, stop=kind)
+                                title=f'Queue runner stop: {repo.name}#{n}', sha=h, stop=kind,
+                                base=base)
         line = f'**{KINDS[kind]}**: {why}.' + (f' ([details]({link}))' if link else '')
         try:
             url, opened = self._issue(repo, pr, line)
