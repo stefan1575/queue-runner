@@ -84,8 +84,12 @@ const REVIEW_STATUS = 'sol-review';
  *  is killed (the timeout) is a code that isn't 0, with why in `stderr`. */
 export type Gh = (args: string[], cwd: string, input?: string) => Promise<{ code: number; stdout: string; stderr: string }>;
 
-export const ghAt = (program: string): Gh => (args, cwd, input) => new Promise((resolve) => {
-  const child = execFile(program, args, { cwd, timeout: 60_000, env: { ...process.env, GH_PROMPT_DISABLED: '1' } },
+/** `program` with `pre` before gh's own arguments (a test runs `node -e <script>` as gh).
+ *  **Its output is never capped**: execFile's default 1 MiB would cut off a paged answer (every
+ *  page of check runs comes back as one JSON document), and GitHub's answer is bounded by the
+ *  timeout instead. */
+export const ghAt = (program: string, pre: string[] = []): Gh => (args, cwd, input) => new Promise((resolve) => {
+  const child = execFile(program, [...pre, ...args], { cwd, timeout: 60_000, maxBuffer: Infinity, env: { ...process.env, GH_PROMPT_DISABLED: '1' } },
     (error, stdout, stderr) => {
       const code = error ? (typeof error.code === 'number' ? error.code : -1) : 0;
       const why = error && typeof error.code !== 'number' ? `${error.message}\n` : '';
