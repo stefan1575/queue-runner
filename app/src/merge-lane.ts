@@ -284,7 +284,7 @@ export class MergeLane {
     const numbers = new Set(this.d.log.steps().filter((s) => s.kind === 'ready' && s.repo === repo.id).map((s) => s.pr));
     for (const n of [...numbers].sort((a, b) => a - b)) {
       const last = this.marked(repo, n);
-      if (!last) continue;
+      if (!last || this.mergedSince(last)) continue; // a merge noticed once is done with
       const pr = listed.get(n);
       if (pr) {
         const why = pr.headSha !== last.sha ? `the head moved from ${last.sha.slice(0, 7)} to ${pr.headSha.slice(0, 7)}: it's reviewed first`
@@ -302,6 +302,13 @@ export class MergeLane {
         await this.userMerged(repo, last, now.headSha);
       } else if (now.state === 'closed') await this.unmark(repo, last, 'closed without merging');
     }
+  }
+
+  /** A merge of the PR recorded after its mark: the mark's PR is done with (F2). */
+  private mergedSince(mark: Step): boolean {
+    const steps = this.d.log.steps();
+    const at = steps.indexOf(steps.find((s) => s.id === mark.id)!);
+    return steps.slice(at + 1).some((s) => s.kind === 'merge' && s.repo === mark.repo && s.pr === mark.pr && s.end?.outcome === 'merged');
   }
 
   private async unmark(repo: BuildRepo, last: Step, why: string): Promise<void> {
@@ -327,13 +334,29 @@ export class MergeLane {
 
   // --- after a merge ---------------------------------------------------------------------------
 
+  /** The PR's own jobs: its reviews and fix rounds (by the PR's number), and the build whose end
+   *  names this PR. A later build on a reused branch name is another PR's, and so is a branch a
+   *  person pushed (F2). */
+  private ownJobs(repo: BuildRepo, step: Step): Job[] {
+    return this.d.log.jobs().filter((j) => j.repo === repo.id
+      && (j.kind === 'build' ? j.end?.pr?.number === step.pr : j.issue === step.pr && j.branch === step.branch));
+  }
+
   /** The PR's worktrees and branches removed and every thread the app ran on it settled: the
-   *  latest point one of them can still be open (#68 story 7). Recorded once both are done; a
-   *  settle that failed leaves it owed for the next pass. */
+   *  latest point one of them can still be open (#68 story 7). Only what the PR's own jobs made is
+   *  touched: its build's branch and each fresh fixer's, never one another job of the app's uses
+   *  now (a new build on a reused branch name, F2), and never a person's. Recorded once both are
+   *  done; a settle that failed leaves it owed for the next pass. */
   private async cleanUp(repo: BuildRepo, step: Step): Promise<void> {
     const name = `merge ${repo.title}#${step.pr}`;
-    const jobs = this.d.log.jobs().filter((j) => j.repo === repo.id && (j.branch === step.branch || (j.kind === 'review' && j.issue === step.pr)));
-    const branches = [step.branch, ...jobs.flatMap((j) => (j.workBranch ? [j.workBranch] : []))];
+    const jobs = this.ownJobs(repo, step);
+    const own = new Set(jobs.map((j) => j.id));
+    // another job of the app's on the branch: still running (or waiting, or cut off), or one whose
+    // end names another PR. An earlier build of this PR that ended without one is neither
+    const others = new Set(this.d.log.jobs().filter((j) => j.repo === repo.id && !own.has(j.id) && j.kind !== 'review'
+      && (WRITING(j) || (j.end?.pr && j.end.pr.number !== step.pr))).map((j) => j.branch));
+    const branches = [...new Set(jobs.flatMap((j) => [...(j.kind === 'build' ? [j.branch] : []), ...(j.workBranch ? [j.workBranch] : [])]))]
+      .filter((b) => !others.has(b));
     const left: string[] = [];
     let done = true;
     try {

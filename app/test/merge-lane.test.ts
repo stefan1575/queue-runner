@@ -116,7 +116,7 @@ async function review(round: number, sha: string, verdict: 'clean' | 'blocking')
 const steps = (kind: string) => log.steps().filter((s) => s.kind === kind);
 const settledThreads = () => t3.toolCalls.filter((c) => c.tool === 't3_thread_organize').map((c) => c.args.threadId);
 // the builder's question was answered: nothing writes to the branch
-const answered = async () => { const b = log.jobs().find((j) => j.kind === 'build')!; await log.ended(b.id, { outcome: 'done' }); };
+const answered = async () => { const b = log.jobs().find((j) => j.kind === 'build')!; await log.ended(b.id, { outcome: 'done', pr: { number: 4, url: '', state: 'open' } }); };
 
 describe('in a repo where the runner merges', () => {
   test('a clean review on H with checks passed merges at H with a merge commit; worktrees, branches and threads after', async () => {
@@ -295,6 +295,57 @@ describe('in a repo where the user merges', () => {
     expect(lines.some((l) => l.includes('you merged it'))).toBe(true);
   });
 
+  test("the user's merge is noticed once: later passes record nothing, and a new build on the same branch name keeps its worktree (F2)", async () => {
+    await built();
+    await answered();
+    await review(1, H, 'clean');
+    // the PR's build ended with its PR, so the clean-up knows it as this PR's job
+    const b = log.jobs().find((j) => j.kind === 'build')!;
+    await log.ended(b.id, { outcome: 'done', pr: { number: 4, url: '', state: 'open' } });
+    await makeLane().pass();
+    gh.reviewPulls['owner/app'] = [];
+    gh.prs['owner/app#4'] = github({ state: 'merged' });
+    await lane.pass();
+    await lane.idle();
+    expect(steps('merge')).toHaveLength(1);
+    // the issue reopened and rebuilt on the same branch name: a new build, its own worktree
+    const again = await log.started({ kind: 'build', repo: 'p-app', github: 'owner/app', issue: 3, branch: BRANCH, base: 'main', title: 'Queue runner build: app#3', choice: CHOICE, onFallback: false });
+    await log.thread(again.id, { threadId: 'thread-new', runId: 'r', link: null });
+    git.trees.push({ path: 'C:/t3/worktrees/app/claude-add-a-thing-3-again', branch: BRANCH });
+    git.calls = [];
+    await lane.pass();
+    await lane.pass();
+    await lane.idle();
+    expect(steps('merge')).toHaveLength(1);
+    expect(git.calls).toEqual([]);
+    expect(settledThreads()).not.toContain('thread-new');
+  });
+
+  test("a merge's clean-up owed after a new build reused the branch name leaves that build's worktree and branch alone (F2)", async () => {
+    await built();
+    await answered();
+    const b = log.jobs().find((j) => j.kind === 'build')!;
+    await log.ended(b.id, { outcome: 'done', pr: { number: 4, url: '', state: 'open' } });
+    await review(1, H, 'clean');
+    repo = RUNNER;
+    git.stuck.add(WT); // the clean-up is owed: git keeps listing the PR's worktree
+    await makeLane().pass();
+    await lane.idle();
+    expect(steps('merge')[0]!.cleanedAt).toBeUndefined();
+    // meanwhile the old worktree went, and a new build took the branch name
+    git.stuck.clear();
+    git.trees = git.trees.filter((t) => t.path !== WT);
+    const again = await log.started({ kind: 'build', repo: 'p-app', github: 'owner/app', issue: 3, branch: BRANCH, base: 'main', title: 'Queue runner build: app#3', choice: CHOICE, onFallback: false });
+    await log.thread(again.id, { threadId: 'thread-new', runId: 'r', link: null });
+    git.trees.push({ path: 'C:/t3/worktrees/app/claude-add-a-thing-3-again', branch: BRANCH });
+    git.calls = [];
+    await lane.pass();
+    await lane.idle();
+    expect(git.calls.filter((c) => c.includes('again') || c === `deleteBranch ${BRANCH}`)).toEqual([]);
+    expect(settledThreads()).not.toContain('thread-new');
+    expect(steps('merge')[0]!.cleanedAt).toEqual(expect.any(String));
+  });
+
   test('the mark comes off when the head moves; a marked PR closed unmerged loses it too', async () => {
     await review(1, H, 'clean');
     await makeLane().pass();
@@ -316,4 +367,3 @@ describe('in a repo where the user merges', () => {
     expect(steps('ready').map((s) => s.end?.outcome)).toEqual(['failed', 'marked']);
   });
 });
-
