@@ -1,6 +1,6 @@
 // A fake GitHub behind the build lane's seam (`GitHubWork`), answered from memory. Repos are
 // `owner/name`; issues elsewhere are `owner/name#N` in `states`.
-import type { Checks, Comment, GitHubReview, GitHubWork, Issue, Pull, PullState, ReviewPull } from '../src/github.ts';
+import { GitHubError, HeadMoved, type Checks, type Comment, type GitHubMerge, type GitHubReview, type GitHubWork, type Issue, type MergePull, type Pull, type PullState, type ReviewPull } from '../src/github.ts';
 import type { GitHubPosts, OpenIssue } from '../src/review/post.ts';
 
 export class FakeGitHub implements GitHubWork {
@@ -47,7 +47,7 @@ export class FakeReviewGitHub extends FakeGitHub implements GitHubPosts, GitHubR
   failing = new Set<string>();
   private n = 100;
 
-  private fail(what: string) { if (this.failing.has(what)) throw new Error(`gh ${what} failed (HTTP 502)`); }
+  protected fail(what: string) { if (this.failing.has(what)) throw new Error(`gh ${what} failed (HTTP 502)`); }
   async pullsToReview(repo: string) { return structuredClone(this.reviewPulls[repo] ?? []); }
   async checks(_repo: string, sha: string) { return this.checkStates[sha] ?? { state: 'none' as const, pending: [], failed: [] }; }
   async issue(repo: string, n: number) { return this.issues[`${repo}#${n}`] ?? { title: `Issue ${n}`, body: '' }; }
@@ -75,5 +75,45 @@ export class FakeReviewGitHub extends FakeGitHub implements GitHubPosts, GitHubR
   async editPullBody(repo: string, n: number, body: string) {
     this.posted.push({ what: 'body', repo, n, body });
     this.bodies[`${repo}#${n}`] = body;
+  }
+}
+
+/** The merge lane's GitHub (#156): each PR as a merge reads it, and GitHub's merge, which refuses
+ *  a head that isn't the PR's (its 409, `HeadMoved`). Writes go to `posted` too. */
+export class FakeMergeGitHub extends FakeReviewGitHub implements GitHubMerge {
+  prs: Record<string, MergePull> = {};
+  threads: Record<string, number> = {};
+  /** While above 0, each merge fails (a GitHub blip) and counts it down. */
+  mergeFails = 0;
+  /** While above 0, each PR read fails and counts it down. */
+  pullFails = 0;
+  async pull(repo: string, n: number) {
+    if (this.pullFails > 0) { this.pullFails--; throw new Error('gh api failed (1): HTTP 502'); }
+    const p = this.prs[`${repo}#${n}`];
+    if (!p) throw new Error(`gh api failed (1): HTTP 404 (${repo}#${n})`);
+    return structuredClone(p);
+  }
+  /** Runs just before GitHub merges: a push landing between the re-check and the merge, say. */
+  beforeMerge: () => void = () => {};
+  async merge(repo: string, n: number, sha: string) {
+    this.beforeMerge();
+    const p = this.prs[`${repo}#${n}`]!;
+    if (this.mergeFails > 0) { this.mergeFails--; throw new GitHubError('gh api PUT merge failed (1): HTTP 502'); }
+    if (p.headSha !== sha) throw new HeadMoved(`GitHub refused the merge at ${sha.slice(0, 7)}: Head branch was modified. (HTTP 409)`);
+    p.state = 'merged';
+    this.posted.push({ what: 'merge', repo, n, sha });
+    return 'm'.repeat(40);
+  }
+  async openThreads(repo: string, n: number) { return this.threads[`${repo}#${n}`] ?? 0; }
+  async addLabel(repo: string, n: number, label: string) {
+    this.fail('label');
+    this.prs[`${repo}#${n}`]!.labels.push(label);
+    this.posted.push({ what: 'label', repo, n, label });
+  }
+  async removeLabel(repo: string, n: number, label: string) {
+    this.fail('label');
+    const p = this.prs[`${repo}#${n}`]!;
+    p.labels = p.labels.filter((l) => l !== label);
+    this.posted.push({ what: 'unlabel', repo, n, label });
   }
 }

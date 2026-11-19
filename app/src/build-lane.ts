@@ -33,6 +33,7 @@ import { launchJob } from './launch.ts';
 import { pick, type BuildTicket } from './picker.ts';
 import { ThreadSettler } from './settle.ts';
 import type { Repo } from './repos.ts';
+import type { Merger } from './settings.ts';
 import type { Retry } from './t3/project-feed.ts';
 import type { T3Mcp } from './t3/mcp.ts';
 import { NoAnswer } from './t3/seams.ts';
@@ -41,8 +42,9 @@ import type { T3Ws } from './t3/ws.ts';
 import type { UsageGate } from './usage-gate.ts';
 
 /** A repo the lane builds in: a served T3 project. `github` is null only for the live check's
- *  sandbox, which has no GitHub: no picking, no comments and no PR to look for. */
-export type BuildRepo = { id: string; title: string; folder: string; github: string | null };
+ *  sandbox, which has no GitHub: no picking, no comments and no PR to look for. `merge` says who
+ *  merges its clean PRs (#156): the app, or the user (the default). */
+export type BuildRepo = { id: string; title: string; folder: string; github: string | null; merge?: Merger };
 
 export type BuildLaneDoors = {
   /** The served repos, now. */
@@ -71,7 +73,7 @@ export type BuildLaneDoors = {
 /** The repos the lane builds in: those switched to Served that have a GitHub remote. An
  *  unserved repo's tickets are never read. */
 export const servedRepos = (list: Repo[] | null): BuildRepo[] =>
-  (list ?? []).filter((r) => r.served && r.github).map((r) => ({ id: r.id, title: r.title, folder: r.folder, github: r.github }));
+  (list ?? []).filter((r) => r.served && r.github).map((r) => ({ id: r.id, title: r.title, folder: r.folder, github: r.github, merge: r.merge }));
 
 export const jobTitle = (repo: BuildRepo, issue: number) => `Queue runner build: ${repo.title}#${issue}`;
 
