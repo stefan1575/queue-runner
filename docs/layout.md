@@ -96,4 +96,4 @@ What each module and script is for.
 - `app/`: the TypeScript rebuild (spec #68), apart from `queue_runner/`: `src/t3/` (T3's seams,
   sign-in, MCP and WebSocket; `src/t3/thread-end.ts`, a run's end from its events),
   `src/github.ts`, `src/projects.ts`, `src/app.ts` (the command line), the build lane
-  (`src/build-lane.ts`, `src/picker.ts`, `src/briefs/build.ts`, `src/job-log.ts`, `src/git.ts`), `test/` (on `test/fake-t3.ts`) and `live/` (its live checks). `docs/app.md`.
+  (`src/build-lane.ts`, `src/picker.ts`, `src/briefs/build.ts` and the rules the briefs share in `src/briefs/rules.ts`, `src/job-log.ts`, `src/git.ts`), `test/` (on `test/fake-t3.ts`) and `live/` (its live checks). `docs/app.md`.

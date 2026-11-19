@@ -16,9 +16,10 @@
 // started a thread for that the app has no id of (its launch was sent and the answer lost, or the
 // app stopped before the id was saved) needs the user (#154, After a restart, don't guess): it's
 // recorded as such and its repo starts nothing until the user answers (`answered`). A repo whose
-// job started no thread rests `restMs` before it's tried again. The usage the job was let in on and T3's first reading after
-// it are the gate's cost record (`usage.jsonl`, by the same job id); both the reading and the cost
-// it was let in at are in its start line, so a job watched again after a restart keeps them.
+// job started no thread rests `restMs` before it's tried again. The usage the job was let in on
+// and T3's first reading after it are the gate's cost record (`usage.jsonl`, by the same job id);
+// both the reading and the cost it was let in at are in its start line, so a job watched again
+// after a restart keeps them.
 import { buildBrief } from './briefs/build.ts';
 import { reading } from './costs.ts';
 import { holdText } from './gate.ts';

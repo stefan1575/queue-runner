@@ -312,7 +312,7 @@ tickets but the build lane (Builds, below); the tests drive it on fake T3's even
 
 The first job end to end (#154): a served repo's next ticket becomes a PR, as today's runner
 builds (`docs/flow.md`, `docs/claude-lane.md`). `src/build-lane.ts`, `src/picker.ts`,
-`src/briefs/build.ts`, `src/t3/thread-end.ts`, `src/job-log.ts`, `src/git.ts`.
+`src/briefs/build.ts`, `src/briefs/rules.ts`, `src/t3/thread-end.ts`, `src/job-log.ts`, `src/git.ts`.
 
 - **Picking** (`src/picker.ts`, today's picker ported, `docs/layout.md`): an open issue labelled
   `ready-for-agent`, every blocker closed (GitHub's native blocked-by count, and `#N`,
