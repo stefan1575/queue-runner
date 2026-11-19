@@ -14,10 +14,11 @@
 //
 // **One conflicted PR at a time** in a repo, lowest number first: while another open PR that had a
 // conflict round is still being moved by the loop (`moving`: a job on it, a review, fix round or
-// merge the lanes will start on their own), it's on its way to merging, and the next waits, so each
-// resolves against the base it lands on. One that waits on the user (a draft, a question, a stop, a
-// failed check, a clean review where the user merges, a reply or open thread the merge waits on)
-// holds nothing (#157 F6). One that conflicts again waits its own turn, so it holds back only
+// merge the lanes will start on their own, asked of those lanes' own rules), it's on its way to
+// merging, and the next waits, so each resolves against the base it lands on. One that waits on the
+// user (a draft, a question, a stop, a failed check, reviews that failed past the review lane's
+// cut-off, a clean review where the user merges, a reply or open thread the merge waits on), or on
+// checks that never report past NO_CHECKS_GRACE_MS, holds nothing (#157 F6, F7). One that conflicts again waits its own turn, so it holds back only
 // higher numbers: two such PRs never wait for each other.
 //
 // **A stop, not a round** (#91), only when another round wouldn't help: the round on H ended
@@ -38,8 +39,9 @@ import { conflictBrief, type ConflictWhere } from './briefs/conflict.ts';
 import { holdText } from './gate.ts';
 import type { FixGit } from './git.ts';
 import type { GitHubMerge, GitHubReview, ReviewPull } from './github.ts';
-import { MAX_FAILED_MERGES, saidSince } from './merge-lane.ts';
-import { readReviews } from './review/ledger.ts';
+import { fixNext } from './fix-lane.ts';
+import { mergeNext } from './merge-lane.ts';
+import { reviewNext } from './review-lane.ts';
 import { REVIEWED, settles, type Job, type JobEnd, type JobLog, type StopStart } from './job-log.ts';
 import type { Catalog, ModelChoice } from './jobs.ts';
 import { launchJob } from './launch.ts';
@@ -73,6 +75,9 @@ export type ConflictLaneDoors = {
 
 /** A PR that conflicted this many times as its base kept moving is a stop (today's #91 limit). */
 export const MAX_CONFLICT_ROUNDS = 5;
+/** How long a head a conflict round pushed, with no checks reported on it, still holds the repo's
+ *  other conflicted PRs: CI reports within minutes, and a repo with none never does (#157 F7). */
+export const NO_CHECKS_GRACE_MS = 10 * 60_000;
 
 export const conflictTitle = (repo: BuildRepo, n: number) => `Queue runner conflict: ${repo.title}#${n}`;
 /** The local branch a round's new worktree is made on, from H; it never goes to origin: the round
@@ -258,33 +263,43 @@ export class ConflictLane {
   }
 
   /** What the loop is still doing with the PR without the user, or null when it waits on them:
-   *  only such a PR holds the repo's other conflicted PRs back (#157 F6). Read from the job log
-   *  and GitHub as the review and merge lanes would see it; a read that fails throws, so the PR
-   *  it would hold waits for the next pass rather than go on a guess. */
+   *  only such a PR holds the repo's other conflicted PRs back (#157 F6). Asked of the review, fix
+   *  and merge lanes' own rules (`reviewNext`, `fixNext`, `mergeNext`), so the hold never counts
+   *  a PR one of them has given up on (#157 F7); a read that fails throws, so the PR it would hold
+   *  waits for the next pass rather than go on a guess. */
   private async moving(repo: BuildRepo, o: ReviewPull): Promise<string | null> {
-    const h = o.headSha;
-    const h7 = h.slice(0, 7);
+    const h7 = o.headSha.slice(0, 7);
     if (o.draft) return null; // a draft is never merged until the user marks it ready
     if (this.heldForUser(repo, o)) return null;
-    const jobs = this.d.log.jobs().filter((j) => j.repo === repo.id);
     // (a job that needs the user holds the whole repo: no pass gets here)
-    const writer = jobs.find((j) => j.kind !== 'review' && j.branch === o.branch && WRITING(j));
-    if (writer) return writer.end?.outcome === 'waiting' ? null : `a ${writer.kind} job on it`;
-    if (jobs.some((j) => j.kind === 'review' && j.issue === o.number && !j.end)) return 'a review of it is running';
-    const review = this.newestReview(repo, o);
-    const checks = await this.d.github.checks(repo.github!, h);
-    if (checks.state === 'failed') return null; // a failed check is the user's (#158)
-    if (!review) return `${h7} is reviewed next`;
-    if (review.end!.outcome === 'blocking') return `review ${review.round} of ${h7} gets its fix round`;
-    // clean on H: the app merges it, unless the user does or the merge waits on them
+    if (this.d.log.jobs().some((j) => j.kind === 'review' && j.repo === repo.id && j.issue === o.number && !j.end)) return 'a review of it is running';
+    const review = await reviewNext(this.d, repo, o);
+    if (review.why === null) return `${h7} is reviewed next`;
+    if (review.on !== 'reviewed') return this.stillMoving(repo, o, review);
+    const done = this.newestReview(repo, o)!;
+    if (done.end!.outcome === 'blocking') {
+      const fix = await fixNext(this.d, repo, o, done);
+      if ('reviews' in fix) return `review ${done.round} of ${h7} gets its fix round`;
+      return this.stillMoving(repo, o, fix);
+    }
+    // clean on H (a stop or approach note is the user's: heldForUser): the app merges it, unless
+    // the user does
     if ((repo.merge ?? 'me') === 'me') return null;
-    const failed = this.d.log.steps().filter((s) => s.kind === 'merge' && s.repo === repo.id && s.pr === o.number && s.sha === h && s.end?.outcome === 'failed').length;
-    if (failed >= MAX_FAILED_MERGES) return null;
-    const comments = await this.d.github.issueComments(repo.github!, o.number);
-    const clean = readReviews(comments).at(-1);
-    if (clean && saidSince([...comments, ...await this.d.github.reviewReplies(repo.github!, o.number)], clean.at).length) return null;
-    if (await this.d.github.openThreads(repo.github!, o.number)) return null;
-    return `clean at ${h7}, merged next`;
+    const merge = await mergeNext(this.d, repo, o.number, o.headSha);
+    if (merge.why === null) return `clean at ${h7}, merged next`;
+    return this.stillMoving(repo, o, merge);
+  }
+
+  /** A lane's "not now" as the hold reads it: what the loop brings itself still moves the PR; what
+   *  waits on the user doesn't. Checks that may never report (no CI, a path filter) move it only
+   *  for NO_CHECKS_GRACE_MS after the conflict round that pushed its head: past that, nothing the
+   *  loop does brings them. */
+  private stillMoving(repo: BuildRepo, o: ReviewPull, next: { why: string; on: string }): string | null {
+    if (next.on === 'loop') return next.why;
+    if (next.on !== 'checks') return null;
+    const pushed = this.d.log.jobs().filter((j) => j.kind === 'conflict' && j.repo === repo.id && j.issue === o.number && j.end?.head === o.headSha).at(-1);
+    const until = pushed ? Date.parse(pushed.end!.at) + NO_CHECKS_GRACE_MS : 0;
+    return until > this.now().getTime() ? `${next.why}, held until ${new Date(until).toISOString()} at most` : null;
   }
 
   /** The app's newest review of the PR's head that reached a verdict. */

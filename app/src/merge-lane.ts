@@ -63,6 +63,49 @@ const defaultRemove = async (path: string) => {
   return !existsSync(path);
 };
 
+/** Whether the PR merges (or is marked ready for the user) at H now, read afresh, and why not: the
+ *  one rule for it, which the lane's re-check and the conflict lane's hold both ask (#157 F7).
+ *  `why` null: it merges now. Otherwise `on` says what it waits on: `loop`, something the loop
+ *  itself brings (a job writing to the branch, its new head's review, checks still running,
+ *  GitHub's word on a conflict, a conflict round); `checks`, checks on H that may never report;
+ *  `you`, the user or a new head (a draft, a stop, failed merges, no clean review of H, a failed
+ *  check, a reply or an open thread). */
+export async function mergeNext(d: { log: JobLog; github: Pick<GitHubReview, 'issueComments' | 'reviewReplies' | 'checks'> & Pick<GitHubMerge, 'pull' | 'openThreads'> },
+  repo: BuildRepo, n: number, h: string): Promise<{ why: null } | { why: string; on: 'loop' | 'checks' | 'you' }> {
+  const github = repo.github!;
+  const h7 = h.slice(0, 7);
+  const pr = await d.github.pull(github, n);
+  if (pr.state !== 'open') return { why: `it is ${pr.state}`, on: 'you' };
+  if (pr.headSha !== h) return { why: `the head moved from ${h7} to ${pr.headSha.slice(0, 7)}: it's reviewed first`, on: 'loop' };
+  if (pr.draft) return { why: 'it is a draft', on: 'you' };
+  const writer = d.log.jobs().find((j) => j.repo === repo.id && j.kind !== 'review' && j.branch === pr.branch && WRITING(j));
+  if (writer) return { why: `a ${writer.kind} job is writing to ${pr.branch}`, on: writer.end?.outcome === 'waiting' ? 'you' : 'loop' };
+  const held = d.log.needingUser(repo.id)[0];
+  if (held) return { why: `${held.title} needs you`, on: 'you' };
+  const failed = d.log.steps().filter((s) => s.kind === 'merge' && s.repo === repo.id && s.pr === n && s.sha === h && s.end?.outcome === 'failed').length;
+  if (failed >= MAX_FAILED_MERGES) return { why: `${failed} merges failed on ${h7}: left until a new head`, on: 'you' };
+  const comments = await d.github.issueComments(github, n);
+  const last = readReviews(comments).at(-1);
+  if (!last || !h.startsWith(last.sha) || last.verdict !== 'clean') return { why: `its newest review comment is not a clean review of ${h7}`, on: 'you' };
+  const checks = await d.github.checks(github, h);
+  if (checks.state !== 'passed') {
+    const more = [...checks.failed, ...checks.pending].join(', ');
+    return { why: `checks on ${h7} are ${checks.state}${more ? ` (${more})` : ''}`, on: checks.state === 'pending' ? 'loop' : checks.state === 'none' ? 'checks' : 'you' };
+  }
+  if (pr.mergeable === false) return { why: `it conflicts with ${pr.base}`, on: 'loop' };
+  // GitHub still working it out is not known yet (#157 F5): no merge or mark on a guess, and a
+  // mark already on stays
+  if (pr.mergeable === null) return { why: MERGEABLE_UNKNOWN, on: 'loop' };
+  const said = saidSince([...comments, ...await d.github.reviewReplies(github, n)], last.at);
+  if (said.length) {
+    const who = [...new Set(said.map((c) => c.author))].join(', ');
+    return { why: `${said.length} repl${said.length === 1 ? 'y' : 'ies'} since the clean review (${who}): you read ${said.length === 1 ? 'it' : 'them'} first`, on: 'you' };
+  }
+  const threads = await d.github.openThreads(github, n);
+  if (threads) return { why: `${threads} unresolved review thread${threads === 1 ? '' : 's'}`, on: 'you' };
+  return { why: null };
+}
+
 export class MergeLane {
   private d: MergeLaneDoors;
   private settler: ThreadSettler;
@@ -160,40 +203,10 @@ export class MergeLane {
       && !this.d.log.steps().some((s) => s.kind === 'merge' && s.repo === repo.id && s.pr === n && s.end?.outcome === 'merged');
   }
 
-  /** The re-check just before a merge or a mark, read afresh: why not at H now, or null. */
+  /** The re-check just before a merge or a mark, read afresh: why not at H now, or null
+   *  (`mergeNext`, the one rule for it). */
   async whyNot(repo: BuildRepo, n: number, h: string): Promise<string | null> {
-    const github = repo.github!;
-    const h7 = h.slice(0, 7);
-    const pr = await this.d.github.pull(github, n);
-    if (pr.state !== 'open') return `it is ${pr.state}`;
-    if (pr.headSha !== h) return `the head moved from ${h7} to ${pr.headSha.slice(0, 7)}: it's reviewed first`;
-    if (pr.draft) return 'it is a draft';
-    const writer = this.d.log.jobs().find((j) => j.repo === repo.id && j.kind !== 'review' && j.branch === pr.branch && WRITING(j));
-    if (writer) return `a ${writer.kind} job is writing to ${pr.branch}`;
-    const held = this.d.log.needingUser(repo.id)[0];
-    if (held) return `${held.title} needs you`;
-    const failed = this.d.log.steps().filter((s) => s.kind === 'merge' && s.repo === repo.id && s.pr === n && s.sha === h && s.end?.outcome === 'failed').length;
-    if (failed >= MAX_FAILED_MERGES) return `${failed} merges failed on ${h7}: left until a new head`;
-    const comments = await this.d.github.issueComments(github, n);
-    const last = readReviews(comments).at(-1);
-    if (!last || !h.startsWith(last.sha) || last.verdict !== 'clean') return `its newest review comment is not a clean review of ${h7}`;
-    const checks = await this.d.github.checks(github, h);
-    if (checks.state !== 'passed') {
-      const more = [...checks.failed, ...checks.pending].join(', ');
-      return `checks on ${h7} are ${checks.state}${more ? ` (${more})` : ''}`;
-    }
-    if (pr.mergeable === false) return `it conflicts with ${pr.base}`;
-    // GitHub still working it out is not known yet (#157 F5): no merge or mark on a guess, and a
-    // mark already on stays
-    if (pr.mergeable === null) return MERGEABLE_UNKNOWN;
-    const said = saidSince([...comments, ...await this.d.github.reviewReplies(github, n)], last.at);
-    if (said.length) {
-      const who = [...new Set(said.map((c) => c.author))].join(', ');
-      return `${said.length} repl${said.length === 1 ? 'y' : 'ies'} since the clean review (${who}): you read ${said.length === 1 ? 'it' : 'them'} first`;
-    }
-    const threads = await this.d.github.openThreads(github, n);
-    if (threads) return `${threads} unresolved review thread${threads === 1 ? '' : 's'}`;
-    return null;
+    return (await mergeNext(this.d, repo, n, h)).why;
   }
 
   /** Merges at H. GitHub refusing the old head (409) is head-moved, and the new head is reviewed. */

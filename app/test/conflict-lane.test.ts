@@ -8,7 +8,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import type { BuildRepo } from '../src/build-lane.ts';
-import { ConflictLane, MAX_CONFLICT_ROUNDS, type ConflictLaneDoors } from '../src/conflict-lane.ts';
+import { ConflictLane, MAX_CONFLICT_ROUNDS, NO_CHECKS_GRACE_MS, type ConflictLaneDoors } from '../src/conflict-lane.ts';
+import { MAX_FAILED_MERGES } from '../src/merge-lane.ts';
+import { MAX_FAILED } from '../src/review-lane.ts';
 import { GitHubError, type ReviewPull } from '../src/github.ts';
 import { JobLog, type Job, type JobStart } from '../src/job-log.ts';
 import type { ModelChoice } from '../src/jobs.ts';
@@ -101,6 +103,9 @@ let lines: string[];
 let ended: Job[];
 let lane: ConflictLane;
 let repoNow: BuildRepo;
+/** The one clock the lane and the job log read. */
+let clock: Date;
+const PASSED = { state: 'passed' as const, pending: [], failed: [] };
 
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), 'qr-conflict-'));
@@ -115,7 +120,8 @@ beforeEach(async () => {
   gh.conflicting.add('owner/app#4');
   git = new FakeGit(gh);
   gate = new FakeGate();
-  log = await JobLog.open(join(dir, 'state', 'jobs.jsonl'));
+  clock = new Date('2026-11-19T12:00:00Z');
+  log = await JobLog.open(join(dir, 'state', 'jobs.jsonl'), () => clock);
   lines = [];
   ended = [];
   repoNow = APP;
@@ -129,7 +135,7 @@ function makeLane(part: Partial<ConflictLaneDoors> = {}) {
   lane = new ConflictLane({
     repos: () => [repoNow], github: gh, git, mcp, ws, gate, catalog: () => catalog, user: async () => 'Pat', log,
     exists: () => true, say: (l) => lines.push(l), ended: (j) => ended.push(j), retry: () => () => {},
-    now: () => new Date('2026-11-19T12:00:00Z'), ...part,
+    now: () => clock, ...part,
   });
   return lane;
 }
@@ -266,6 +272,7 @@ describe('one conflicted PR at a time, oldest first', () => {
     await until(() => t3.launches.length === 1);
     expect(t3.launches[0].title).toBe('Queue runner conflict: app#4');
     await until(() => lines.includes('conflict app#5: no conflict round now, the conflict round on PR #4 runs first: one conflicted PR at a time'));
+    gh.checkStates[H2] = PASSED;
     await finish('thread-1', 4, H2);
     await lane.idle();
     // #4 is on its way to merging (reviewed next): #5 waits to resolve against what it lands on
@@ -284,6 +291,7 @@ describe('one conflicted PR at a time, oldest first', () => {
     async function afterRound4() {
       gh.reviewPulls['owner/app'] = [pull(4), pull(5)];
       gh.conflicting.add('owner/app#5');
+      gh.checkStates[H2] = PASSED;
       makeLane();
       await lane.pass();
       await finish('thread-1', 4, H2);
@@ -335,6 +343,64 @@ describe('one conflicted PR at a time, oldest first', () => {
       expect(t3.launches).toHaveLength(1);
       expect(lines.at(-1)).toContain('PR #4 had a conflict round and is still on its way to merging (clean at 1234567, merged next)');
       gh.threads['owner/app#4'] = 1;
+      await goes5();
+    });
+
+    test("reviews that failed past the review lane's cut-off hold nothing; one failed review still holds (F7)", async () => {
+      await afterRound4();
+      const failed = async () => {
+        const r = await log.started({ ...job({ kind: 'review', round: 1, sha: H2 }), title: 'Queue runner review: app#4' });
+        await log.ended(r.id, { outcome: 'failed', error: 'the thread failed' });
+      };
+      for (let k = 1; k < MAX_FAILED; k++) await failed();
+      await lane.pass();
+      expect(t3.launches).toHaveLength(1);
+      expect(lines.at(-1)).toContain('(1234567 is reviewed next)');
+      await failed(); // the review lane leaves H2 until a new head
+      await goes5();
+    });
+
+    test('a head with no checks reported holds the others for NO_CHECKS_GRACE_MS after its round pushed it, then nothing (F7)', async () => {
+      await afterRound4();
+      delete gh.checkStates[H2];
+      await lane.pass();
+      expect(t3.launches).toHaveLength(1);
+      expect(lines.at(-1)).toContain('(no checks reported on 1234567 yet, held until 2026-11-19T12:10:00.000Z at most)');
+      clock = new Date(clock.getTime() + NO_CHECKS_GRACE_MS);
+      await goes5();
+    });
+
+    test('checks still running hold the others however long they take (F7)', async () => {
+      await afterRound4();
+      gh.checkStates[H2] = { state: 'pending', pending: ['tests'], failed: [] };
+      clock = new Date(clock.getTime() + 2 * NO_CHECKS_GRACE_MS);
+      await lane.pass();
+      expect(t3.launches).toHaveLength(1);
+      expect(lines.at(-1)).toContain('(checks still running on 1234567 (tests))');
+    });
+
+    test('a review of its head on GitHub the log lacks holds nothing: no lane acts on it (F7)', async () => {
+      await afterRound4();
+      (gh.comments['owner/app#4'] ??= []).push({ author: 'me', createdAt: '2026-11-19T11:00:00Z', body: mark(1, 'blocking', H2, []), url: 'u' });
+      await goes5();
+    });
+
+    test('a blocking review whose fix round ended on its head holds nothing (F7)', async () => {
+      await afterRound4();
+      await review4('blocking');
+      const fix = await log.started(job({ kind: 'fix', title: 'Queue runner fix: app#4', sha: H2, round: 1 }));
+      await log.ended(fix.id, { outcome: 'failed', error: 'it failed' });
+      await goes5();
+    });
+
+    test("merges that failed past the merge lane's cut-off hold nothing (F7)", async () => {
+      repoNow = { ...APP, merge: 'runner' };
+      await afterRound4();
+      await review4('clean');
+      for (let k = 0; k < MAX_FAILED_MERGES; k++) {
+        const step = await log.stepStarted({ kind: 'merge', repo: APP.id, github: 'owner/app', pr: 4, branch: 'claude/thing-3', sha: H2 });
+        await log.stepEnded(step.id, { outcome: 'failed', error: 'HTTP 405' });
+      }
       await goes5();
     });
 

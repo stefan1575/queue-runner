@@ -84,6 +84,35 @@ const refusedText = (threadId: string, why: string) => `the PR's writer thread $
 const join = (folder: string, name: string) => `${folder.replace(/[\\/]+$/, '')}/${name}`;
 const WRITING = (j: Job) => !j.end || j.end.outcome === 'waiting' || j.end.outcome === 'usage-limit';
 
+/** Whether the blocking `review` of the PR's head H gets its fix round now (the PR's reviews to
+ *  brief from) or why not: the one rule for it, which the lane's pass and the conflict lane's hold
+ *  both ask (#157 F7). `on` says what it waits on: `loop`, the round on H running or cut off by a
+ *  usage limit, or another job writing to the branch; `you`, a question, a round on H that ended,
+ *  or a newest review comment that isn't this review. */
+export async function fixNext(d: { log: JobLog; github: Pick<GitHubReview, 'issueComments'> }, repo: BuildRepo, pr: ReviewPull, review: Job):
+  Promise<{ why: string; on: 'loop' | 'you' } | { reviews: Review[] }> {
+  const h7 = pr.headSha.slice(0, 7);
+  const jobs = d.log.jobs().filter((j) => j.repo === repo.id);
+  // one round per head: one that ran on H (any end but not-started) is the last on H
+  const rounds = jobs.filter((j) => j.kind === 'fix' && j.issue === pr.number && j.sha === pr.headSha && j.end?.outcome !== 'not-started');
+  const last = rounds.at(-1);
+  if (last) {
+    if (!last.end) return { why: 'its fix round is still running', on: 'loop' };
+    if (last.end.outcome === 'waiting') return { why: 'its fix round waits for an answer', on: 'you' };
+    if (last.end.outcome === 'usage-limit') return { why: 'its fix round was cut off by a usage limit and resumes after the reset', on: 'loop' };
+    return { why: `a fix round on ${h7} ended ${last.end.outcome} and the head is still ${h7}: left for you`, on: 'you' };
+  }
+  // one writer per PR
+  const writer = jobs.find((j) => j.kind !== 'review' && j.branch === pr.branch && WRITING(j));
+  if (writer) return { why: `a ${writer.kind} job is writing to ${pr.branch}`, on: writer.end?.outcome === 'waiting' ? 'you' : 'loop' };
+  const reviews = readReviews(await d.github.issueComments(repo.github!, pr.number));
+  const newest = reviews.at(-1);
+  if (!newest || newest.round !== review.round || !pr.headSha.startsWith(newest.sha) || newest.verdict !== 'blocking') {
+    return { why: `its newest review comment is not the blocking review ${review.round} of ${h7}`, on: 'you' };
+  }
+  return { reviews };
+}
+
 /** What a round goes out on: sent to a thread, or a fresh fixer. */
 type Plan =
   | { send: Job; why?: never }
@@ -228,28 +257,9 @@ export class FixLane {
     return last?.end?.outcome === 'blocking' ? last : null;
   }
 
-  /** Why the PR gets no round on its head now, or the PR's reviews to brief from. */
-  private async whyNot(repo: BuildRepo, pr: ReviewPull, review: Job): Promise<{ why: string } | { reviews: Review[] }> {
-    const h7 = pr.headSha.slice(0, 7);
-    const jobs = this.d.log.jobs().filter((j) => j.repo === repo.id);
-    // one round per head: one that ran on H (any end but not-started) is the last on H
-    const rounds = jobs.filter((j) => j.kind === 'fix' && j.issue === pr.number && j.sha === pr.headSha && j.end?.outcome !== 'not-started');
-    const last = rounds.at(-1);
-    if (last) {
-      if (!last.end) return { why: 'its fix round is still running' };
-      if (last.end.outcome === 'waiting') return { why: 'its fix round waits for an answer' };
-      if (last.end.outcome === 'usage-limit') return { why: 'its fix round was cut off by a usage limit and resumes after the reset' };
-      return { why: `a fix round on ${h7} ended ${last.end.outcome} and the head is still ${h7}: left for you` };
-    }
-    // one writer per PR
-    const writer = jobs.find((j) => j.kind !== 'review' && j.branch === pr.branch && WRITING(j));
-    if (writer) return { why: `a ${writer.kind} job is writing to ${pr.branch}` };
-    const reviews = readReviews(await this.d.github.issueComments(repo.github!, pr.number));
-    const newest = reviews.at(-1);
-    if (!newest || newest.round !== review.round || !pr.headSha.startsWith(newest.sha) || newest.verdict !== 'blocking') {
-      return { why: `its newest review comment is not the blocking review ${review.round} of ${h7}` };
-    }
-    return { reviews };
+  /** Why the PR gets no round on its head now, or the PR's reviews to brief from (`fixNext`). */
+  private whyNot(repo: BuildRepo, pr: ReviewPull, review: Job): Promise<{ why: string } | { reviews: Review[] }> {
+    return fixNext(this.d, repo, pr, review);
   }
 
   /** Where the round goes: back to the PR's writer thread, or to a fresh fixer, and why. */

@@ -650,11 +650,14 @@ A PR whose head conflicts with its base gets a conflict round (#157; `docs/flow.
 - **One conflicted PR at a time,** lowest number first, as today's runner: while a round runs in
   the repo, or another open PR that had a round is still being moved by the loop (it's on its way
   to merging, so the next resolves against the base it lands on), the next waits. Moved means the
-  lanes act on it without the user (`moving`): a job on it (not one waiting on a question), a
-  review running, its head reviewed next (its checks not failed), a blocking review's fix round to
-  come, or a clean review the app merges with no reply since, no unresolved thread and fewer than 2
-  failed merges. A PR waiting on the user holds nothing: a draft, a failed check, a question, a stop
-  or anything left for them, a clean review where the user merges (#157 F6). One that conflicts
+  lanes act on it without the user (`moving`), asked of each lane's own rule (`reviewNext`,
+  `fixNext`, `mergeNext`, which the lanes' own passes use) so the hold and the lanes never disagree:
+  a job on it (not one waiting on a question), a review running or to come (checks running count;
+  none reported count only for 10 minutes after the round pushed the head, `NO_CHECKS_GRACE_MS`), a
+  blocking review's fix round to come, or a clean review the app merges. A PR waiting on the user
+  holds nothing: a draft, a failed check, a question, a stop or anything left for them, reviews
+  failed past the review lane's cut-off, a clean review where the user merges, or a reply, open
+  thread or failed merges the merge waits on (#157 F6, F7). One that conflicts
   again waits its own turn, so it holds back only higher numbers. A round held by the gate holds
   the rest too.
 - **The round:** the gate picks the conflict kind's model (`UsageGate.pick`, kind `conflict`, its
