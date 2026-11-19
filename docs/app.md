@@ -618,7 +618,9 @@ merge half of `src/github.ts` and `src/git.ts`.
   `orchestration_error` when it takes a send and can't read the run back), or the app stopped
   before T3 answered (found on restart). The thread is read: a run it didn't have before the send
   is the round's, watched to its end; the thread gone means nothing ran, and a fresh fixer
-  follows; anything else (no new run, or the thread can't be read) ends `needs-user`. Only a
+  follows; no new run ends `needs-user`. A thread that can't be read (T3's connection still down)
+  says nothing yet: the round stays open, its repo held, and a pass reads the thread again a
+  minute later (`SEND_READ_MS`), until a read answers (#210 F6). Only a
   refusal before the tool ran (a 4xx, a refused token) or a call never sent is `not-started`.
 - **After a restart, don't guess** (as Builds): a round the log shows open with its thread line is
   watched again; a send without one is read as above; a fresh fixer's launch without one, or one
