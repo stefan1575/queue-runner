@@ -1,9 +1,8 @@
 // A run's end learned from T3's thread events (#154): `orchestration.subscribeThread` on fake T3.
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
-import { runtimeAddress } from '../src/t3/real.ts';
 import { watchThreadEnd } from '../src/t3/thread-end.ts';
 import { T3Ws } from '../src/t3/ws.ts';
 import { FakeT3 } from './fake-t3.ts';
@@ -15,8 +14,7 @@ let ws: T3Ws;
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), 'qr-thread-end-'));
   t3 = new FakeT3();
-  await writeFile(join(dir, 'server-runtime.json'), JSON.stringify({ origin: t3.origin }));
-  ws = new T3Ws(runtimeAddress(join(dir, 'server-runtime.json')), t3.cli, t3.http, t3.connect);
+  ws = new T3Ws(t3.address, t3.cli, t3.http, t3.connect);
   t3.threadState.t = {
     id: 't', projectId: 'p', runtimeRequests: [], turnItems: [],
     runs: [{ id: 'r1', ordinal: 1, rootNodeId: 'n1', status: 'completed' }, { id: 'r2', ordinal: 2, rootNodeId: 'n2', status: 'running' }],

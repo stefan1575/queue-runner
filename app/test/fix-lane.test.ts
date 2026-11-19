@@ -3,7 +3,7 @@
 // lane is told so a fresh reviewer reviews the pushed head. A review that marks an earlier finding
 // still not fixed, a PR with no builder thread, or a send T3 turns down gets a fresh fixer on the
 // fix kind's settings instead. After a restart nothing is guessed.
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
@@ -16,10 +16,10 @@ import { DEFAULT_JOBS, type Jobs, type ModelChoice } from '../src/jobs.ts';
 import { mark, type Finding } from '../src/review/ledger.ts';
 import { catalogFromConfig } from '../src/t3/catalog.ts';
 import { T3Mcp } from '../src/t3/mcp.ts';
-import { runtimeAddress } from '../src/t3/real.ts';
 import { T3Ws } from '../src/t3/ws.ts';
 import { FakeReviewGitHub } from './fake-github.ts';
 import { FakeT3 } from './fake-t3.ts';
+import { memoryJobFiles } from './memory-files.ts';
 
 const snapshot = JSON.parse(await readFile(new URL('./fixtures/server-config.json', import.meta.url), 'utf8'));
 const catalog = catalogFromConfig(snapshot.config);
@@ -93,15 +93,14 @@ beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), 'qr-fix-'));
   t3 = new FakeT3();
   t3.serverConfig = snapshot;
-  await writeFile(join(dir, 'server-runtime.json'), JSON.stringify({ origin: t3.origin }));
-  const address = runtimeAddress(join(dir, 'server-runtime.json'));
+  const address = t3.address;
   mcp = new T3Mcp(address, t3.cli, t3.http);
   ws = new T3Ws(address, t3.cli, t3.http, t3.connect);
   gh = new FixGitHub();
   gh.reviewPulls['owner/app'] = [pull()];
   git = new FakeGit();
   gate = new FakeGate();
-  log = await JobLog.open(join(dir, 'state', 'jobs.jsonl'));
+  log = await JobLog.open(join(dir, 'state', 'jobs.jsonl'), undefined, memoryJobFiles());
   lines = [];
   ended = [];
   jobs = { ...DEFAULT_JOBS, build: { own: BUILD, fallback: null }, fix: { own: FIX, fallback: null } };
@@ -465,7 +464,7 @@ describe('what never reaches the user, the cap, and an answer (#158)', () => {
   let tick = 0;
   beforeEach(async () => {
     tick = 0;
-    log = await JobLog.open(join(dir, 'state', 'ticking.jsonl'), () => new Date(Date.UTC(2026, 10, 19, 12, 0, tick++)));
+    log = await JobLog.open(join(dir, 'state', 'ticking.jsonl'), () => new Date(Date.UTC(2026, 10, 19, 12, 0, tick++)), memoryJobFiles());
   });
 
   /** A check on H that failed again after its re-run, as the checks lane records it. */

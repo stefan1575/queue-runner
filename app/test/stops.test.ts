@@ -2,7 +2,7 @@
 // `needs-info` issue (or on a build's own issue) and holds the PR; an answer on GitHub releases it;
 // a PR merged or closed outside the app clears its stop; the cap gets an Approach note from a
 // decision thread first, whose answer is acted on and whose thread is settled once it's read.
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
@@ -14,10 +14,10 @@ import type { ModelChoice } from '../src/jobs.ts';
 import { needsInfoMark, StopDesk } from '../src/stops.ts';
 import { catalogFromConfig } from '../src/t3/catalog.ts';
 import { T3Mcp } from '../src/t3/mcp.ts';
-import { runtimeAddress } from '../src/t3/real.ts';
 import { T3Ws } from '../src/t3/ws.ts';
 import { FakeMergeGitHub } from './fake-github.ts';
 import { FakeT3 } from './fake-t3.ts';
+import { memoryJobFiles } from './memory-files.ts';
 
 const snapshot = JSON.parse(await readFile(new URL('./fixtures/server-config.json', import.meta.url), 'utf8'));
 const catalog = catalogFromConfig(snapshot.config);
@@ -63,8 +63,7 @@ beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), 'qr-stops-'));
   t3 = new FakeT3();
   t3.serverConfig = snapshot;
-  await writeFile(join(dir, 'server-runtime.json'), JSON.stringify({ origin: t3.origin }));
-  const address = runtimeAddress(join(dir, 'server-runtime.json'));
+  const address = t3.address;
   mcp = new T3Mcp(address, t3.cli, t3.http);
   ws = new T3Ws(address, t3.cli, t3.http, t3.connect);
   gh = new FakeMergeGitHub();
@@ -72,7 +71,7 @@ beforeEach(async () => {
   gh.reviewPulls['owner/app'] = [{ number: 4, title: 'Add a thing', body: 'Closes #3', branch: BRANCH, base: 'main', headSha: H, draft: false, url: '' }];
   gate = new FakeGate();
   tick = 0;
-  log = await JobLog.open(join(dir, 'jobs.jsonl'), now);
+  log = await JobLog.open(join(dir, 'jobs.jsonl'), now, memoryJobFiles());
   lines = [];
   answered = [];
 });

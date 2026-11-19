@@ -3,7 +3,7 @@
 // merge is reviewed again, not merged (GitHub's 409 in the fake). Where the user merges, a clean
 // PR gets `ready-to-merge` and the app never merges it, and the user's merge is noticed. After a
 // merge the PR's worktrees and branches are gone and its threads settled.
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
@@ -14,9 +14,9 @@ import type { ModelChoice } from '../src/jobs.ts';
 import { MergeLane, READY, type MergeLaneDoors } from '../src/merge-lane.ts';
 import { mark } from '../src/review/ledger.ts';
 import { T3Mcp } from '../src/t3/mcp.ts';
-import { runtimeAddress } from '../src/t3/real.ts';
 import { FakeMergeGitHub } from './fake-github.ts';
 import { FakeT3 } from './fake-t3.ts';
+import { memoryJobFiles } from './memory-files.ts';
 
 const CHOICE: ModelChoice = { provider: 'claudeAgent', model: 'claude-opus-5-5', effort: 'medium' };
 const H = 'abcdef1234567890abcdef1234567890abcdef12';
@@ -65,8 +65,7 @@ let lane: MergeLane;
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), 'qr-merge-'));
   t3 = new FakeT3();
-  await writeFile(join(dir, 'server-runtime.json'), JSON.stringify({ origin: t3.origin }));
-  mcp = new T3Mcp(runtimeAddress(join(dir, 'server-runtime.json')), t3.cli, t3.http);
+  mcp = new T3Mcp(t3.address, t3.cli, t3.http);
   gh = new FakeMergeGitHub();
   gh.reviewPulls['owner/app'] = [listed()];
   gh.prs['owner/app#4'] = github();
@@ -74,7 +73,7 @@ beforeEach(async () => {
   git = new FakeGit();
   // a clock that ticks a millisecond each read, so every line is later than the one before
   let tick = 0;
-  log = await JobLog.open(join(dir, 'state', 'jobs.jsonl'), () => new Date(Date.UTC(2026, 10, 19, 12, 0, 0, ++tick)));
+  log = await JobLog.open(join(dir, 'state', 'jobs.jsonl'), () => new Date(Date.UTC(2026, 10, 19, 12, 0, 0, ++tick)), memoryJobFiles());
   lines = [];
   merged = [];
   moved = 0;

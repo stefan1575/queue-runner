@@ -4,7 +4,10 @@ import { execFileSync } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, expect, test } from 'vitest';
+import { afterEach, expect, test, vi } from 'vitest';
+// These run real git (and npm) processes: how long one takes is the machine's load, not what's
+// tested, so a full parallel run on a busy PC must not fail them on the default 5 seconds (#158 N1).
+vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 });
 import { GitCli, GitError } from '../src/git.ts';
 
 test('fetch asks origin for the base into origin/<base>; a failure is a GitError with what git said', async () => {

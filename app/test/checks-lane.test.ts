@@ -10,6 +10,7 @@ import { ChecksLane } from '../src/checks-lane.ts';
 import type { ReviewPull } from '../src/github.ts';
 import { JobLog } from '../src/job-log.ts';
 import { FakeMergeGitHub } from './fake-github.ts';
+import { memoryJobFiles } from './memory-files.ts';
 
 const APP: BuildRepo = { id: 'p-app', title: 'app', folder: 'C:/code/app', github: 'owner/app' };
 const H = 'abcdef1234567890abcdef1234567890abcdef12';
@@ -31,7 +32,7 @@ let tick: number;
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), 'qr-checks-'));
   tick = 0;
-  log = await JobLog.open(join(dir, 'jobs.jsonl'), () => new Date(Date.UTC(2026, 10, 19, 12, 0, tick++)));
+  log = await JobLog.open(join(dir, 'jobs.jsonl'), () => new Date(Date.UTC(2026, 10, 19, 12, 0, tick++)), memoryJobFiles());
   gh = new FakeMergeGitHub();
   gh.reviewPulls['owner/app'] = [pull()];
   gh.tips['owner/app:main'] = B1;

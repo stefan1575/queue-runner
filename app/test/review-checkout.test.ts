@@ -5,7 +5,10 @@ import { execFileSync } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, expect, test } from 'vitest';
+import { afterEach, beforeEach, expect, test, vi } from 'vitest';
+// These run real git (and npm) processes: how long one takes is the machine's load, not what's
+// tested, so a full parallel run on a busy PC must not fail them on the default 5 seconds (#158 N1).
+vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 });
 import { GitCli, prRef } from '../src/git.ts';
 import { Deps, READY, testsNote, type Install } from '../src/review/deps.ts';
 

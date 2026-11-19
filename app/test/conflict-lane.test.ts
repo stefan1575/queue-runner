@@ -3,7 +3,7 @@
 // base in and pushes; the review lane is told so the pushed head is reviewed next. One conflicted PR
 // at a time, oldest first. A conflict back after the base moved gets another round; one back on the
 // same base tip, or a round that ends without a push, is a stop recorded for the stops ticket.
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
@@ -17,11 +17,11 @@ import { JobLog, type Job, type JobStart } from '../src/job-log.ts';
 import type { ModelChoice } from '../src/jobs.ts';
 import { catalogFromConfig } from '../src/t3/catalog.ts';
 import { T3Mcp } from '../src/t3/mcp.ts';
-import { runtimeAddress } from '../src/t3/real.ts';
 import { T3Ws } from '../src/t3/ws.ts';
 import { mark } from '../src/review/ledger.ts';
 import { FakeReviewGitHub } from './fake-github.ts';
 import { FakeT3 } from './fake-t3.ts';
+import { memoryJobFiles } from './memory-files.ts';
 
 const snapshot = JSON.parse(await readFile(new URL('./fixtures/server-config.json', import.meta.url), 'utf8'));
 const catalog = catalogFromConfig(snapshot.config);
@@ -112,8 +112,7 @@ beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), 'qr-conflict-'));
   t3 = new FakeT3();
   t3.serverConfig = snapshot;
-  await writeFile(join(dir, 'server-runtime.json'), JSON.stringify({ origin: t3.origin }));
-  const address = runtimeAddress(join(dir, 'server-runtime.json'));
+  const address = t3.address;
   mcp = new T3Mcp(address, t3.cli, t3.http);
   ws = new T3Ws(address, t3.cli, t3.http, t3.connect);
   gh = new ConflictGitHub();
@@ -122,7 +121,7 @@ beforeEach(async () => {
   git = new FakeGit(gh);
   gate = new FakeGate();
   clock = new Date('2026-11-19T12:00:00Z');
-  log = await JobLog.open(join(dir, 'state', 'jobs.jsonl'), () => clock);
+  log = await JobLog.open(join(dir, 'state', 'jobs.jsonl'), () => clock, memoryJobFiles());
   lines = [];
   ended = [];
   repoNow = APP;
@@ -239,7 +238,9 @@ describe('a conflict round', () => {
     await lane.pass();
     await until(() => t3.threadStreamCount('thread-1') > 0);
     t3.endRun('thread-1', 'failed');
-    await until(() => t3.launches.length === 2);
+    // the second round is launched and its lines are written before the test ends (N1: it raced
+    // the teardown)
+    await until(() => Boolean(rounds()[1]?.made));
     expect(rounds()[0]!.end).toMatchObject({ outcome: 'failed', head: H });
     expect(log.stops()).toEqual([]);
   });

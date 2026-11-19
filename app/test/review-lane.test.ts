@@ -21,11 +21,11 @@ import { DEFAULT_SETTINGS, type Settings } from '../src/settings.ts';
 import { catalogFromConfig } from '../src/t3/catalog.ts';
 import { T3Catalog } from '../src/t3/catalog-source.ts';
 import { T3Mcp } from '../src/t3/mcp.ts';
-import { runtimeAddress } from '../src/t3/real.ts';
 import { T3Ws } from '../src/t3/ws.ts';
 import { UsageGate } from '../src/usage-gate.ts';
 import { FakeReviewGitHub } from './fake-github.ts';
 import { FakeT3 } from './fake-t3.ts';
+import { memoryJobFiles } from './memory-files.ts';
 
 const snapshot = JSON.parse(await readFile(new URL('./fixtures/server-config.json', import.meta.url), 'utf8'));
 const catalog = catalogFromConfig(snapshot.config);
@@ -93,8 +93,7 @@ beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), 'qr-review-'));
   t3 = new FakeT3();
   t3.serverConfig = snapshot;
-  await writeFile(join(dir, 'server-runtime.json'), JSON.stringify({ origin: t3.origin }));
-  const address = runtimeAddress(join(dir, 'server-runtime.json'));
+  const address = t3.address;
   mcp = new T3Mcp(address, t3.cli, t3.http);
   ws = new T3Ws(address, t3.cli, t3.http, t3.connect);
   gh = new FakeReviewGitHub();
@@ -103,7 +102,7 @@ beforeEach(async () => {
   gh.issues['owner/app#3'] = { title: 'Add a thing', body: 'Please add it.' };
   gh.bodies['owner/app#4'] = '## Summary\n\nx\n\n## Evidence\n\ny\n';
   git = new FakeGit();
-  log = await JobLog.open(join(dir, 'state', 'jobs.jsonl'));
+  log = await JobLog.open(join(dir, 'state', 'jobs.jsonl'), undefined, memoryJobFiles());
   lines = [];
   jobs = { ...DEFAULT_JOBS, build: { own: BUILD, fallback: null }, review: { own: REVIEW, fallback: FALLBACK } };
   toolFree = [REVIEW.provider, FALLBACK.provider];
