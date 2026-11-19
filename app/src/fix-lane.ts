@@ -68,11 +68,18 @@ export const fixTitle = (repo: BuildRepo, n: number) => `Queue runner fix: ${rep
  *  round pushes to the PR's own branch. */
 export const fixBranch = (n: number, sha: string) => `${JOB_BRANCH_PREFIX}fix-pr${n}-${sha.slice(0, 7)}`;
 
-/** How a round's end says its thread is gone in T3, so the next round goes to a fresh fixer. */
-const GONE_MARK = 'is gone in T3';
+/** How a round's end says its thread can't take a turn (gone, archived...), so the next round
+ *  goes to a fresh fixer. */
+const GONE_MARK = "can't take another turn";
+/** What T3 answers a send with when it refuses before it dispatches anything (its server's
+ *  sendToThread, read 2026-11-19): the thread deleted, archived, or its provider instance switched
+ *  off. The thread can't take a turn, and nothing ran (F9). Any other failure (`orchestration_error`
+ *  can come after the turn was dispatched) leaves the outcome unknown (F4). */
+const NOT_SENDABLE = new Set(['thread_not_found', 'thread_not_sendable', 'invalid_request']);
 /** How T3 says a thread isn't there, on MCP (`not_found`) or in a WebSocket failure. */
 const GONE = /not[_ ]?found|no such thread|does not exist|was deleted/i;
-const goneText = (threadId: string, why: string) => `the PR's writer thread ${threadId} ${GONE_MARK} (${why})`;
+const goneText = (threadId: string, why: string) => `the PR's writer thread ${threadId} is gone in T3, so it ${GONE_MARK} (${why})`;
+const refusedText = (threadId: string, why: string) => `the PR's writer thread ${threadId} ${GONE_MARK}: T3 refused the send (${why})`;
 
 const join = (folder: string, name: string) => `${folder.replace(/[\\/]+$/, '')}/${name}`;
 const WRITING = (j: Job) => !j.end || j.end.outcome === 'waiting' || j.end.outcome === 'usage-limit';
@@ -255,7 +262,7 @@ export class FixLane {
     const writer = jobs.filter((j) => j.threadId && (j.kind === 'build' || (j.kind === 'fix' && j.fresh))).at(-1);
     if (!writer) return { why: "no thread of the app's wrote this PR" };
     const gone = this.gone.has(writer.threadId!) ? 'T3 says so'
-      : jobs.some((j) => j.kind === 'fix' && j.to === writer.threadId && j.end?.error?.includes(GONE_MARK)) ? 'a round sent to it found it gone' : null;
+      : jobs.some((j) => j.kind === 'fix' && j.to === writer.threadId && j.end?.error?.includes(GONE_MARK)) ? `a round sent to it found it can't take a turn` : null;
     if (gone) return { why: goneText(writer.threadId!, gone) };
     return { send: writer };
   }
@@ -347,6 +354,13 @@ export class FixLane {
     } catch (e) {
       // a send whose outcome isn't known (its answer lost, or T3 answering a failure after it may
       // have taken it) is never "not started" (F4): the thread is read, and it's the new run there
+      // T3 refused the send before it dispatched anything: the thread can't take a turn, so the
+      // next pass sends a fresh fixer (F9)
+      if (plan.send && e instanceof ToolFailed && e.code !== null && NOT_SENDABLE.has(e.code)) {
+        this.gone.add(plan.send.threadId!);
+        const text = e.code === 'thread_not_found' ? goneText(plan.send.threadId!, e.message) : refusedText(plan.send.threadId!, e.message);
+        return this.notStarted(job, text, false);
+      }
       if (plan.send && (e instanceof NoAnswer || e instanceof ToolFailed)) {
         return this.unknownSend(job, plan.send.threadId!, plan.send.link ?? null, knownRuns, e as Error, onLaunched);
       }

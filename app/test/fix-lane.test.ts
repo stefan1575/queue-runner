@@ -334,6 +334,28 @@ describe('a fresh fixer', () => {
   });
 });
 
+describe("a send T3 refuses because the thread can't take a turn (F9)", () => {
+  // what the installed T3 answers before it dispatches anything (sendToThread in its server):
+  // archived, deleted, or its provider instance switched off
+  for (const failure of [
+    { code: 'thread_not_sendable', message: 'Thread thread-b is archived.' },
+    { code: 'thread_not_found', message: 'Thread thread-b was not found.' },
+    { code: 'invalid_request', message: 'Provider instance claudeAgent is disabled.' },
+  ]) {
+    test(`${failure.code}: nothing counts, and the next pass sends a fresh fixer, not the user`, async () => {
+      await builder();
+      await blocking(1, H, [finding({})]);
+      t3.sendFailure = failure;
+      makeLane();
+      await lane.pass();
+      await until(() => t3.launches.length === 1);
+      expect(fixes()[0]!.end).toMatchObject({ outcome: 'not-started', error: expect.stringContaining("can't take another turn") });
+      expect(log.needingUser(APP.id)).toEqual([]);
+      expect(t3.launches[0].message).toContain("can't take another turn");
+    });
+  }
+});
+
 describe('a send whose outcome is not known (F4)', () => {
   test('T3 takes the send and answers orchestration_error: its new run is the round, watched to its end; no fresh fixer beside it', async () => {
     await builder();

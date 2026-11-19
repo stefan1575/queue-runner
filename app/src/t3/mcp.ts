@@ -25,7 +25,14 @@ function rpcResult(text: string, contentType: string): any {
 class Refused extends T3Error {}
 /** T3 ran the tool and answered that it failed (`isError`): a thread that's gone, say, or one
  *  that can't take another turn. */
-export class ToolFailed extends T3Error {}
+export class ToolFailed extends T3Error {
+  /** T3's failure code (`thread_not_sendable`, `orchestration_error`...), or null when it gave none. */
+  code: string | null;
+  constructor(message: string, code: string | null = null) {
+    super(message);
+    this.code = code;
+  }
+}
 
 export class T3Mcp {
   private token: string | null = null;
@@ -123,11 +130,13 @@ export class T3Mcp {
     }
     if (result.isError) {
       let text: string = (result.content ?? []).find((c: any) => c?.text)?.text ?? '';
+      let code: string | null = null;
       try {
         const failure = JSON.parse(text);
+        code = typeof failure.code === 'string' ? failure.code : null;
         text = `${failure.code}: ${failure.message}`;
       } catch { /* the text as it is */ }
-      throw new ToolFailed(`${tool} failed: ${text.slice(0, 300)}`);
+      throw new ToolFailed(`${tool} failed: ${text.slice(0, 300)}`, code);
     }
     return result.structuredContent;
   }
