@@ -1,29 +1,22 @@
 // T3's catalog as the app keeps it (#152): from `subscribeServerConfig`'s snapshot, kept current
 // by its later events, and asked again when the stream ends.
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { readFile } from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { T3Catalog } from '../src/t3/catalog-source.ts';
-import { runtimeAddress } from '../src/t3/real.ts';
 import { T3Ws } from '../src/t3/ws.ts';
 import { FakeT3 } from './fake-t3.ts';
 
 const snapshot = JSON.parse(await readFile(new URL('./fixtures/server-config.json', import.meta.url), 'utf8'));
-let dir: string;
 let t3: FakeT3;
 let ws: T3Ws;
-beforeEach(async () => {
-  dir = await mkdtemp(join(tmpdir(), 'qr-catalog-'));
+// T3's address is the fake's own, so a wait for T3's events waits on nothing but the fake (#202 F2).
+beforeEach(() => {
   t3 = new FakeT3();
   t3.serverConfig = snapshot;
-  const runtime = join(dir, 'server-runtime.json');
-  await writeFile(runtime, JSON.stringify({ origin: t3.origin }));
-  ws = new T3Ws(runtimeAddress(runtime), t3.cli, t3.http, t3.connect);
+  ws = new T3Ws(t3.address, t3.cli, t3.http, t3.connect);
 });
-afterEach(async () => {
+afterEach(() => {
   vi.useRealTimers();
-  await rm(dir, { recursive: true, force: true });
 });
 
 const until = (f: () => boolean) => vi.waitFor(() => { if (!f()) throw new Error('not yet'); }, { timeout: 2000, interval: 5 });
