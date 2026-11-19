@@ -3,16 +3,17 @@
 // reviewer's `sol-findings` block, never from its prose (docs/flow.md, The review loop).
 //
 // A PR's state lives in its review comments. The newest one holds every finding raised so far,
-// each with a status, so a review reads only the newest. Three formats are read: today's runner's
-// and the old script's hidden marker (`<!-- sol-pr-review round=N verdict=V sha=H
-// findings=<base64> -->`), and a review posted by hand from a T3 child (`<!-- sol-review round=N
-// head=H -->`, its verdict in its heading and its findings in its visible block). The app's own
-// comments carry the marker and a visible ledger, as today's do: open PRs read them across the
-// cutover (docs/app.md, Rules).
+// each with a status, so a review reads only the newest. **It starts clean** (#155): only the
+// app's own reviews are read, by their hidden marker (`<!-- queue-runner-app review round=N
+// verdict=V sha=H findings=<base64> -->`) beside a visible ledger. The Python runner's and the old
+// script's (`<!-- sol-pr-review ...`) and reviews posted by hand (`<!-- sol-review ...`) are never
+// read: a PR one of them reviewed gets a fresh first review from the app. They still count as the
+// runner's posts, not something a person said (`runnerPost`).
 
-const MARK = /<!-- sol-pr-review round=(\d+) verdict=(clean|blocking)(?: sha=([0-9a-f]+))?/;
-const HAND_MARK = /<!-- sol-review round=(\d+) head=([0-9a-f]{7,40}) -->/;
-const HEADING = /^## Sol review (\d+)\s*\S\s*(Clean|Blocking)\b/im;
+const MARK = /<!-- queue-runner-app review round=(\d+) verdict=(clean|blocking) sha=([0-9a-f]+)/;
+/** The hidden markers of reviews the app never reads: the Python runner's, the old script's and
+ *  the hand-posted format's. */
+const OTHER_REVIEWS = ['<!-- sol-pr-review', '<!-- sol-review '];
 const FENCE = /^[ \t]*```+[ \t]*sol-findings[ \t]*\r?\n([\s\S]*?)^[ \t]*```+[ \t]*$/gm;
 export const TAGS = { important: 'Important', nit: 'Nit', 'pre-existing': 'Pre-existing' } as const;
 export type Tag = keyof typeof TAGS;
@@ -35,7 +36,7 @@ export type Finding = {
   status: Status; raised: number;
   closed?: number; issue?: string; unfiled?: boolean; reopened?: Status; was?: string; again?: boolean;
 };
-export type Review = { round: number; verdict: 'clean' | 'blocking'; sha: string | null; findings: any[]; at: string };
+export type Review = { round: number; verdict: 'clean' | 'blocking'; sha: string; findings: any[]; at: string };
 export type Comment = { author: string; createdAt: string; body: string; path?: string | null; line?: number | null };
 
 /** The review failed: the reply has no readable ledger, or the reviewer's run failed. */
@@ -60,53 +61,29 @@ function markerFindings(body: string, start: number): any[] | null {
   }
 }
 
-function visibleFindings(body: string): any[] | null {
-  const all = blocks(body);
-  let data: unknown;
-  try {
-    data = all.length ? JSON.parse(all.at(-1)!) : null;
-  } catch {
-    return null;
-  }
-  const found = isObj(data) ? data.findings : null;
-  return Array.isArray(found) ? found.filter(isObj) : null;
-}
-
 /** One comment's review, or null if it isn't one (or its ledger can't be read: a failed review). */
 export function readReview(body: string, at = ''): Review | null {
   const m = MARK.exec(body);
-  if (m) {
-    const found = markerFindings(body, m.index);
-    if (found === null) return null;
-    return { round: Number(m[1]), verdict: m[2] as Review['verdict'], sha: m[3] ?? null, findings: found, at };
-  }
-  const h = HAND_MARK.exec(body);
-  if (h) {
-    const rnd = Number(h[1]);
-    const visible = visibleFindings(body);
-    if (visible === null) return null;
-    const found = visible.map((f) => ({ ...f, raised: f.raised || rnd }));
-    const head = HEADING.exec(body);
-    const verdict = head ? (head[2]!.toLowerCase() as Review['verdict'])
-      : found.some((f) => f.tag === 'important' && OPEN.includes(f.status ?? 'open')) ? 'blocking' : 'clean';
-    return { round: rnd, verdict, sha: h[2]!, findings: found, at };
-  }
-  return null;
+  if (!m) return null;
+  const found = markerFindings(body, m.index);
+  if (found === null) return null;
+  return { round: Number(m[1]), verdict: m[2] as Review['verdict'], sha: m[3]!, findings: found, at };
 }
 
-/** The PR's reviews, oldest first, from its comments (oldest first). */
+/** The PR's reviews by the app, oldest first, from its comments (oldest first). */
 export const readReviews = (comments: Comment[]): Review[] =>
   comments.flatMap((c) => readReview(c.body ?? '', c.createdAt) ?? []);
 
-/** A review (any format) or anything else the runner posted: not something a person said. */
+/** A review (the app's or one it doesn't read) or anything else the runner posted: not something
+ *  a person said. */
 export const runnerPost = (body: string) =>
-  readReview(body ?? '') !== null || (body ?? '').includes('<!-- sol-pr-review') || (body ?? '').includes(RUNNER_MARK);
+  [...OTHER_REVIEWS, RUNNER_MARK, '<!-- queue-runner-app '].some((m) => (body ?? '').includes(m));
 
-/** Numbering carries on from the newest review, whoever wrote it. */
+/** Numbering carries on from the app's newest review: a PR only another runner reviewed starts at 1. */
 export const nextRound = (earlier: Review[]) => 1 + Math.max(0, ...earlier.map((r) => r.round));
 
 /** The PR's findings as its newest review left them, each with a status and the review that
- *  raised it. A marker from before statuses counts pre-existing as filed, the rest open. */
+ *  raised it. One with no status counts pre-existing as filed, the rest open. */
 export function state(earlier: Review[]): Finding[] {
   const m = earlier.at(-1);
   if (!m) return [];
@@ -208,7 +185,7 @@ export function githubLinks(prose: string, wt: string, runDir: string, repo: str
 
 export function mark(rnd: number, verdict: string, sha: string, findings: Finding[]): string {
   const data = Buffer.from(JSON.stringify(findings), 'utf8').toString('base64');
-  return `<!-- sol-pr-review round=${rnd} verdict=${verdict} sha=${sha} findings=${data} -->`;
+  return `<!-- queue-runner-app review round=${rnd} verdict=${verdict} sha=${sha} findings=${data} -->`;
 }
 
 export const ledgerBlock = (rnd: number, verdict: string, sha: string, findings: Finding[]) =>
@@ -385,7 +362,7 @@ export function decide(i: DecideInput): Decision {
   const guide = i.hasReviewMd ? ", with the repo's REVIEW.md" : '';
   const scope = last && !i.gone ? `, the change since ${last.slice(0, 7)}` : '';
   const body_ = i.wt && i.runDir ? githubLinks(prose, i.wt, i.runDir, repo, sha) : prose;
-  // The heading keeps its `## Sol review N · V` start: today's runner and HEADING read it.
+  // The heading keeps its `## Sol review N · V` start: the `sol-*` names stay until #171.
   const body = `## Sol review ${rnd} · ${verdict[0]!.toUpperCase()}${verdict.slice(1)} · ${reviewer}\n\n`
     + `<sub>Reviewed by ${reviewer} in a T3 thread, on ${sha.slice(0, 7)}${scope}${guide}. Posted by the queue runner from ${i.user}'s PC.</sub>\n\n`
     + `${body_}\n\n${old}### Findings\n\n${table.trimEnd()}\n\n`

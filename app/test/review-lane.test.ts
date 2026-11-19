@@ -198,7 +198,7 @@ describe('a review', () => {
   });
 
   test('a PR with a review on H already, or a build writing to its branch, is left', async () => {
-    gh.comments['owner/app#4'] = [{ author: 'x', createdAt: '1', body: `<!-- sol-pr-review round=1 verdict=clean sha=${H.slice(0, 7)} findings=W10= -->` }];
+    gh.comments['owner/app#4'] = [{ author: 'x', createdAt: '1', body: `<!-- queue-runner-app review round=1 verdict=clean sha=${H.slice(0, 7)} findings=W10= -->` }];
     makeLane();
     await lane.pass();
     gh.comments['owner/app#4'] = [];

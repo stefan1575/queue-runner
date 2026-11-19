@@ -133,20 +133,32 @@ describe('decide', () => {
 });
 
 describe('earlier reviews', () => {
-  test("today's runner's comments, the hand-posted format and other comments", () => {
+  test("only the app's own reviews are read: the Python runner's, the old script's and hand-posted ones are not", () => {
     const hand = '## Sol review 2 · Blocking\n\n<!-- sol-review round=2 head=1234567 -->\n```sol-findings\n{"findings":[{"id":"F1","tag":"important","status":"open"}]}\n```';
+    const python = '<!-- sol-pr-review round=3 verdict=blocking sha=abc findings=W10= -->';
+    const own = '<!-- queue-runner-app review round=1 verdict=clean sha=def findings=W10= -->';
     const reviews = readReviews([
       { author: 'a', createdAt: '1', body: 'Nice work' },
-      { author: 'a', createdAt: '2', body: '<!-- sol-pr-review round=1 verdict=clean sha=abc findings=W10= -->' },
+      { author: 'a', createdAt: '2', body: python },
       { author: 'a', createdAt: '3', body: hand },
+      { author: 'a', createdAt: '4', body: own },
     ]);
-    expect(reviews.map((r) => [r.round, r.verdict, r.sha])).toEqual([[1, 'clean', 'abc'], [2, 'blocking', '1234567']]);
-    expect(runnerPost(hand)).toBe(true);
-    expect(runnerPost('<!-- queue-runner stop -->')).toBe(true);
+    expect(reviews.map((r) => [r.round, r.verdict, r.sha])).toEqual([[1, 'clean', 'def']]);
+    // a PR only the Python runner reviewed starts at review 1
+    expect(nextRound(readReviews([{ author: 'a', createdAt: '2', body: python }]))).toBe(1);
+    // every one of them is the runner's, not something a person said
+    for (const b of [hand, python, own, '<!-- queue-runner stop -->']) expect(runnerPost(b)).toBe(true);
     expect(runnerPost('Thanks!')).toBe(false);
   });
 
+  test("the app's comment carries its own marker, and reads back", () => {
+    const got = decide(input({ reply: reply([]) }));
+    expect(got.body).toContain('<!-- queue-runner-app review round=1 verdict=clean sha=');
+    expect(got.body).not.toContain('sol-pr-review');
+    expect(readReviews([{ author: 'a', createdAt: '1', body: got.body }])).toMatchObject([{ round: 1, verdict: 'clean' }]);
+  });
+
   test("a marker whose findings can't be read isn't a review", () => {
-    expect(readReview('<!-- sol-pr-review round=1 verdict=clean sha=abc findings=!!! -->')).toBeNull();
+    expect(readReview('<!-- queue-runner-app review round=1 verdict=clean sha=abc findings=!!! -->')).toBeNull();
   });
 });

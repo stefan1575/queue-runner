@@ -52,7 +52,7 @@ describe('reviewBrief', () => {
   });
 
   test('a force-push says the whole diff is read again', () => {
-    const r1 = readReview('<!-- sol-pr-review round=1 verdict=clean sha=1234567 findings=W10= -->', '')!;
+    const r1 = readReview('<!-- queue-runner-app review round=1 verdict=clean sha=1234567 findings=W10= -->', '')!;
     expect(reviewBrief({ ...input, round: 2, earlier: [r1], gone: true })).toContain("1234567, isn't in this branch's history any more");
   });
 });

@@ -2,9 +2,11 @@
 // posts on the repo's own PR, which need no go-ahead (docs/flow.md, Who runs it). In order: each
 // new Pre-existing finding filed once as a `needs-triage` issue (an open issue that already holds
 // it is linked instead), the review comment with those links and its ledger, the `sol-review`
-// status on H (the commit reviewed, never a newer one), then a row in the PR body's `## Review`
-// table, on every repo (#36), its Reviewer column naming who reviewed. The comment is the review's record: if it
-// can't be posted the review failed and nothing counts. Anything after it that fails is said and
+// status on H (the commit reviewed, never a newer one), then a row in the app's Review table in
+// the PR body, on every repo (#36), its Reviewer column naming who reviewed. The app reads and
+// changes only what it posted itself: its own marker on a follow-up issue, its own table between
+// its own markers. The comment is the review's record: if it can't be posted the review failed and
+// nothing counts. Anything after it that fails is said and
 // left; the review stands.
 import { cell, OPEN, where, withIssues, type Decision, type Finding } from './ledger.ts';
 
@@ -13,8 +15,6 @@ export const STATUS_CONTEXT = 'sol-review';
 const OUTCOMES = { stop: 'stopped for the user', 'approach-note': 'approach note for the user', merge: 'to merge', fix: 'back to fix' } as const;
 const TABLE_HEAD = '| Step | Reviewer | Time (UTC) | Commit | Verdict |';
 const TABLE_RULE = '|---|---|---|---|---|';
-/** Today's runner's table, before the Reviewer column: a PR it reviewed keeps its rows. */
-const OLD_HEAD = '| Step | Time (UTC) | Commit | Verdict |';
 
 /** The review comment couldn't be posted: nothing is on the PR, so the review failed. */
 export class PostFailed extends Error {}
@@ -34,7 +34,7 @@ export interface GitHubPosts {
 }
 
 /** The hidden line that ties a follow-up issue to its PR and finding. */
-export const followupMark = (repo: string, n: number, id: string) => `<!-- sol-finding ${repo}#${n} ${id} -->`;
+export const followupMark = (repo: string, n: number, id: string) => `<!-- queue-runner-app finding ${repo}#${n} ${id} -->`;
 
 export function issueBody(repo: string, n: number, rnd: number, sha: string, f: Finding): string {
   const lines = [`The review found this in code that PR #${n} didn't change, in review ${rnd} of https://github.com/${repo}/pull/${n}, so it was filed here instead of blocking that PR.`, ''];
@@ -43,13 +43,10 @@ export function issueBody(repo: string, n: number, rnd: number, sha: string, f: 
   return [...lines, '', `<sub>Finding ${f.id}, filed by the queue runner.</sub>`, '', followupMark(repo, n, f.id), ''].join('\n');
 }
 
-/** The open issue that already holds this finding: the runner's mark, the old script's footer
- *  for the same PR and ID, or the same title. */
+/** The open issue that already holds this finding: the app's mark for the same PR and ID, or the
+ *  same title. Another runner's footer is never read: its finding IDs are its own reviews'. */
 export function filedAlready(issues: OpenIssue[], repo: string, n: number, id: string, title: string): OpenIssue | undefined {
-  const old = new RegExp(`Finding ${id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}, filed by sol-pr-review`);
-  return issues.find((i) => i.body.includes(followupMark(repo, n, id))
-    || (old.test(i.body) && i.body.includes(`/${repo}/pull/${n}`))
-    || i.title.trim() === title.trim());
+  return issues.find((i) => i.body.includes(followupMark(repo, n, id)) || i.title.trim() === title.trim());
 }
 
 const pad = (n: number) => String(n).padStart(2, '0');
@@ -79,66 +76,58 @@ export function reviewRow(d: Decision, url: string, at: Date): string {
   return `| [Review ${rnd}](${url}) | ${cell(d.reviewer)} | ${utc(at)} | \`${d.sha.slice(0, 7)}\` | ${cell(parts.join('; '))} |`;
 }
 
-/** Today's runner's Step cell: `[Review N, <reviewer>](url)`, or `[Sol review N](url)` from
- *  before it named the reviewer (Sol, then). */
-const OLD_STEP = /^\|\s*\[(?:Sol review (\d+)|Review (\d+), ((?:[^\]\\]|\\.)+))\]\(([^)\s]*)\)\s*\|/;
+/** Where the app's Review table starts and ends in the PR body. **Only the table between these is
+ *  ever read or changed** (#155, It starts clean): another table, the Python runner's included, is
+ *  never touched, nor anything in a fenced block. */
+export const TABLE_START = '<!-- queue-runner-app review-table -->';
+export const TABLE_END = '<!-- /queue-runner-app review-table -->';
 
-/** A row of today's runner's table with the Reviewer column: the reviewer its Step link named
- *  moves to its own cell; a Step it didn't write keeps its text, beside a blank Reviewer. */
-function oldRow(line: string): string {
-  const m = OLD_STEP.exec(line);
-  if (m) return `| [Review ${m[1] ?? m[2]}](${m[4]}) | ${m[1] ? 'Sol' : m[3]!.trim()} |${line.slice(m[0].length)}`;
-  const step = /^\|(?:[^|\\]|\\.)*\|/.exec(line); // the first pipe that isn't escaped after the opening one
-  return step ? `${step[0]}  |${line.slice(step[0].length)}` : line;
-}
-
-/** The tables in lines `from` to `to`: each a run of lines that start with a pipe, its first
- *  and last line. A table ends at the first line that doesn't. */
-function tablesIn(lines: string[], from: number, to: number): [number, number][] {
-  const out: [number, number][] = [];
-  for (let j = from; j < to; j++) {
-    if (!lines[j]!.startsWith('|')) continue;
-    const last = out.at(-1);
-    if (last && last[1] === j - 1) last[1] = j;
-    else out.push([j, j]);
+/** Each line's index unless it's inside a fenced code block (```` ``` ```` or `~~~`) or is a fence. */
+function outsideFences(lines: string[]): boolean[] {
+  const out: boolean[] = [];
+  let fence: string | null = null;
+  for (const line of lines) {
+    const m = /^ {0,3}(`{3,}|~{3,})/.exec(line);
+    if (fence === null && m) { fence = m[1]!; out.push(false); continue; }
+    if (fence !== null) {
+      if (m && m[1]![0] === fence[0] && m[1]!.length >= fence.length && !line.slice(m[0].length).trim()) fence = null;
+      out.push(false);
+      continue;
+    }
+    out.push(true);
   }
   return out;
 }
 
-/** The PR body with `row` appended to its `## Review` table: the section's table headed as the
- *  runner's (today's runner's is given the Reviewer column first), whichever table it is there;
- *  every other table is left as it is. A section without it gets one after its last table, or at
- *  its end; a body without the section gets it after `## Evidence` (or at the end). */
+/** The PR body with `row` appended to the app's Review table, the one between its markers. With
+ *  no such table, one is added at the end of the `## Review` section, or, with no such section,
+ *  as a new one after `## Evidence` (or at the end). */
 export function withReviewRow(body: string, row: string): string {
   const lines = (body ?? '').replace(/\r\n/g, '\n').replace(/\n+$/, '').split('\n');
-  const head = (pat: RegExp) => { const i = lines.findIndex((l) => pat.test(l)); return i < 0 ? null : i; };
-  const end = (i: number) => { for (let j = i + 1; j < lines.length; j++) if (/^#{1,2}\s/.test(lines[j]!)) return j; return lines.length; };
-  const table = [TABLE_HEAD, TABLE_RULE, row];
-  const put = (at: number, floor: number, add: string[]) => {
-    let s = at;
+  const open = outsideFences(lines);
+  const at = (ok: (l: string) => boolean, from = 0) => { for (let j = from; j < lines.length; j++) if (open[j] && ok(lines[j]!)) return j; return null; };
+  const start = at((l) => l.trim() === TABLE_START);
+  const end = start === null ? null : at((l) => l.trim() === TABLE_END, start + 1);
+  if (start !== null && end !== null) {
+    let last = end;
+    while (last > start + 1 && !lines[last - 1]!.trim()) last--;
+    lines.splice(last, 0, row);
+    return lines.join('\n') + '\n';
+  }
+  // a blank line before the end marker: GitHub ends the table there, whatever it makes of the marker
+  const table = [TABLE_START, TABLE_HEAD, TABLE_RULE, row, '', TABLE_END];
+  const sectionEnd = (i: number) => at((l) => /^#{1,2}\s/.test(l), i + 1) ?? lines.length;
+  // blank lines around the block: a line next to a table would be read as its row
+  const put = (where: number, floor: number, add: string[]) => {
+    let s = where;
     while (s > floor && !lines[s - 1]!.trim()) s--;
-    lines.splice(s, at - s, '', ...add, ...(at < lines.length ? [''] : []));
+    lines.splice(s, where - s, '', ...add, ...(where < lines.length ? [''] : []));
   };
-  const r = head(/^##\s+Review\s*$/);
-  if (r !== null) {
-    const tables = tablesIn(lines, r + 1, end(r));
-    const ours = tables.find(([a]) => [TABLE_HEAD, OLD_HEAD].includes(lines[a]!.trim()));
-    if (ours) {
-      const [a, b] = ours;
-      if (lines[a]!.trim() === OLD_HEAD) {
-        lines[a] = TABLE_HEAD;
-        if (b > a && /^\|(\s*:?-+:?\s*\|)+\s*$/.test(lines[a + 1]!)) lines[a + 1] = TABLE_RULE;
-        for (let j = a + 2; j <= b; j++) lines[j] = oldRow(lines[j]!);
-      }
-      lines.splice(b + 1, 0, row);
-    } else if (tables.length) {
-      const after = tables.at(-1)![1] + 1;
-      // a line right after a table would be read as its row: a blank line keeps ours apart
-      lines.splice(after, 0, '', ...table, ...(after < lines.length && lines[after]!.trim() ? [''] : []));
-    } else put(end(r), r + 1, table);
-  } else {
-    const ev = head(/^##\s+Evidence\b/);
-    put(ev === null ? lines.length : end(ev), 0, ['## Review', '', '_Rows from the review loop, one per review; each links its comment._', '', ...table]);
+  const r = at((l) => /^##\s+Review\s*$/.test(l));
+  if (r !== null) put(sectionEnd(r), r + 1, table);
+  else {
+    const ev = at((l) => /^##\s+Evidence\b/.test(l));
+    put(ev === null ? lines.length : sectionEnd(ev), 0, ['## Review', '', '_Rows from the review loop, one per review; each links its comment._', '', ...table]);
   }
   return lines.join('\n').replace(/^\n+/, '') + '\n';
 }

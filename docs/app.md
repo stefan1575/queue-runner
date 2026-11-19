@@ -409,7 +409,7 @@ every open PR in a served repo without a review on its newest commit gets one, w
 - **Adoption** (`ReviewLane.whyNot`, cheapest first): not while a build writes to the PR's branch
   (open, waiting on a question, or cut off by a usage limit); not once the app reviewed its head H
   (`clean`, `blocking`, `stop`, `approach-note` in the job log); not after two failed reviews on H;
-  not while any review comment is on H already (today's three formats); and only once H's checks
+  not while one of the app's own review comments is on H already; and only once H's checks
   passed, `sol-review` not counted (`checks`: check runs and commit statuses). Why not is said once
   per PR. Lowest number first, repo by repo. Conflicts aren't looked at: GitHub runs no
   `pull_request` checks on a PR that conflicts, so it waits on its checks (#157 adds conflict
@@ -453,12 +453,22 @@ every open PR in a served repo without a review on its newest commit gets one, w
 - **Decide and post** (`src/review/ledger.ts`, `src/review/post.ts`, today's `ledger.py` and
   `post.py`): the verdict from the reply's last `sol-findings` block; clean means no Important
   finding open. Then each new Pre-existing finding filed once as a `needs-triage` issue, the
-  comment (its visible ledger and hidden marker), `sol-review` on H only, and a row in the PR body's
-  `## Review` table, on every repo (#36): Step (the comment's link), Reviewer, Time, Commit,
-  Verdict. A table today's runner wrote (no Reviewer column) gets the column, its rows blank in
-  it. The comment and the Reviewer cell name who reviewed: the model and effort as T3 labels
+  comment (its visible ledger and hidden marker), `sol-review` on H only, and a row in the app's
+  Review table in the PR body, on every repo (#36): Step (the comment's link), Reviewer, Time,
+  Commit, Verdict. The comment and the Reviewer cell name who reviewed: the model and effort as T3 labels
   them, and on the fallback `, fallback while <provider> is out of usage` (`reviewerName`). gh writes send their JSON on stdin (`--input -`). Only the comment failing
   fails the review. The run folder keeps `brief.md`, `reply.md`, `comment.md`, `decision.json`.
+- **It starts clean** (#155): the app reads only what it posted itself. Its review comments carry
+  their own marker (`<!-- queue-runner-app review round=N verdict=V sha=H findings=<base64> -->`);
+  the Python runner's and the old script's (`<!-- sol-pr-review`) and hand-posted ones
+  (`<!-- sol-review`) are never read, so a PR one of them reviewed gets a fresh review 1 (they
+  still count as the runner's posts, not something a person said). Its Review table sits between
+  `<!-- queue-runner-app review-table -->` and `<!-- /queue-runner-app review-table -->`, and only
+  that table is ever changed: a body without it gets one at the end of its `## Review` section
+  (below the Python runner's table, which is left as it is), or a new section after `## Evidence`.
+  Markers and headings inside a fenced block are only text. A follow-up issue is known as the
+  app's by its own mark (`<!-- queue-runner-app finding <repo>#<n> <id> -->`) or the same title,
+  never by another runner's footer, whose finding IDs are its own reviews'.
 - **The job log:** kind `review`, `issue` the PR, with `sha`, `round` and `reviewer`; its end
   `clean`, `blocking`, `stop`, `approach-note` (with `verdict`, `signals`, `link`), `failed`,
   `out-of-usage` or `head-moved`. Once the end is recorded the thread is settled, whatever the end:

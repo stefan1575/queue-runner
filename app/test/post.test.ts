@@ -4,7 +4,7 @@
 import { describe, expect, test } from 'vitest';
 import { GhGitHub, type Gh } from '../src/github.ts';
 import { decide, readReviews } from '../src/review/ledger.ts';
-import { GitHubPoster, PostFailed, reviewRow, withReviewRow } from '../src/review/post.ts';
+import { GitHubPoster, PostFailed, reviewRow, TABLE_END, TABLE_START, withReviewRow } from '../src/review/post.ts';
 import { FakeReviewGitHub } from './fake-github.ts';
 
 const SHA = 'abcdef1234567890abcdef1234567890abcdef12';
@@ -23,19 +23,29 @@ describe('GitHubPoster', () => {
     expect(gh.posted.map((p) => p.what)).toEqual(['issue', 'comment', 'status', 'body']);
     const [issue, comment, status, body] = gh.posted;
     expect(issue).toMatchObject({ labels: ['needs-triage'], title: 'temp folder never removed (src/x.ts)' });
-    expect(issue!.body).toContain('<!-- sol-finding owner/app#4 F1 -->');
+    expect(issue!.body).toContain('<!-- queue-runner-app finding owner/app#4 F1 -->');
     expect(comment!.body).toContain(`F1 → [#101](${issue!.url})`);
     expect(readReviews([{ author: 'me', createdAt: '1', body: comment!.body }])[0]!.findings[0]).toMatchObject({ issue: issue!.url });
     expect(status).toMatchObject({ sha: SHA, context: 'sol-review', state: 'success', url });
-    expect(body!.body).toContain(`## Evidence\n\ny\n\n## Review\n\n_Rows from the review loop, one per review; each links its comment._\n\n| Step | Reviewer | Time (UTC) | Commit | Verdict |\n|---|---|---|---|---|\n| [Review 1](${url}) | Model X high | 2026-11-19 12:34 | \`abcdef1\` | **Clean**, to merge; filed as follow-ups: F1 |\n\n## Merge Danger`);
+    expect(body!.body).toContain(`## Evidence\n\ny\n\n## Review\n\n_Rows from the review loop, one per review; each links its comment._\n\n${TABLE_START}\n| Step | Reviewer | Time (UTC) | Commit | Verdict |\n|---|---|---|---|---|\n| [Review 1](${url}) | Model X high | 2026-11-19 12:34 | \`abcdef1\` | **Clean**, to merge; filed as follow-ups: F1 |\n\n${TABLE_END}\n\n## Merge Danger`);
   });
 
   test('a finding open as an issue already is linked, not filed again', async () => {
     const gh = new FakeReviewGitHub();
-    gh.open['owner/app'] = [{ number: 7, title: 'other', body: 'x <!-- sol-finding owner/app#4 F1 -->', url: 'https://github.com/owner/app/issues/7' }];
+    gh.open['owner/app'] = [{ number: 7, title: 'other', body: 'x <!-- queue-runner-app finding owner/app#4 F1 -->', url: 'https://github.com/owner/app/issues/7' }];
     await new GitHubPoster(gh, () => {}).post('owner/app', 4, d([PRE]));
     expect(gh.posted.map((p) => p.what)).toEqual(['comment', 'status', 'body']);
     expect(gh.posted[0]!.body).toContain('F1 → [#7]');
+  });
+
+  test("another runner's follow-up for the same PR and ID isn't this finding: its IDs are its own reviews'", async () => {
+    const gh = new FakeReviewGitHub();
+    gh.open['owner/app'] = [
+      { number: 7, title: 'other', body: 'x <!-- sol-finding owner/app#4 F1 -->', url: 'https://github.com/owner/app/issues/7' },
+      { number: 8, title: 'else', body: 'From https://github.com/owner/app/pull/4\n<sub>Finding F1, filed by sol-pr-review.</sub>', url: 'https://github.com/owner/app/issues/8' },
+    ];
+    await new GitHubPoster(gh, () => {}).post('owner/app', 4, d([PRE]));
+    expect(gh.posted.map((p) => p.what)).toEqual(['issue', 'comment', 'status', 'body']);
   });
 
   test("a comment that can't be posted fails the review; a failed filing is marked unfiled", async () => {
@@ -61,10 +71,17 @@ describe('GitHubPoster', () => {
 
 describe('the Review table', () => {
   const row = reviewRow(d([], 'Model Y medium, fallback while Prov A is out of usage'), 'https://u', AT);
+  const ours = (...rows: string[]) => `${TABLE_START}\n| Step | Reviewer | Time (UTC) | Commit | Verdict |\n|---|---|---|---|---|\n${rows.join('\n')}\n\n${TABLE_END}`;
+
   test('a body without the section gets it at the end; one with the table gets a row', () => {
     const once = withReviewRow('Some text', row);
-    expect(once).toBe(`Some text\n\n## Review\n\n_Rows from the review loop, one per review; each links its comment._\n\n| Step | Reviewer | Time (UTC) | Commit | Verdict |\n|---|---|---|---|---|\n${row}\n`);
-    expect(withReviewRow(once, 'ROW2')).toBe(once.replace(`${row}\n`, `${row}\nROW2\n`));
+    expect(once).toBe(`Some text\n\n## Review\n\n_Rows from the review loop, one per review; each links its comment._\n\n${ours(row)}\n`);
+    expect(withReviewRow(once, 'ROW2')).toBe(`Some text\n\n## Review\n\n_Rows from the review loop, one per review; each links its comment._\n\n${ours(row, 'ROW2')}\n`);
+  });
+
+  test('the section goes after Evidence, before what follows it', () => {
+    expect(withReviewRow('## Summary\n\nx\n\n## Evidence\n\ny\n\n## Merge Danger\n\nz\n', row))
+      .toBe(`## Summary\n\nx\n\n## Evidence\n\ny\n\n## Review\n\n_Rows from the review loop, one per review; each links its comment._\n\n${ours(row)}\n\n## Merge Danger\n\nz\n`);
   });
 
   // a row's cells, split on the pipes that aren't escaped
@@ -79,40 +96,31 @@ describe('the Review table', () => {
     expect(cells(reviewRow(d([], 'Model | Z'), 'https://u', AT)).slice(0, 2)).toEqual(['[Review 1](https://u)', 'Model \\| Z']);
   });
 
-  test("today's runner's table gets the Reviewer column, its own rows blank in it", () => {
-    const old = '## Review\n\n| Step | Time (UTC) | Commit | Verdict |\n|---|---|---|---|\n| [Review 1](https://a) | 2026-11-18 10:00 | `1234567` | **Blocking** \\| odd |\n';
-    expect(withReviewRow(old, row)).toBe(`## Review\n\n| Step | Reviewer | Time (UTC) | Commit | Verdict |\n|---|---|---|---|---|\n| [Review 1](https://a) |  | 2026-11-18 10:00 | \`1234567\` | **Blocking** \\| odd |\n${row}\n`);
+  test("the Python runner's Review table is neither read nor rewritten: the app's own table goes below it", () => {
+    const python = '## Review\n\n| Step | Time (UTC) | Commit | Verdict |\n|---|---|---|---|\n| [Sol review 1](https://a) | 2026-11-18 10:00 | `1234567` | **Blocking** |\n';
+    const once = withReviewRow(`## Summary\n\nx\n\n${python}\n## Notes\n\nn\n`, row);
+    expect(once).toBe(`## Summary\n\nx\n\n${python}\n${ours(row)}\n\n## Notes\n\nn\n`);
+    // its rows never move into the app's table, however many reviews follow
+    expect(withReviewRow(once, 'ROW2')).toBe(`## Summary\n\nx\n\n${python}\n${ours(row, 'ROW2')}\n\n## Notes\n\nn\n`);
   });
 
-  test("today's runner's rows name their reviewer in the Reviewer column, not the Step link", () => {
-    const old = '## Review\n\n| Step | Time (UTC) | Commit | Verdict |\n|---|---|---|---|\n'
-      + '| [Sol review 1](https://a) | 2026-11-18 10:00 | `1234567` | **Blocking** |\n'
-      + '| [Review 2, Opus 5.5 high, fallback while Codex is out of usage](https://b) | 2026-11-18 11:00 | `89abcde` | **Clean** |\n';
-    const got = withReviewRow(old, row).split('\n');
-    expect(got.slice(4, 6)).toEqual([
-      '| [Review 1](https://a) | Sol | 2026-11-18 10:00 | `1234567` | **Blocking** |',
-      '| [Review 2](https://b) | Opus 5.5 high, fallback while Codex is out of usage | 2026-11-18 11:00 | `89abcde` | **Clean** |',
-    ]);
-    for (const l of got.filter((x) => x.startsWith('|'))) expect(cells(l)).toHaveLength(5);
+  test('a table headed like the app\'s but not between its markers is left as it is', () => {
+    const lookalike = '## Review\n\n| Step | Reviewer | Time (UTC) | Commit | Verdict |\n|---|---|---|---|---|\n| hand | x | y | z | w |\n';
+    expect(withReviewRow(lookalike, row)).toBe(`${lookalike}\n${ours(row)}\n`);
   });
 
-  test("another table after today's runner's table is left as it is, and the row goes in the review table", () => {
-    const other = '| Area | Owner |\n|---|---|\n| app | me |';
-    const old = `## Review\n\n| Step | Time (UTC) | Commit | Verdict |\n|---|---|---|---|\n| [Sol review 1](https://a) | 2026-11-18 10:00 | \`1234567\` | **Blocking** |\n\n${other}\n`;
-    expect(withReviewRow(old, row)).toBe(`## Review\n\n| Step | Reviewer | Time (UTC) | Commit | Verdict |\n|---|---|---|---|---|\n| [Review 1](https://a) | Sol | 2026-11-18 10:00 | \`1234567\` | **Blocking** |\n${row}\n\n${other}\n`);
+  test('markers and headings inside a fenced block are only text', () => {
+    const fenced = `## Summary\n\n\`\`\`md\n## Review\n\n${ours('| example |')}\n\`\`\`\n`;
+    const got = withReviewRow(fenced, row);
+    expect(got.startsWith(fenced)).toBe(true); // the example is untouched
+    expect(got).toBe(`${fenced}\n## Review\n\n_Rows from the review loop, one per review; each links its comment._\n\n${ours(row)}\n`);
+    // and the next review goes in the real one, not the example
+    expect(withReviewRow(got, 'ROW2')).toBe(got.replace(`${row}\n`, `${row}\nROW2\n`));
   });
 
-  test('a hand-written table before the review table: the next row goes in the review table, not a new one', () => {
-    const once = withReviewRow('## Review\n\n| A | B |\n|---|---|\n| 1 | 2 |\n', '| r1 |');
-    expect(withReviewRow(once, '| r2 |')).toBe('## Review\n\n| A | B |\n|---|---|\n| 1 | 2 |\n\n| Step | Reviewer | Time (UTC) | Commit | Verdict |\n|---|---|---|---|---|\n| r1 |\n| r2 |\n');
-  });
-
-  test('text right after a hand-written table stays out of the new review table', () => {
-    expect(withReviewRow('## Review\n\n| A | B |\n|---|---|\nNotes.\n', 'R')).toBe('## Review\n\n| A | B |\n|---|---|\n\n| Step | Reviewer | Time (UTC) | Commit | Verdict |\n|---|---|---|---|---|\nR\n\nNotes.\n');
-  });
-
-  test('a hand-written table keeps its rows; ours starts below it', () => {
-    expect(withReviewRow('## Review\n\n| A | B |\n|---|---|\n| 1 | 2 |\n', 'R')).toContain('| 1 | 2 |\n\n| Step | Reviewer | Time (UTC) | Commit | Verdict |\n|---|---|---|---|---|\nR\n');
+  test('a start marker with no end marker is no table: a new one is added', () => {
+    const broken = `## Review\n\n${TABLE_START}\n| r0 |\n`;
+    expect(withReviewRow(broken, row)).toBe(`${broken}\n${ours(row)}\n`);
   });
 });
 
