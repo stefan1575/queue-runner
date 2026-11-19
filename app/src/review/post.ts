@@ -79,21 +79,36 @@ export function reviewRow(d: Decision, url: string, at: Date): string {
   return `| [Review ${rnd}](${url}) | ${cell(d.reviewer)} | ${utc(at)} | \`${d.sha.slice(0, 7)}\` | ${cell(parts.join('; '))} |`;
 }
 
-/** Today's runner's table given the Reviewer column, in place: its head and rule, and a blank
- *  cell after each row's Step (the first pipe that isn't escaped after the opening one). */
-function withReviewerColumn(lines: string[], rows: number[]) {
-  for (const [k, j] of rows.entries()) {
-    if (k === 0) lines[j] = TABLE_HEAD;
-    else if (k === 1 && /^\|(\s*:?-+:?\s*\|)+\s*$/.test(lines[j]!)) lines[j] = TABLE_RULE;
-    else {
-      const m = /^\|(?:[^|\\]|\\.)*\|/.exec(lines[j]!);
-      if (m) lines[j] = `${m[0]}  |${lines[j]!.slice(m[0].length)}`;
-    }
-  }
+/** Today's runner's Step cell: `[Review N, <reviewer>](url)`, or `[Sol review N](url)` from
+ *  before it named the reviewer (Sol, then). */
+const OLD_STEP = /^\|\s*\[(?:Sol review (\d+)|Review (\d+), ((?:[^\]\\]|\\.)+))\]\(([^)\s]*)\)\s*\|/;
+
+/** A row of today's runner's table with the Reviewer column: the reviewer its Step link named
+ *  moves to its own cell; a Step it didn't write keeps its text, beside a blank Reviewer. */
+function oldRow(line: string): string {
+  const m = OLD_STEP.exec(line);
+  if (m) return `| [Review ${m[1] ?? m[2]}](${m[4]}) | ${m[1] ? 'Sol' : m[3]!.trim()} |${line.slice(m[0].length)}`;
+  const step = /^\|(?:[^|\\]|\\.)*\|/.exec(line); // the first pipe that isn't escaped after the opening one
+  return step ? `${step[0]}  |${line.slice(step[0].length)}` : line;
 }
 
-/** The PR body with `row` appended to its `## Review` table. A section without a table gets one;
- *  a body without the section gets it after `## Evidence` (or at the end). Rows there stay. */
+/** The tables in lines `from` to `to`: each a run of lines that start with a pipe, its first
+ *  and last line. A table ends at the first line that doesn't. */
+function tablesIn(lines: string[], from: number, to: number): [number, number][] {
+  const out: [number, number][] = [];
+  for (let j = from; j < to; j++) {
+    if (!lines[j]!.startsWith('|')) continue;
+    const last = out.at(-1);
+    if (last && last[1] === j - 1) last[1] = j;
+    else out.push([j, j]);
+  }
+  return out;
+}
+
+/** The PR body with `row` appended to its `## Review` table: the section's table headed as the
+ *  runner's (today's runner's is given the Reviewer column first), whichever table it is there;
+ *  every other table is left as it is. A section without it gets one after its last table, or at
+ *  its end; a body without the section gets it after `## Evidence` (or at the end). */
 export function withReviewRow(body: string, row: string): string {
   const lines = (body ?? '').replace(/\r\n/g, '\n').replace(/\n+$/, '').split('\n');
   const head = (pat: RegExp) => { const i = lines.findIndex((l) => pat.test(l)); return i < 0 ? null : i; };
@@ -106,12 +121,21 @@ export function withReviewRow(body: string, row: string): string {
   };
   const r = head(/^##\s+Review\s*$/);
   if (r !== null) {
-    const rows: number[] = [];
-    for (let j = r + 1; j < end(r); j++) if (lines[j]!.startsWith('|')) rows.push(j);
-    if (rows.length && lines[rows[0]!]!.trim() === OLD_HEAD) withReviewerColumn(lines, rows);
-    if (rows.length && lines[rows[0]!]!.trim() === TABLE_HEAD) lines.splice(rows.at(-1)! + 1, 0, row);
-    else if (rows.length) lines.splice(rows.at(-1)! + 1, 0, '', ...table);
-    else put(end(r), r + 1, table);
+    const tables = tablesIn(lines, r + 1, end(r));
+    const ours = tables.find(([a]) => [TABLE_HEAD, OLD_HEAD].includes(lines[a]!.trim()));
+    if (ours) {
+      const [a, b] = ours;
+      if (lines[a]!.trim() === OLD_HEAD) {
+        lines[a] = TABLE_HEAD;
+        if (b > a && /^\|(\s*:?-+:?\s*\|)+\s*$/.test(lines[a + 1]!)) lines[a + 1] = TABLE_RULE;
+        for (let j = a + 2; j <= b; j++) lines[j] = oldRow(lines[j]!);
+      }
+      lines.splice(b + 1, 0, row);
+    } else if (tables.length) {
+      const after = tables.at(-1)![1] + 1;
+      // a line right after a table would be read as its row: a blank line keeps ours apart
+      lines.splice(after, 0, '', ...table, ...(after < lines.length && lines[after]!.trim() ? [''] : []));
+    } else put(end(r), r + 1, table);
   } else {
     const ev = head(/^##\s+Evidence\b/);
     put(ev === null ? lines.length : end(ev), 0, ['## Review', '', '_Rows from the review loop, one per review; each links its comment._', '', ...table]);

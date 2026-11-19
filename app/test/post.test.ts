@@ -84,6 +84,33 @@ describe('the Review table', () => {
     expect(withReviewRow(old, row)).toBe(`## Review\n\n| Step | Reviewer | Time (UTC) | Commit | Verdict |\n|---|---|---|---|---|\n| [Review 1](https://a) |  | 2026-11-18 10:00 | \`1234567\` | **Blocking** \\| odd |\n${row}\n`);
   });
 
+  test("today's runner's rows name their reviewer in the Reviewer column, not the Step link", () => {
+    const old = '## Review\n\n| Step | Time (UTC) | Commit | Verdict |\n|---|---|---|---|\n'
+      + '| [Sol review 1](https://a) | 2026-11-18 10:00 | `1234567` | **Blocking** |\n'
+      + '| [Review 2, Opus 5.5 high, fallback while Codex is out of usage](https://b) | 2026-11-18 11:00 | `89abcde` | **Clean** |\n';
+    const got = withReviewRow(old, row).split('\n');
+    expect(got.slice(4, 6)).toEqual([
+      '| [Review 1](https://a) | Sol | 2026-11-18 10:00 | `1234567` | **Blocking** |',
+      '| [Review 2](https://b) | Opus 5.5 high, fallback while Codex is out of usage | 2026-11-18 11:00 | `89abcde` | **Clean** |',
+    ]);
+    for (const l of got.filter((x) => x.startsWith('|'))) expect(cells(l)).toHaveLength(5);
+  });
+
+  test("another table after today's runner's table is left as it is, and the row goes in the review table", () => {
+    const other = '| Area | Owner |\n|---|---|\n| app | me |';
+    const old = `## Review\n\n| Step | Time (UTC) | Commit | Verdict |\n|---|---|---|---|\n| [Sol review 1](https://a) | 2026-11-18 10:00 | \`1234567\` | **Blocking** |\n\n${other}\n`;
+    expect(withReviewRow(old, row)).toBe(`## Review\n\n| Step | Reviewer | Time (UTC) | Commit | Verdict |\n|---|---|---|---|---|\n| [Review 1](https://a) | Sol | 2026-11-18 10:00 | \`1234567\` | **Blocking** |\n${row}\n\n${other}\n`);
+  });
+
+  test('a hand-written table before the review table: the next row goes in the review table, not a new one', () => {
+    const once = withReviewRow('## Review\n\n| A | B |\n|---|---|\n| 1 | 2 |\n', '| r1 |');
+    expect(withReviewRow(once, '| r2 |')).toBe('## Review\n\n| A | B |\n|---|---|\n| 1 | 2 |\n\n| Step | Reviewer | Time (UTC) | Commit | Verdict |\n|---|---|---|---|---|\n| r1 |\n| r2 |\n');
+  });
+
+  test('text right after a hand-written table stays out of the new review table', () => {
+    expect(withReviewRow('## Review\n\n| A | B |\n|---|---|\nNotes.\n', 'R')).toBe('## Review\n\n| A | B |\n|---|---|\n\n| Step | Reviewer | Time (UTC) | Commit | Verdict |\n|---|---|---|---|---|\nR\n\nNotes.\n');
+  });
+
   test('a hand-written table keeps its rows; ours starts below it', () => {
     expect(withReviewRow('## Review\n\n| A | B |\n|---|---|\n| 1 | 2 |\n', 'R')).toContain('| 1 | 2 |\n\n| Step | Reviewer | Time (UTC) | Commit | Verdict |\n|---|---|---|---|---|\nR\n');
   });
