@@ -334,6 +334,11 @@ export class ConflictLane {
     });
     this.d.gate.started({ id: job.id, kind: 'conflict', choice: letIn.choice }, letIn.cost);
     if (!this.d.repos().some((r) => r.id === repo.id)) return this.notStarted(job, `${repo.title} is no longer served`);
+    // one writer per PR, asked again after the slow steps: a job another lane started on the PR
+    // meanwhile (a fix round on its branch, a review of it) goes on alone
+    const other = this.d.log.jobs().find((j) => j.id !== job.id && j.repo === repo.id
+      && ((j.kind !== 'review' && j.branch === pr.branch && WRITING(j)) || (j.kind === 'review' && j.issue === n && !j.end)));
+    if (other) return this.notStarted(job, `a ${other.kind} job started on PR #${n} meanwhile`);
     const catalog = this.d.catalog();
     if (!catalog) return this.notStarted(job, "T3's providers aren't known yet");
     let thread: { threadId: string; runId: string | null; link: string | null };

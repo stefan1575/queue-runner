@@ -337,6 +337,20 @@ describe('what waits', () => {
     expect(log.stops()[0]!.why).toContain("its head is in someone/app, not owner/app: no conflict round pushes to a fork's branch");
   });
 
+  test('a fix round another lane starts on the branch while the round is fetched: the round starts nothing', async () => {
+    const fetch = git.fetchPr.bind(git);
+    git.fetchPr = async (f, n, b) => {
+      await log.started(job({ kind: 'fix', title: 'Queue runner fix: app#4', round: 1 }));
+      return fetch(f, n, b);
+    };
+    makeLane();
+    await lane.pass();
+    await lane.idle();
+    expect(t3.launches).toEqual([]);
+    expect(rounds()[0]!.end).toMatchObject({ outcome: 'not-started', error: 'a fix job started on PR #4 meanwhile' });
+    expect(gate.calls.some((c) => c.startsWith('dropped conflict-'))).toBe(true);
+  });
+
   test('a head that moved since listing starts nothing; the PR rests', async () => {
     git.fetchPr = async () => H2;
     makeLane();
