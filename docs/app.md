@@ -600,7 +600,9 @@ merge half of `src/github.ts` and `src/git.ts`.
   The platform's notifications are a later ticket, so the log line
   names the PR for now.
 - **After a merge:** only what the PR's own jobs made is touched (#156 F2): its reviews and fix
-  rounds (by the PR's number) and the build whose end names the PR. Their branches (the build's
+  rounds (by the PR's number) and its build: the one whose end names the PR, or the one on the
+  PR's head branch that ended before the merge was recorded and names no other PR (a build that
+  opened its PR and then failed or hit a usage limit has none on its end, #156 F11). Their branches (the build's
   and each fresh fixer's) are removed, with the worktrees `git worktree list` shows on them, but
   never a branch another job of the app's is on (one still running, or ended on another PR: a
   new build reusing the name), and never a person's branch. Every thread of those jobs is settled: the merge is the latest point one can still be open (#68,

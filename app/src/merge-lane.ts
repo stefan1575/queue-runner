@@ -334,12 +334,16 @@ export class MergeLane {
 
   // --- after a merge ---------------------------------------------------------------------------
 
-  /** The PR's own jobs: its reviews and fix rounds (by the PR's number), and the build whose end
-   *  names this PR. A later build on a reused branch name is another PR's, and so is a branch a
-   *  person pushed (F2). */
+  /** The PR's own jobs: its reviews and fix rounds (by the PR's number), and its build: the one
+   *  whose end names this PR, or the one on the PR's head branch that ended before the merge was
+   *  recorded and names no other PR (a build that opened its PR and then failed or hit a usage
+   *  limit has no PR on its end, #154 looking one up only for `done`: F11). A build still running,
+   *  or started after the merge, on a reused branch name is another PR's (F2). */
   private ownJobs(repo: BuildRepo, step: Step): Job[] {
+    const build = (j: Job) => j.end?.pr?.number === step.pr
+      || (j.branch === step.branch && Boolean(j.end) && !j.end!.pr && j.startedAt < step.startedAt);
     return this.d.log.jobs().filter((j) => j.repo === repo.id
-      && (j.kind === 'build' ? j.end?.pr?.number === step.pr : j.issue === step.pr && j.branch === step.branch));
+      && (j.kind === 'build' ? build(j) : j.issue === step.pr && j.branch === step.branch));
   }
 
   /** The PR's worktrees and branches removed and every thread the app ran on it settled: the

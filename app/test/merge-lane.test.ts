@@ -69,7 +69,9 @@ beforeEach(async () => {
   gh.prs['owner/app#4'] = github();
   gh.checkStates[H] = { state: 'passed', pending: [], failed: [] };
   git = new FakeGit();
-  log = await JobLog.open(join(dir, 'state', 'jobs.jsonl'));
+  // a clock that ticks a millisecond each read, so every line is later than the one before
+  let tick = 0;
+  log = await JobLog.open(join(dir, 'state', 'jobs.jsonl'), () => new Date(Date.UTC(2026, 10, 19, 12, 0, 0, ++tick)));
   lines = [];
   merged = [];
   moved = 0;
@@ -266,6 +268,46 @@ describe('in a repo where the runner merges', () => {
     folders.delete(WT);
     await lane.pass();
     expect(steps('merge')[0]!.sweptAt).toEqual(expect.any(String));
+  });
+});
+
+describe("the PR's build is found by its branch too (F11, F12)", () => {
+  for (const end of [
+    { outcome: 'usage-limit' as const, resetAt: null },
+    { outcome: 'failed' as const, error: 'it stopped after opening the PR' },
+    { outcome: 'done' as const }, // a PR lookup the live check's build never made
+  ]) {
+    test(`a build that opened its PR and ended ${end.outcome}, with no PR on its end: its worktree and branch go after the merge`, async () => {
+      const build = await log.started({ kind: 'build', repo: 'p-app', github: 'owner/app', issue: 3, branch: BRANCH, base: 'main', title: 'Queue runner build: app#3', choice: CHOICE, onFallback: false });
+      await log.thread(build.id, { threadId: 'thread-b', runId: 'r', link: null });
+      t3.threadState['thread-b'] = { id: 'thread-b', projectId: 'p-app', runs: [], runtimeRequests: [], turnItems: [] };
+      await log.ended(build.id, end);
+      await review(1, H, 'clean');
+      repo = RUNNER;
+      // the usage-limited build would hold the merge as writing: the user merges it instead
+      if (end.outcome === 'usage-limit') {
+        repo = ME;
+        await log.stepStarted({ kind: 'ready', repo: 'p-app', github: 'owner/app', pr: 4, branch: BRANCH, sha: H }).then((s) => log.stepEnded(s.id, { outcome: 'marked' }));
+        gh.reviewPulls['owner/app'] = [];
+        gh.prs['owner/app#4'] = github({ state: 'merged' });
+      }
+      await makeLane().pass();
+      await lane.idle();
+      expect(steps('merge')[0]).toMatchObject({ end: { outcome: 'merged' }, cleanedAt: expect.any(String) });
+      expect(git.calls).toContain(`removeWorktree ${WT}`);
+      expect(git.calls).toContain(`deleteBranch ${BRANCH}`);
+      expect(settledThreads()).toContain('thread-b');
+    });
+  }
+
+  test("a build on the branch that started after the merge is never the PR's, even ended without a PR", async () => {
+    await review(1, H, 'clean');
+    await makeLane().pass();
+    await lane.idle();
+    expect(steps('merge')[0]!.end?.outcome).toBe('merged');
+    const later = await log.started({ kind: 'build', repo: 'p-app', github: 'owner/app', issue: 3, branch: BRANCH, base: 'main', title: 'b', choice: CHOICE, onFallback: false });
+    await log.ended(later.id, { outcome: 'failed', error: 'x' });
+    expect(git.calls).toEqual([]); // no build of this PR's: nothing on the branch was its
   });
 });
 
