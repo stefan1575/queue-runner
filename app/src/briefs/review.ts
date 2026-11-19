@@ -58,8 +58,9 @@ Review independently (the only files you change are tests you add to show a prob
    for it, and leaves a record of how the screen got this way. Behaviour is proved by its tests;
    screenshots are for a ticket that changes what a person looks at. You are their reader: look
    at each shot the PR gives. Text-only output (a CLI, a log, GitHub) needs none. A missing or
-   thin screenshot is a **nit**: name the screen you'd want to see. A shot that shows the screen
-   wrong (not as the change leaves it, or not what the PR says it shows) is **important**
+   thin screenshot is a **nit**: name the screen you'd want to see, and mark the finding
+   \`"missing_screenshot": true\` (only that mark makes it one, whatever its wording). A shot
+   that shows the screen wrong (not as the change leaves it, or not what the PR says it shows) is **important**
    (\`rule\`: "a screenshot shows the screen as it is", and a \`cost\`: what it would mislead a
    reader about).
 $again$guide

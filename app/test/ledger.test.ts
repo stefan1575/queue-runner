@@ -49,9 +49,9 @@ describe('decide', () => {
     expect(d.body).toContain('F1 was tagged Important without a file and line plus how it comes up in real use');
   });
 
-  test('a missing or thin screenshot never blocks on its own; a wrong one does', () => {
-    const missing = important('F1', { class: 'visible change without screenshots', scenario: '', cost: 'a reader cannot see the new table', rule: 'a visible change needs screenshots' });
-    const thin = important('F2', { class: 'screenshots too few for the states changed', scenario: '', cost: 'the empty state is unseen', rule: 'docs/flow.md' });
+  test('a finding the reviewer marks as a missing or thin screenshot never blocks on its own; a wrong one does', () => {
+    const missing = important('F1', { class: 'visible change without screenshots', scenario: '', cost: 'a reader cannot see the new table', rule: 'a visible change needs screenshots', missing_screenshot: true });
+    const thin = important('F2', { class: 'too few for the states changed', scenario: '', cost: 'the empty state is unseen', rule: 'docs/flow.md', missing_screenshot: true });
     const d = decide(input({ reply: reply([missing, thin]) }));
     expect(d.verdict).toBe('clean');
     expect(d.findings.map((f) => [f.id, f.tag, f.was])).toEqual([['F1', 'nit', 'important'], ['F2', 'nit', 'important']]);
@@ -59,6 +59,15 @@ describe('decide', () => {
     expect(JSON.stringify(d.findings)).not.toContain('"shots"');
     const wrong = important('F3', { class: 'screenshot taken before the change', scenario: '', cost: 'a reader is told the old table is the new one', rule: 'a screenshot shows the screen as it is' });
     expect(decide(input({ reply: reply([wrong]) }))).toMatchObject({ verdict: 'blocking', findings: [{ id: 'F3', tag: 'important' }] });
+  });
+
+  test('a wrong shot worded like a missing one still blocks: only the mark makes a missing screenshot (F16)', () => {
+    const wrong = important('F1', { class: 'screenshot shows a missing Save button', scenario: '', cost: 'the Settings shot shows a missing Save button the change keeps', rule: 'a screenshot shows the screen as it is' });
+    const d = decide(input({ reply: reply([wrong]) }));
+    expect(d).toMatchObject({ verdict: 'blocking', findings: [{ id: 'F1', tag: 'important' }] });
+    expect(d.body).not.toContain('screenshots that are missing or thin');
+    const unmarked = important('F2', { class: 'visible change without screenshots', scenario: '', cost: 'a reader cannot see it', rule: 'no screenshots for a visible change' });
+    expect(decide(input({ reply: reply([unmarked]) })).verdict).toBe('blocking');
   });
 
   test('a fixed finding clears the block in review 2', () => {

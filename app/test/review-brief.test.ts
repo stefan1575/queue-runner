@@ -40,6 +40,7 @@ describe('reviewBrief', () => {
     expect(b).toContain('a `scenario`: how it comes up in real use (who does what in ordinary use, and the wrong result)');
     expect(b).toContain('a bug that comes up only in a made-up situation (someone setting it up on purpose, a state nothing in real use reaches) is a nit.');
     expect(b).toContain('Text-only output (a CLI, a log, GitHub) needs none. A missing or thin screenshot is a **nit**');
+    expect(b).toContain('mark the finding `"missing_screenshot": true` (only that mark makes it one, whatever its wording)');
     expect(b).toContain('A shot that shows the screen wrong (not as the change leaves it, or not what the PR says it shows) is **important**');
   });
 

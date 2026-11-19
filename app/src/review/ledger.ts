@@ -109,7 +109,10 @@ function block(reply: string): unknown {
   }
 }
 
-type Raw = { id: string; tag: string; class: string; file: string; line: number | null; scenario: string; cost: string; rule: string };
+/** The finding's field the reviewer sets when it's about a screenshot missing or thin (the brief's
+ *  check 5): a nit whatever its tag. Never inferred from its wording (F16). */
+export const MISSING_SCREENSHOT = 'missing_screenshot';
+type Raw = { id: string; tag: string; class: string; file: string; line: number | null; scenario: string; cost: string; rule: string; missingScreenshot: boolean };
 
 /** The reply's last sol-findings block as findings, and the reply without the block. */
 export function parseFindings(reply: string): [Raw[], string] {
@@ -125,7 +128,8 @@ export function parseFindings(reply: string): [Raw[], string] {
     if (!(tag in TAGS)) throw new ReviewFailed(`Finding ${g.id} has tag "${f.tag}", not one of ${Object.keys(TAGS).join(', ')}.`);
     if (found.some((h) => h.id === g.id)) throw new ReviewFailed(`Two findings have the id ${g.id}.`);
     const m = /^L?(\d+)/.exec(g.line);
-    found.push({ ...g, tag, line: m && Number(m[1]) > 0 ? Number(m[1]) : null });
+    const shot = f[MISSING_SCREENSHOT];
+    found.push({ ...g, tag, line: m && Number(m[1]) > 0 ? Number(m[1]) : null, missingScreenshot: shot === true || text(shot).toLowerCase() === 'true' });
   });
   return [found, reply.replace(FENCE, '').trim()];
 }
@@ -163,12 +167,12 @@ export function repoPath(file: string, line: number | null, roots: string[] = []
 
 /** What an Important finding needs to block: file and line, and how it comes up in real use (its
  *  scenario) or, for a problem that isn't a bug, a cost and the rule it breaks. */
-export const evidence = (f: Raw) => Boolean(f.file && f.line && (f.scenario || (f.cost && f.rule)));
+export const evidence = (f: Pick<Raw, 'file' | 'line' | 'scenario' | 'cost' | 'rule'>) => Boolean(f.file && f.line && (f.scenario || (f.cost && f.rule)));
 
-/** A finding about screenshots missing, thin or owed: a nit, whatever its tag (#155). A shot that
- *  shows the screen wrong is another finding, and blocks. */
-const SHOTS_MISSING = /\b(?:no|missing|thin|owed|too few|needs?|without)\b[^.]{0,40}\bscreenshots?\b|\bscreenshots?\b[^.]{0,40}\b(?:missing|owed|thin|too few|omitted)\b/i;
-export const shotsMissing = (f: Raw) => SHOTS_MISSING.test(f.rule ?? '') || SHOTS_MISSING.test(f.class ?? '');
+/** A finding the reviewer marked as a screenshot missing or thin (`missing_screenshot: true`): a
+ *  nit, whatever its tag (#155). Only the mark counts, never the words: a shot that shows the
+ *  screen wrong is another finding, and blocks, however it's worded. */
+export const shotsMissing = (f: Raw) => f.missingScreenshot;
 
 // --- the comment ------------------------------------------------------------------------------
 
@@ -244,9 +248,10 @@ export function decide(i: DecideInput): Decision {
   }
   const roots = [i.wt, i.runDir].filter((r): r is string => Boolean(r));
   const found: Finding[] = raw.map((f) => {
-    const [file, line] = repoPath(f.file, f.line, roots);
-    const g = { ...f, file, line };
-    const shots = g.tag === 'important' && shotsMissing(g);
+    const { missingScreenshot, ...rest } = f;
+    const [file, line] = repoPath(rest.file, rest.line, roots);
+    const g = { ...rest, file, line };
+    const shots = g.tag === 'important' && shotsMissing(f);
     const down = g.tag === 'important' && (shots || !evidence(g));
     return { ...g, tag: (down ? 'nit' : g.tag) as Tag, ...(down ? { was: 'important' } : {}), ...(shots ? { shots: true } : {}), status: 'open', raised: rnd };
   });
