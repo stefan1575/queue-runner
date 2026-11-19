@@ -97,6 +97,128 @@ class RecheckTest(unittest.TestCase):
         self.assertEqual(len(self.calls('update-branch')), 1)
         self.assertEqual(len(self.calls('close-done')), 1)
 
+    def test_failing_again_on_the_new_head_is_rerun_then_stopped_once(self):
+        r, stop = self.stopped()
+        self.main_moves()
+        r.reviewer.review_pass()
+        self.github_updates(H4, Checks('failed', failed=('tests',), runs=(437,),
+                                       by_run=((437, ('tests',)),)))
+        self.gh.workflow_runs[437] = WorkflowRun(437, 1, 'completed', 'failure', RUN)
+        r.reviewer.review_pass()
+        self.assertEqual(self.calls('rerun'), [(437,)])   # #93's one re-run first
+        self.assertEqual([s.sha for s in self.of(r, 'stop')], [H2])
+        self.gh.workflow_runs[437] = WorkflowRun(437, 2, 'completed', 'failure', RUN)
+        r.reviewer.review_pass()
+        r.reviewer.review_pass()
+        r.reviewer.review_pass()
+        stops = self.of(r, 'stop')
+        self.assertEqual([(s.sha, s.stop, s.outcome) for s in stops],
+                         [(H2, 'failed-check', 'filed'), (H4, 'failed-check', 'filed')])
+        self.assertEqual(stops[1].base, MAIN2)
+        [job] = self.of(r, RECHECK)
+        self.assertEqual((job.outcome, job.head), ('failed-again', H4))
+        self.assertEqual(len(self.calls('update-branch')), 1)   # never twice for MAIN2
+        self.assertEqual(self.calls('close-done'), [])
+        self.assertEqual(self.sol.briefs, [])
+        self.assertEqual(sum('not moved since' in s for s in self.said), 1, self.said)
+
+    def test_main_moving_again_after_a_failure_checks_it_again_once(self):
+        self.test_failing_again_on_the_new_head_is_rerun_then_stopped_once()
+        r = self.runner()
+        MAIN3 = '7' * 40
+        self.main_moves(MAIN3)
+        r.reviewer.review_pass()
+        self.assertEqual(self.calls('update-branch'), [(20, H2), (20, H4)])
+        self.assertEqual(self.of(r, RECHECK)[-1].base, MAIN3)
+
+    def test_a_base_that_has_not_moved_is_left_alone_and_said_once(self):
+        r, _ = self.stopped()
+        r.reviewer.review_pass()
+        r.reviewer.review_pass()
+        self.assertEqual(self.calls('update-branch'), [])
+        self.assertEqual(self.of(r, RECHECK), [])
+        self.assertEqual(sum('main has not moved since its check failed' in s
+                             for s in self.said), 1, self.said)
+
+    def test_a_conflict_is_left_to_the_conflict_round_and_said_once(self):
+        r, _ = self.stopped()
+        self.main_moves()
+        self.gh.conflicts.add(20)
+        stopper = r.reviewer.stopper
+        stopper.recheck(self.repo, self.gh.pull(self.repo, 20))
+        stopper.recheck(self.repo, self.gh.pull(self.repo, 20))
+        self.assertEqual(self.calls('update-branch'), [])
+        self.assertEqual(sum('a conflict round comes first' in s for s in self.said), 1)
+
+    def test_a_pr_with_a_claude_job_writing_to_it_waits_for_that_job(self):
+        r, _ = self.stopped()
+        self.main_moves()
+        r.jobs.started(kind='fix', repo='first', issue=20, branch='claude/red-5',
+                       title='Queue runner fix: first#20', sha=H2)
+        stopper = r.reviewer.stopper
+        stopper.recheck(self.repo, self.gh.pull(self.repo, 20))
+        stopper.recheck(self.repo, self.gh.pull(self.repo, 20))
+        self.assertEqual(self.calls('update-branch'), [])
+        self.assertEqual(sum('is writing to the PR' in s for s in self.said), 1, self.said)
+
+    def test_a_pr_with_another_stop_is_left_for_stefan(self):
+        r, stop = self.stopped()
+        r.reviewer.stopper.file(self.repo, self.gh.pull(self.repo, 20), 'no-push', 'nothing')
+        self.main_moves()
+        r.reviewer.review_pass()
+        self.assertEqual(self.calls('update-branch'), [])
+        self.assertTrue(any('another stop for Stefan (no-push)' in s for s in self.said))
+
+    def test_an_update_github_refuses_is_not_tried_again_on_that_base(self):
+        r, stop = self.stopped()
+        self.main_moves()
+        self.gh.fail.add('update-branch')
+        r.reviewer.review_pass()
+        r.reviewer.review_pass()
+        [job] = self.of(r, RECHECK)
+        self.assertEqual(job.outcome, 'update-failed')
+        self.assertEqual(self.of(r, 'stop')[0].outcome, 'filed')   # still Stefan's
+
+    def test_github_not_answering_is_tried_again_next_pass(self):
+        from queue_runner.github import GhError
+        r, stop = self.stopped()
+        self.main_moves()
+        real = self.gh.update_branch
+
+        def down(repo, number, expected_head):
+            raise GhError('gh api failed (1): Bad gateway (HTTP 502)')
+        self.gh.update_branch = down
+        r.reviewer.review_pass()
+        self.gh.update_branch = real
+        r.reviewer.review_pass()
+        self.assertEqual([j.outcome for j in self.of(r, RECHECK)], ['not-started', 'updated'])
+        self.assertEqual(self.calls('update-branch'), [(20, H2)])
+
+    def test_a_stop_filed_before_199_with_no_base_counts_as_moved(self):
+        self.gh.check_states[H2] = Checks('failed', failed=('tests',))
+        r = self.runner()
+        job = r.jobs.started(kind='stop', repo='first', issue=20, branch='claude/red-5',
+                             title='Queue runner stop: first#20', sha=H2, stop='failed-check')
+        url = self.gh.create_issue(self.repo, 'PR #20 needs Stefan', 'x', ['needs-info'])
+        r.jobs.ended(job.id, exit_code=None, outcome='filed', link=url, reason='tests')
+        r.reviewer.review_pass()
+        self.assertEqual(self.calls('update-branch'), [(20, H2)])
+
+    def test_a_close_that_fails_is_tried_again_without_a_second_comment(self):
+        r, stop = self.stopped()
+        n = int(stop.link.rsplit('/', 1)[-1])
+        self.main_moves()
+        r.reviewer.review_pass()
+        self.github_updates(H4, Checks('passed'))
+        self.gh.fail.add('close-done')
+        r.reviewer.review_pass()
+        self.assertEqual(self.of(r, 'stop')[0].outcome, 'filed')
+        self.gh.fail.discard('close-done')
+        r.reviewer.review_pass()
+        self.assertEqual(self.calls('close-done'), [(n,)])
+        self.assertEqual(sum('main moved' in b for k, b in self.calls('comment') if k == n), 1)
+        self.assertEqual(self.of(r, 'stop')[0].answer, 'passed-after-update')
+
 
 if __name__ == '__main__':
     unittest.main()
