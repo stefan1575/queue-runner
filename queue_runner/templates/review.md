@@ -12,11 +12,13 @@ Review independently (the only files you change are tests you add to show a prob
 3. **Standards:** does it follow this repo's $agents and `docs/agents/`?
 4. **Tests:** do the tests cover the behaviour it changes? $tests
 5. **Screenshots:** a screenshot lets a reader see a change instead of taking the builder's word
-   for it, and leaves a record of how the screen got this way. Behaviour is proved by its tests;
-   screenshots are for a ticket that changes what a person looks at. You are their reader: look
-   at each shot the PR gives. They are enough when, reading only the PR, you can see the change
-   the ticket asked for, and the shots show what the PR says. When you can't, that is
-   **important** (`rule`: "a visible change needs screenshots"): name the screen you need to see.
+   for it. Behaviour is proved by its tests; screenshots are for a ticket that changes what a
+   person looks at, and output that is only text (what a command prints, a log line, a GitHub
+   comment or label) has none. Look at each shot the PR gives. A shot that shows the screen
+   wrong (not what the ticket asked for, not what the PR says, or broken) is **important**: its
+   `scenario` is what the shot shows and what it should. They are enough when, reading only the
+   PR, you can see the change the ticket asked for; shots that are missing or not enough are a
+   **nit** naming the screen you'd want to see, and they never block on their own.
 $again$guide
 Tag every finding:
 - **important** blocks the merge. It needs `file` and `line`, plus either a `scenario` (a failure

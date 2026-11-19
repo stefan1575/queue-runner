@@ -272,6 +272,15 @@ class ReviewerTest(unittest.TestCase):
         with open(os.path.join(self.run_dir(), 'evidence', 'after-busy-usage.png'), 'rb') as f:
             self.assertEqual(f.read(), b'PNG2')
 
+    def test_missing_shots_are_a_nit_and_only_a_wrong_shot_blocks(self):
+        # Stefan, 2026-11-19: 10 rounds blocked on screenshots alone; they're for checking the
+        # work, so a shot that shows it wrong blocks, and a missing one doesn't.
+        self.one_pr().review_pass()
+        brief = ' '.join(self.sol.briefs[0]['brief'].split())
+        self.assertIn('A shot that shows the screen wrong', brief)
+        self.assertIn('they never block on their own', brief)
+        self.assertNotIn('a visible change needs screenshots', brief)
+
     def test_a_pr_without_screenshots_says_none_were_published(self):
         self.one_pr().review_pass()
         brief = self.sol.briefs[0]['brief']
