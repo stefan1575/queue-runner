@@ -429,6 +429,22 @@ class HistoryTest(HistoryCase):
         self.assertEqual((tl[-1]['title'], tl[-1]['tone']),
                          ('tests failed on bbbbbbb and passed on its re-run.', 'ok'))
 
+    def test_a_stop_settled_by_a_recheck_is_the_runners_on_the_timeline(self):
+        stop = self.job('stop', 5, None, sha=H2, stop='failed-check')
+        self.jobs.ended(stop.id, exit_code=None, outcome='filed', reason='tests failed',
+                        link='https://github.com/owner/first/issues/40')
+        recheck = self.jobs.started(kind='recheck', repo='first', issue=5, branch=None,
+                                    title='Queue runner recheck', sha=H2, base='8' * 40)
+        self.jobs.ended(recheck.id, exit_code=None, outcome='passed', head='d' * 40)
+        self.jobs.ended(stop.id, exit_code=None, outcome='answered', answer='passed-after-update',
+                        link='https://github.com/owner/first/issues/40')
+        tl = pr_of(self.snap(), 5)['timeline']
+        rows = {(r['kind'], r['actor']): r for r in tl}
+        self.assertEqual(rows[('recheck', 'runner')]['title'],
+                         'Its base moved to 8888888; updated from it, its checks pass on '
+                         'ddddddd.')
+        self.assertIn('the stop is settled', rows[('answer', 'runner')]['title'])
+
     def test_activity_keeps_the_latest_200(self):
         for k in range(205):
             self.job('review', 5, 'failed', sha=H2, round=3)

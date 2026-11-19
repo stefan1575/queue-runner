@@ -10,6 +10,7 @@ import unittest
 
 from queue_runner.config import Config, Repo
 from queue_runner.github import Checks, Issue, WorkflowRun
+from queue_runner.inbox import collect
 from queue_runner.run import Runner
 from queue_runner.stops import RECHECK
 from tests.fakes import MAIN_HEAD, FakeGitHubForReviews, FakeToaster, full_pr, issue
@@ -96,6 +97,15 @@ class RecheckTest(unittest.TestCase):
         self.assertEqual(len(self.sol.briefs), 1)   # back in review, on the new head
         self.assertEqual(len(self.calls('update-branch')), 1)
         self.assertEqual(len(self.calls('close-done')), 1)
+
+    def test_a_settled_stop_leaves_the_inbox_at_once(self):
+        r, _ = self.stopped()
+        self.assertEqual(len(collect(self.config, self.gh, r.jobs).items), 1)
+        self.main_moves()
+        r.reviewer.review_pass()
+        self.github_updates(H4, Checks('passed'))
+        r.reviewer.stopper.stop_pass()
+        self.assertEqual(collect(self.config, self.gh, r.jobs).items, [])
 
     def test_failing_again_on_the_new_head_is_rerun_then_stopped_once(self):
         r, stop = self.stopped()

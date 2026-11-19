@@ -682,7 +682,8 @@ def _pr_list(v: View, statuses: dict, story, releases) -> list[dict]:
 # --- what happened ------------------------------------------------------------------------------
 
 ACTIVITY_MAX = 200
-_PR_KINDS = ('review', 'fix', 'merge', 'ready', 'stop', 'live', 'rerun', 'base-hold')
+_PR_KINDS = ('review', 'fix', 'merge', 'ready', 'stop', 'live', 'rerun', 'base-hold',
+             'recheck')
 
 
 def _h7(sha) -> str:
@@ -724,8 +725,8 @@ def _other(j) -> str | None:
 def _event(story, j) -> list[tuple]:
     """A job's events: (when, actor, kind, sha, sentence, tone, findings). A stop Stefan answered
     is two: the stop, and his answer."""
-    from .asks import REVIEWED, SKIPPED
-    from .stops import number_of
+    from .asks import REVIEWED, SKIPPED, UPDATED_PASSED
+    from .stops import PASSED_AFTER_UPDATE, number_of
     if j.outcome in SKIPPED or (j.kind == 'live' and j.outcome == 'assumed'):
         return []
     at, sha = j.ended_at or j.started_at, _h7(j.sha)
@@ -778,16 +779,32 @@ def _event(story, j) -> list[tuple]:
             'cleared': f'Its base failed {j.reason} too; then nothing failed on it any more.',
         }.get(j.outcome), 'runner'
         tone = 'bad' if j.outcome == 'update-failed' else None
+    elif j.kind == 'recheck':   # a failed-check stop, checked again on a moved base (#199)
+        b7 = _h7(j.base)
+        text, actor = {
+            'updated': f'Its base moved to {b7} since its check failed, so the runner updated '
+                       'it from the base to check it again.',
+            'passed': f'Its base moved to {b7}; updated from it, its checks pass on '
+                      f'{_h7(j.head)}.',
+            'failed-again': f'Its base moved to {b7}; updated from it, a check fails on '
+                            f'{_h7(j.head)} too.',
+            'update-failed': f'Its base moved to {b7}, but GitHub would not update it from the '
+                             'base (a conflict).',
+        }.get(j.outcome), 'runner'
+        tone = 'ok' if j.outcome == 'passed' else 'bad' if j.outcome in (
+            'failed-again', 'update-failed') else None
     elif j.kind == 'stop':
         if j.outcome not in ('filed', 'answered'):
             return [(at, 'runner', 'stop', sha, _other(j), 'bad', [])] if _other(j) else []
         out = [(j.started_at, 'runner', 'stop', sha, story._stop(j), 'you', [])]
         if j.outcome == 'answered':
-            out.append((j.ended_at, 'you', 'answer', sha,
+            out.append((j.ended_at, 'runner' if j.answer == PASSED_AFTER_UPDATE else 'you',
+                        'answer', sha,
                         f'You closed needs-info issue #{number_of(j.link)}.'
                         if j.answer == 'issue-closed' and j.link else
                         'Its PR was merged or closed on GitHub, so the stop had nothing left to decide.'
-                        if j.answer == 'pr-closed' else 'You replied.', None, []))
+                        if j.answer == 'pr-closed' else UPDATED_PASSED
+                        if j.answer == PASSED_AFTER_UPDATE else 'You replied.', None, []))
         return out
     else:
         return []

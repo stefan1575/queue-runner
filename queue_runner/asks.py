@@ -17,7 +17,11 @@ the shape `dashboard/sample.py` builds: each written to be picked up cold, a wee
 import datetime
 import re
 
-from .stops import KINDS, number_of
+from .stops import KINDS, PASSED_AFTER_UPDATE, number_of
+
+# A failed-check stop the runner settled itself (issue #199).
+UPDATED_PASSED = ('Its base moved, so the runner updated it from the base, and its checks pass '
+                  'there: the stop is settled.')
 
 ORDER = ('broken', 'stuck', 'decision', 'merge')
 KIND = {'review': 'stuck', 'approach-note': 'stuck', 'no-push': 'stuck', 'conflict': 'stuck',
@@ -193,7 +197,8 @@ class Story:
                 add(j.ended_at, j, f'You closed needs-info issue #{number_of(j.link)}.'
                     if j.answer == 'issue-closed' and j.link else 'You decided in T3.'
                     if j.answer == 'thread' else 'Its PR was merged or closed on GitHub, so the stop had nothing left to decide.'
-                    if j.answer == 'pr-closed' else 'You replied.')
+                    if j.answer == 'pr-closed' else UPDATED_PASSED
+                    if j.answer == PASSED_AFTER_UPDATE else 'You replied.')
         for j in self.on('ask', repo, n):   # a thread Stefan opened to decide in (ticket 35)
             if j.outcome == 'opened':   # or a fresh one in place of a stale one (#72)
                 add(j.ended_at or j.started_at, j,

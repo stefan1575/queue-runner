@@ -30,7 +30,7 @@ from dataclasses import dataclass, field, replace
 from .ledger import RUNNER_MARK, said_since
 from .merge import Merger
 from .picker import blockers, closed_issues
-from .stops import BASE, BASE_HOLD, KINDS, number_of, utc
+from .stops import BASE, BASE_HOLD, KINDS, PASSED_AFTER_UPDATE, number_of, utc
 from .usage import failing_since
 
 BUILD_QUESTIONS = ('failed', 'no-pr')   # a decision's stop on a build: on its issue
@@ -229,6 +229,8 @@ def acting(all_jobs, stop) -> list:
 def finished(all_jobs, stop) -> bool:
     """The runner has acted on Stefan's answer: after a reply, the decision on it ended (and the
     fix round it ordered, if it did); after a closed issue, the next job on the PR ended."""
+    if stop.answer == PASSED_AFTER_UPDATE:   # settled by the runner, not answered (#199)
+        return True
     after = acting(all_jobs, stop)
     if stop.answer in ('replied', 'thread'):   # a reply, or decided in its T3 thread (35)
         k = next((i for i, j in enumerate(after) if j.kind == 'decision'), None)
