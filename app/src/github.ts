@@ -190,20 +190,26 @@ export class GhGitHub implements GitHub, GitHubAccount, GitHubLabels, GitHubWork
     }
   }
 
-  /** Every page of a paged REST answer, as GitHub sent each one. */
+  /** Every page of a paged REST answer, as GitHub sent each one. An answer that isn't a list of
+   *  pages is an error, never read as an empty list (a PR lookup would take it as no PR, #154 F13). */
   private async pages(endpoint: string): Promise<any[]> {
     const pages = await this.api(['--paginate', '--slurp', endpoint], endpoint);
-    return Array.isArray(pages) ? pages : [];
+    if (!Array.isArray(pages)) throw new GitHubError(`gh api ${endpoint} printed no list: ${JSON.stringify(pages).slice(0, 200)}`);
+    return pages;
   }
 
   /** Every item of a paged REST list. */
   private async all(endpoint: string): Promise<any[]> {
-    return (await this.pages(endpoint)).flat();
+    const pages = await this.pages(endpoint);
+    if (!pages.every(Array.isArray)) throw new GitHubError(`gh api ${endpoint} printed no list: ${JSON.stringify(pages).slice(0, 200)}`);
+    return pages.flat();
   }
 
   /** Every item under `key` of a paged REST answer whose pages are objects (`{check_runs: [...]}`). */
   private async allOf(endpoint: string, key: string): Promise<any[]> {
-    return (await this.pages(endpoint)).flatMap((p) => (Array.isArray(p?.[key]) ? p[key] : []));
+    const pages = await this.pages(endpoint);
+    if (!pages.every((p) => Array.isArray(p?.[key]))) throw new GitHubError(`gh api ${endpoint} printed no ${key}: ${JSON.stringify(pages).slice(0, 200)}`);
+    return pages.flatMap((p) => p[key]);
   }
 
   async readyIssues(repo: string): Promise<Issue[]> {

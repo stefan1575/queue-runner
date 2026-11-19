@@ -46,6 +46,22 @@ describe('JobLog', () => {
     expect([...log.heldIssues('p1')].sort()).toEqual([1, 2, 4]);
   });
 
+  test('a job that needs the user holds its repo and its issue until the answer, read back on the next open', async () => {
+    const log = await JobLog.open(file, () => now);
+    const job = await log.started(start(1));
+    await log.ended(job.id, { outcome: 'needs-user', error: 'its launch was sent and its answer lost' });
+    await log.started(start(2, 'p2'));
+    expect(log.needingUser('p1').map((j) => j.id)).toEqual([job.id]);
+    expect(log.needingUser('p2')).toEqual([]);
+    expect((await JobLog.open(file)).needingUser('p1').map((j) => j.id)).toEqual([job.id]);
+    now = new Date('2026-11-19T11:00:00Z');
+    await log.answered(job.id);
+    const again = await JobLog.open(file);
+    expect(again.needingUser('p1')).toEqual([]);
+    expect(again.get(job.id)).toMatchObject({ answeredAt: '2026-11-19T11:00:00.000Z', end: { outcome: 'needs-user' } });
+    expect(again.heldIssues('p1')).toEqual(new Set([1]));
+  });
+
   test("a repo's last end, a not-started aside", async () => {
     const log = await JobLog.open(file, () => now);
     expect(log.lastEnded('p1')).toBeNull();

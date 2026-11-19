@@ -1,7 +1,7 @@
 // The usage gate on fake T3's usage events (#153): each job waits for room in the provider it runs
 // on, beside the jobs running on that provider's login, and a kind with a fallback runs on it
 // while its own provider is out.
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
@@ -9,8 +9,9 @@ import { CostLog } from '../src/cost-log.ts';
 import { holdText } from '../src/gate.ts';
 import { DEFAULT_JOBS, type Jobs, type ModelChoice } from '../src/jobs.ts';
 import { DEFAULT_SETTINGS, type Settings } from '../src/settings.ts';
-import { T3Catalog } from '../src/t3/catalog-source.ts';
-import { runtimeAddress } from '../src/t3/real.ts';
+import { T3Catalog, type CatalogSource, type CatalogState } from '../src/t3/catalog-source.ts';
+import { catalogFromConfig } from '../src/t3/catalog.ts';
+import { usageFromProviders } from '../src/usage.ts';
 import { T3Ws } from '../src/t3/ws.ts';
 import { UsageGate } from '../src/usage-gate.ts';
 import { FakeT3 } from './fake-t3.ts';
@@ -34,8 +35,9 @@ beforeEach(async () => {
   t3 = new FakeT3();
   t3.serverConfig = snapshot;
   providers = structuredClone(snapshot.config.providers);
-  await writeFile(join(dir, 'server-runtime.json'), JSON.stringify({ origin: t3.origin }));
-  source = T3Catalog.start(new T3Ws(runtimeAddress(join(dir, 'server-runtime.json')), t3.cli, t3.http, t3.connect), 10);
+  // T3's address is the fake's own, so `until` waits on nothing but the fake (#202 F2); the cost
+  // log is on disk, and each test awaits its writes (`gate.settled()`).
+  source = T3Catalog.start(new T3Ws(t3.address, t3.cli, t3.http, t3.connect), 10);
   settings = { ...DEFAULT_SETTINGS };
   gate = new UsageGate(source, () => settings, await CostLog.open(join(dir, 'usage.jsonl')), () => now);
   await until(() => source.current().usage.length > 0);
@@ -121,5 +123,53 @@ describe('every job waits for room in its own provider', () => {
     expect(lines).toHaveLength(1);
     expect(lines[0]).toMatchObject({ provider: 'claudeAgent', model: 'claude-opus-5-5', effort: 'medium', kind: 'build', job: 'build a#1', spent: { five_hour: 4, seven_day: 1, seven_day_fable: 0 } });
     expect(gate.check({ ...job, id: 'build a#2' }).fits).toBe(true);
+  });
+});
+
+describe('jobs started before T3 names their login (#154 F10)', () => {
+  /** A source T3 hasn't answered yet: no catalog, no usage, until `answer`. */
+  function coldSource() {
+    let state: CatalogState = { catalog: null, usage: [] };
+    const listeners = new Set<(s: CatalogState) => void>();
+    const cold: CatalogSource = { current: () => state, onChange: (l) => { listeners.add(l); return () => listeners.delete(l); } };
+    const answer = (used: number, emit = true, checkedAt = '2026-11-18T19:04:30.000Z') => {
+      const ps = structuredClone(snapshot.config.providers);
+      for (const p of ps) if (p.usageLimits) { p.usageLimits.checkedAt = checkedAt; for (const w of p.usageLimits.windows) w.usedPercent = used; }
+      state = { catalog: catalogFromConfig({ ...snapshot.config, providers: ps }), usage: usageFromProviders(ps) };
+      if (emit) for (const l of listeners) l(state);
+    };
+    return { cold, answer };
+  }
+  const BEFORE = { checkedAt: '2026-11-18T19:00:00.000Z', windows: {} };
+
+  test.each([['tells the gate', true], ['is only asked', false]])(
+    "a build reserved before T3's first catalog counts against its real login once T3 %s", async (_, emit) => {
+      jobs({ build: { own: OPUS, fallback: null } });
+      const { cold, answer } = coldSource();
+      const g = new UsageGate(cold, () => settings, await CostLog.open(join(dir, 'cold.jsonl')), () => now);
+      g.started({ id: 'recovered', kind: 'build', choice: OPUS }, { five_hour: 60, seven_day: 15 }, BEFORE);
+      answer(25, emit);
+      // 25% used and the recovered build holding 60%: no room for another 60% build beside it
+      expect(g.pick('build b#2', 'build')).toMatchObject({ fits: false, hold: { why: 'running', jobs: ['recovered'] } });
+    });
+
+  test('two builds reserved before the catalog are counted beside each other, and one that ended then holds the next reading', async () => {
+    jobs({ build: { own: OPUS, fallback: null } });
+    const { cold, answer } = coldSource();
+    const costs = join(dir, 'cold.jsonl');
+    const g = new UsageGate(cold, () => settings, await CostLog.open(costs), () => now);
+    g.started({ id: 'one', kind: 'build', choice: OPUS }, { five_hour: 10 }, BEFORE);
+    g.started({ id: 'two', kind: 'build', choice: OPUS }, { five_hour: 10 }, BEFORE);
+    now = new Date('2026-11-18T19:06:00Z');
+    g.finished('one');
+    // T3's first answer reads usage from before 'one' ended: it decides nothing on that login
+    answer(0);
+    expect(g.check({ id: 'three', kind: 'build', choice: OPUS })).toMatchObject({ fits: false, hold: { why: 'reading', stale: 'before-end' } });
+    now = new Date('2026-11-18T19:20:00Z');
+    g.finished('two');
+    answer(20, true, '2026-11-18T19:30:00.000Z');
+    await g.settled();
+    const records = (await CostLog.open(costs)).records();
+    expect(records.map((r) => [r.job, r.sharedWith])).toEqual([['one', ['two']], ['two', ['one']]]);
   });
 });

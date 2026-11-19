@@ -42,7 +42,9 @@ pnpm --dir app test
 ```
 
 CI runs both on Windows (`.github/workflows/tests.yml`, job `app`), beside the Python tests. A
-push to `main` runs them first (`docs/tests.md`, Main is tested before a push).
+push to `main` runs them first (`docs/tests.md`, Main is tested before a push). A PR that changes
+the Time format watcher or its tests also runs `test/time-format.test.ts` 50 times in a row
+(`.github/workflows/time-format-repeat.yml`), since those tests once failed CI now and then.
 
 **Tests check the code, never Stefan's settings** (#172). A test builds its own settings, in a
 temp folder or an in-memory store, and checks what the code does with them. No test reads the
@@ -52,6 +54,10 @@ main red (#169). `test/no-real-settings.test.ts` fails on a test file that reach
 home or app-data folders, `T3_HOME` or `T3CODE_HOME`, T3's real runtime file or CLI
 (`runtimeAddress()` or `t3Cli()` with no path), `config.toml`, or the real settings path, which
 the settings tickets export as `SETTINGS_PATH` (`test/real-settings.ts` lists them all).
+
+**Tests get time from a fake clock and files from a temp folder** (#202): none waits for real
+time to pass or a real file watcher to fire, and a `vi.waitFor` waits only on the test's own fakes (`FakeT3.address`, the settings and the job log in `test/memory-files.ts`), never on real file I/O, which a test awaits; `test/no-real-time.test.ts` fails a test that reads
+the real clock or runs on a real timer that no `vi.useFakeTimers()` around it fakes (a `toFake` list fakes only what it names), naming it (`test/real-time.ts`). Both checks read every app test file, `renderer/test/` included (`test/app-test-files.ts`).
 
 ## Rules for every rebuild ticket
 
@@ -129,8 +135,9 @@ Code both sides use (`display.ts`, `settings-search.ts`) touches no Node. The wi
   no such key, checked live 2026-11-18 against T3 0.1.9, and no WebSocket method serves client
   settings). So, as Stefan settled on #150, the app reads it there: the one exception to "No
   reads of T3's database or settings" (Rules). `src/t3/time-format.ts` reads only that key, never
-  writes the file, and polls it (`fs.watchFile`, every 500 ms: it sees a file that's missing or
-  replaced by a rename), telling the window when the format changes. A file that's missing or
+  writes the file, and reads it every 500 ms (it sees a file that's missing or replaced by a
+  rename; a stat poll, `fs.watchFile`, missed changes on CI: a write made before its first stat,
+  or a same-size one in the same clock tick), telling the window when the format changes. A file that's missing or
   unreadable, or has no such key or a value T3 doesn't offer, is System default. It goes once
   T3's server serves client settings. The app has no Time format setting of its own.
 
@@ -278,6 +285,8 @@ tickets but the build lane (Builds, below); the tests drive it on fake T3's even
   instances on one login (seen: `claudeAgent` and `claudeReviewer`) show the same windows, and a
   job running on either counts against both. Its name, in every reason and share row, is the
   shortest of its instances' names.
+  A job started before T3 has named its provider's login (a build watched again on a cold start,
+  before T3's first catalog) is given that login once T3 does, and counts against it from then.
 - **The gate** (`checkJob`), before any job, reviews included (#106): each window of the job's
   provider that counts its model (a `<kind> · <family>` window counts only models whose id or
   name holds the family) must fit used + the expected cost of every job running on the same
@@ -311,7 +320,7 @@ tickets but the build lane (Builds, below); the tests drive it on fake T3's even
 
 The first job end to end (#154): a served repo's next ticket becomes a PR, as today's runner
 builds (`docs/flow.md`, `docs/claude-lane.md`). `src/build-lane.ts`, `src/picker.ts`,
-`src/briefs/build.ts`, `src/t3/thread-end.ts`, `src/job-log.ts`, `src/git.ts`.
+`src/briefs/build.ts`, `src/briefs/rules.ts`, `src/t3/thread-end.ts`, `src/job-log.ts`, `src/git.ts`.
 
 - **Picking** (`src/picker.ts`, today's picker ported, `docs/layout.md`): an open issue labelled
   `ready-for-agent`, every blocker closed (GitHub's native blocked-by count, and `#N`,
@@ -326,6 +335,11 @@ builds (`docs/flow.md`, `docs/claude-lane.md`). `src/build-lane.ts`, `src/picker
   names the runner's `scripts/evidence.py`, it says in words what that script does (compare the
   before and after, commit the shots to the `evidence` branch under `pr-<n>/` without touching
   the job's branch, link each by that commit).
+- **Each rule is written once** (`src/briefs/rules.ts`): a rule more than one brief needs (the
+  Before you push list, today's `templates/check.md` from closed PR #196; the screenshots; what
+  is the user's to decide) is written there and filled into each brief that needs it. The build
+  brief goes through Before you push before it pushes. `test/brief.test.ts` fails a brief file
+  that writes one of them out itself.
 - **Starting:** fetch `origin/<base>` (T3 doesn't), with the refspec named
   (`+refs/heads/<base>:refs/remotes/origin/<base>`), so the tracking ref is written whatever the
   clone's own refspec covers (a single-branch clone of another branch); then a leftover local
@@ -335,12 +349,18 @@ builds (`docs/flow.md`, `docs/claude-lane.md`). `src/build-lane.ts`, `src/picker
   `claude/<slug>-<issue>`, titled `Queue runner build: <project>#<n>`. The served set is asked
   again after the GitHub reads and right before the launch call: a repo switched off meanwhile
   gets no gate verdict, or is `not-started`.
-- **A launch with no answer** (the call sent, its answer lost) may still have started a thread,
-  so it isn't taken as not started: after one retry wait the job's thread is looked for in T3's
-  shell snapshot (`orchestration.subscribeShell`; the live build check reads a thread's `branch`
-  there), by the job's own title and branch, and its project when the thread names one. Found, it's recorded and watched like a
-  launched one; absent, the job is `not-started`; while T3 can't be read, the job stays open, its
-  repo busy and its place in the gate kept, looked for again after each wait.
+- **After a restart, don't guess** (#154): a job is tied to a thread only by the thread id T3
+  gave its own launch, never by a thread's title, branch or project. A launch that was sent and
+  whose answer was lost (the connection dropped, T3 answered 5xx or unreadably: `NoAnswer`,
+  `src/t3/seams.ts`) may still have started a thread, so it isn't taken as not started: the job
+  ends `needs-user`, is dropped from the gate unmeasured, holds its issue, and its repo starts
+  nothing until the user answers (`BuildLane.answered`, an `answered` line in the job log; the
+  Inbox ticket asks). A launch T3 refused, or one that failed before the call was sent, started
+  nothing: `not-started`.
+- **One ticket at a time per repo** (#179): no build while the repo has an open PR, whoever
+  opened it, read before the ticket is picked and again right before the launch (a PR opened
+  meanwhile makes the job `not-started`). Clean means merged. The app merges nothing yet, so it
+  has no live steps to wait on: the merge ticket adds that wait.
 - **One build per repo, repos side by side** (#50): each pass takes every served repo with no build
   running, the one whose last job ended longest ago first (the job log's `lastEnded`). Each asks
   the usage gate first (`UsageGate.pick`, kind `build`); a held one says its reason once and waits.
@@ -349,12 +369,16 @@ builds (`docs/flow.md`, `docs/claude-lane.md`). `src/build-lane.ts`, `src/picker
   minutes. In the desktop app a pass runs at start, when the served set changes, when T3 reads new
   usage while a build is held, and every 5 minutes (GitHub is polled for new tickets).
 - **The end comes from T3's thread events** (`src/t3/thread-end.ts`; The WebSocket API, below), not
-  polling: `done` (the run completed; `done-no-pr` when no PR came from the branch), `waiting` (a
+  polling: `done` (the run completed; `done-no-pr` when GitHub answered that no PR came from the
+  branch; a lookup that failed is never "none": the end has no `pr`, each pass, a start's
+  included, looks it up again, and a `pr` line records what it found), `waiting` (a
   pending runtime request: a question to the user), `usage-limit` (with T3's `resetAt`) or
   `failed` (with the error item's message). A stream that drops opens again after 5 seconds.
 - **The job log** is `jobs.jsonl` in the state folder (`src/job-log.ts`, today's `state.py` cut to
   a build): `start` (the model the gate let it in on, the cost it was let in at and T3's reading it
-  was let in on, `cost` and `before`), `thread` (once T3 names it) and `end`.
+  was let in on, `cost` and `before`), `thread` (once T3 names it), `end` and, for a `needs-user`
+  end, `answered` once the user has answered; `settled` once its thread is settled; `pr` once a
+  PR lookup that failed at the end is done.
   Every build that started holds its issue but `not-started` (releasing is a later ticket). The
   usage before and after a job are its record in the gate's `usage.jsonl`, by the same job id: the
   gate counts the job from its let-in and measures it on T3's first reading after its end; a job
@@ -363,11 +387,16 @@ builds (`docs/flow.md`, `docs/claude-lane.md`). `src/build-lane.ts`, `src/picker
   action: settle}`; #68 story 5). Only threads the app launched are settled (story 13): the id
   comes from its own launch. One waiting on a question is left for the Inbox ticket and one
   stopped by a usage limit for the limits ticket; both are recorded as such and left unsettled.
+  A settle is recorded (`settled`); an end with none (the app stopped between the two, or the
+  settle failed) is settled on the next pass, a start's included. A log from before `settled`
+  lines settles its ended builds' threads once more on the first start, which leaves a settled
+  thread as it is.
 - **An app that stopped mid-build:** on start, each build the log shows open is watched again to
   its end before any pass (so its repo still has one build), reserved in the gate at its logged
   `cost` and measured from its logged `before`, never from a reading taken mid-run (a line with
-  neither, an older app's, is measured as teaching nothing). One T3 never named a thread for is
-  looked for as an unanswered launch is, and `not-started` only once T3's threads show none.
+  neither, an older app's, is measured as teaching nothing). One with no saved thread id
+  needs the user, as a lost launch answer does (After a restart, don't guess, above): no thread
+  is adopted for it, and its repo starts nothing until the user answers.
 - **The app's log** is its console for now (`say`): a line per start, hold, end and failure.
 
 ## Reviews

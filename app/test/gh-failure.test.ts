@@ -64,7 +64,8 @@ describe("gh's output is read whole, however long", () => {
   };
 
   it('two pages of 100 passing check runs with long summaries, over 1 MiB together, pass the gate', async () => {
-    const page = (k: number) => ({ total_count: 200, check_runs: Array.from({ length: 100 }, (_, i) => ({
+    // the same pages answer both reads, so each carries an empty `statuses` too
+    const page = (k: number) => ({ total_count: 200, statuses: [], check_runs: Array.from({ length: 100 }, (_, i) => ({
       name: `check ${k}-${i}`, status: 'completed', conclusion: 'success', output: { summary: 'x'.repeat(6000) } })) });
     const gh = new GhGitHub(printing([page(1), page(2)]), here);
     expect(await gh.checks('o/r', 'abc')).toEqual({ state: 'passed', pending: [], failed: [] });

@@ -161,7 +161,7 @@ class Fixer:
             return why
         # A decision that ordered a round on H since (Stefan's reply to the stop) overrides
         # the stop: `_busy` has seen that no round ran after it.
-        if not self.order(repo, pr) and (stop := conflict_stop(self.jobs, repo, pr)):
+        if not self.order(repo, pr) and (stop := conflict_stop(self.jobs, self.github, repo, pr)):
             return f'{stop[0]}: a stop for Stefan'
         if other := self.resolving(repo, pr, prs):
             return (f"PR #{other.number} had a conflict round and hasn't merged or stopped yet: "

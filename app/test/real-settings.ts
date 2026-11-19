@@ -5,6 +5,8 @@
 // The patterns run over the whole source with its comments blanked out, not line by line, so a
 // call or an access split over lines (`t3Cli(\n)`, `process.env\n  .HOME`) is still found (#173).
 import ts from 'typescript';
+import { scriptKind } from './app-test-files.ts';
+import { testNameAt } from './test-names.ts';
 
 const REAL: [RegExp, string][] = [
   [/\bhomedir\b/g, "the user's home folder"],
@@ -28,9 +30,11 @@ const REAL: [RegExp, string][] = [
  *  regex's contents as a comment and blanked real code after it (#173 F3). A comment can only
  *  sit in the trivia before a token, which holds nothing but whitespace and comments, so each
  *  token's trivia is scanned on its own and its comments blanked. */
-export function blankComments(source: string): string {
-  const file = ts.createSourceFile('test.ts', source, ts.ScriptTarget.Latest, false, ts.ScriptKind.TS);
-  const scanner = ts.createScanner(ts.ScriptTarget.Latest, false, ts.LanguageVariant.Standard, source);
+export function blankComments(source: string, name = 'test.ts'): string {
+  const script = scriptKind(name);
+  const file = ts.createSourceFile(name, source, ts.ScriptTarget.Latest, false, script);
+  const jsx = script === ts.ScriptKind.TSX || script === ts.ScriptKind.JSX;
+  const scanner = ts.createScanner(ts.ScriptTarget.Latest, false, jsx ? ts.LanguageVariant.JSX : ts.LanguageVariant.Standard, source);
   const out = source.split('');
   const blankTrivia = (from: number, to: number) => {
     scanner.resetTokenState(from);
@@ -52,16 +56,18 @@ export function blankComments(source: string): string {
   return out.join('');
 }
 
-/** Each line of `source` where a real setting is reached, as `line: what it reaches: the line`;
+/** Each line of `source` where a real setting is reached, as
+ *  `line: in test '<describe > test>': what it reaches: the line` (or `outside any test`);
  *  a match over several lines is reported at the line it starts on. Comments are skipped. */
-export function realSettingsReads(source: string): string[] {
-  const code = blankComments(source);
+export function realSettingsReads(source: string, name = 'test.ts'): string[] {
+  const code = blankComments(source, name);
+  const file = ts.createSourceFile(name, source, ts.ScriptTarget.Latest, true, scriptKind(name));
   const lines = source.split('\n');
   const found = new Map<number, string>();
   for (const [pattern, what] of REAL) {
     for (const match of code.matchAll(pattern)) {
       const n = code.slice(0, match.index).split('\n').length - 1;
-      if (!found.has(n)) found.set(n, what);
+      if (!found.has(n)) found.set(n, `${testNameAt(file, match.index)}: ${what}`);
     }
   }
   return [...found.entries()]

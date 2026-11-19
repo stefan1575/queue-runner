@@ -80,26 +80,44 @@ export function checkPatch(patch: unknown): SettingsPatch {
   return out as SettingsPatch;
 }
 
+/** The file calls the settings make: the disk, or a test's own in-memory folder. A missing file
+ *  is read as an error with `code` 'ENOENT', as Node's is. */
+export type SettingsFiles = {
+  mkdir(folder: string): Promise<void>;
+  read(file: string): Promise<string>;
+  write(file: string, text: string): Promise<void>;
+  rename(from: string, to: string): Promise<void>;
+};
+
+export const DISK: SettingsFiles = {
+  mkdir: async (folder) => { await mkdir(folder, { recursive: true }); },
+  read: (file) => readFile(file, 'utf8'),
+  write: (file, text) => writeFile(file, text),
+  rename: (from, to) => rename(from, to),
+};
+
 export class SettingsStore {
   private file: string;
+  private files: SettingsFiles;
   private settings: Settings;
   private listeners = new Set<(s: Settings) => void>();
   /** Writes run one after another, so the file always ends on the last change. */
   private writing: Promise<void> = Promise.resolve();
 
-  private constructor(file: string, settings: Settings) {
+  private constructor(file: string, settings: Settings, files: SettingsFiles) {
     this.file = file;
     this.settings = settings;
+    this.files = files;
   }
 
   /** The settings kept in `folder`. A missing file is a new install; a key with a value this
    *  version doesn't take falls back to its default and the rest are kept. */
-  static async open(folder: string): Promise<SettingsStore> {
-    await mkdir(folder, { recursive: true });
+  static async open(folder: string, files: SettingsFiles = DISK): Promise<SettingsStore> {
+    await files.mkdir(folder);
     const file = join(folder, 'settings.json');
     let saved: Record<string, unknown> = {};
     try {
-      saved = JSON.parse(await readFile(file, 'utf8'));
+      saved = JSON.parse(await files.read(file));
     } catch (e) {
       if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw new Error(`${file} can't be read: ${(e as Error).message}`);
     }
@@ -109,7 +127,7 @@ export class SettingsStore {
       const kept = !(k in saved) ? undefined : k === 'repos' ? repoChoices(saved[k], true) : CHECKS[k](saved[k]);
       if (kept !== undefined) settings[k] = kept;
     }
-    return new SettingsStore(file, settings as Settings);
+    return new SettingsStore(file, settings as Settings, files);
   }
 
   get(): Settings {
@@ -135,9 +153,9 @@ export class SettingsStore {
     const write = this.writing.then(async () => {
       const next = { ...this.settings, ...patch() };
       // written aside and renamed over, so a crash mid-write never leaves half a file
-      await writeFile(`${this.file}.tmp`, `${JSON.stringify(next, null, 2)}
+      await this.files.write(`${this.file}.tmp`, `${JSON.stringify(next, null, 2)}
 `);
-      await rename(`${this.file}.tmp`, this.file);
+      await this.files.rename(`${this.file}.tmp`, this.file);
       this.settings = next;
       const now = this.get();
       for (const l of this.listeners) l(now);

@@ -2,7 +2,7 @@
 // token exchange, /mcp) and its WebSocket. No network: requests are answered in memory, and one
 // to any port but the server's is refused, as a moved server refuses.
 import { createHash } from 'node:crypto';
-import type { Cli, Connect, Http, HttpAnswer, Socket, SocketEvents } from '../src/t3/seams.ts';
+import { T3Error, type Address, type Cli, type Connect, type Http, type HttpAnswer, type Socket, type SocketEvents } from '../src/t3/seams.ts';
 
 type Session = {
   sessionId: string; subject: string; client: { label: string }; issuedAt: string;
@@ -55,6 +55,15 @@ export class FakeT3 {
   private n = 0;
 
   get origin() { return `http://127.0.0.1:${this.port}`; }
+
+  /** Whether T3's server is up, for `address`: off, it answers as a missing runtime file does. */
+  running = true;
+  /** Where T3's server is, answered in memory rather than read from a runtime file, so a test
+   *  that waits for T3's events waits on nothing but this fake (#202 F2). */
+  address: Address = async () => {
+    if (!this.running) throw new T3Error("T3's server isn't running (the fake T3 is stopped)");
+    return this.origin;
+  };
 
   /** A session someone else holds (today's runner's, say). */
   addSession(subject: string, label: string): Session {

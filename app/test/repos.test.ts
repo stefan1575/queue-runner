@@ -1,18 +1,16 @@
 // Repositories (#151): the runner's repos are T3's projects, kept in step both ways from T3's
 // events, each switched on before the runner touches it. The fake T3 behind the real MCP and
-// WebSocket clients, GitHub faked, settings in a temp folder.
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+// WebSocket clients, GitHub faked, settings in an in-memory folder. T3's address is the fake's
+// too, so every wait here is on a fake and none on the disk (#202 F2).
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { GhGitHub, GitHubError, type GitHub, type GitHubLabels, type Label } from '../src/github.ts';
 import { NotEmpty, RepoError, Repositories, RUNNER_LABELS } from '../src/repos.ts';
 import { SettingsStore } from '../src/settings.ts';
 import { T3Mcp } from '../src/t3/mcp.ts';
 import { T3ProjectFeed } from '../src/t3/project-feed.ts';
-import { runtimeAddress } from '../src/t3/real.ts';
 import { T3Ws } from '../src/t3/ws.ts';
 import { FakeT3 } from './fake-t3.ts';
+import { memoryFiles } from './memory-files.ts';
 
 /** GitHub: each folder's remote, and each repo's labels. */
 class FakeGitHub implements GitHub, GitHubLabels {
@@ -39,14 +37,14 @@ class FakeGitHub implements GitHub, GitHubLabels {
   }
 }
 
-let dir: string;
+let files: ReturnType<typeof memoryFiles>;
 let t3: FakeT3;
 let github: FakeGitHub;
 let picked: string | null;
 let stops: (() => void)[] = [];
 
-beforeEach(async () => {
-  dir = await mkdtemp(join(tmpdir(), 'qr-repos-'));
+beforeEach(() => {
+  files = memoryFiles();
   t3 = new FakeT3();
   t3.projects = [
     { id: 'p1', title: 'sandbox', workspaceRoot: 'C:/sandbox' },
@@ -55,19 +53,17 @@ beforeEach(async () => {
   github = new FakeGitHub();
   github.remotes = { 'C:/sandbox': 'ana/sandbox', 'C:/blog': 'ana/blog' };
   picked = null;
-  await writeFile(join(dir, 'server-runtime.json'), JSON.stringify({ origin: t3.origin }));
 });
-afterEach(async () => {
+afterEach(() => {
   for (const s of stops) s();
   stops = [];
-  await rm(dir, { recursive: true, force: true });
 });
 
-async function start(state = join(dir, 'state')) {
-  const address = runtimeAddress(join(dir, 'server-runtime.json'));
+async function start(state = 'state') {
+  const address = t3.address;
   const feed = T3ProjectFeed.start(new T3Ws(address, t3.cli, t3.http, t3.connect), () => () => {});
   stops.push(() => feed.stop());
-  const settings = await SettingsStore.open(state);
+  const settings = await SettingsStore.open(state, files);
   const repos = Repositories.start({
     feed, github, settings, mcp: new T3Mcp(address, t3.cli, t3.http), pickFolder: async () => picked,
   });
@@ -109,7 +105,7 @@ describe('in step with T3', () => {
   });
 
   test("T3 down shows no list and says why", async () => {
-    await rm(join(dir, 'server-runtime.json'));
+    t3.running = false;
     const { repos } = await start();
     expect(repos.list()).toBeNull();
     expect(repos.error()).toMatch(/T3's server isn't running/);
@@ -200,7 +196,7 @@ describe('served', () => {
 
 describe('a GitHub remote read again', () => {
   test("gh failing at the start doesn't stick: the next T3 event reads it again, and a served repo is served once it can be read", async () => {
-    const state = join(dir, 'state');
+    const state = 'state';
     const first = await start(state);
     await first.repos.setServed('p1', true);
     stops.forEach((s) => s());
@@ -247,7 +243,7 @@ describe('a GitHub remote read again', () => {
 
 describe('who merges', () => {
   test('defaults to "I merge" and a change survives a restart', async () => {
-    const state = join(dir, 'state');
+    const state = 'state';
     const { repos } = await start(state);
     expect(row(repos, 'p1')?.merge).toBe('me');
     await repos.setServed('p1', true);

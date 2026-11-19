@@ -1,9 +1,10 @@
 // The build brief (#154): today's `queue_runner/templates/build.md`, ported. Self-contained (docs/app.md,
 // Rules): it names no skill, starts no slash command and points at nothing outside the repo, so any
-// provider in T3 can run it. The user's name comes from Settings in place of "Stefan". Today's
-// brief names the runner's own screenshot script by its path; the app has no such script beside a
-// served repo, so the brief says in words what it did (shoot, compare, publish to `evidence`).
+// provider in T3 can run it. The user's name comes from Settings in place of "Stefan". The rules
+// other briefs share (Before you push, the screenshots, what is the user's to decide) come from
+// `rules.ts`, written there once.
 import type { Comment } from '../github.ts';
+import { BEFORE_YOU_PUSH, SCREENSHOTS, USERS_TO_DECIDE } from './rules.ts';
 
 export type BuildBriefInput = {
   /** `owner/name`. */
@@ -48,13 +49,12 @@ $comments
   usage limit can cut this thread off at any point, and the next job starts from your commits.
 - If the change alters what a person sees, take the before screenshots first, before you change
   anything (see Screenshots below).
-- When the issue is done, push \`$branch\` and open the PR with the body below, with
-  \`Closes #$number\` in it. Where the repo's own rules ask for more, add it. Don't review your own
-  work: the runner has the PR reviewed. Then end your turn.
+- When the issue is done, go through Before you push (below), then push \`$branch\` and
+  open the PR with the body below, with \`Closes #$number\` in it. Where the repo's own rules ask
+  for more, add it. Then end your turn.
 - Don't schedule, watch or wait on anything (no scheduled tasks, PR watches, wake-ups or
   monitors). The runner does the waiting.
-- If something only $user can decide stops you: commit and push what you have, comment the
-  question on the issue, swap its \`ready-for-agent\` label for \`needs-info\`, and end your turn.
+${USERS_TO_DECIDE}
 
 ## The PR body
 
@@ -80,34 +80,9 @@ Visible: <yes, what changes on screen | no, why nothing does>
 **Blast radius:** <a word or two: what could break>
 \`\`\`
 
-## Screenshots
+${SCREENSHOTS}
 
-A screenshot lets a reader see a change instead of taking your word for it, and leaves a record
-of how the screen got this way. Take them when the issue changes what a person looks at;
-behaviour is proved by its tests. They are enough when someone reading only the PR can see the
-change the issue asked for: a before and an after of it (a new screen has no before).
-
-The repo's docs say how to render each of its states. A change that shows only in the app's own
-data, not in a sample state it can render, is shot from that data: the repo's docs say how to
-build it and shoot it (a sample page shot instead is the same before and after). Open your after
-shots once, when the work is done, to check they show what you built; the reviewer looks at them
-all, and an image costs tokens on every later turn.
-
-Name the files \`before-<state>-<page>.png\` and \`after-<state>-<page>.png\`, at 1440x900 unless
-the repo's docs say otherwise, and keep them out of the commits. Before publishing, compare each
-before with its after: if their bytes are the same, the shot missed the change, so reshoot what
-the change touches, or write \`Screenshot owed: <why>\` for that state.
-
-Publish them once the PR is open, on the repo's \`evidence\` branch on \`origin\`, in the folder
-\`pr-<the PR's number>/\`: that folder is the only one the review reads. Commit them there without
-touching your branch or working tree: with a temporary index (\`GIT_INDEX_FILE\`), read the tree of
-\`origin/evidence\` if it exists, add each file (\`git hash-object -w\`, \`git update-index --add
---cacheinfo\`), \`git write-tree\`, \`git commit-tree\` with \`origin/evidence\` as its parent, and
-push that commit to \`refs/heads/evidence\`; if the push is refused because another job published
-first, fetch and build it again on top. Link each file in the Evidence table as
-\`![<file name without .png>](https://github.com/$github/blob/<that commit>/pr-<the PR's number>/<file>?raw=true)\`
-(\`gh pr edit <number> --body-file ...\`). If the screen can't be captured, write
-\`Screenshot owed: <why>\` there instead.`;
+${BEFORE_YOU_PUSH}`;
 
 function agentsPointer(file: BuildBriefInput['agentsFile']): string {
   return file

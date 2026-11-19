@@ -8,6 +8,7 @@ import { DEFAULT_JOBS } from '../src/jobs.ts';
 import { DEFAULT_SETTINGS, SettingsError, SettingsStore } from '../src/settings.ts';
 import { existsSync } from 'node:fs';
 import { savedStateFolder, stateFolder } from '../src/state-folder.ts';
+import { memoryFiles } from './memory-files.ts';
 
 let dirs: string[] = [];
 afterEach(async () => {
@@ -63,6 +64,14 @@ describe('the settings', () => {
     const store = await SettingsStore.open(await temp());
     expect((await store.set({ toolFreeInstances: [' reviewer ', 'reviewer', 'other'] })).toolFreeInstances).toEqual(['reviewer', 'other']);
     for (const bad of ['reviewer', [''], [3], null]) await expect(store.set({ toolFreeInstances: bad as any })).rejects.toThrow(SettingsError);
+  });
+
+  test("kept in the files it's given, a test's in-memory folder as well as the disk", async () => {
+    const files = memoryFiles();
+    const store = await SettingsStore.open('state', files);
+    await store.set({ name: 'Ana' });
+    expect([...files.files.keys()]).toEqual([join('state', 'settings.json')]);
+    expect((await SettingsStore.open('state', files)).get().name).toBe('Ana');
   });
 
   test('a change is saved at once and survives a restart', async () => {
