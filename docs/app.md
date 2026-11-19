@@ -26,6 +26,7 @@ pnpm --dir app live:usage         # each provider's usage as the app reads it; a
 pnpm --dir app live:build         # the live build check, sandbox only (Live checks, below)
 pnpm --dir app live:review        # the live review check, GitHub sandbox, dry run (Live checks, below)
 pnpm --dir app live:merge         # the live merge check, GitHub sandbox, review stubbed clean (Live checks, below)
+pnpm --dir app live:conflict      # the live conflict check, GitHub sandbox, one real round (Live checks, below)
 pnpm --dir app desktop            # builds and opens the desktop app (The desktop app, below)
 pnpm --dir app installer          # builds the Windows installer into installer-dist/ (The installer, below)
 ```
@@ -907,6 +908,18 @@ is killed is code -1 with Node's reason in stderr, never a gh exit code (so is t
   only what a `made` line records; the check records its build's): all ok, sandbox PR #8 (H1
   f266f22 refused with 409; merged at a82bd12, merge commit 2135b76, worktree and local branch
   gone).
+- `app/live/conflict.ts` (`pnpm --dir app live:conflict [-- --run <instance>:<model>]`): a conflict
+  round against `stefan1575/queue-runner-sandbox` only, in the T3 project cloned from it (found by
+  its remote, as the review check's), on T3's default model at its lowest effort unless `--run`
+  names one; the gate isn't asked, and the lane sees only the check's own PR. **It writes to
+  GitHub:** a branch adding `live-conflict-<stamp>.txt` and its PR, then a commit to main adding
+  the same file with other text, so GitHub says the PR conflicts; one round through the
+  `ConflictLane`'s pass, which must end `done` with the base it merged read from the branch, on its
+  own made branch in a T3 worktree, the PR's head moved, main's tip in the new head's history,
+  GitHub saying it merges, no stop, and the thread settled. The PR is closed and its branch
+  deleted at the end; main keeps its commit. **Run 2026-11-19** on Haiku 5.5 at low: all ok,
+  sandbox PR #9 (H 85f306b against main at b8cdc82; the round pushed 27f8676 in about 30
+  seconds).
 - `app/live/usage.ts` (`pnpm --dir app live:usage [-- --minutes N]`): acts on no project. It
   subscribes to T3's server config and prints each connected provider's windows as the app reads
   them, then each `providerStatuses` event that changes one, for N minutes (5 by default). **Run
