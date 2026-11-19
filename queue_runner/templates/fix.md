@@ -66,8 +66,9 @@ $threads
   naming the finding's ID, the reason and the evidence. The best evidence is a test, committed
   and pushed, that passes now and would fail if the finding were right. Sol reconsiders a decline
   once, in the next review.
-- **A missing or wrong screenshot finding:** the shots are enough when someone reading only the
-  PR can see the change the ticket asked for, so shoot the screen the finding names. Shoot and
+- **A screenshot finding:** a shot shows the screen wrong, so fix what it shows, then shoot the
+  screen the finding names again: the shots are enough when someone reading only the PR can see
+  the change the ticket asked for. Shoot and
   publish with the runner's script
   (`python3 -I $evidence shoot URL OUT.png --size 1440x900`, or `screen OUT.png` for the
   desktop, then `publish --repo . --into pr-$number FILE.png ...`, which prints the image lines),
@@ -79,10 +80,13 @@ $threads
   on the PR and end your turn.
 - Commit after every step, with the decision in the commit message: what you chose and why. A
   usage limit can cut this thread off at any point, and the next job starts from your commits.
-- End the round by pushing to `$branch`. A round that ends without a push isn't reviewed again:
-  the PR waits for Stefan. Don't review your own work: the runner has the new head reviewed.
+- End the round by going through Before you push (below) for what this round changed, then
+  pushing to `$branch`. A round that ends without a push isn't reviewed again: the PR waits for
+  Stefan.
 - Don't merge, review, set statuses or edit the PR's `## Review` table: the runner does those.
 - Don't schedule, watch or wait on anything (no scheduled tasks, PR watches, wake-ups or
   monitors). The runner does the waiting.
 - If something only Stefan can decide stops you: push what you have, comment the question on the
   PR, and end your turn.
+
+$check

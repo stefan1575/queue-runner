@@ -32,6 +32,19 @@ class BuildBriefTest(unittest.TestCase):
         self.assertIn('2026-11-01T10:00:00Z', text)
         self.assertIn('Navy, not sky blue.', text)
 
+    def test_the_build_goes_through_the_check_before_it_pushes(self):
+        # Stefan, 2026-11-19: 60% of PRs blocked on review 1, mostly on the same few causes.
+        text = ' '.join(self.brief().split())
+        self.assertIn('go through Before you push (below), then push', text)
+        self.assertIn('## Before you push', text)
+        self.assertIn('read to its last page', text)
+        self.assertIn("Don't run a review", text)
+        self.assertNotIn("Don't review your own work", text)
+
+    def test_text_only_output_needs_no_screenshots(self):
+        text = ' '.join(self.brief().split())
+        self.assertIn('Output that is only text', text)
+
     def test_says_when_the_issue_has_no_comments(self):
         self.comments = []
         self.assertIn('No comments.', self.brief())

@@ -27,7 +27,7 @@ gets another round.
 from importlib import resources
 from string import Template
 
-from .brief import EVIDENCE, _agents_pointer
+from .brief import EVIDENCE, _agents_pointer, check
 from .ledger import OPEN, STATUSES, escalation, newest_on, norm, read_reviews, state
 from .picker import closed_issues
 from .state import NOT_SENT, NOT_STARTED, Job, JobLog
@@ -232,7 +232,7 @@ class Fixer:
             direction=direction,
             number=pr.number, github=repo.github, title=pr.title, round=review.round,
             sha=h, sha7=h[:7], work=fix_branch(pr.number, h), branch=pr.branch, base=pr.base,
-            agents=_agents_pointer(repo.path), evidence=EVIDENCE,
+            agents=_agents_pointer(repo.path), evidence=EVIDENCE, check=check(),
             review_link=review.link or f'review {review.round} on the PR',
             important='\n'.join(map(_open_line, important)) or 'None.',
             classes='; '.join(f'"{c}"' for c in classes) or 'none named',

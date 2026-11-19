@@ -18,6 +18,12 @@ def _template(kind: str) -> Template:
                     .read_text(encoding='utf-8'))
 
 
+def check() -> str:
+    """The list a build or fix round goes through before it pushes (`templates/check.md`): one
+    copy, put into both briefs as `$check`."""
+    return resources.files(__package__).joinpath('templates/check.md').read_text(encoding='utf-8')
+
+
 def _agents_pointer(path: str) -> str:
     for name in ('AGENTS.md', 'CLAUDE.md'):
         if os.path.isfile(os.path.join(path, name)):
@@ -36,4 +42,4 @@ def build_brief(job: BuildJob, comments: list[Comment]) -> str:
         number=job.issue.number, github=job.repo.github, title=job.issue.title,
         branch=job.branch, base=job.base, agents=_agents_pointer(job.repo.path),
         body=(job.issue.body or '').strip() or '(The issue has no body.)',
-        comments=_comments(comments), evidence=EVIDENCE)
+        comments=_comments(comments), evidence=EVIDENCE, check=check())

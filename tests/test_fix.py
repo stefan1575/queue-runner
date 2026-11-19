@@ -122,6 +122,14 @@ class FixTest(unittest.TestCase):
                       'indentation)', brief)
         self.assertIn("says in the commit message why the cause can't recur", brief)
 
+    def test_the_round_goes_through_the_same_check_before_it_pushes(self):
+        r = self.blocking()
+        r.run_pass()
+        brief = ' '.join(self.t3.starts[0]['message'].split())
+        self.assertIn('going through Before you push (below)', brief)
+        self.assertIn('## Before you push', brief)
+        self.assertNotIn("Don't review your own work", brief)
+
     def test_earlier_declines_and_fixes_are_in_the_brief(self):
         r = self.runner(PushingT3([(0, 'completed')], self.gh),
                         reply(findings=[important('F1')]),

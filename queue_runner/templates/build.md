@@ -25,14 +25,15 @@ $comments
   usage limit can cut this thread off at any point, and the next job starts from your commits.
 - If the change alters what a person sees, take the before screenshots first, before you change
   anything (see Screenshots below).
-- When the issue is done, push `$branch` and open the PR with the body below, with
-  `Closes #$number` in it. Where the repo's own rules ask for more, add it. Don't review your own
-  work: the runner has the PR reviewed. Then end your turn.
+- When the issue is done, go through Before you push (below), then push `$branch` and
+  open the PR with the body below, with `Closes #$number` in it. Where the repo's own rules ask
+  for more, add it. Then end your turn.
 - Don't schedule, watch or wait on anything (no scheduled tasks, PR watches, wake-ups or
   monitors). The runner does the waiting.
 - If something only Stefan can decide stops you: commit and push what you have, comment the
   question on the issue, swap its `ready-for-agent` label for `needs-info`, and end your turn.
 
+$check
 ## The PR body
 
 Keep it short, with no preamble.
@@ -60,9 +61,11 @@ Visible: <yes, what changes on screen | no, why nothing does>
 ## Screenshots
 
 A screenshot lets a reader see a change instead of taking your word for it, and leaves a record
-of how the screen got this way. Take them when the issue changes what a person looks at;
-behaviour is proved by its tests. They are enough when someone reading only the PR can see the
-change the issue asked for: a before and an after of it (a new screen has no before).
+of how the screen got this way, and they're how you check your own work. Take them when the
+issue changes what a person looks at; behaviour is proved by its tests. Output that is only text
+(what a command prints, a log line, a GitHub comment or label) has no screenshots: its tests
+show it. They are enough when someone reading only the PR can see the change the issue asked
+for: a before and an after of it (a new screen has no before).
 
 The repo's docs say how to render each of its states. A change that shows only in the app's own
 data, not in a sample state it can render, is shot from that data: the repo's docs say how to
