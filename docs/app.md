@@ -279,6 +279,8 @@ tickets but the build lane (Builds, below); the tests drive it on fake T3's even
   instances on one login (seen: `claudeAgent` and `claudeReviewer`) show the same windows, and a
   job running on either counts against both. Its name, in every reason and share row, is the
   shortest of its instances' names.
+  A job started before T3 has named its provider's login (a build watched again on a cold start,
+  before T3's first catalog) is given that login once T3 does, and counts against it from then.
 - **The gate** (`checkJob`), before any job, reviews included (#106): each window of the job's
   provider that counts its model (a `<kind> · <family>` window counts only models whose id or
   name holds the family) must fit used + the expected cost of every job running on the same
