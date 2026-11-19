@@ -17,6 +17,29 @@ const FORMATS: TimeFormat[] = ['locale', '12-hour', '24-hour'];
  *  same-size write in the same clock tick as the last (CI, 2026-11-18 and 19). */
 const POLL_MS = 500;
 
+/** Runs `tick` again and again; returns the way to stop. The seam the tests run by hand, so
+ *  none waits for real time to pass (#202). */
+export type Poll = (tick: () => Promise<void>) => () => void;
+
+/** `tick` every `ms`, the next wait set only once a tick is done, so a slow read never lands
+ *  after a newer one. Its timer is never what keeps the app running. */
+export const pollEvery = (ms: number): Poll => (tick) => {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let stopped = false;
+  const next = () => {
+    timer = setTimeout(async () => {
+      await tick();
+      if (!stopped) next();
+    }, ms);
+    timer.unref();
+  };
+  next();
+  return () => {
+    stopped = true;
+    clearTimeout(timer);
+  };
+};
+
 /** The Time format in T3's client settings; System default (T3's own default) when the file is
  *  missing or unreadable, or holds no such key or a value T3 doesn't offer. */
 export async function readTimeFormat(file: string = CLIENT_SETTINGS): Promise<TimeFormat> {
@@ -32,28 +55,19 @@ export class T3TimeFormat implements TimeFormatSource {
   private format: TimeFormat;
   private file: string;
   private listeners = new Set<(f: TimeFormat) => void>();
-  private timer: ReturnType<typeof setTimeout> | undefined;
+  private stop: () => void;
   private closed = false;
 
-  private constructor(file: string, format: TimeFormat) {
+  private constructor(file: string, format: TimeFormat, poll: Poll) {
     this.file = file;
     this.format = format;
     // Polled rather than fs.watch: it sees a file that's missing (or whose folder is) and comes
-    // later, and a file replaced by a rename, with no watcher to re-arm. The next read is set
-    // only once this one is done, so a slow one never lands after a newer one.
-    this.poll();
+    // later, and a file replaced by a rename, with no watcher to re-arm.
+    this.stop = poll(() => this.reread());
   }
 
-  private poll() {
-    this.timer = setTimeout(async () => {
-      await this.reread();
-      if (!this.closed) this.poll();
-    }, POLL_MS);
-    this.timer.unref(); // never what keeps the app running
-  }
-
-  static async start(file: string = CLIENT_SETTINGS): Promise<T3TimeFormat> {
-    return new T3TimeFormat(file, await readTimeFormat(file));
+  static async start(file: string = CLIENT_SETTINGS, poll: Poll = pollEvery(POLL_MS)): Promise<T3TimeFormat> {
+    return new T3TimeFormat(file, await readTimeFormat(file), poll);
   }
 
   current(): TimeFormat {
@@ -67,7 +81,7 @@ export class T3TimeFormat implements TimeFormatSource {
 
   close(): void {
     this.closed = true;
-    clearTimeout(this.timer);
+    this.stop();
     this.listeners.clear();
   }
 

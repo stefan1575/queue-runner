@@ -65,6 +65,22 @@ describe('no test runs on the real clock', () => {
     expect(realTimeUses(source)).toEqual([]);
   });
 
+  it('passes a describe or test that installs the fake clock, and only that one', () => {
+    const source = [
+      "describe('on the fake clock', () => {",
+      "  beforeEach(() => { vi.useFakeTimers(); });",
+      "  test('ticks', () => { setTimeout(f, 500); });",
+      "});",
+      "test('its own fake clock', () => { vi.useFakeTimers(); expect(Date.now()).toBe(0); });",
+      "describe('on the real clock', () => {",
+      "  test('waits', async () => { await new Promise((r) => setTimeout(r, 500)); });",
+      "});",
+    ].join('\n');
+    expect(realTimeUses(source)).toEqual([
+      "7: in test 'on the real clock > waits': a real timer (use vi.useFakeTimers or a seam the test runs): test('waits', async () => { await new Promise((r) => setTimeout(r, 500)); });",
+    ]);
+  });
+
   it("passes the app's tests", () => {
     const names = readdirSync(HERE, { recursive: true, encoding: 'utf8' })
       .filter((name) => name.endsWith('.ts') && !SELF.includes(name));

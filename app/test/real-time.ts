@@ -1,7 +1,7 @@
 // What no test may run on (docs/app.md, Test it): the real clock and real timers, so no test
-// waits for real time to pass and none fails when the machine is slow (#202). A file that installs
-// the fake clock (`vi.useFakeTimers()`) may use both, since its timers and `Date` are the fake
-// ones. `no-real-time.test.ts` runs it over every test file, as `no-real-settings.test.ts` does for
+// waits for real time to pass and none fails when the machine is slow (#202). A test may use both
+// where the fake clock is on (`vi.useFakeTimers()` in the test, in a hook of a describe around it
+// or at the top of the file), since there its timers and `Date` are the fake ones. `no-real-time.test.ts` runs it over every test file, as `no-real-settings.test.ts` does for
 // the user's home and tests/test_no_temp_leftovers.py does for `mkdtemp(`.
 //
 // It reads the code through TypeScript's parser, so a comment or a string that names a timer is
@@ -56,22 +56,37 @@ function titles(node: ts.Node): string[] {
   return out;
 }
 
-const fakeClock = (n: ts.Node): boolean =>
-  (ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression)
-    && isName(n.expression.expression, 'vi') && n.expression.name.text === 'useFakeTimers')
-  || ts.forEachChild(n, (c) => fakeClock(c) || undefined) === true;
+const isTestCall = (n: ts.Node): n is ts.CallExpression => ts.isCallExpression(n) && testCall(n.expression);
+const isFakeClock = (n: ts.Node) => ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression)
+  && isName(n.expression.expression, 'vi') && n.expression.name.text === 'useFakeTimers';
+
+/** Whether `scope` (the file, or a describe or test) installs the fake clock itself: in its own
+ *  body or a hook there, not in a describe or test inside it. */
+function installsFakeClock(scope: ts.Node): boolean {
+  const look = (n: ts.Node): boolean =>
+    isFakeClock(n) || (!isTestCall(n) && ts.forEachChild(n, (c) => look(c) || undefined) === true);
+  return ts.forEachChild(scope, (c) => look(c) || undefined) === true;
+}
+
+/** Whether the fake clock is on where `node` runs: the file, or a describe or test around it,
+ *  installs it. */
+function onFakeClock(node: ts.Node): boolean {
+  for (let n = node.parent; n; n = n.parent) {
+    if ((isTestCall(n) || ts.isSourceFile(n)) && installsFakeClock(n)) return true;
+  }
+  return false;
+}
 
 /** Each line of `source` that reads the real clock or runs on a real timer, as
  *  `line: in test '<describe > test>': what: the line` (or `outside any test` for a helper at
- *  the top of the file). Nothing when the file installs the fake clock. */
+ *  the top of the file). A use where the fake clock is installed is not one. */
 export function realTimeUses(source: string): string[] {
   const file = ts.createSourceFile('test.ts', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
-  if (fakeClock(file)) return [];
   const lines = source.split('\n');
   const found = new Map<number, string>();
   const visit = (node: ts.Node) => {
     const what = use(node);
-    if (what) {
+    if (what && !onFakeClock(node)) {
       const n = file.getLineAndCharacterOfPosition(node.getStart(file)).line;
       if (!found.has(n)) {
         const where = titles(node);
