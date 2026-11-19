@@ -135,6 +135,9 @@ export function withReviewRow(body: string, row: string): string {
 export interface Poster {
   /** Posts the review; its comment's URL (null for a dry run). PostFailed if the comment didn't post. */
   post(repo: string, n: number, d: Decision): Promise<string | null>;
+  /** What follows a comment already on the PR (posted before the app stopped): `sol-review` on H
+   *  and its Review row, unless the row is there already. */
+  finish(repo: string, n: number, d: Decision, url: string): Promise<void>;
 }
 
 /** Posts nothing (the live check): the comment and the decision are in the run folder. */
@@ -144,6 +147,10 @@ export class DryRunPoster implements Poster {
   async post(repo: string, n: number): Promise<null> {
     this.say(`dry run: ${repo}#${n}'s review comment, follow-ups, sol-review status and Review row not posted`);
     return null;
+  }
+
+  async finish(repo: string, n: number): Promise<void> {
+    this.say(`dry run: ${repo}#${n}'s sol-review status and Review row not posted`);
   }
 }
 
@@ -173,6 +180,12 @@ export class GitHubPoster implements Poster {
       throw new PostFailed(`Posting the review comment failed (${(e as Error).message}).`);
     }
     this.say(`${name}: posted ${url}`);
+    await this.finish(repo, n, d, url);
+    return url;
+  }
+
+  async finish(repo: string, n: number, d: Decision, url: string): Promise<void> {
+    const name = `review ${repo}#${n}`;
     try { // on H, the commit reviewed, whatever the PR's head is by now
       await this.gh.setStatus(repo, d.sha, STATUS_CONTEXT, d.status.state, d.status.description, url);
       this.say(`${name}: ${STATUS_CONTEXT} ${d.status.state} on ${d.sha.slice(0, 7)}`);
@@ -180,13 +193,14 @@ export class GitHubPoster implements Poster {
       this.say(`${name}: setting ${STATUS_CONTEXT} on ${d.sha.slice(0, 7)} failed: ${(e as Error).message}`);
     }
     try { // read afresh: someone may have edited the body while the review ran
-      const next = withReviewRow(await this.gh.pullBody(repo, n), reviewRow(d, url, this.now()));
+      const body = await this.gh.pullBody(repo, n);
+      if (body.includes(`[Review ${d.round}](${url})`)) return; // its row is there already
+      const next = withReviewRow(body, reviewRow(d, url, this.now()));
       await this.write('pr-body.md', next);
       await this.gh.editPullBody(repo, n, next);
     } catch (e) {
       this.say(`${name}: adding the Review row to the PR body failed: ${(e as Error).message}`);
     }
-    return url;
   }
 
   /** Files each new Pre-existing finding once: its issue's URL by finding id, and the ids that failed. */

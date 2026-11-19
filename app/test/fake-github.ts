@@ -64,7 +64,7 @@ export class FakeReviewGitHub extends FakeGitHub implements GitHubPosts, GitHubR
     this.fail('comment');
     const url = `https://github.com/${repo}/pull/${n}#issuecomment-${++this.n}`;
     this.posted.push({ what: 'comment', repo, n, body, url });
-    (this.comments[`${repo}#${n}`] ??= []).push({ author: 'me', createdAt: `2026-11-19T12:00:${String(this.n % 60).padStart(2, '0')}Z`, body });
+    (this.comments[`${repo}#${n}`] ??= []).push({ author: 'me', createdAt: `2026-11-19T12:00:${String(this.n % 60).padStart(2, '0')}Z`, body, url });
     return url;
   }
   async setStatus(repo: string, sha: string, context: string, state: string, description: string, url: string) {

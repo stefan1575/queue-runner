@@ -39,7 +39,7 @@ export interface GitHubLabels {
 export type Issue = { number: number; title: string; body: string; openBlockers: number; openSubIssues: number; openLinkedPulls: number };
 export type Pull = { number: number; branch: string; body: string; url: string };
 export type PullState = { number: number; url: string; state: 'open' | 'closed' | 'merged' };
-export type Comment = { author: string; createdAt: string; body: string };
+export type Comment = { author: string; createdAt: string; body: string; url?: string };
 
 /** What the build lane reads on GitHub (#154; today's `queue_runner/github.py`). Repos are
  *  `owner/name`. Each is a GitHubError when gh fails. */
@@ -251,7 +251,7 @@ export class GhGitHub implements GitHub, GitHubAccount, GitHubLabels, GitHubWork
 
   async issueComments(repo: string, n: number): Promise<Comment[]> {
     const comments = await this.all(`repos/${repo}/issues/${n}/comments?per_page=100`);
-    return comments.map((c) => ({ author: c.user?.login ?? 'ghost', createdAt: c.created_at ?? '', body: c.body ?? '' }));
+    return comments.map((c) => ({ author: c.user?.login ?? 'ghost', createdAt: c.created_at ?? '', body: c.body ?? '', ...(c.html_url ? { url: c.html_url } : {}) }));
   }
 
   async pullForBranch(repo: string, branch: string): Promise<PullState | null> {

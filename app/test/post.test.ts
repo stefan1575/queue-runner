@@ -48,6 +48,14 @@ describe('GitHubPoster', () => {
     expect(gh.posted.map((p) => p.what)).toEqual(['issue', 'comment', 'status', 'body']);
   });
 
+  test('finishing a comment already posted sets sol-review again, and adds its row only if the body lacks it', async () => {
+    const gh = new FakeReviewGitHub();
+    const url = 'https://github.com/owner/app/pull/4#issuecomment-9';
+    gh.bodies['owner/app#4'] = `## Review\n\n${TABLE_START}\n| Step | Reviewer | Time (UTC) | Commit | Verdict |\n|---|---|---|---|---|\n| [Review 1](${url}) | M | t | c | v |\n\n${TABLE_END}\n`;
+    await new GitHubPoster(gh, () => {}).finish('owner/app', 4, d(), url);
+    expect(gh.posted.map((p) => p.what)).toEqual(['status']);
+  });
+
   test("a comment that can't be posted fails the review; a failed filing is marked unfiled", async () => {
     const gh = new FakeReviewGitHub();
     gh.failing.add('comment');

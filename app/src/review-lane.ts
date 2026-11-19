@@ -37,11 +37,11 @@ import type { GitHubReview, ReviewPull } from './github.ts';
 import { prRef, type ReviewGit } from './git.ts';
 import { REVIEWED, type Job, type JobEnd, type JobLog } from './job-log.ts';
 import { kindModels, model, provider, type Catalog, type Jobs, type ModelChoice } from './jobs.ts';
-import { launchJob, noToolsRefusal } from './launch.ts';
+import { JobError, launchJob, noToolsRefusal } from './launch.ts';
 import { closedIssues } from './picker.ts';
 import type { Deps } from './review/deps.ts';
 import { testsNote } from './review/deps.ts';
-import { decide, nextRound, readReviews, ReviewFailed, runnerPost, type Comment, type Decision } from './review/ledger.ts';
+import { decide, nextRound, readReviews, ReviewFailed, runnerPost, type Comment, type Decision, type Review } from './review/ledger.ts';
 import { GitHubPoster, PostFailed, type GitHubPosts, type Poster } from './review/post.ts';
 import type { BuildRepo } from './build-lane.ts';
 import { ThreadSettler } from './settle.ts';
@@ -79,6 +79,8 @@ export type ReviewLaneDoors = {
   poster?: Poster;
   say: (line: string) => void;
   retry?: Retry;
+  /** How long a PR whose review started no thread rests before it's tried again (ms). */
+  restMs?: number;
   now?: () => Date;
 };
 
@@ -113,6 +115,8 @@ type Run = {
 
 /** The lane was stopped while a review waited: it's left open, for the next start to carry on. */
 class Stopping extends Error {}
+/** A review that launched nothing, for a reason the lane gives. */
+class NotStarted extends Error {}
 
 export class ReviewLane {
   private d: ReviewLaneDoors;
@@ -130,6 +134,8 @@ export class ReviewLane {
   private holdSaid: string | null = null;
   /** The needs-you hold last said for each repo, so it's said once. */
   private heldSaid = new Map<string, string>();
+  /** PRs whose review started no thread, resting until then (ms), by `owner/name#n`. */
+  private resting = new Map<string, number>();
 
   constructor(doors: ReviewLaneDoors) {
     this.d = doors;
@@ -268,6 +274,8 @@ export class ReviewLane {
     const done = jobs.filter((j) => j.kind === 'review' && j.issue === pr.number && j.sha === h && j.end);
     const ran = done.filter((j) => REVIEWED.includes(j.end!.outcome));
     if (ran.length) return `the app reviewed ${h7} already (review ${ran.at(-1)!.round}, ${ran.at(-1)!.end!.outcome})`;
+    const rest = this.resting.get(`${repo.github}#${pr.number}`) ?? 0;
+    if (rest > this.now().getTime()) return `its last review started no thread; it rests until ${new Date(rest).toISOString()}`;
     const failed = done.filter((j) => j.end!.outcome === 'failed').length;
     if (failed >= MAX_FAILED) return `${failed} failed reviews on ${h7}: left until a new head`;
     for (const r of readReviews(await this.d.github.issueComments(repo.github!, pr.number))) {
@@ -302,13 +310,15 @@ export class ReviewLane {
     const fit = v as Extract<typeof v, { fits: true }>;
     // named now, from the settings the gate read: the review runs and is named as it was let in
     const reviewer = reviewerName(catalog!, this.d.jobs(), fit.choice, fit.onFallback);
-    this.track(this.review(repo, pr, { ...fit, reviewer }));
+    this.track(this.review(repo, pr, { ...fit, reviewer }, () => this.d.repos().some((r) => r.id === repo.id)));
     return true;
   }
 
   /** One review of H, start to end, on the choice let in and under the name it was let in as
-   *  (`reviewerName`): the settings aren't read again. The live check calls it directly. */
-  async review(repo: BuildRepo, pr: ReviewPull, letIn: { choice: ModelChoice; onFallback: boolean; cost: Record<string, number>; reviewer: string }): Promise<Job> {
+   *  (`reviewerName`): the settings aren't read again. `served` is asked again right before the
+   *  launch, after the slow steps. The live check calls it directly. */
+  async review(repo: BuildRepo, pr: ReviewPull, letIn: { choice: ModelChoice; onFallback: boolean; cost: Record<string, number>; reviewer: string },
+    served: () => boolean = () => true): Promise<Job> {
     const github = repo.github!;
     const n = pr.number;
     const h = pr.headSha;
@@ -334,7 +344,7 @@ export class ReviewLane {
       const fetched = await this.d.git.fetchPr(repo.folder, n, pr.base);
       if (fetched !== h) {
         this.d.say(`${name}: the head moved from ${h.slice(0, 7)} to ${fetched.slice(0, 7)}; next pass`);
-        return await this.close(job, null, { outcome: 'head-moved', error: `Listed at ${h.slice(0, 7)}, fetched at ${fetched.slice(0, 7)}.`, runDir }, false);
+        return await this.close(job, { folder: repo.folder, wt, n }, { outcome: 'head-moved', error: `Listed at ${h.slice(0, 7)}, fetched at ${fetched.slice(0, 7)}.`, runDir }, false);
       }
       await mkdir(join(this.d.stateDir, 'checkouts'), { recursive: true });
       await this.d.git.checkout(repo.folder, prRef(n), wt);
@@ -356,6 +366,8 @@ export class ReviewLane {
       run = { name, github, n, h, round, reviewer, runDir, wt, folder: repo.folder, gone, hasReviewMd: guidelines !== null };
       // what deciding needs that the log's start line doesn't hold, for a review carried on after a restart
       await write('review.json', `${JSON.stringify({ gone: run.gone, hasReviewMd: run.hasReviewMd })}\n`);
+      // nothing is awaited from here to the launch call, so a repo served now is served at launch
+      if (!served()) throw new NotStarted(`${repo.title} is no longer served`);
       this.d.say(`${name}: ${reviewer} reviews ${h.slice(0, 7)} (review ${round}) in ${runDir}`);
       try {
         launched = await launchJob(this.d.mcp, catalog, { kind: 'review', projectId: repo.id, title, brief, choice: letIn.choice, toolFree: this.d.toolFree(),
@@ -367,7 +379,13 @@ export class ReviewLane {
         throw e;
       }
     } catch (e) {
-      return await this.close(job, { folder: repo.folder, wt, n }, await this.failed(name, runDir, e), false);
+      // nothing ran: a git, GitHub or T3 step failing for a moment (or a launch T3 refused) isn't a
+      // failed review, which would count against the head; the PR rests and is tried again
+      const error = `${e instanceof NotStarted || e instanceof JobError ? '' : `${(e as Error).name}: `}${(e as Error).message}`;
+      await writeFile(join(runDir, 'not-started.txt'), `${error}\n`).catch(() => {});
+      this.d.say(`${name} not started: ${error}`);
+      this.resting.set(`${github}#${n}`, this.now().getTime() + (this.d.restMs ?? 300_000));
+      return await this.close(job, { folder: repo.folder, wt, n }, { outcome: 'not-started', error, runDir }, false);
     }
     const thread = { threadId: launched.threadId, runId: launched.runId, link: launched.link };
     await this.d.log.thread(job.id, thread);
@@ -410,11 +428,27 @@ export class ReviewLane {
       repo: run.github, sha: run.h, round: run.round, earlier, hasReviewMd: run.hasReviewMd, reply,
       wt: slash(run.wt), runDir: slash(run.runDir), gone: run.gone, reviewer: run.reviewer, user: await this.d.user(),
     });
-    if (reviews.some((r) => r.round === run.round && r.sha === run.h)) {
-      this.d.say(`${run.name}: review ${run.round} on ${run.h.slice(0, 7)} was posted before the app stopped; not posted again`);
-      return { outcome: OUTCOMES[d.outcome], verdict: d.verdict, signals: d.signals.map((s) => s.signal), link: null, runDir: run.runDir };
+    const posted = (list: Review[]) => list.find((r) => r.round === run.round && r.sha === run.h);
+    const done = async (had: Review, why: string): Promise<JobEnd> => {
+      this.d.say(`${run.name}: review ${run.round} on ${run.h.slice(0, 7)} is on the PR already (${why}); not posted again`);
+      if (had.url) await this.poster.finish(run.github, run.n, d, had.url);
+      return { outcome: OUTCOMES[d.outcome], verdict: d.verdict, signals: d.signals.map((s) => s.signal), link: had.url ?? null, runDir: run.runDir };
+    };
+    const had = posted(reviews);
+    if (had) return done(had, 'posted before the app stopped');
+    // a comment that fails to post is posted again after the wait, unless it got there after all
+    for (;;) {
+      try {
+        return await this.post(run.name, run.github, run.n, d, run.runDir, write);
+      } catch (e) {
+        if (!(e instanceof PostFailed)) throw e;
+        this.d.say(`${run.name}: ${e.message} Posting it again after a wait.`);
+        await this.wait();
+        if (this.stopped) throw new Stopping('the lane stopped');
+        const now = posted(readReviews(await this.askAgain(run.name, 'its comments', () => this.d.github.issueComments(run.github, run.n))));
+        if (now) return done(now, 'its post failed and got there after all');
+      }
     }
-    return await this.post(run.name, run.github, run.n, d, run.runDir, write);
   }
 
   /** The run's reply, read whole. A read T3 fails is asked again after `retry`'s wait, never

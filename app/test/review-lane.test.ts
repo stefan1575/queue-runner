@@ -259,6 +259,56 @@ describe('a review', () => {
     await lane.idle();
     expect(t3.launches).toEqual([]);
     expect(log.jobs().map((j) => j.end?.outcome)).toEqual(['head-moved']);
+    // the ref its fetch wrote is removed
+    expect(git.calls.at(-1)).toBe(`removeCheckout ${join(dir, 'state', 'checkouts', 'app-pr4')} refs/queue-runner/pr4`);
+  });
+
+  test('a repo switched off during the checkout launches nothing', async () => {
+    let served = [APP];
+    const checkout = git.checkout.bind(git);
+    git.checkout = async (folder, ref, d) => { served = []; await checkout(folder, ref, d); };
+    makeLane({ repos: () => served });
+    await lane.pass();
+    await lane.idle();
+    expect(t3.launches).toEqual([]);
+    expect(log.jobs()[0]!.end).toMatchObject({ outcome: 'not-started', error: 'app is no longer served' });
+    expect(git.calls.at(-1)).toMatch(/^removeCheckout /);
+  });
+
+  test("a step before the launch failing for a moment isn't a failed review: the PR rests, then is reviewed", async () => {
+    let at = new Date('2026-11-19T12:00:00Z');
+    const checkout = git.checkout.bind(git);
+    let fails = 1;
+    git.checkout = async (folder, ref, d) => { if (fails-- > 0) throw new Error('git worktree add failed: index.lock exists'); await checkout(folder, ref, d); };
+    makeLane({ now: () => at });
+    await lane.pass();
+    await lane.idle();
+    expect(log.jobs().map((j) => j.end?.outcome)).toEqual(['not-started']);
+    expect(lines.at(-1)).toMatch(/not now, its last review started no thread; it rests until 2026-11-19T12:05:00/);
+    await lane.pass();
+    expect(t3.launches).toEqual([]);
+    at = new Date('2026-11-19T12:05:01Z');
+    const passed = lane.pass();
+    await answer(1, reply([]));
+    await passed;
+    await lane.idle();
+    expect(log.jobs().map((j) => j.end?.outcome)).toEqual(['not-started', 'clean']);
+  });
+
+  test('a comment that fails to post is posted again after the wait, never taken as a failed review', async () => {
+    gh.failing.add('comment');
+    makeLane();
+    const passed = lane.pass();
+    await answer(1, reply([]));
+    await passed;
+    await until(() => retries.size > 0);
+    expect(lines.join('\n')).toMatch(/Posting the review comment failed .*Posting it again after a wait\./);
+    gh.failing.delete('comment');
+    retryNow();
+    await until(() => log.jobs()[0]!.end !== undefined);
+    await lane.idle();
+    expect(log.jobs()[0]!.end).toMatchObject({ outcome: 'clean' });
+    expect(gh.posted.filter((p) => p.what === 'comment')).toHaveLength(1);
   });
 
   test("only on an instance named as set up without outside tools: another one, though not the build's, waits and launches nothing", async () => {
@@ -278,12 +328,12 @@ describe('a review', () => {
     expect(lines.at(-1)).toMatch(/isn't one of the instances set up without outside tools/);
   });
 
-  test('a review called directly (the live check) on an instance not named launches nothing and fails', async () => {
+  test('a review called directly (the live check) on an instance not named launches nothing', async () => {
     toolFree = [FALLBACK.provider];
     makeLane();
     const job = await lane.review(APP, pull(), { choice: REVIEW, onFallback: false, cost: {}, reviewer: 'R' });
     expect(t3.launches).toEqual([]);
-    expect(job.end).toMatchObject({ outcome: 'failed' });
+    expect(job.end).toMatchObject({ outcome: 'not-started' });
     expect(job.end!.error).toMatch(/set up without outside tools/);
     expect(git.calls.at(-1)).toMatch(/^removeCheckout /);
   });
@@ -414,9 +464,10 @@ describe('after a restart', () => {
     expect(lines.filter((l) => /reply empty; reading it again/.test(l))).toHaveLength(1);
   });
 
-  test('a review posted before the app stopped is recorded, never posted twice', async () => {
+  test('a review posted before the app stopped is recorded, never posted twice; its status and row follow', async () => {
     const job = await cutOff();
-    gh.comments['owner/app#4'] = [{ author: 'me', createdAt: '2', body: `<!-- queue-runner-app review round=1 verdict=clean sha=${H} findings=W10= -->` }];
+    const url = 'https://github.com/owner/app/pull/4#issuecomment-77';
+    gh.comments['owner/app#4'] = [{ author: 'me', createdAt: '2', body: `<!-- queue-runner-app review round=1 verdict=clean sha=${H} findings=W10= -->`, url }];
     makeLane();
     void lane.start();
     await until(() => t3.threadStreamCount('thread-1') > 0);
@@ -424,9 +475,11 @@ describe('after a restart', () => {
     t3.endRun('thread-1', 'completed');
     await until(() => log.get(job.id)!.end !== undefined);
     await lane.idle();
-    expect(log.get(job.id)!.end).toMatchObject({ outcome: 'clean', link: null });
-    expect(gh.posted).toEqual([]);
-    expect(lines.join('\n')).toMatch(/was posted before the app stopped; not posted again/);
+    expect(log.get(job.id)!.end).toMatchObject({ outcome: 'clean', link: url });
+    expect(gh.posted.map((p) => p.what)).toEqual(['status', 'body']);
+    expect(gh.posted[0]).toMatchObject({ sha: H, state: 'success', url });
+    expect(gh.bodies['owner/app#4']).toContain(`| [Review 1](${url}) |`);
+    expect(lines.join('\n')).toMatch(/is on the PR already \(posted before the app stopped\); not posted again/);
   });
 
   test('one with no saved thread id needs the user: no thread is matched to it, its checkout stays, and its repo starts nothing until the user answers', async () => {

@@ -36,8 +36,8 @@ export type Finding = {
   status: Status; raised: number;
   closed?: number; issue?: string; unfiled?: boolean; reopened?: Status; was?: string; again?: boolean; shots?: boolean;
 };
-export type Review = { round: number; verdict: 'clean' | 'blocking'; sha: string; findings: any[]; at: string };
-export type Comment = { author: string; createdAt: string; body: string; path?: string | null; line?: number | null };
+export type Review = { round: number; verdict: 'clean' | 'blocking'; sha: string; findings: any[]; at: string; url?: string };
+export type Comment = { author: string; createdAt: string; body: string; path?: string | null; line?: number | null; url?: string };
 
 /** The review failed: the reply has no readable ledger, or the reviewer's run failed. */
 export class ReviewFailed extends Error {}
@@ -72,7 +72,7 @@ export function readReview(body: string, at = ''): Review | null {
 
 /** The PR's reviews by the app, oldest first, from its comments (oldest first). */
 export const readReviews = (comments: Comment[]): Review[] =>
-  comments.flatMap((c) => readReview(c.body ?? '', c.createdAt) ?? []);
+  comments.flatMap((c) => { const r = readReview(c.body ?? '', c.createdAt); return r ? [c.url ? { ...r, url: c.url } : r] : []; });
 
 /** A review (the app's or one it doesn't read) or anything else the runner posted: not something
  *  a person said. */

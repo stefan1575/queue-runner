@@ -449,7 +449,10 @@ every open PR in a served repo without a review on its newest commit gets one, w
   `runResultText`). A read that fails (T3 or GitHub busy a moment) is asked again after a wait,
   never taken as no reply; a reply that comes back empty is read again, and only three empty reads
   in a row are the thread's own. A question, a failure or that empty reply fails the review; a
-  usage limit is `out-of-usage` and the next review waits on the gate.
+  usage limit is `out-of-usage` and the next review waits on the gate. A step before the launch
+  that fails (a git, GitHub or T3 step, a launch T3 refused, or the repo no longer served when it's
+  asked again right before the launch) launched nothing: `not-started`, which doesn't count
+  against H, and the PR rests 5 minutes.
 - **Decide and post** (`src/review/ledger.ts`, `src/review/post.ts`, today's `ledger.py` and
   `post.py`): the verdict from the reply's last `sol-findings` block; clean means no Important
   finding open. **What blocks** (#155): an Important finding needs its file and line and how it
@@ -461,8 +464,9 @@ every open PR in a served repo without a review on its newest commit gets one, w
   comment (its visible ledger and hidden marker), `sol-review` on H only, and a row in the app's
   Review table in the PR body, on every repo (#36): Step (the comment's link), Reviewer, Time,
   Commit, Verdict. The comment and the Reviewer cell name who reviewed: the model and effort as T3 labels
-  them, and on the fallback `, fallback while <provider> is out of usage` (`reviewerName`). gh writes send their JSON on stdin (`--input -`). Only the comment failing
-  fails the review. The run folder keeps `brief.md`, `reply.md`, `comment.md`, `decision.json`.
+  them, and on the fallback `, fallback while <provider> is out of usage` (`reviewerName`). gh writes send their JSON on stdin (`--input -`). A comment
+  that fails to post is posted again after a wait, unless the PR's comments show it got there
+  after all; the status or the row failing is said and left. The run folder keeps `brief.md`, `reply.md`, `comment.md`, `decision.json`.
 - **It starts clean** (#155): the app reads only what it posted itself. Its review comments carry
   their own marker (`<!-- queue-runner-app review round=N verdict=V sha=H findings=<base64> -->`);
   the Python runner's and the old script's (`<!-- sol-pr-review`) and hand-posted ones
@@ -477,7 +481,7 @@ every open PR in a served repo without a review on its newest commit gets one, w
 - **The job log:** kind `review`, `issue` the PR, with `sha`, `round`, `reviewer`, the `cost` it
   was let in at, its `runDir`, its `checkout` and the repo's `folder`; its end `clean`, `blocking`,
   `stop`, `approach-note` (with `verdict`, `signals`, `link`), `failed`, `out-of-usage`,
-  `head-moved` or `needs-user`. Once the end is recorded the thread is settled, whatever the end
+  `head-moved`, `not-started` or `needs-user`. Once the end is recorded the thread is settled, whatever the end
   (nobody answers a review thread), with the builds' settle (`src/settle.ts`: a `settled` line,
   and an end with none settled on the next pass).
 - **After a restart, don't guess** (as Builds): a review the log shows open whose thread id was
@@ -485,7 +489,7 @@ every open PR in a served repo without a review on its newest commit gets one, w
   read, decided and posted from its start line and the run folder's `review.json` (what deciding
   needs that the start line doesn't hold), its checkout removed and its thread settled. One posted
   before the app stopped (the app's own comment for its round and H is on the PR) is recorded, not
-  posted again. One with no saved thread id (the app stopped before T3 named it) and a launch whose
+  posted again; its `sol-review` is set again and its row added if the body lacks it. One with no saved thread id (the app stopped before T3 named it) and a launch whose
   answer was lost (`NoAnswer`) end `needs-user`: no thread is ever matched to it by title, branch,
   project or anything listed in T3, its checkout stays for the thread T3 may have started, and its
   repo starts nothing, review or build, until the user answers (`ReviewLane.answered`; the Inbox
