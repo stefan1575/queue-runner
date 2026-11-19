@@ -316,7 +316,7 @@ export class BuildLane {
     } finally {
       this.watches.delete(w);
     }
-    this.d.gate.finished(job.id);
+    this.d.gate.finished(job.id, end.outcome === 'usage-limit' ? { resetAt: end.resetAt } : undefined);
     const record: JobEnd = { outcome: end.outcome as JobEnd['outcome'], status: end.status };
     if (end.outcome === 'done' && github) {
       // a job may open its PR and stop after; done without one is done-no-pr. A lookup that

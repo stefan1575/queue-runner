@@ -120,6 +120,7 @@ async function main() {
   // are ever served (Rules).
   const gate = new UsageGate(catalog, () => settings.get(), await CostLog.open(join(state, 'usage.jsonl')));
   const log = await JobLog.open(join(state, 'jobs.jsonl'));
+  gate.limitsFrom(log.jobs()); // a provider the last run saw run out stays held until its reset
   const say = (line: string) => console.log(`${new Date().toISOString()} ${line}`);
   const user = async () => briefName(view.get()) ?? 'the user';
   const lane = new BuildLane({

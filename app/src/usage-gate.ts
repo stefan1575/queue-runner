@@ -10,12 +10,17 @@
 // - **Measured:** a job's usage before (the reading it was let in on) and after (T3's first
 //   reading taken after it ended) is appended to the cost log, with the other jobs that ran on
 //   the same login meanwhile (then it teaches nothing).
+// - **Out of usage:** a job that ended on its provider's usage limit holds that provider until the
+//   reset T3 gave (and `AFTER_RESET_MS`), or `LIMIT_UNKNOWN_MS` with none, so the next job goes to
+//   the fallback, even on a provider T3 reads no usage for (#155 F22). The job log's ends restore
+//   it on a start (`limitsFrom`).
 // - **Whose login:** a job started before T3 has named its provider's login (a build watched again
 //   on a cold start, before T3's first catalog) is given it once T3 does, so it counts against
 //   that login whichever came first (#154 F10).
 import type { CostLog } from './cost-log.ts';
 import { reading, spentOf, type Cost, type Reading } from './costs.ts';
-import { checkJob, type GateJob, type Hold, type RunningJob, type Verdict } from './gate.ts';
+import { AFTER_RESET_MS, checkJob, LIMIT_UNKNOWN_MS, type GateJob, type Hold, type RunningJob, type Verdict } from './gate.ts';
+import type { Job } from './job-log.ts';
 import { kindModels, model, type JobKind, type ModelChoice } from './jobs.ts';
 import type { Settings } from './settings.ts';
 import type { CatalogSource } from './t3/catalog-source.ts';
@@ -42,6 +47,8 @@ export class UsageGate {
   /** Ends of jobs whose login T3 hadn't named yet, by provider: their login's `lastEnd` once it does. */
   private unplacedEnd = new Map<string, Date>();
   private held = new Map<string, Held>();
+  /** Each provider a job ran out of usage on: until when it's held, and the reset T3 gave. */
+  private limited = new Map<string, { until: Date; resetAt: string | null }>();
   private listeners = new Set<() => void>();
 
   constructor(source: CatalogSource, settings: () => Settings, log: CostLog, now = () => new Date()) {
@@ -90,6 +97,10 @@ export class UsageGate {
 
   /** Whether this job, on this model, fits now. */
   check(job: GateJob): Verdict {
+    const limit = this.limited.get(job.choice.provider);
+    if (limit && this.now() < limit.until) {
+      return { fits: false, until: limit.until, hold: { why: 'limit', kind: job.kind, provider: this.usage(job.choice.provider)?.name ?? job.choice.provider, at: limit.resetAt } };
+    }
     this.placeJobs();
     const u = this.usage(job.choice.provider);
     const catalog = this.source.current().catalog;
@@ -162,10 +173,27 @@ export class UsageGate {
     this.running.set(job.id, r);
   }
 
-  /** The job's thread ended: it's measured on T3's next reading of its provider. */
-  finished(id: string) {
+  /** The provider ran out of usage at `endedAt`, resetting at `resetAt` as T3 has it: held till then. */
+  outOfUsage(provider: string, resetAt: string | null, endedAt: Date = this.now()) {
+    const reset = resetAt ? Date.parse(resetAt) : NaN;
+    const until = new Date(Number.isNaN(reset) ? endedAt.getTime() + LIMIT_UNKNOWN_MS : reset + AFTER_RESET_MS);
+    const was = this.limited.get(provider);
+    if (!was || until > was.until) this.limited.set(provider, { until, resetAt: Number.isNaN(reset) ? null : resetAt });
+  }
+
+  /** The usage limits the job log's ends recorded, so a start holds what the last run held. */
+  limitsFrom(jobs: Job[]) {
+    for (const j of jobs) {
+      if (j.end && (j.end.outcome === 'usage-limit' || j.end.outcome === 'out-of-usage')) this.outOfUsage(j.choice.provider, j.end.resetAt ?? null, new Date(j.end.at));
+    }
+  }
+
+  /** The job's thread ended: it's measured on T3's next reading of its provider. Ended on its
+   *  usage limit (`limit`), its provider is held until the reset. */
+  finished(id: string, limit?: { resetAt: string | null }) {
     const r = this.running.get(id);
     if (!r) return;
+    if (limit) this.outOfUsage(r.job.choice.provider, limit.resetAt);
     this.placeJobs();
     this.running.delete(id);
     const at = this.now();

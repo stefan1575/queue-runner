@@ -66,7 +66,7 @@ class RoomyGate {
   pick(id: string) { this.calls.push(`pick ${id}`); return { fits: true as const, choice: REVIEW, onFallback: false, cost: { five_hour: 15 } }; }
   check() { return { fits: true as const, cost: { five_hour: 15 } }; }
   started(job: { id: string }) { this.calls.push(`started ${job.id}`); }
-  finished(id: string) { this.calls.push(`finished ${id}`); }
+  finished(id: string, limit?: { resetAt: string | null }) { this.calls.push(`finished ${id}${limit ? ` out of usage until ${limit.resetAt}` : ''}`); }
   dropped(id: string) { this.calls.push(`dropped ${id}`); }
   forget() {}
 }
@@ -266,6 +266,20 @@ describe('a review', () => {
     await lane.idle();
     expect(log.jobs()[0]!.end).toMatchObject({ outcome: 'blocking' });
     expect(lines.join('\n')).toMatch(/its reply couldn't be read \(T3 gave message \S+'s text from 50 empty\)/);
+  });
+
+  test("a review that ends on a usage limit tells the gate its provider is out until T3's reset (#155 F22)", async () => {
+    const gate = new RoomyGate();
+    makeLane({ gate: gate as any });
+    const passed = lane.pass();
+    await until(() => t3.threadStreamCount('thread-1') > 0);
+    t3.hitUsageLimit('thread-1', '2026-11-19T15:00:00.000Z');
+    await answer(2, reply([])); // this gate has room, so the pass reviews again
+    await passed;
+    await lane.idle();
+    const [job] = log.jobs();
+    expect(job!.end).toMatchObject({ outcome: 'out-of-usage' });
+    expect(gate.calls).toContain(`finished ${job!.id} out of usage until 2026-11-19T15:00:00.000Z`);
   });
 
   test('the head moving since listing counts nothing', async () => {

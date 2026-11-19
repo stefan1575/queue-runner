@@ -49,7 +49,7 @@ class RoomyGate {
   pick(id: string) { this.calls.push(`pick ${id}`); return { fits: true as const, ...this.admits, cost: { five_hour: 10 } }; }
   reading() { return { checkedAt: null, windows: {} }; }
   started(job: { id: string }) { this.calls.push(`started ${job.id}`); }
-  finished(id: string) { this.calls.push(`finished ${id}`); }
+  finished(id: string, limit?: { resetAt: string | null }) { this.calls.push(`finished ${id}${limit ? ` out of usage until ${limit.resetAt}` : ''}`); }
   dropped(id: string) { this.calls.push(`dropped ${id}`); }
   forget() {}
 }
@@ -261,6 +261,17 @@ describe('picking and launching', () => {
 });
 
 describe('the end', () => {
+  test("a usage-limit end tells the gate its provider is out until T3's reset (#155 F22)", async () => {
+    gh.ready['owner/app'] = [issue(5)];
+    const gate = new RoomyGate();
+    await makeLane({ gate: gate as any }).pass();
+    await watching('thread-1');
+    t3.hitUsageLimit('thread-1', '2026-11-19T15:00:00.000Z');
+    await lane.idle();
+    const [job] = log.jobs();
+    expect(gate.calls).toContain(`finished ${job!.id} out of usage until 2026-11-19T15:00:00.000Z`);
+  });
+
   test("a thread's end arrives as a T3 event and is recorded; then the thread is settled", async () => {
     gh.ready['owner/app'] = [issue(5)];
     gh.pullsFromBranch['owner/app:claude/ticket-number-5-5'] = { number: 77, url: 'https://github.com/owner/app/pull/77', state: 'open' };

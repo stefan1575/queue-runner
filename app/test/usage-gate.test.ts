@@ -108,6 +108,44 @@ describe('every job waits for room in its own provider', () => {
     if (!held.fits) expect(held.until?.toISOString()).toBe('2026-11-18T20:54:50.000Z');
   });
 
+  test("a review that ran out of usage on a provider T3 reads no usage for holds it until the reset: the next goes to the fallback (#155 F22)", async () => {
+    await t3Reads('2026-11-18T19:06:00Z', () => {
+      window('claudeAgent', 'five_hour').usedPercent = 10;
+      providers.find((p) => p.instanceId === 'codex').usageLimits = { checkedAt: null, windows: [], unavailable: { reason: 'unsupported' } };
+    });
+    now = new Date('2026-11-18T19:06:30Z');
+    jobs({ review: { own: SOL, fallback: OPUS } });
+    const first = gate.pick('review a#1', 'review');
+    expect(first).toMatchObject({ fits: true, choice: SOL }); // ungated
+    gate.started({ id: 'r1', kind: 'review', choice: SOL }, {});
+    gate.finished('r1', { resetAt: '2026-11-18T21:00:00.000Z' });
+    expect(gate.pick('review a#2', 'review')).toMatchObject({ fits: true, choice: OPUS, onFallback: true });
+    jobs({ review: { own: SOL, fallback: null } });
+    const held = gate.pick('review a#2', 'review');
+    expect(held).toMatchObject({ fits: false, hold: { why: 'limit', provider: 'Codex', at: '2026-11-18T21:00:00.000Z' } });
+    if (!held.fits) {
+      expect(held.until?.toISOString()).toBe('2026-11-18T21:02:00.000Z');
+      expect(holdText(held.hold, (d) => d.toISOString().slice(11, 16))).toBe('a job on Codex ran out of usage; it resets at 21:00');
+    }
+    now = new Date('2026-11-18T21:02:00Z');
+    expect(gate.pick('review a#2', 'review')).toMatchObject({ fits: true, choice: SOL });
+  });
+
+  test('a start holds what the job log says ran out of usage; with no reset time, for an hour', async () => {
+    await t3Reads('2026-11-18T19:06:00Z', () => {
+      providers.find((p) => p.instanceId === 'codex').usageLimits = { checkedAt: null, windows: [], unavailable: { reason: 'unsupported' } };
+    });
+    now = new Date('2026-11-18T19:06:30Z');
+    jobs({ review: { own: SOL, fallback: null } });
+    const job = (outcome: string, at: string, resetAt: string | null) => ({ id: at, kind: 'review', choice: SOL, startedAt: at, end: { outcome, at, resetAt } }) as any;
+    gate.limitsFrom([job('clean', '2026-11-18T18:00:00.000Z', null), job('out-of-usage', '2026-11-18T18:30:00.000Z', null)]);
+    const held = gate.pick('review a#1', 'review');
+    expect(held).toMatchObject({ fits: false, hold: { why: 'limit', at: null } });
+    if (!held.fits) expect(held.until?.toISOString()).toBe('2026-11-18T19:30:00.000Z');
+    now = new Date('2026-11-18T19:30:00Z');
+    expect(gate.pick('review a#1', 'review')).toMatchObject({ fits: true, choice: SOL });
+  });
+
   test("a job's cost is measured on T3's first reading after it ends, and the next job of its kind waits for that reading", async () => {
     await t3Reads('2026-11-18T19:06:00Z', () => { window('claudeAgent', 'five_hour').usedPercent = 10; });
     now = new Date('2026-11-18T19:06:30Z');

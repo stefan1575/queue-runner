@@ -526,7 +526,7 @@ export class ReviewLane {
    *  nobody answers a review thread. */
   private async close(job: Job, checkout: Pick<Run, 'folder' | 'wt' | 'n'> | null, end: JobEnd, launched: boolean): Promise<Job> {
     if (checkout) await this.d.git.removeCheckout(checkout.folder, checkout.wt, prRef(checkout.n));
-    if (launched) this.d.gate.finished(job.id);
+    if (launched) this.d.gate.finished(job.id, end.outcome === 'out-of-usage' ? { resetAt: end.resetAt ?? null } : undefined);
     else this.d.gate.dropped(job.id);
     const ended = await this.d.log.ended(job.id, end);
     if (launched) await this.settler.settle(ended);
