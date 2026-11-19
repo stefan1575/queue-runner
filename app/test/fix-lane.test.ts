@@ -29,7 +29,8 @@ const H = 'abcdef1234567890abcdef1234567890abcdef12';
 const H2 = '1234567890abcdef1234567890abcdef12345678';
 const BRANCH = 'claude/add-a-thing-3';
 const pull = (part: Partial<ReviewPull> = {}): ReviewPull =>
-  ({ number: 4, title: 'Add a thing', body: 'Closes #3', branch: BRANCH, base: 'main', headSha: H, draft: false, url: 'https://github.com/owner/app/pull/4', ...part });
+  ({ number: 4, title: 'Add a thing', body: 'Closes #3', branch: BRANCH, base: 'main', headSha: H, draft: false, url: 'https://github.com/owner/app/pull/4', headRepo: 'Owner/App', ...part });
+// (the PR's own repo, as GitHub may case it: no fork, so every round here is sent or launched)
 const finding = (part: Partial<Finding>): Finding => ({
   id: 'F1', tag: 'important', class: 'unchecked input', file: 'src/a.ts', line: 3, scenario: 'empty input crashes', cost: '', rule: '', status: 'open', raised: 1, ...part,
 });
@@ -225,6 +226,22 @@ describe('a fix round', () => {
     await lane.idle();
     expect(t3.sends).toEqual([]);
     expect(lines.some((l) => l.includes('the head moved from abcdef1 to 1234567'))).toBe(true);
+  });
+
+  test("a fork's PR gets no fixer: it needs the user, nothing is sent or launched, and H gets no round after (N2)", async () => {
+    await builder();
+    await blocking(1, H, [finding({})]);
+    gh.reviewPulls['owner/app'] = [pull({ branch: 'main', headRepo: 'someone/app' })];
+    makeLane();
+    await lane.pass();
+    await lane.idle();
+    expect(t3.sends).toEqual([]);
+    expect(t3.launches).toEqual([]);
+    const job = fixes()[0]!;
+    expect(job.end).toMatchObject({ outcome: 'needs-user', error: expect.stringContaining('head is in someone/app, not owner/app') });
+    expect(log.needingUser(APP.id)).toHaveLength(1);
+    await lane.answered(job.id);
+    expect(fixes()).toHaveLength(1);
   });
 
   test("the gate holds a send on the builder's model: it waits and says why once", async () => {

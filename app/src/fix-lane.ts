@@ -194,6 +194,12 @@ export class FixLane {
         }
         if ('why' in ready) { this.note(key, name, ready.why); continue; }
         if ((this.resting.get(key) ?? 0) > this.now().getTime()) continue;
+        // a fork's PR: a fixer would push to this repo's branch of that name (a fork's `main` is
+        // this repo's `main`), so none does; it needs the user (N2)
+        if (pr.headRepo !== undefined && pr.headRepo?.toLowerCase() !== repo.github.toLowerCase()) {
+          await this.forked(repo, pr, blocking);
+          continue;
+        }
         const plan = this.plan(repo, pr, blocking, ready.reviews);
         // the gate counts the round from now; the pass goes on once T3 has it, so the next PR's
         // verdict counts this one
@@ -352,6 +358,16 @@ export class FixLane {
     await this.d.log.thread(job.id, thread);
     onLaunched();
     return this.watch({ ...job, ...thread });
+  }
+
+  /** A blocking review on a fork's PR: recorded as a round on H that needs the user, so its repo
+   *  starts nothing until they answer and H gets no round after (one per head). No gate, no thread. */
+  private async forked(repo: BuildRepo, pr: ReviewPull, review: Job): Promise<void> {
+    const job = await this.d.log.started({
+      kind: 'fix', repo: repo.id, github: repo.github, issue: pr.number, branch: pr.branch, base: pr.base, title: fixTitle(repo, pr.number),
+      choice: { provider: '', model: '', effort: null }, onFallback: false, sha: pr.headSha, round: review.round!,
+    });
+    await this.needsUser(job, `PR #${pr.number}'s head is in ${pr.headRepo ?? 'a fork GitHub no longer has'}, not ${repo.github}: no fixer pushes to a fork's branch`);
   }
 
   /** The thread's run ids, oldest first, or `gone` when T3 says it isn't there. The projection

@@ -545,9 +545,10 @@ merge half of `src/github.ts` and `src/git.ts`.
   its fallback while its provider has no room), titled `Queue runner fix: <project>#<n>`, when
   the review marks an earlier Important finding still open (`raised` before this round: the
   writer has shown it's stuck there), when no thread of the app's wrote the PR (a person opened
-  it, or the build needs the user), or when T3 turned a send down (`ToolFailed`: the thread is gone
-  or can't take another turn; that round ends `not-started` and the next pass sends the fresh
-  fixer at once). It works in the PR's own worktree when `git worktree list` shows one on the
+  it, or the build needs the user), or when T3 says the writer thread is gone (#156 F3), however it
+  says so: the runs read before the send failing with "not found", or, when that read fails
+  otherwise, T3's MCP answering `t3_thread_read` with `not_found`; or the send itself answered so.
+  A thread that's there but couldn't be read rests the PR and is tried again. It works in the PR's own worktree when `git worktree list` shows one on the
   PR's branch (T3's `existing_worktree`), else in a new worktree at H on
   `claude/fix-pr<n>-<sha7>` that pushes `HEAD` to the PR's branch, as today's runner does. A
   fresh fixer then writes the PR: the next round goes back to its thread.
@@ -562,10 +563,21 @@ merge half of `src/github.ts` and `src/git.ts`.
   end's `head`): pushed, the review lane is told (`ended`) and reviews the new head in a new
   thread; not pushed, it waits for the user. The thread is settled unless it waits on a question
   or stopped on a usage limit.
+- **A send whose outcome isn't known is never `not-started`** (#156 F4): its answer lost
+  (`NoAnswer`), T3 answering a failure after it may have taken it (`ToolFailed`: T3 answers
+  `orchestration_error` when it takes a send and can't read the run back), or the app stopped
+  before T3 answered (found on restart). The thread is read: a run it didn't have before the send
+  is the round's, watched to its end; the thread gone means nothing ran, and a fresh fixer
+  follows; anything else (no new run, or the thread can't be read) ends `needs-user`. Only a
+  refusal before the tool ran (a 4xx, a refused token) or a call never sent is `not-started`.
 - **After a restart, don't guess** (as Builds): a round the log shows open with its thread line is
-  watched again; one without (the app stopped before T3 answered the send or the launch) and a
-  send or launch whose answer was lost (`NoAnswer`) end `needs-user`, and the repo starts nothing
-  until the user answers (`FixLane.answered`).
+  watched again; a send without one is read as above; a fresh fixer's launch without one, or one
+  whose answer was lost, ends `needs-user`, and the repo starts nothing until the user answers
+  (`FixLane.answered`).
+- **A fork's PR gets no fixer** (#156 N2): a head in another repo than the PR's (GitHub's
+  `head.repo`, or none for a deleted fork) would have a fixer push to this repo's branch of that
+  name, a fork's `main` being this repo's `main`. Its blocking review ends a round on H as
+  `needs-user`, so the repo starts nothing until the user answers, and H gets no round after.
 - **Merging** (`MergeLane`), where the runner merges (`merge: runner`): a clean review on the
   newest commit, checks passed on it, nothing open. Just before merging the PR is read again: still
   open at H, not a draft, nothing writing to its branch, the repo not held for the user, fewer than
@@ -578,11 +590,14 @@ merge half of `src/github.ts` and `src/git.ts`.
   (it was `ready-for-stefan`) once per head and is never merged by the app. The mark comes off when
   the head moves, the review isn't clean any more or the re-check fails. A marked PR gone from the
   open list is read: merged, the user's merge is recorded (`by: user`) and cleaned up like the
-  app's; closed, it's unmarked. The platform's notifications are a later ticket, so the log line
+  app's, once: a mark followed by its PR's merge is done with (#156 F2); closed, it's unmarked.
+  The platform's notifications are a later ticket, so the log line
   names the PR for now.
-- **After a merge:** the PR's worktrees (by branch in `git worktree list`: the PR's own and each
-  fresh fixer's) and local branches are removed, and every thread the app ran on the PR (its
-  builds, fixes and reviews) is settled: the merge is the latest point one can still be open (#68,
+- **After a merge:** only what the PR's own jobs made is touched (#156 F2): its reviews and fix
+  rounds (by the PR's number) and the build whose end names the PR. Their branches (the build's
+  and each fresh fixer's) are removed, with the worktrees `git worktree list` shows on them, but
+  never a branch another job of the app's is on (one still running, or ended on another PR: a
+  new build reusing the name), and never a person's branch. Every thread of those jobs is settled: the merge is the latest point one can still be open (#68,
   story 7). Then a `cleaned` line; a worktree git keeps listing, or a settle that failed, leaves it
   owed for the next pass. T3 may hold an emptied worktree folder until its thread settles
   (`docs/t3.md`): such folders are kept in the `cleaned` line and swept on later passes (`swept`).

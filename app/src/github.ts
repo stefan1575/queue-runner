@@ -58,7 +58,12 @@ export interface GitHubWork {
 }
 
 /** An open PR as the review lane reads it (#155): its head commit and its base branch. */
-export type ReviewPull = { number: number; title: string; body: string; branch: string; base: string; headSha: string; draft: boolean; url: string };
+export type ReviewPull = {
+  number: number; title: string; body: string; branch: string; base: string; headSha: string; draft: boolean; url: string;
+  /** The repo its head branch is in (`owner/name`; null when GitHub has none, a deleted fork). A
+   *  head in another repo is a fork's: no fixer pushes to it (#156 N2). Absent: the PR's own repo. */
+  headRepo?: string | null;
+};
 /** The checks on one commit, `sol-review` not counted: none reported, still running, one failed,
  *  or every one passed (success, neutral or skipped). */
 export type Checks = { state: 'none' | 'pending' | 'failed' | 'passed'; pending: string[]; failed: string[] };
@@ -312,6 +317,7 @@ export class GhGitHub implements GitHub, GitHubAccount, GitHubLabels, GitHubWork
     return pulls.map((p) => ({
       number: p.number, title: p.title ?? '', body: p.body ?? '', branch: p.head?.ref ?? '', base: p.base?.ref ?? '',
       headSha: p.head?.sha ?? '', draft: p.draft === true, url: p.html_url ?? '',
+      headRepo: typeof p.head?.repo?.full_name === 'string' ? p.head.repo.full_name : null,
     }));
   }
 

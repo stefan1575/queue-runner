@@ -30,6 +30,17 @@ describe('pull', () => {
   });
 });
 
+describe('pullsToReview', () => {
+  test("names the repo each head is in, null for a fork GitHub no longer has (N2)", async () => {
+    const gh = new GhGitHub(fakeGh(() => json([[
+      { number: 4, head: { ref: 'x', sha: 'a', repo: { full_name: 'o/r' } }, base: { ref: 'main' } },
+      { number: 5, head: { ref: 'main', sha: 'b', repo: { full_name: 'someone/r' } }, base: { ref: 'main' } },
+      { number: 6, head: { ref: 'y', sha: 'c', repo: null }, base: { ref: 'main' } },
+    ]])), () => true);
+    expect((await gh.pullsToReview('o/r')).map((p) => p.headRepo)).toEqual(['o/r', 'someone/r', null]);
+  });
+});
+
 describe('merge', () => {
   test('names the expected head and a merge commit, on stdin', async () => {
     const calls: { args: string[]; input?: string }[] = [];
