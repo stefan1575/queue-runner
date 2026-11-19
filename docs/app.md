@@ -64,7 +64,7 @@ the settings tickets export as `SETTINGS_PATH` (`test/real-settings.ts` lists th
 
 **Tests get time from a fake clock and files from a temp folder** (#202): none waits for real
 time to pass or a real file watcher to fire, and a `vi.waitFor` waits only on the test's own fakes (`FakeT3.address`, the settings and the job log in `test/memory-files.ts`), never on real file I/O, which a test awaits; `test/no-real-time.test.ts` fails a test that reads
-the real clock or runs on a real timer that no `vi.useFakeTimers()` around it fakes (a `toFake` list fakes only what it names), naming it (`test/real-time.ts`). Both checks read every app test file, `renderer/test/` included (`test/app-test-files.ts`).
+the real clock or runs on a real timer that no `vi.useFakeTimers()` around it fakes (a `toFake` list fakes only what it names), naming it (`test/real-time.ts`). Both checks read every app test file, `renderer/test/` included (`test/app-test-files.ts`). `test/waits-on-fakes.test.ts` fails a waiting test file that reads T3's address from a file (`runtimeAddress(<path>)`) or keeps its job log on disk: the lane tests did both, and a full parallel run on a busy PC timed their waits out (#158 N1). The tests that run real `git` and `npm` (`git.test.ts`, `review-checkout.test.ts`) get 60 seconds, since a real process's time is the machine's load, not what they test.
 
 ## Rules for every rebuild ticket
 
@@ -695,9 +695,11 @@ A PR whose head conflicts with its base gets a conflict round (#157; `docs/flow.
   was 53 commits ahead). A tip read that fails starts nothing; the next pass reads it again. A
   fork's PR (its head in another repo) gets no round and is left for the user: a round would push
   to this repo's branch of that name (#156 N2).
-- A round waiting on a question is a stop for the user (Stops and decisions, below); answered, H
-  gets another round. An older app's `stop` lines (`cause: conflict`) are kept in the log, never
-  filed, and hold nothing.
+- A round waiting on a question, or one whose agent asks the user in its question block (the
+  brief's choice only the user can make), is a stop for the user (Stops and decisions, below);
+  answered, H gets another round at once, the answer first in its brief. A failed round's retry on
+  the same head and base takes the next free branch name (`-2`, `-3`...; `freeBranch`). An older
+  app's `stop` lines (`cause: conflict`) are kept in the log, never filed, and hold nothing.
 - **After a restart, don't guess** (as Builds): a round the log shows open with its thread line is
   watched again; one without, and a launch whose answer was lost (`NoAnswer`), end `needs-user`,
   and the repo starts nothing until the user answers (`ConflictLane.answered`).
@@ -719,8 +721,12 @@ list): `src/stops.ts` (the stop desk), `src/cap.ts`, `src/checks-lane.ts`, `src/
     (`decide`'s `capped`), and the fix and conflict lanes ask `capReached` before every round. No
     fourth review without the user's answer: an open stop holds the PR, a new head included.
   - **a question** from a builder or a decision thread: a build, fix or conflict thread waiting on
-    one; a build that ended without a PR (the build brief has it ask on its issue); a fix round that
-    ended without a push (its brief has it ask on the PR); a decision's `stop`.
+    one; a build that ended without a PR (the build brief has it ask on its issue); a fixer or
+    conflict agent that asked (their briefs end with `ASK_BLOCK`: the question alone in a
+    `queue-runner-question` block at the end of the last reply, read when the round ends, before
+    its end is recorded and any lane hears of it, so a pushed head isn't reviewed with it
+    unanswered; a read that fails is asked again, never taken as none); a fix round that ended
+    without a push; a decision's `stop`.
   - **a job with no saved thread id after a restart**, or a launch or send whose answer was lost
     (`needs-user`, #154).
 - **What never reaches the user,** and files no `needs-info`: a repeated class, a reopened finding
@@ -734,7 +740,9 @@ list): `src/stops.ts` (the stop desk), `src/cap.ts`, `src/checks-lane.ts`, `src/
   the tip moves, brought up to date with GitHub's update-branch naming H (`update`, once per base
   tip; GitHub's 422 is left to the conflict lane). Otherwise each GitHub Actions run with a failed
   check (its check run's `details_url`) is re-run once per head (`rerun`, written before GitHub is
-  asked; after a restart GitHub's attempt number says whether it took). A check no re-run reaches
+  asked; after a restart GitHub's attempt number says whether it took). It counts once GitHub took
+  it: a request that failed for a moment is asked again next pass, and only GitHub refusing it (a
+  4xx) ends it failed (#158 F7). A check no re-run reaches
   (a commit status, another app's), a run re-run by hand already, a re-run GitHub refused, or a
   re-run whose attempt ended failing again is a `check-failed` step: the fix lane's round, whose
   brief carries the end of each check's failing log (`gh run view <id> --log-failed`,
@@ -752,11 +760,20 @@ list): `src/stops.ts` (the stop desk), `src/cap.ts`, `src/checks-lane.ts`, `src/
 - **Held:** while a stop is open on a PR it gets no review, fix or conflict round, re-run or merge;
   while any is open in a repo, no new build starts there (#179), though an answered build carries
   on.
+- **One writer per PR** (`src/writers.ts`, #158 F6): every lane that writes to a PR's branch (the
+  fix lane's rounds for a blocking review or a failed check, the conflict lane, the build lane's
+  carry-on) reserves it (`Writers.claim`, one instance the desktop app shares) before preparing
+  anything, and gives it back once the round has ended or started nothing; a branch another lane
+  holds gets nothing meanwhile. Just before every send or launch the log is asked again
+  (`otherWriter`). After a restart the log's open jobs are the writers.
 - **Answered** (`stop-answered`): its issue closed, or a person's words on the issue or the PR after
-  the stop (a bot's, and the app's own or another runner's posts, aren't). The job it's about is
-  then answered (`answered`, so one that needed the user frees its repo and a question's writer
-  writes no more), and every lane passes: the PR's next round starts with the user's words under
-  `Direction first`, and its round count starts again. **Its PR merged or closed** outside the app
+  the stop (a bot's, and the app's own or another runner's posts, aren't). An answer whose first
+  word is "hold" keeps it held (said once): only words after it release it, and only those go on
+  (#158 F1). The job it's about is then answered (`answered`, so one that needed the user frees its
+  repo and a question's writer writes no more; swept on every pass, so an app that stopped between
+  the two frees it), and every lane passes: the PR's next round starts with the user's words under
+  `Direction first` (`directionFirst`, `src/briefs/rules.ts`, in the fix and the conflict brief
+  alike, #158 F9), and its round count starts again. **Its PR merged or closed** outside the app
   clears it (`pr-closed`, #88): its `needs-info` issue gets a note (once, by its mark) and is
   closed, completed for a merge and not planned for a close, unless another open stop shares it.
 - **Decision threads** (#68 story 6): the cap stop's Approach note. A fresh thread on the decision
@@ -768,10 +785,13 @@ list): `src/stops.ts` (the stop desk), `src/cap.ts`, `src/checks-lane.ts`, `src/
   rework, fix on or hold) is posted on the PR under `## Approach note`, and the stop links it;
   `stop` (`question`) puts that question to the user. Anything else (no block, bad JSON, another
   version, an action not allowed, a missing field, a thread that failed) files the stop with no
-  note, saying why. The thread is settled once its answer is read (`decided`, with `action`).
-  After a restart one the log shows open is watched again; one with no thread id, or a launch whose
-  answer was lost, files the stop unnoted. Held by the gate, it says why once, and the stop holds
-  the PR meanwhile.
+  note, saying why. The note is posted before the decision's end is recorded, tried again after a
+  wait until it lands (#158 F3); then the end (`decided`, with `action`) and the thread settled. A
+  read of its reply that fails is asked again, never taken as no answer. After a restart one the
+  log shows open is watched again by its saved thread id, whatever the repo list says yet, and no
+  second one starts while it's open (#158 F4); a note it posted before the app stopped is found by
+  its mark. One with no thread id, or a launch whose answer was lost, files the stop unnoted. Held
+  by the gate, it says why once, and the stop holds the PR meanwhile.
 - **A build that stopped on a question** (`BuildLane`): once the user answers its stop on the issue
   (a reply; a closed issue carries nothing on), it carries on once, a new build job `about` the old
   one, before any new build in the repo. **In place or fresh** (`src/resume.ts`, today's
