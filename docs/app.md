@@ -12,8 +12,9 @@ below), ships as a Windows installer built by CI on a version tag (#164; The ins
 below), builds a served repo's next ticket into a PR (#154; Builds, below), reviews every
 open PR on its newest commit, posting the review with its ledger (#155; Reviews, below), and
 closes the loop: a blocking review gets a fix round, and a clean one merges or is marked ready to
-merge (#156; Fix rounds and merges, below), and a PR that conflicts with its base gets a conflict
-round (#157; Conflict rounds, below).
+merge (#156; Fix rounds and merges, below), a PR that conflicts with its base gets a conflict
+round (#157; Conflict rounds, below), and what the loop can't settle stops on GitHub or goes to a
+decision thread (#158; Stops and decisions, below).
 
 ## Run it
 
@@ -423,8 +424,9 @@ every open PR in a served repo without a review on its newest commit gets one, w
   per PR. Lowest number first, repo by repo. Last, a head GitHub says conflicts with its base
   (`mergeable: false`) waits, its checks passed or not: its conflict round comes first, and its
   push is what's reviewed (#157; Conflict rounds, below). `null`, GitHub still working it out, is
-  not known yet: it waits too, and is read again next pass (#157 F5). Stops (#158) aren't filed yet: a `stop`
-  or `approach-note` is recorded and posted, and nothing more happens.
+  not known yet: it waits too, and is read again next pass (#157 F5). A stop open on the PR holds
+  it, a new head included, and a failed check is the loop's (its re-run, then a fix round; Stops
+  and decisions, below). Still blocking at the cap, the review is an `approach-note`.
 - **One review at a time** (#106 runs them at once later). Each asks the usage gate
   (`UsageGate.pick`, kind `review`): the kind's own model, or its fallback while that provider has
   no room (#69); held, it says the gate's reason once and the pass ends. A pass runs at start (after
@@ -518,9 +520,8 @@ every open PR in a served repo without a review on its newest commit gets one, w
 - **The review lane and the build lane** share the repo's one ticket at a time (#179): the build
   lane starts nothing while a PR is open, and the review lane reviews that PR; a review waits while
   a build writes to its branch, and a job of either lane that needs the user holds both.
-- **Not yet:** stops (#158). A review that ends tells the fix, merge and conflict lanes
-  (`ended`), so a blocking one gets its round and a clean one merges without waiting for the
-  minute's pass.
+- A review that ends tells the fix, merge and conflict lanes and the stop desk (`ended`), so a
+  blocking one gets its round and a clean one merges without waiting for the minute's pass.
 
 ## Fix rounds and merges
 
@@ -531,11 +532,15 @@ is reviewed by a fresh reviewer, and a clean head merges, or waits for the user 
 merge half of `src/github.ts` and `src/git.ts`.
 
 - **Which PRs get a round** (`FixLane`): the app's newest review of the PR's head H is `blocking`
-  (a `stop` or `approach-note` goes to the user, #158), it's still the PR's newest review comment,
-  no round ran on H yet (one per head: a round that ended without a push leaves the PR at H, which
-  was reviewed already, so it waits for the user), and nothing writes to the branch (a build or fix
-  open, waiting on a question or cut off by a usage limit: one writer per PR, and the review lane
-  waits on a fix round the same way). A repo with a job that needs the user starts none.
+  (an `approach-note` goes to the user, and is blocking again once they've answered its stop,
+  #158), or with no review of H, checks on H failed again after their re-run (a `check-failed`
+  step, #158); it's still the PR's newest review comment; no round ran on H since the user's last
+  answer (one per head: a round that ended without a push leaves the PR at H, which was reviewed
+  already, so it's a question for the user; a round that failed gets another); nothing writes to
+  the branch (a build or fix open, waiting on a question nobody answered or cut off by a usage
+  limit: one writer per PR, `writes` in `src/job-log.ts`, and the review lane waits on a fix round
+  the same way); no stop is open on the PR; and the cap isn't reached (past it, a cap stop). A repo
+  with a job that needs the user starts none.
 - **Back to the builder:** the round goes to the thread that wrote the PR, its build's or the
   fresh fixer's that took over since, with `t3_thread_send {threadId, message, mode: queue}`
   (`queue` starts a new turn and never steers one), so it starts with that thread's context. The
@@ -633,7 +638,7 @@ merge half of `src/github.ts` and `src/git.ts`.
 
 A PR whose head conflicts with its base gets a conflict round (#157; `docs/flow.md` A round, step
 1, and today's conflict rounds in `queue_runner/fix.py` and `stops.py`, ported):
-`src/conflict-lane.ts`, `src/briefs/conflict.ts`, the stop lines in `src/job-log.ts` and
+`src/conflict-lane.ts`, `src/briefs/conflict.ts` and
 `branchHead` in `src/github.ts`.
 
 - **Which PRs** (`ConflictLane`): each open PR in a served repo is read (`pull`) for GitHub's
@@ -643,9 +648,9 @@ A PR whose head conflicts with its base gets a conflict round (#157; `docs/flow.
   the repo for the next pass, never taken as "no conflict". A conflicting
   PR waits while a job writes to its branch (one writer per PR: the fix and review lanes wait on a
   conflict round the same way), while a review of it runs, and while its head's blocking review
-  hasn't had its fix round (that comes first). A head left for the user gets none: a stop on it, a
-  review on it that ended `stop` or `approach-note`, a fix or conflict round on it that ended
-  without a push, or a `ready-to-merge` mark on it. A repo with a job that needs the user starts
+  hasn't had its fix round (that comes first). A head left for the user gets none: a stop open on the PR (#158), a
+  review on it that ended `stop` or `approach-note` and isn't answered, a fix round on it that
+  ended without a push, a fork's head, or a `ready-to-merge` mark on it. A repo with a job that needs the user starts
   none.
 - **One conflicted PR at a time,** lowest number first, as today's runner: while a round runs in
   the repo, or another open PR that had a round is still being moved by the loop (it's on its way
@@ -675,26 +680,116 @@ A PR whose head conflicts with its base gets a conflict round (#157; `docs/flow.
   `failed` end (one that failed may have pushed). Pushed, the review lane is told and reviews the
   new head. Not pushed, it's a stop. The thread is settled unless it waits on a question or stopped
   on a usage limit.
-- **Another round, or a stop** (#91), only when another round wouldn't help: the round on H ended
-  without a push; the PR conflicts again while the base's tip is still the one its last round
-  merged (the start line's `baseSha`); or it had 5 rounds (`MAX_CONFLICT_ROUNDS`) as the base keeps
-  moving. A conflict after the base moved, below that, gets another round. **The base's tip is
-  read from the branch** (`branchHead`, GitHub's branches API), at the round's start and when the
-  PR conflicts again, never from a PR's `base.sha`: GitHub refreshes that only when the PR's branch
-  is pushed, so after a stop it stays at the base the last round merged however far the base has
-  moved (the Python runner trusted it and stopped game-backdrop#20 with "main has not moved
-  since" while main was 53 commits ahead). A tip read that fails starts nothing and stops nothing;
-  the next pass reads it again. A fork's PR (its head in another repo) is a stop too: a round would
-  push to this repo's branch of that name (#156 N2).
-- **Stops** are `stop` lines in the job log (`cause: conflict`, the PR, its head, why, the round's
-  thread link), written once per PR, head and cause, for the stops ticket (#158), which files and
-  shows them. Until then a stop holds the PR's head: no round runs on it, even once the base moves,
-  until a new head.
+- **Another round once the base moves, never a stop** (#158, replacing #157's port of #91): a
+  conflict the last round couldn't resolve (it ended without a push, or the PR conflicts again
+  after it) waits while the base's tip is still the one that round merged (the start line's
+  `baseSha`), and gets another round once it moves, on a branch named for H and the base tip
+  (`claude/conflict-pr<n>-<H7>-<base7>`). A round that failed gets another at once. Each counts
+  toward the cap; at it, a cap stop instead. A PR waiting for its base to move holds no other
+  conflicted PR back: the next one's merge is what moves the base. **The base's tip is read from
+  the branch** (`branchHead`, GitHub's branches API), at the round's start and when the PR
+  conflicts again, never from a PR's `base.sha`: GitHub refreshes that only when the PR's branch is
+  pushed, so it stays at the base the last round merged however far the base has moved (the
+  Python runner trusted it and stopped game-backdrop#20 with "main has not moved since" while main
+  was 53 commits ahead). A tip read that fails starts nothing; the next pass reads it again. A
+  fork's PR (its head in another repo) gets no round and is left for the user: a round would push
+  to this repo's branch of that name (#156 N2).
+- A round waiting on a question is a stop for the user (Stops and decisions, below); answered, H
+  gets another round. An older app's `stop` lines (`cause: conflict`) are kept in the log, never
+  filed, and hold nothing.
 - **After a restart, don't guess** (as Builds): a round the log shows open with its thread line is
   watched again; one without, and a launch whose answer was lost (`NoAnswer`), end `needs-user`,
   and the repo starts nothing until the user answers (`ConflictLane.answered`).
 - **When:** open rounds are watched again at start; then a pass on usage, the repos, each review,
   fix round and merge that ends, and every minute.
+
+## Stops and decisions
+
+What the loop can't settle (#158; `docs/flow.md` Stops and Judgement, `docs/stops.md` and today's
+decision threads, with the owner's 2026-11-19 decisions on the ticket, which replace today's stop
+list): `src/stops.ts` (the stop desk), `src/cap.ts`, `src/checks-lane.ts`, `src/resume.ts`,
+`src/briefs/decision.ts`, the carry-on in `src/build-lane.ts`.
+
+- **What reaches the user:** only something that needs rethinking, each a stop:
+  - **the cap** (`src/cap.ts`, `CAP = 3`, the one place the number is): review 3 still blocking.
+    Every round counts (a fix round for a blocking review or a failed check, a conflict round),
+    counted from the user's last answer to a stop on the PR: the loop gets `CAP - 1` rounds, and the
+    next is a cap stop instead. The review lane decides `approach-note` when it's reached
+    (`decide`'s `capped`), and the fix and conflict lanes ask `capReached` before every round. No
+    fourth review without the user's answer: an open stop holds the PR, a new head included.
+  - **a question** from a builder or a decision thread: a build, fix or conflict thread waiting on
+    one; a build that ended without a PR (the build brief has it ask on its issue); a fix round that
+    ended without a push (its brief has it ask on the PR); a decision's `stop`.
+  - **a job with no saved thread id after a restart**, or a launch or send whose answer was lost
+    (`needs-user`, #154).
+- **What never reaches the user,** and files no `needs-info`: a repeated class, a reopened finding
+  and a kept decline are fix rounds like any (`decide` says the signal in the comment, and it goes
+  into the Approach note's sources); a kept decline stays an open finding, so the next round fixes
+  it; a failed check is re-run once and then gets a fix round with its failing log; one the base
+  fails too waits, and the PR is updated once the base moves; an unresolved conflict gets another
+  round once the base moves. Each counts toward the cap.
+- **The checks lane** (`ChecksLane`, no model, `step` lines): a failed check on H that the base's
+  own tip fails too (every failed name) is the base's: H is held (`base-hold`, the tip) and, once
+  the tip moves, brought up to date with GitHub's update-branch naming H (`update`, once per base
+  tip; GitHub's 422 is left to the conflict lane). Otherwise each GitHub Actions run with a failed
+  check (its check run's `details_url`) is re-run once per head (`rerun`, written before GitHub is
+  asked; after a restart GitHub's attempt number says whether it took). A check no re-run reaches
+  (a commit status, another app's), a run re-run by hand already, a re-run GitHub refused, or a
+  re-run whose attempt ended failing again is a `check-failed` step: the fix lane's round, whose
+  brief carries the end of each check's failing log (`gh run view <id> --log-failed`,
+  `LOG_CHARS`). Today's rule from closed PR #201 (`docs/stops.md` on its branch) is the update.
+- **Filing** (the loop's own posts, no go-ahead; `StopDesk`): each stop the lanes' ends imply is
+  recorded once (`stop` line; a cap stop by the lane that reached it, or for an `approach-note`
+  review). On a PR: its one `needs-info` issue, found by its hidden line (`<!-- queue-runner-app
+  needs-info owner/name#N -->`) or filed (`PR #N needs <user>: <title>`, labelled `needs-info`),
+  gets the stop as a comment (why, the note or question, the thread's last message for a question,
+  the thread), and the PR a comment linking it; on a build's own issue (no PR yet), a comment there,
+  and `needs-info` in place of `ready-for-agent`. Every comment has the app's hidden mark
+  (`<!-- queue-runner-app stop <id> -->`; `runnerPost` reads it as the app's) and is looked for
+  before it's posted, so a retry never doubles one. A write that fails, or a last message that
+  can't be read yet, is said and tried next pass; the stop holds its PR filed or not.
+- **Held:** while a stop is open on a PR it gets no review, fix or conflict round, re-run or merge;
+  while any is open in a repo, no new build starts there (#179), though an answered build carries
+  on.
+- **Answered** (`stop-answered`): its issue closed, or a person's words on the issue or the PR after
+  the stop (a bot's, and the app's own or another runner's posts, aren't). The job it's about is
+  then answered (`answered`, so one that needed the user frees its repo and a question's writer
+  writes no more), and every lane passes: the PR's next round starts with the user's words under
+  `Direction first`, and its round count starts again. **Its PR merged or closed** outside the app
+  clears it (`pr-closed`, #88): its `needs-info` issue gets a note (once, by its mark) and is
+  closed, completed for a merge and not planned for a close, unless another open stop shares it.
+- **Decision threads** (#68 story 6): the cap stop's Approach note. A fresh thread on the decision
+  kind's settings (`UsageGate.pick`, kind `decision`), titled `Queue runner decision: <project>#<n>`,
+  in the repo's T3 project with no worktree, briefed with one narrow question and the state
+  (`src/briefs/decision.ts`, today's `templates/decision.md`: the PR, its open Important findings,
+  every review and round with its signals, each clipped to 3000 characters). Its reply's last
+  `queue-runner-decision` block (`version: 1`) is read once: `approach-note` (`note`, `recommend`:
+  rework, fix on or hold) is posted on the PR under `## Approach note`, and the stop links it;
+  `stop` (`question`) puts that question to the user. Anything else (no block, bad JSON, another
+  version, an action not allowed, a missing field, a thread that failed) files the stop with no
+  note, saying why. The thread is settled once its answer is read (`decided`, with `action`).
+  After a restart one the log shows open is watched again; one with no thread id, or a launch whose
+  answer was lost, files the stop unnoted. Held by the gate, it says why once, and the stop holds
+  the PR meanwhile.
+- **A build that stopped on a question** (`BuildLane`): once the user answers its stop on the issue
+  (a reply; a closed issue carries nothing on), it carries on once, a new build job `about` the old
+  one, before any new build in the repo. **In place or fresh** (`src/resume.ts`, today's
+  `limits.resume_choice`): warm (its last request started under 55 minutes ago) at any size, or
+  cold and under 120k tokens, in its own thread; otherwise a fresh one. Both numbers come from T3's
+  thread projection (`orchestration.getThreadProjection`'s `providerTurns`: the newest one's
+  `startedAt` and `tokenUsage.usedTokens`, T3's schema read in its server 2026-11-20); an unknown
+  age is cold, an unknown size large, and a projection that can't be read starts nothing (the repo
+  rests). In place, a build waiting on T3's question has it answered (`t3_pending_request {action:
+  respond, threadId, requestId, answers}`, each question id given the answer, its run watched on
+  with that request no longer read as a question); one that ended without a PR gets the answer as a
+  new turn (`t3_thread_send`, mode `queue`). Fresh: its own worktree when `git worktree list` shows
+  one on the branch, else a new worktree from the branch (fetched when it isn't local) on
+  `<branch>-carry-<id>` that pushes to the branch (a `made` line); the brief is the build brief with
+  the issue read afresh and `Direction first` (the question, the answer, where to push). An answer
+  or send whose outcome is unclear needs the user; one the app stopped before T3 took is given
+  again on restart while the question is still pending.
+- **Not yet:** notifications (the Inbox ticket); until then a stop is only on GitHub and in the
+  app's log.
 
 ## Setup
 

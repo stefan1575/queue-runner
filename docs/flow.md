@@ -140,6 +140,12 @@ A stop comes to Stefan:
 Each stop is recorded on the PR and in one `needs-info` issue per PR, and toasted
 (`docs/stops.md`).
 
+This is the Python runner's list. The TypeScript app (#158) stops only for what needs rethinking:
+review 3 still blocking (with the Approach note), a question from a builder or a decision thread, a
+ticket that didn't explain enough, and a job with no saved thread id after a restart; a repeated
+class, a reopened finding, a kept decline, a failed check and an unresolved conflict stay in the
+loop as rounds (`docs/app.md`, Stops and decisions).
+
 ### Merge
 
 A clean review on the newest commit, checks passed on it, nothing open. Just before merging, the
