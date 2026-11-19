@@ -47,8 +47,17 @@ export class FakeReviewGitHub extends FakeGitHub implements GitHubPosts, GitHubR
   failing = new Set<string>();
   private n = 100;
 
+  /** PRs GitHub says can't merge cleanly, by `owner/name#N` (#157). */
+  conflicting = new Set<string>();
   protected fail(what: string) { if (this.failing.has(what)) throw new Error(`gh ${what} failed (HTTP 502)`); }
   async pullsToReview(repo: string) { return structuredClone(this.reviewPulls[repo] ?? []); }
+  /** A listed PR as one read of it has it: open, mergeable unless `conflicting` names it. */
+  async pull(repo: string, n: number): Promise<MergePull> {
+    const p = (this.reviewPulls[repo] ?? []).find((x) => x.number === n);
+    if (!p) throw new Error(`gh api failed (1): HTTP 404 (${repo}#${n})`);
+    return { number: n, title: p.title, url: p.url, state: 'open', headSha: p.headSha, branch: p.branch, base: p.base, draft: p.draft,
+      mergeable: !this.conflicting.has(`${repo}#${n}`), labels: [] };
+  }
   async checks(_repo: string, sha: string) { return this.checkStates[sha] ?? { state: 'none' as const, pending: [], failed: [] }; }
   async issue(repo: string, n: number) { return this.issues[`${repo}#${n}`] ?? { title: `Issue ${n}`, body: '' }; }
   async reviewReplies(repo: string, n: number) { return structuredClone(this.replies[`${repo}#${n}`] ?? []); }
@@ -105,6 +114,16 @@ export class FakeMergeGitHub extends FakeReviewGitHub implements GitHubMerge {
     return 'm'.repeat(40);
   }
   async openThreads(repo: string, n: number) { return this.threads[`${repo}#${n}`] ?? 0; }
+  /** Each branch's tip, by `owner/name:branch` (#157). */
+  tips: Record<string, string> = {};
+  /** While above 0, each tip read fails and counts it down. */
+  tipFails = 0;
+  async branchHead(repo: string, branch: string) {
+    if (this.tipFails > 0) { this.tipFails--; throw new GitHubError('gh api branches failed (1): HTTP 502'); }
+    const tip = this.tips[`${repo}:${branch}`];
+    if (!tip) throw new GitHubError(`gh api failed (1): HTTP 404 (${repo}:${branch})`);
+    return tip;
+  }
   async addLabel(repo: string, n: number, label: string) {
     this.fail('label');
     this.prs[`${repo}#${n}`]!.labels.push(label);

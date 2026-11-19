@@ -198,6 +198,15 @@ describe('a review', () => {
     ]);
   });
 
+  test('a head that conflicts with its base waits for its conflict round, though its checks passed (#157)', async () => {
+    makeLane();
+    gh.checkStates[H] = { state: 'passed', pending: [], failed: [] };
+    gh.conflicting.add('owner/app#4');
+    await lane.pass();
+    expect(t3.launches).toEqual([]);
+    expect(lines).toEqual([`review app#4: not now, ${H.slice(0, 7)} conflicts with main: a conflict round (or a stop) comes first`]);
+  });
+
   test('a PR with a review on H already, or a build writing to its branch, is left', async () => {
     gh.comments['owner/app#4'] = [{ author: 'x', createdAt: '1', body: `<!-- queue-runner-app review round=1 verdict=clean sha=${H.slice(0, 7)} findings=W10= -->` }];
     makeLane();
