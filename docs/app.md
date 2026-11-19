@@ -122,8 +122,9 @@ Code both sides use (`display.ts`, `settings-search.ts`) touches no Node. The wi
   no such key, checked live 2026-11-18 against T3 0.1.9, and no WebSocket method serves client
   settings). So, as Stefan settled on #150, the app reads it there: the one exception to "No
   reads of T3's database or settings" (Rules). `src/t3/time-format.ts` reads only that key, never
-  writes the file, and polls it (`fs.watchFile`, every 500 ms: it sees a file that's missing or
-  replaced by a rename), telling the window when the format changes. A file that's missing or
+  writes the file, and reads it every 500 ms (it sees a file that's missing or replaced by a
+  rename; a stat poll, `fs.watchFile`, missed changes on CI: a write made before its first stat,
+  or a same-size one in the same clock tick), telling the window when the format changes. A file that's missing or
   unreadable, or has no such key or a value T3 doesn't offer, is System default. It goes once
   T3's server serves client settings. The app has no Time format setting of its own.
 
