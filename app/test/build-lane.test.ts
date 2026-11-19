@@ -216,6 +216,35 @@ describe('picking and launching', () => {
     expect(log.jobs()[0]).toMatchObject({ choice: SOL, onFallback: true });
   });
 
+  test('one ticket at a time: no build while the repo has an open PR, whoever opened it; the next once it is gone (#179)', async () => {
+    served = [APP, LIB];
+    gh.ready['owner/app'] = [issue(5)];
+    gh.ready['owner/lib'] = [issue(3)];
+    gh.pulls['owner/app'] = [{ number: 40, branch: 'someone/their-change', body: 'Their own change.', url: 'https://github.com/owner/app/pull/40' }];
+    await makeLane().pass();
+    await lane.pass();
+    // app waits on its open PR; lib, with none, builds side by side as ever
+    expect(t3.launches.map((l) => l.projectId)).toEqual(['p-lib']);
+    expect(lines.filter((l) => /app: no build while PR #40 is open/.test(l))).toHaveLength(1);
+    gh.pulls['owner/app'] = []; // merged
+    await lane.pass();
+    expect(t3.launches.map((l) => l.title)).toEqual(['Queue runner build: lib#3', 'Queue runner build: app#5']);
+  });
+
+  test('a PR opened while the build fetches holds it too: not launched, not-started', async () => {
+    gh.ready['owner/app'] = [issue(5)];
+    let fetched!: () => void;
+    git.slow = new Promise((r) => { fetched = r; });
+    makeLane();
+    void lane.pass();
+    await until(() => git.calls.length > 0);
+    gh.pulls['owner/app'] = [{ number: 41, branch: 'someone/else', body: '', url: 'u' }];
+    fetched();
+    await lane.idle();
+    expect(t3.launches).toEqual([]);
+    expect(log.jobs()[0]!.end).toMatchObject({ outcome: 'not-started', error: expect.stringMatching(/PR #41 was opened/) });
+  });
+
   test('no ticket: nothing launched', async () => {
     await makeLane().pass();
     expect(t3.launches).toEqual([]);

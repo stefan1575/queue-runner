@@ -1,6 +1,7 @@
 // The build lane (#154; today's runner's builds, docs/flow.md, ported): a
 // served repo's next ticket becomes a PR. One build per repo at a time, repos side by side, the
-// repo that waited longest first (#50). Each pass, for every served repo with no build running:
+// repo that waited longest first (#50), and none while the repo has an open PR (#179). Each pass,
+// for every served repo with no build running:
 //
 //   pick (src/picker.ts)  ->  the usage gate lets it in, on the build kind's model or its fallback
 //   ->  fetch origin/<base>  ->  a leftover branch of the job's name holds the job (branch-exists)
@@ -81,6 +82,8 @@ export class BuildLane {
   private watches = new Set<{ stop(): void }>();
   private resting = new Map<string, number>();
   private holdSaid = new Map<string, string>();
+  /** The open-PR hold last said for each repo, so it's said once. */
+  private prHeld = new Map<string, string>();
   private passing: Promise<void> | null = null;
   private again = false;
   private stopped = false;
@@ -166,6 +169,15 @@ export class BuildLane {
       let ticket: BuildTicket | null;
       try {
         base = await this.d.github.defaultBranch(repo.github!);
+        // one ticket at a time (#179): no build while the repo has an open PR, whoever opened it
+        const open = await this.d.github.openPulls(repo.github!);
+        if (open.length) {
+          const text = `${repo.title}: no build while PR #${Math.min(...open.map((p) => p.number))} is open (one ticket at a time)`;
+          if (this.prHeld.get(repo.id) !== text) this.d.say(text);
+          this.prHeld.set(repo.id, text);
+          continue;
+        }
+        this.prHeld.delete(repo.id);
         ticket = await pick(this.d.github, repo.github!, base, this.d.log.heldIssues(repo.id));
       } catch (e) {
         this.d.say(`${repo.title}: GitHub couldn't be read (${(e as Error).message})`);
@@ -226,6 +238,9 @@ export class BuildLane {
         branch: ticket.branch, base: ticket.base, user: await this.d.user(),
         agentsFile: this.d.exists(join(repo.folder, 'AGENTS.md')) ? 'AGENTS.md' : this.d.exists(join(repo.folder, 'CLAUDE.md')) ? 'CLAUDE.md' : null,
       });
+      // a PR opened while the job was fetched and its brief written holds it, as one open before
+      const opened = repo.github ? await this.d.github.openPulls(repo.github) : [];
+      if (opened.length) return await notStarted('not-started', `PR #${opened[0]!.number} was opened in ${repo.title} meanwhile (one ticket at a time)`);
       // nothing is awaited from here to the launch call, so a repo served now is served at launch
       if (!isServed(this.d.repos(), repo)) return await notStarted('not-started', `${repo.title} is no longer served`);
       this.d.say(`Starting ${job.title} on ${ticket.branch} from ${ticket.base}`);

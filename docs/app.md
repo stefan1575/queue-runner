@@ -349,6 +349,10 @@ builds (`docs/flow.md`, `docs/claude-lane.md`). `src/build-lane.ts`, `src/picker
   nothing until the user answers (`BuildLane.answered`, an `answered` line in the job log; the
   Inbox ticket asks). A launch T3 refused, or one that failed before the call was sent, started
   nothing: `not-started`.
+- **One ticket at a time per repo** (#179): no build while the repo has an open PR, whoever
+  opened it, read before the ticket is picked and again right before the launch (a PR opened
+  meanwhile makes the job `not-started`). Clean means merged. The app merges nothing yet, so it
+  has no live steps to wait on: the merge ticket adds that wait.
 - **One build per repo, repos side by side** (#50): each pass takes every served repo with no build
   running, the one whose last job ended longest ago first (the job log's `lastEnded`). Each asks
   the usage gate first (`UsageGate.pick`, kind `build`); a held one says its reason once and waits.
