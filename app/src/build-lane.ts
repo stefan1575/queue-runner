@@ -1,9 +1,10 @@
 // The build lane (#154; today's runner's builds, docs/flow.md, ported): a
-// served repo's next ticket becomes a PR. One build per repo at a time, repos side by side, the
-// repo that waited longest first (#50), and none while the repo has an open PR (#179). Each pass,
-// for every served repo with no build running:
+// served repo's next ticket becomes a PR, none while the repo has an open PR (#179). When a build
+// starts is the chooser's (src/chooser.ts, #210): one job per repo, repos side by side, the
+// repo that waited longest first. Asked for a repo's next job (`next`):
 //
-//   pick (src/picker.ts)  ->  the usage gate lets it in, on the build kind's model or its fallback
+//   new tickets read from GitHub at most every 5 minutes (sooner after a build ends, a merge, the
+//   served repos changing or usage changing while one waits)  ->  pick (src/picker.ts)  ->  the usage gate lets it in, on the build kind's model or its fallback
 //   ->  fetch origin/<base>  ->  a leftover branch of the job's name holds the job (branch-exists)
 //   ->  the brief (src/briefs/build.ts)  ->  t3_thread_launch in a worktree from origin/<base>
 //   ->  its end from T3's thread events (src/t3/thread-end.ts)  ->  the end recorded in the job log
@@ -31,6 +32,7 @@ import { settles, type Job, type JobEnd, type JobLog } from './job-log.ts';
 import type { Catalog, Jobs } from './jobs.ts';
 import { launchJob } from './launch.ts';
 import { pick, type BuildTicket } from './picker.ts';
+import type { RepoJobLane, Next } from './chooser.ts';
 import { ThreadSettler } from './settle.ts';
 import type { Repo } from './repos.ts';
 import type { Merger } from './settings.ts';
@@ -65,6 +67,8 @@ export type BuildLaneDoors = {
   say: (line: string) => void;
   /** How long a repo whose job started no thread rests (ms). */
   restMs?: number;
+  /** A build is over, or a done build's PR is known: the chooser passes. */
+  freed?: () => void;
   /** A dropped thread stream's wait before it's opened again. */
   retry?: Retry;
   now?: () => Date;
@@ -82,7 +86,10 @@ const isServed = (repos: BuildRepo[], repo: BuildRepo) => repos.some((r) => r.id
 
 const join = (folder: string, name: string) => `${folder.replace(/[\\/]+$/, '')}/${name}`;
 
-export class BuildLane {
+/** How often a repo's new tickets are read from GitHub, as today's 5-minute poll. */
+export const TICKETS_MS = 5 * 60_000;
+
+export class BuildLane implements RepoJobLane {
   private d: BuildLaneDoors;
   private building = new Map<string, Promise<Job>>();
   private watches = new Set<{ stop(): void }>();
@@ -93,8 +100,8 @@ export class BuildLane {
   private holdSaid = new Map<string, string>();
   /** The open-PR hold last said for each repo, so it's said once. */
   private prHeld = new Map<string, string>();
-  private passing: Promise<void> | null = null;
-  private again = false;
+  /** When each repo's tickets were last read; one not read is due. */
+  private readAt = new Map<string, number>();
   private stopped = false;
   private now: () => Date;
 
@@ -104,14 +111,13 @@ export class BuildLane {
     this.settler = new ThreadSettler(doors.mcp, doors.log, doors.say);
   }
 
-  /** Watches again each build the log shows open and settles each one it shows ended and not
-   *  settled (an app that stopped mid-job), then passes. */
-  start(): Promise<void> {
+  /** Watches again each build the log shows open (an app that stopped mid-job); the chooser's
+   *  first pass settles each one it shows ended and not settled (`owed`). */
+  recover(): void {
     for (const job of this.d.log.open()) {
       if (job.kind !== 'build' || this.building.has(job.repo)) continue;
       this.track(job.repo, this.resume(job));
     }
-    return this.pass();
   }
 
   /** Stops watching: builds in T3 go on, and the next start watches them again. */
@@ -120,16 +126,21 @@ export class BuildLane {
     for (const w of this.watches) w.stop();
   }
 
-  /** T3 read new usage: a pass, if a build waits on the gate (a held one may fit now). */
-  usageChanged(): void {
-    if (this.holdSaid.size) void this.pass();
+  /** T3 read new usage: whether a build waits on the gate (a held one may fit now); its tickets
+   *  are read again then. */
+  usageChanged(): boolean {
+    if (!this.holdSaid.size) return false;
+    this.ticketsDue();
+    return true;
   }
 
-  /** The user has answered a job that needed them (the Inbox ticket's to ask): its repo is free
-   *  again, and a pass runs. Its issue stays held, as every started build's does. */
-  async answered(jobId: string): Promise<void> {
-    await this.d.log.answered(jobId);
-    await this.pass();
+  /** Every repo's tickets are read on its next turn (a merge, the served repos changing). */
+  ticketsDue(): void {
+    this.readAt.clear();
+  }
+
+  busy(repo: BuildRepo): boolean {
+    return this.building.has(repo.id);
   }
 
   /** The repos with a build running, by T3 project id. */
@@ -139,91 +150,74 @@ export class BuildLane {
 
   /** Settles once every build under way has ended and been recorded (the tests wait on it). */
   async idle(): Promise<void> {
-    while (this.building.size || this.passing || this.settler.pending().length || this.lookingUp.size) {
-      await Promise.allSettled([...this.building.values(), this.passing, ...this.settler.pending(), ...this.lookingUp.values()]);
+    while (this.building.size || this.settler.pending().length || this.lookingUp.size) {
+      await Promise.allSettled([...this.building.values(), ...this.settler.pending(), ...this.lookingUp.values()]);
     }
   }
 
-  /** One pass: a build for each served repo that has none running and has a ticket the gate lets
-   *  in. A pass asked for while one runs runs once more after it. */
-  pass(): Promise<void> {
-    if (this.stopped) return Promise.resolve();
-    if (this.passing) {
-      this.again = true;
-      return this.passing;
-    }
-    this.passing = (async () => {
-      do {
-        this.again = false;
-        await this.passOnce();
-      } while (this.again && !this.stopped);
-    })().finally(() => { this.passing = null; });
-    return this.passing;
-  }
-
-  private waited(repo: BuildRepo): number {
-    const at = this.d.log.lastEnded(repo.id);
-    return at ? Date.parse(at) : 0;
-  }
-
-  private async passOnce() {
+  owed(): void {
     // an end recorded and not settled: left by an app that stopped between the two, or a settle
     // that failed; tried each pass, on its own (a thread left in the sidebar holds no build)
     this.settler.owed('build');
     // a done build whose PR lookup failed: looked up again each pass, a restart's first included
     for (const job of this.d.log.prOwed()) if (job.kind === 'build') void this.lookUp(job);
+  }
+
+  /** The repo's next build: its next ticket, while it has no open PR, if the gate lets it in. Its
+   *  tickets are read at most every TICKETS_MS (`ticketsDue` asks sooner); a read that fails
+   *  throws, and they're read again on the next pass. */
+  async next(repo: BuildRepo): Promise<Next> {
     const now = this.now().getTime();
-    const repos = this.d.repos()
-      .map((r, i) => ({ r, i }))
-      .filter(({ r }) => r.github && !this.building.has(r.id) && (this.resting.get(r.id) ?? 0) <= now
-        && !this.d.log.needingUser(r.id).length)
-      .sort((a, b) => this.waited(a.r) - this.waited(b.r) || a.i - b.i)
-      .map(({ r }) => r);
-    for (const repo of repos) {
-      if (this.stopped) return;
-      let base: string;
-      let ticket: BuildTicket | null;
-      try {
-        base = await this.d.github.defaultBranch(repo.github!);
-        // one ticket at a time (#179): no build while the repo has an open PR, whoever opened it
-        const open = await this.d.github.openPulls(repo.github!);
-        if (open.length) {
-          const text = `${repo.title}: no build while PR #${Math.min(...open.map((p) => p.number))} is open (one ticket at a time)`;
-          if (this.prHeld.get(repo.id) !== text) this.d.say(text);
-          this.prHeld.set(repo.id, text);
-          continue;
-        }
-        this.prHeld.delete(repo.id);
-        ticket = await pick(this.d.github, repo.github!, base, this.d.log.heldIssues(repo.id));
-      } catch (e) {
-        this.d.say(`${repo.title}: GitHub couldn't be read (${(e as Error).message})`);
-        continue;
+    if (this.stopped || !repo.github || this.building.has(repo.id) || (this.resting.get(repo.id) ?? 0) > now) return null;
+    const read = this.readAt.get(repo.id);
+    if (read !== undefined && now - read < TICKETS_MS) return null;
+    let base: string;
+    let ticket: BuildTicket | null;
+    try {
+      base = await this.d.github.defaultBranch(repo.github);
+      // one ticket at a time (#179): no build while the repo has an open PR, whoever opened it
+      const open = await this.d.github.openPulls(repo.github);
+      if (open.length) {
+        const text = `${repo.title}: no build while PR #${Math.min(...open.map((p) => p.number))} is open (one ticket at a time)`;
+        if (this.prHeld.get(repo.id) !== text) this.d.say(text);
+        this.prHeld.set(repo.id, text);
+        this.readAt.set(repo.id, now);
+        return null;
       }
-      if (!ticket) continue;
-      if (!isServed(this.d.repos(), repo)) continue; // switched off while GitHub was read
-      const holdId = `build:${repo.github}#${ticket.issue.number}`;
-      const verdict = this.d.gate.pick(holdId, 'build');
-      if (!verdict.fits) {
-        const text = holdText(verdict.hold, (d) => d.toISOString());
-        if (this.holdSaid.get(repo.id) !== text) this.d.say(`${repo.title}#${ticket.issue.number} waits: ${text}`);
-        this.holdSaid.set(repo.id, text);
-        continue;
-      }
-      this.holdSaid.delete(repo.id);
-      this.d.gate.forget(holdId);
-      // the gate counts it from now, so the next repo's verdict counts this one; the pass goes on
-      // once T3 has it (or it ended before), so builds launch in the pass's order
-      await new Promise<void>((launched) => {
-        this.track(repo.id, this.build(repo, ticket, base, verdict, launched).finally(launched));
-      });
+      this.prHeld.delete(repo.id);
+      ticket = await pick(this.d.github, repo.github, base, this.d.log.heldIssues(repo.id));
+    } catch (e) {
+      throw new Error(`GitHub couldn't be read (${(e as Error).message})`);
     }
+    this.readAt.set(repo.id, now);
+    if (!ticket) return null;
+    if (!isServed(this.d.repos(), repo)) return null; // switched off while GitHub was read
+    const holdId = `build:${repo.github}#${ticket.issue.number}`;
+    const verdict = this.d.gate.pick(holdId, 'build');
+    if (!verdict.fits) {
+      const text = holdText(verdict.hold, (d) => d.toISOString());
+      if (this.holdSaid.get(repo.id) !== text) this.d.say(`${repo.title}#${ticket.issue.number} waits: ${text}`);
+      this.holdSaid.set(repo.id, text);
+      return { waits: text };
+    }
+    this.holdSaid.delete(repo.id);
+    this.d.gate.forget(holdId);
+    // the gate counts it from now, so the next repo's verdict counts this one; the chooser goes on
+    // once T3 has it (or it ended before), so builds launch in the pass's order
+    return {
+      launch: () => new Promise<void>((launched) => {
+        this.track(repo.id, this.build(repo, ticket, base, verdict, launched).finally(launched));
+      }),
+    };
   }
 
   private track(repo: string, build: Promise<Job>) {
     this.building.set(repo, build);
     build.then(() => {}, (e) => this.d.say(`a build in ${repo} stopped: ${(e as Error).message}`)).finally(() => {
       this.building.delete(repo);
-      void this.pass();
+      // a build that ended may have opened its PR or freed its ticket: read again on the next pass
+      this.readAt.delete(repo);
+      if (!this.stopped) this.d.freed?.();
     });
   }
 
@@ -354,6 +348,7 @@ export class BuildLane {
         const pr = await this.d.github.pullForBranch(job.github!, job.branch);
         const done = await this.d.log.pr(job.id, pr);
         this.d.say(`${job.title}: ${done.end!.outcome}${pr ? `, PR #${pr.number}` : ''}`);
+        if (!this.stopped) this.d.freed?.(); // its repo was held while its PR wasn't known
       } catch (e) {
         this.d.say(`${job.title}: its PR lookup failed again (${(e as Error).message}); tried again next pass`);
       }

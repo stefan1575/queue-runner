@@ -45,7 +45,7 @@ class LanesGitHub extends FakeMergeGitHub {
     return super.pullsToReview(repo);
   }
   async openPulls(repo: string) {
-    return (this.reviewPulls[repo] ?? []).map((p) => ({ number: p.number, branch: p.branch, body: p.body }));
+    return (this.reviewPulls[repo] ?? []).map((p) => ({ number: p.number, branch: p.branch, body: p.body, url: p.url }));
   }
   async pull(repo: string, n: number) {
     const p = (this.reviewPulls[repo] ?? []).find((x) => x.number === n);
@@ -60,7 +60,8 @@ class LanesGitHub extends FakeMergeGitHub {
 }
 
 class FakeGit {
-  constructor(private gh: LanesGitHub) {}
+  private gh: LanesGitHub;
+  constructor(gh: LanesGitHub) { this.gh = gh; }
   async fetch() {}
   async hasBranch() { return false; }
   async fetchPr(folder: string, n: number) {
@@ -209,7 +210,7 @@ describe('one Claude job per repo', () => {
     await chooser.pass();
     expect(t3.launches).toHaveLength(0);
     expect(t3.sends).toHaveLength(0);
-    expect(lines.some((l) => l.includes('Queue runner fix: app#4 is its Claude job'))).toBe(true);
+    expect(lines.some((l) => l.includes('Queue runner fix: app#4 is its job'))).toBe(true);
     // the round ends (no push: PR #4 waits for the user), and the next job goes: #6's conflict round
     t3.endRun('thread-b', 'completed');
     await until(() => t3.launches.length === 1);

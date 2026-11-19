@@ -19,6 +19,7 @@ import { existsSync } from 'node:fs';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { Chooser } from '../src/chooser.ts';
 import { ConflictLane } from '../src/conflict-lane.ts';
 import { GitCli } from '../src/git.ts';
 import { GhGitHub } from '../src/github.ts';
@@ -106,7 +107,7 @@ try {
   check('GitHub says the PR conflicts', (await mergeable(n, false)) === false);
   check("the base's tip is read from the branch", (await github.branchHead(GITHUB, 'main')) === tip);
 
-  // 2. the lane's pass: one round on the check's PR only
+  // 2. the chooser's pass (#210): one round on the check's PR only
   const only = n;
   const lane = new ConflictLane({
     repos: () => [repo],
@@ -118,8 +119,9 @@ try {
     git, mcp, ws, catalog: () => catalog, user: async () => 'the live check', log, exists: existsSync, say,
     gate: { pick: () => ({ fits: true, choice, onFallback: false, cost: {} }), started() {}, finished() {}, dropped() {}, forget() {} } as any,
   });
-  await lane.pass();
-  await lane.idle();
+  const chooser = new Chooser({ repos: () => [repo], lanes: [lane], log, say });
+  await chooser.pass();
+  await chooser.idle();
   const rounds = log.jobs().filter((j) => j.kind === 'conflict');
   const job = rounds[0];
   workBranch = job?.workBranch ?? null;

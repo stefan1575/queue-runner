@@ -5,12 +5,15 @@
 //
 //   GitHub says H can't merge (`mergeable: false`; null, still working it out, is not known yet:
 //   that PR, and every newer one, waits for GitHub's answer on a later pass)
-//   ->  nothing writes to the branch, no review of the PR is running, H's blocking review has had
-//       its fix round, nothing on H is left for the user, it's no stop  ->  oldest first, one at a
-//       time  ->  the gate (kind `conflict`)  ->  the PR's head fetched (moved: nothing starts), the
+//   ->  nothing that may write to the branch again (a question, a usage limit), no review of the
+//       PR is running, H's blocking review has had its fix round, nothing on H is left for the
+//       user, it's no stop  ->  oldest first, one at a time  ->  the gate (kind `conflict`)  ->  the PR's head fetched (moved: nothing starts), the
 //       base's own tip read from GitHub  ->  the brief (src/briefs/conflict.ts)  ->  a new thread
 //   ->  its end from T3's thread events; the PR's head read again: pushed (reviewed next) or not,
 //       which is a stop  ->  the end recorded and the thread settled, then the review lane passes
+//
+// **When a round starts is the chooser's** (src/chooser.ts, #210): one job per repo, so no
+// round starts while another job of the repo's runs, a conflict round included.
 //
 // **One conflicted PR at a time** in a repo, lowest number first: while another open PR that had a
 // conflict round is still being moved by the loop (`moving`: a job on it, a review, fix round or
@@ -46,6 +49,7 @@ import { REVIEWED, settles, type Job, type JobEnd, type JobLog, type StopStart }
 import type { Catalog, ModelChoice } from './jobs.ts';
 import { launchJob } from './launch.ts';
 import { closedIssues, JOB_BRANCH_PREFIX } from './picker.ts';
+import type { RepoJobLane, Next } from './chooser.ts';
 import { ThreadSettler } from './settle.ts';
 import type { T3Mcp } from './t3/mcp.ts';
 import type { Retry } from './t3/project-feed.ts';
@@ -68,6 +72,8 @@ export type ConflictLaneDoors = {
   say: (line: string) => void;
   /** A round ended (the review lane passes: its pushed head is reviewed next). */
   ended?: (job: Job) => void;
+  /** A round is over, or started nothing: the chooser passes. */
+  freed?: () => void;
   restMs?: number;
   retry?: Retry;
   now?: () => Date;
@@ -85,14 +91,15 @@ export const conflictTitle = (repo: BuildRepo, n: number) => `Queue runner confl
 export const conflictBranch = (n: number, sha: string) => `${JOB_BRANCH_PREFIX}conflict-pr${n}-${sha.slice(0, 7)}`;
 
 const join = (folder: string, name: string) => `${folder.replace(/[\\/]+$/, '')}/${name}`;
-const WRITING = (j: Job) => !j.end || j.end.outcome === 'waiting' || j.end.outcome === 'usage-limit';
+/** A job on the branch that ended on a question or a usage limit: it may write to it again. */
+const MAY_WRITE_AGAIN = (j: Job) => j.end?.outcome === 'waiting' || j.end?.outcome === 'usage-limit';
 /** A round that got as far as its thread (or may have): every end but `not-started`. */
 const RAN = (j: Job) => j.end?.outcome !== 'not-started';
 
 /** A round that started no thread, for a reason the lane gives. */
 class NotStarted extends Error {}
 
-export class ConflictLane {
+export class ConflictLane implements RepoJobLane {
   private d: ConflictLaneDoors;
   private now: () => Date;
   private settler: ThreadSettler;
@@ -101,8 +108,6 @@ export class ConflictLane {
   private watches = new Set<{ stop(): void }>();
   private why = new Map<string, string | null>();
   private resting = new Map<string, number>();
-  private passing: Promise<void> | null = null;
-  private again = false;
   private stopped = false;
 
   constructor(doors: ConflictLaneDoors) {
@@ -111,13 +116,12 @@ export class ConflictLane {
     this.settler = new ThreadSettler(doors.mcp, doors.log, doors.say);
   }
 
-  /** Each round the log shows open is watched again (or needs the user), then a pass. */
-  start(): Promise<void> {
+  /** Each round the log shows open is watched again (or needs the user). */
+  recover(): void {
     for (const job of this.d.log.open()) {
       if (job.kind !== 'conflict') continue;
       this.track(`${job.github}#${job.issue}`, this.resume(job));
     }
-    return this.pass();
   }
 
   stop() {
@@ -125,34 +129,18 @@ export class ConflictLane {
     for (const w of this.watches) w.stop();
   }
 
-  usageChanged(): void {
-    if ([...this.why.values()].some((w) => w?.startsWith('waits:'))) void this.pass();
+  usageChanged(): boolean {
+    return [...this.why.values()].some((w) => w?.startsWith('waits:'));
   }
 
-  async answered(jobId: string): Promise<void> {
-    if (!this.d.log.get(jobId)?.answeredAt) await this.d.log.answered(jobId);
-    await this.pass();
+  busy(repo: BuildRepo): boolean {
+    return [...this.running.keys()].some((k) => k.startsWith(`${repo.github}#`));
   }
 
   async idle(): Promise<void> {
-    while (this.running.size || this.passing || this.settler.pending().length) {
-      await Promise.allSettled([...this.running.values(), this.passing, ...this.settler.pending()]);
+    while (this.running.size || this.settler.pending().length) {
+      await Promise.allSettled([...this.running.values(), ...this.settler.pending()]);
     }
-  }
-
-  pass(): Promise<void> {
-    if (this.stopped) return Promise.resolve();
-    if (this.passing) {
-      this.again = true;
-      return this.passing;
-    }
-    this.passing = (async () => {
-      do {
-        this.again = false;
-        await this.passOnce();
-      } while (this.again && !this.stopped);
-    })().finally(() => { this.passing = null; });
-    return this.passing;
   }
 
   private note(key: string, name: string, why: string | null) {
@@ -166,68 +154,73 @@ export class ConflictLane {
       if (job?.end && !this.stopped) this.d.ended?.(job);
     }, (e) => this.d.say(`a conflict round on ${key} stopped: ${(e as Error).message}`)).finally(() => {
       this.running.delete(key);
-      if (!this.stopped) void this.pass();
+      if (!this.stopped) this.d.freed?.();
     });
   }
 
-  private async passOnce() {
+  owed(): void {
     this.settler.owed('conflict');
-    for (const repo of this.d.repos()) {
-      if (this.stopped) return;
-      if (!repo.github || this.d.log.needingUser(repo.id).length) continue;
-      let pulls: ReviewPull[];
-      // GitHub's word on each open PR: it conflicts (true), or not (false), or it's still working it
-      // out (null: not known yet, read again next pass). One read failing leaves the repo for the
-      // next pass: who goes first needs them all.
-      const conflicts = new Map<number, boolean | null>();
-      try {
-        pulls = (await this.d.github.pullsToReview(repo.github)).sort((a, b) => a.number - b.number);
-        for (const pr of pulls) {
-          const mergeable = (await this.d.github.pull(repo.github, pr.number)).mergeable;
-          conflicts.set(pr.number, mergeable === null ? null : !mergeable);
-        }
-      } catch (e) {
-        this.note(`${repo.github}`, repo.title, `GitHub couldn't be read for conflicts (${(e as Error).message})`);
+  }
+
+  /** The repo's next conflict round: its lowest-numbered conflicting PR that gets one now, if the
+   *  gate lets it in (held, the round waits and so does the repo). A read that fails throws. */
+  async next(repo: BuildRepo): Promise<Next> {
+    if (this.stopped || !repo.github) return null;
+    let pulls: ReviewPull[];
+    // GitHub's word on each open PR: it conflicts (true), or not (false), or it's still working it
+    // out (null: not known yet, read again next pass). One read failing leaves the repo for the
+    // next pass: who goes first needs them all.
+    const conflicts = new Map<number, boolean | null>();
+    try {
+      pulls = (await this.d.github.pullsToReview(repo.github)).sort((a, b) => a.number - b.number);
+      for (const pr of pulls) {
+        const mergeable = (await this.d.github.pull(repo.github, pr.number)).mergeable;
+        conflicts.set(pr.number, mergeable === null ? null : !mergeable);
+      }
+    } catch (e) {
+      throw new Error(`GitHub couldn't be read for conflicts (${(e as Error).message})`);
+    }
+    let first: ReviewPull | null = null;
+    let waits: string | null = null;
+    // oldest first: a PR GitHub hasn't answered for may conflict, so no newer one goes before it
+    let unknown: ReviewPull | null = null;
+    for (const pr of pulls) {
+      if (this.stopped) return null;
+      const key = `${repo.github}#${pr.number}`;
+      const name = `conflict ${repo.title}#${pr.number}`;
+      if (conflicts.get(pr.number) === null) {
+        // the PR's own writer or review aside, nothing acts on it until GitHub says
+        unknown ??= pr;
+        this.note(key, name, `GitHub hasn't worked out yet whether ${pr.headSha.slice(0, 7)} conflicts with ${pr.base}; read again next pass`);
         continue;
       }
-      this.why.delete(repo.github);
-      let first: ReviewPull | null = null;
-      // oldest first: a PR GitHub hasn't answered for may conflict, so no newer one goes before it
-      let unknown: ReviewPull | null = null;
-      for (const pr of pulls) {
-        if (this.stopped) return;
-        const key = `${repo.github}#${pr.number}`;
-        const name = `conflict ${repo.title}#${pr.number}`;
-        if (this.running.has(key)) continue;
-        if (conflicts.get(pr.number) === null) {
-          // the PR's own writer or review aside, nothing acts on it until GitHub says
-          unknown ??= pr;
-          this.note(key, name, `GitHub hasn't worked out yet whether ${pr.headSha.slice(0, 7)} conflicts with ${pr.base}; read again next pass`);
-          continue;
-        }
-        if (!conflicts.get(pr.number)) { this.why.delete(key); continue; }
-        // one conflicted PR at a time: a round running in the repo holds every other
-        const running = [...this.running.keys()].find((k) => k.startsWith(`${repo.github}#`));
-        let why: string | null = running ? `the conflict round on PR #${running.slice(repo.github.length + 1)} runs first: one conflicted PR at a time` : null;
-        try {
-          why ??= await this.whyNot(repo, pr, pulls, conflicts);
-        } catch (e) {
-          why = `reading it failed (${(e as Error).message})`;
-        }
-        if (!why && first) why = `PR #${first.number} resolves its conflict first: one conflicted PR at a time`;
-        if (!why && unknown) why = `GitHub hasn't said yet whether the older PR #${unknown.number} conflicts: oldest first`;
-        if (why) { this.note(key, name, why); continue; }
-        first = pr;
-        // the gate counts the round from now; the pass goes on once T3 has it
-        const v = this.d.gate.pick(`conflict:${key}`, 'conflict');
-        if (!v.fits) { this.note(key, name, `waits: ${holdText(v.hold, (d) => d.toISOString())}`); continue; }
-        this.d.gate.forget(`conflict:${key}`);
-        this.why.set(key, null);
-        await new Promise<void>((launched) => {
-          this.track(key, this.round(repo, pr, v, launched).finally(launched));
-        });
+      if (!conflicts.get(pr.number)) { this.why.delete(key); continue; }
+      let why: string | null;
+      try {
+        why = await this.whyNot(repo, pr, pulls, conflicts);
+      } catch (e) {
+        throw new Error(`PR #${pr.number} couldn't be read for its conflict round (${(e as Error).message})`);
       }
+      if (!why && first) why = `PR #${first.number} resolves its conflict first: one conflicted PR at a time`;
+      if (!why && unknown) why = `GitHub hasn't said yet whether the older PR #${unknown.number} conflicts: oldest first`;
+      if (why) { this.note(key, name, why); continue; }
+      first = pr;
+      const v = this.d.gate.pick(`conflict:${key}`, 'conflict');
+      if (!v.fits) {
+        waits = `waits: ${holdText(v.hold, (d) => d.toISOString())}`;
+        this.note(key, name, waits);
+        continue; // a round held by the gate holds the rest too (`first`)
+      }
+      this.d.gate.forget(`conflict:${key}`);
+      this.why.set(key, null);
+      // the gate counts the round from now; the chooser goes on once T3 has it
+      return {
+        launch: () => new Promise<void>((launched) => {
+          this.track(key, this.round(repo, pr, v, launched).finally(launched));
+        }),
+      };
     }
+    return waits === null ? null : { waits };
   }
 
   /** Why the conflicting PR gets no round now, or null: cheapest first. A stop found here is
@@ -236,8 +229,8 @@ export class ConflictLane {
     const h = pr.headSha;
     const h7 = h.slice(0, 7);
     const jobs = this.d.log.jobs().filter((j) => j.repo === repo.id);
-    // one writer per PR
-    const writer = jobs.find((j) => j.kind !== 'review' && j.branch === pr.branch && WRITING(j));
+    // a job on the branch that may write to it again (one running is the chooser's to wait on)
+    const writer = jobs.find((j) => j.kind !== 'review' && j.branch === pr.branch && MAY_WRITE_AGAIN(j));
     if (writer) return `a ${writer.kind} job is writing to ${pr.branch}`;
     // a review under way decides on H first; the round would make it a review of a stale head
     if (jobs.some((j) => j.kind === 'review' && j.issue === pr.number && !j.end)) return `a review of PR #${pr.number} is running`;
@@ -319,7 +312,7 @@ export class ConflictLane {
     const review = this.newestReview(repo, pr);
     if (review && (review.end!.outcome === 'stop' || review.end!.outcome === 'approach-note')) return `review ${review.round} of ${h7} ended ${review.end!.outcome}`;
     const round = this.d.log.jobs().filter((j) => j.repo === repo.id && (j.kind === 'fix' || j.kind === 'conflict') && j.issue === pr.number
-      && j.sha === h && j.end && RAN(j) && !WRITING(j)).at(-1);
+      && j.sha === h && j.end && RAN(j) && !MAY_WRITE_AGAIN(j)).at(-1);
     if (round) return `a ${round.kind} round on ${h7} ended ${round.end!.outcome} without a push`;
     const ready = this.d.log.steps().filter((s) => s.kind === 'ready' && s.repo === repo.id && s.pr === pr.number && s.end).at(-1);
     if (ready?.end?.outcome === 'marked' && ready.sha === h) return `${h7} is marked ready for you to merge`;
@@ -399,11 +392,9 @@ export class ConflictLane {
     });
     this.d.gate.started({ id: job.id, kind: 'conflict', choice: letIn.choice }, letIn.cost);
     if (!this.d.repos().some((r) => r.id === repo.id)) return this.notStarted(job, `${repo.title} is no longer served`);
-    // one writer per PR, asked again after the slow steps: a job another lane started on the PR
-    // meanwhile (a fix round on its branch, a review of it) goes on alone
-    const other = this.d.log.jobs().find((j) => j.id !== job.id && j.repo === repo.id
-      && ((j.kind !== 'review' && j.branch === pr.branch && WRITING(j)) || (j.kind === 'review' && j.issue === n && !j.end)));
-    if (other) return this.notStarted(job, `a ${other.kind} job started on PR #${n} meanwhile`);
+    // a review of the PR started meanwhile (the review lane runs beside the chooser) goes on alone
+    const review = this.d.log.jobs().find((j) => j.kind === 'review' && j.repo === repo.id && j.issue === n && !j.end);
+    if (review) return this.notStarted(job, `a review of PR #${n} started meanwhile`);
     const catalog = this.d.catalog();
     if (!catalog) return this.notStarted(job, "T3's providers aren't known yet");
     let thread: { threadId: string; runId: string | null; link: string | null };

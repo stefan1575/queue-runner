@@ -5,6 +5,7 @@
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { Chooser } from '../src/chooser.ts';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { BuildLane, servedRepos, type BuildLaneDoors, type BuildRepo } from '../src/build-lane.ts';
 import { CostLog } from '../src/cost-log.ts';
@@ -69,6 +70,8 @@ const retryNow = () => { const due = [...retries]; retries.clear(); for (const f
 let served: BuildRepo[];
 let jobs: Jobs;
 let lane: BuildLane;
+/** The lane behind a chooser of its own: the chooser starts its jobs (#210). */
+let chooser: Chooser;
 
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), 'qr-lane-'));
@@ -92,13 +95,15 @@ afterEach(async () => {
   await rm(dir, { recursive: true, force: true });
 });
 
-function makeLane(part: Partial<BuildLaneDoors> = {}): BuildLane {
+function makeLane(part: Partial<BuildLaneDoors> = {}): Chooser {
   lane = new BuildLane({
     repos: () => served, github: gh, git, mcp, ws, gate: new RoomyGate() as any, catalog: () => catalog, jobs: () => jobs,
     user: async () => 'Robin', log, exists: (p) => p === 'C:/code/app/AGENTS.md', say: (l) => lines.push(l),
-    retry: (again) => { retries.add(again); return () => { retries.delete(again); }; }, ...part,
+    retry: (again) => { retries.add(again); return () => { retries.delete(again); }; },
+    freed: () => void chooser.pass(), ...part,
   });
-  return lane;
+  chooser = new Chooser({ repos: () => lane['d'].repos(), lanes: [lane], log, say: (l) => lines.push(l), now: lane['now'] });
+  return chooser;
 }
 
 const until = (f: () => boolean) => vi.waitFor(() => { if (!f()) throw new Error('not yet'); }, { timeout: 2000, interval: 5 });
@@ -163,11 +168,11 @@ describe('picking and launching', () => {
     git.slow = new Promise((r) => { fetched = r; });
     const gate = new RoomyGate();
     makeLane({ gate: gate as any });
-    void lane.pass();
+    void chooser.pass();
     await until(() => git.calls.length > 0);
     served = [];
     fetched();
-    await lane.idle();
+    await chooser.idle();
     expect(t3.launches).toEqual([]);
     expect(log.jobs()[0]!.end).toMatchObject({ outcome: 'not-started', error: expect.stringMatching(/no longer served/) });
     expect(log.heldIssues('p-app')).toEqual(new Set());
@@ -178,11 +183,11 @@ describe('picking and launching', () => {
     gh.ready['owner/app'] = [issue(5)];
     let named!: (name: string) => void;
     makeLane({ user: () => new Promise((r) => { named = r; }) });
-    void lane.pass();
+    void chooser.pass();
     await until(() => named !== undefined);
     served = [];
     named('Robin');
-    await lane.idle();
+    await chooser.idle();
     expect(t3.launches).toEqual([]);
     expect(log.jobs()[0]!.end?.outcome).toBe('not-started');
   });
@@ -202,7 +207,7 @@ describe('picking and launching', () => {
     let fetched!: () => void;
     git.slow = new Promise((r) => { fetched = r; });
     makeLane();
-    void lane.pass();
+    void chooser.pass();
     await until(() => git.calls.length > 0);
     jobs = { ...jobs, build: { own: SOL, fallback: null } };
     fetched();
@@ -219,7 +224,7 @@ describe('picking and launching', () => {
     let fetched!: () => void;
     git.slow = new Promise((r) => { fetched = r; });
     makeLane({ gate: gate as any });
-    void lane.pass();
+    void chooser.pass();
     await until(() => git.calls.length > 0);
     jobs = { ...jobs, build: { own: BUILD, fallback: null } };
     fetched();
@@ -234,12 +239,13 @@ describe('picking and launching', () => {
     gh.ready['owner/lib'] = [issue(3)];
     gh.pulls['owner/app'] = [{ number: 40, branch: 'someone/their-change', body: 'Their own change.', url: 'https://github.com/owner/app/pull/40' }];
     await makeLane().pass();
-    await lane.pass();
+    await chooser.pass();
     // app waits on its open PR; lib, with none, builds side by side as ever
     expect(t3.launches.map((l) => l.projectId)).toEqual(['p-lib']);
     expect(lines.filter((l) => /app: no build while PR #40 is open/.test(l))).toHaveLength(1);
-    gh.pulls['owner/app'] = []; // merged
-    await lane.pass();
+    gh.pulls['owner/app'] = []; // merged: the merge lane asks for the tickets again (#210)
+    lane.ticketsDue();
+    await chooser.pass();
     expect(t3.launches.map((l) => l.title)).toEqual(['Queue runner build: lib#3', 'Queue runner build: app#5']);
   });
 
@@ -248,11 +254,11 @@ describe('picking and launching', () => {
     let fetched!: () => void;
     git.slow = new Promise((r) => { fetched = r; });
     makeLane();
-    void lane.pass();
+    void chooser.pass();
     await until(() => git.calls.length > 0);
     gh.pulls['owner/app'] = [{ number: 41, branch: 'someone/else', body: '', url: 'u' }];
     fetched();
-    await lane.idle();
+    await chooser.idle();
     expect(t3.launches).toEqual([]);
     expect(log.jobs()[0]!.end).toMatchObject({ outcome: 'not-started', error: expect.stringMatching(/PR #41 was opened/) });
   });
@@ -270,7 +276,7 @@ describe('the end', () => {
     await makeLane({ gate: gate as any }).pass();
     await watching('thread-1');
     t3.hitUsageLimit('thread-1', '2026-11-19T15:00:00.000Z');
-    await lane.idle();
+    await chooser.idle();
     const [job] = log.jobs();
     expect(gate.calls).toContain(`finished ${job!.id} out of usage until 2026-11-19T15:00:00.000Z`);
   });
@@ -283,7 +289,7 @@ describe('the end', () => {
     await watching('thread-1');
     expect(organized()).toEqual([]);
     t3.endRun('thread-1', 'completed');
-    await lane.idle();
+    await chooser.idle();
     const [job] = log.jobs();
     expect(job).toMatchObject({ issue: 5, threadId: 'thread-1', runId: 'run-1', choice: BUILD, end: { outcome: 'done', status: 'completed', pr: { number: 77 } } });
     // recorded, then settled: the settle is the last call, on the thread the app launched
@@ -305,7 +311,7 @@ describe('the end', () => {
     await watching('thread-2');
     t3.threadEvent('thread-2', 'turn-item', { id: 'e', type: 'error', status: 'failed', runId: 'run-2', nodeId: 'node-2', failure: { class: 'provider_error', message: 'boom' } });
     t3.endRun('thread-2', 'failed');
-    await lane.idle();
+    await chooser.idle();
     expect(log.jobs().map((j) => [j.issue, j.end?.outcome, j.end?.error ?? null])).toEqual([[5, 'done-no-pr', null], [6, 'failed', 'boom']]);
     expect(organized().map((a) => a.threadId)).toEqual(['thread-1', 'thread-2']);
   });
@@ -317,13 +323,13 @@ describe('the end', () => {
     await makeLane().pass();
     await watching('thread-1');
     t3.endRun('thread-1', 'completed');
-    await lane.idle();
+    await chooser.idle();
     const [job] = log.jobs();
     expect(job!.end).toMatchObject({ outcome: 'done', error: expect.stringMatching(/PR lookup failed/) });
     expect(job!.end!.pr).toBeUndefined();
     expect(organized()).toEqual([{ threadId: 'thread-1', action: 'settle' }]);
-    await lane.pass();
-    await lane.idle();
+    await chooser.pass();
+    await chooser.idle();
     expect(log.get(job!.id)!.end).toMatchObject({ outcome: 'done', pr: { number: 77 } });
     expect(log.get(job!.id)!.end!.error).toBeUndefined();
     // looked up once it's found: a pass after that reads nothing more
@@ -336,13 +342,13 @@ describe('the end', () => {
     await makeLane().pass();
     await watching('thread-1');
     t3.endRun('thread-1', 'completed');
-    await lane.idle();
+    await chooser.idle();
     lane.stop();
     expect(log.jobs()[0]!.end!.outcome).toBe('done');
     // restarted: the log as the stopped app left it
     log = await JobLog.open(join(dir, 'jobs.jsonl'), undefined, jobFiles);
     await makeLane().start();
-    await lane.idle();
+    await chooser.idle();
     expect(log.jobs()[0]!.end).toMatchObject({ outcome: 'done-no-pr', pr: null });
     log = await JobLog.open(join(dir, 'jobs.jsonl'), undefined, jobFiles);
     expect(log.jobs()[0]!.end).toMatchObject({ outcome: 'done-no-pr', pr: null });
@@ -357,7 +363,7 @@ describe('the end', () => {
     await until(() => t3.launches.length === 2);
     await watching('thread-2');
     t3.hitUsageLimit('thread-2', '2026-11-19T15:00:00.000Z');
-    await lane.idle();
+    await chooser.idle();
     expect(log.jobs().map((j) => j.end)).toMatchObject([
       { outcome: 'waiting', request: 'user_input' },
       { outcome: 'usage-limit', resetAt: '2026-11-19T15:00:00.000Z' },
@@ -370,7 +376,7 @@ describe('the end', () => {
     git.leftover.add('claude/ticket-number-5-5');
     const gate = new RoomyGate();
     await makeLane({ gate: gate as any }).pass();
-    await lane.idle();
+    await chooser.idle();
     expect(t3.launches).toEqual([]);
     expect(log.jobs()[0]!.end).toMatchObject({ outcome: 'branch-exists' });
     expect(log.jobs()[0]!.made).toBeUndefined(); // the branch was there before: never the app's (#156 F15)
@@ -383,11 +389,11 @@ describe('the end', () => {
     gh.ready['owner/app'] = [issue(5)];
     t3.launchFailure = { code: 'invalid_request', message: 'The project was not found.' };
     await makeLane({ restMs: 60_000 }).pass();
-    await lane.idle();
+    await chooser.idle();
     expect(log.jobs()[0]!.end).toMatchObject({ outcome: 'not-started', error: expect.stringMatching(/project was not found/) });
     expect(log.heldIssues('p-app')).toEqual(new Set());
     t3.launchFailure = null;
-    await lane.pass();
+    await chooser.pass();
     expect(t3.launches).toEqual([]); // resting
   });
 
@@ -396,7 +402,7 @@ describe('the end', () => {
     t3.launchAnswerLost = true; // T3 starts thread-1, and its answer is lost on the way
     const gate = new RoomyGate();
     await makeLane({ gate: gate as any, restMs: 0 }).pass();
-    await lane.idle();
+    await chooser.idle();
     const [job] = log.jobs();
     expect(job).toMatchObject({ issue: 5, end: { outcome: 'needs-user', error: expect.stringMatching(/answer was lost/) } });
     expect(job!.threadId).toBeUndefined();
@@ -409,10 +415,10 @@ describe('the end', () => {
     expect(log.heldIssues('p-app')).toEqual(new Set([5]));
     // no second build in the repo, however many passes, until the user answers
     t3.launchAnswerLost = false;
-    await lane.pass();
-    await lane.pass();
+    await chooser.pass();
+    await chooser.pass();
     expect(t3.launches).toHaveLength(1);
-    await lane.answered(job!.id); // its pass waits for the launch
+    await chooser.answered(job!.id); // its pass waits for the launch
     expect(t3.launches.map((l) => l.title)).toEqual(['Queue runner build: app#5', 'Queue runner build: app#6']);
   });
 
@@ -422,7 +428,7 @@ describe('the end', () => {
     await log.ended(review.id, { outcome: 'needs-user', error: 'lost' });
     await makeLane().pass();
     expect(t3.launches).toEqual([]);
-    await lane.answered(review.id);
+    await chooser.answered(review.id);
     expect(t3.launches.map((l) => l.title)).toEqual(['Queue runner build: app#5']);
   });
 
@@ -430,7 +436,7 @@ describe('the end', () => {
     gh.ready['owner/app'] = [issue(5)];
     const down = { call: async () => { throw new Error("T3's server can't be reached"); } };
     await makeLane({ mcp: down as any }).pass();
-    await lane.idle();
+    await chooser.idle();
     expect(log.jobs()[0]!.end).toMatchObject({ outcome: 'not-started' });
   });
 
@@ -443,7 +449,7 @@ describe('the end', () => {
     retryNow();
     await watching('thread-1');
     t3.endRun('thread-1', 'completed');
-    await lane.idle();
+    await chooser.idle();
     expect(log.jobs()[0]!.end?.outcome).toBe('done-no-pr');
   });
 });
@@ -456,7 +462,7 @@ describe('an app that stopped mid-build', () => {
     t3.threadState['look-alike'] = { id: 'look-alike', projectId: 'p-app', title: 'Queue runner build: app#5', branch: 'claude/x-5', runtimeRequests: [], turnItems: [], runs: [{ id: 'r', ordinal: 1, rootNodeId: 'n', status: 'completed' }] };
     const gate = new RoomyGate();
     await makeLane({ gate: gate as any }).start();
-    await lane.idle();
+    await chooser.idle();
     expect(log.get(open.id)).toMatchObject({ end: { outcome: 'needs-user', error: expect.stringMatching(/stopped before T3 named its thread/) } });
     expect(log.get(open.id)!.threadId).toBeUndefined();
     expect(t3.threadStreamCount('look-alike')).toBe(0);
@@ -468,7 +474,7 @@ describe('an app that stopped mid-build', () => {
     log = await JobLog.open(join(dir, 'jobs.jsonl'), undefined, jobFiles);
     await makeLane().start();
     expect(t3.launches).toEqual([]);
-    await lane.answered(open.id);
+    await chooser.answered(open.id);
     expect(t3.launches.map((l) => l.title)).toEqual(['Queue runner build: app#7']);
   });
 
@@ -513,7 +519,7 @@ describe('an app that stopped between recording an end and settling its thread (
     // restarted: the log as an app that stopped before settling left it
     log = await JobLog.open(join(dir, 'jobs.jsonl'), undefined, jobFiles);
     await makeLane().start();
-    await lane.idle();
+    await chooser.idle();
     expect(organized()).toEqual([{ threadId: 't-1', action: 'settle' }, { threadId: 't-2', action: 'settle' }]);
     expect([done, failed].map((j) => log.get(j.id)!.settledAt)).toEqual([expect.any(String), expect.any(String)]);
     // recorded on disk, so a start after this one settles nothing again
@@ -521,7 +527,7 @@ describe('an app that stopped between recording an end and settling its thread (
     lane.stop();
     t3.toolCalls.length = 0;
     await makeLane().start();
-    await lane.idle();
+    await chooser.idle();
     expect(organized()).toEqual([]);
   });
 
@@ -529,12 +535,12 @@ describe('an app that stopped between recording an end and settling its thread (
     const job = await ended(1, 'done', 'gone-thread');
     delete t3.threadState['gone-thread'];
     await makeLane().start();
-    await lane.idle();
+    await chooser.idle();
     expect(lines.join('\n')).toMatch(/settling its thread gone-thread failed/);
     expect(log.get(job.id)!.settledAt).toBeUndefined();
     t3.threadState['gone-thread'] = { id: 'gone-thread', projectId: 'p-app', runtimeRequests: [], turnItems: [], runs: [] };
-    await lane.pass();
-    await lane.idle();
+    await chooser.pass();
+    await chooser.idle();
     expect(organized().map((a) => a.threadId)).toEqual(['gone-thread', 'gone-thread']);
     expect(log.get(job.id)!.settledAt).toEqual(expect.any(String));
   });
@@ -577,7 +583,7 @@ describe('an app that stopped mid-build, measured', () => {
     const again = new UsageGate(source, () => settings, await CostLog.open(costs), () => now);
     const started = vi.spyOn(again, 'started');
     makeLane({ gate: again, catalog: () => source.current().catalog });
-    void lane.start();
+    void chooser.start();
     await watching('thread-1');
     // reserved at the cost it was let in at, not what the gate would ask of a new build at 25%
     expect(started.mock.calls[0]![1]).toEqual(admitted.cost);
@@ -614,7 +620,7 @@ describe('repos side by side', () => {
     expect(t3.launches.map((l) => [l.projectId, l.workspaceStrategy.branch])).toEqual([
       ['p-app', 'claude/ticket-number-1-1'], ['p-lib', 'claude/ticket-number-3-3'],
     ]);
-    await lane.pass(); // another pass while both run starts nothing
+    await chooser.pass(); // another pass while both run starts nothing
     expect(t3.launches).toHaveLength(2);
     await watching('thread-2');
     t3.endRun('thread-2', 'completed'); // lib's ends: lib takes its next, app's still runs
@@ -646,8 +652,8 @@ describe('the usage gate', () => {
     const gate = new UsageGate(source, () => settings, await CostLog.open(join(dir, 'usage.jsonl')), () => now);
     gh.ready['owner/app'] = [issue(5)];
     makeLane({ gate, catalog: () => source.current().catalog });
-    gate.onChange(() => void lane.pass());
-    await lane.pass();
+    gate.onChange(() => chooser.usageChanged());
+    await chooser.pass();
     // Claude's 5-hour window is 46% used and a build is expected to take 60%
     expect(t3.launches).toEqual([]);
     expect(lines.join('\n')).toMatch(/app#5 waits: .*5-hour.*resets at/i);

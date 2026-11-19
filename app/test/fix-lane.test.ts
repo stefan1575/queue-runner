@@ -6,6 +6,7 @@
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { Chooser } from '../src/chooser.ts';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import type { BuildRepo } from '../src/build-lane.ts';
 import { FixLane, type FixLaneDoors } from '../src/fix-lane.ts';
@@ -87,6 +88,8 @@ let lines: string[];
 let jobs: Jobs;
 let ended: Job[];
 let lane: FixLane;
+/** The lane behind a chooser of its own: the chooser starts its jobs (#210). */
+let chooser: Chooser;
 
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), 'qr-fix-'));
@@ -110,13 +113,15 @@ afterEach(async () => {
   await rm(dir, { recursive: true, force: true });
 });
 
-function makeLane(part: Partial<FixLaneDoors> = {}) {
+function makeLane(part: Partial<FixLaneDoors> = {}): Chooser {
   lane = new FixLane({
     repos: () => [APP], github: gh, git, mcp, ws, gate, catalog: () => catalog, jobs: () => jobs, user: async () => 'Pat', log,
     exists: () => true, say: (l) => lines.push(l), ended: (j) => ended.push(j), retry: () => () => {},
-    now: () => new Date('2026-11-19T12:00:00Z'), ...part,
+    now: () => new Date('2026-11-19T12:00:00Z'),
+    freed: () => void chooser.pass(), ...part,
   });
-  return lane;
+  chooser = new Chooser({ repos: () => lane['d'].repos(), lanes: [lane], log, say: (l) => lines.push(l), now: lane['now'] });
+  return chooser;
 }
 
 /** The PR's builder: a build job with its thread, which T3 has. */
@@ -143,7 +148,7 @@ describe('a fix round', () => {
     await builder();
     await blocking(1, H, [finding({})]);
     makeLane();
-    await lane.pass();
+    await chooser.pass();
     await until(() => t3.sends.length === 1);
     expect(t3.sends[0]).toMatchObject({ threadId: 'thread-b', mode: 'queue' });
     expect(t3.sends[0].message).toContain('Fix round on PR #4 in owner/app: Add a thing');
@@ -156,7 +161,7 @@ describe('a fix round', () => {
     await until(() => t3.threadStreamCount('thread-b') > 0);
     gh.heads[4] = H2;
     t3.endRun('thread-b', 'completed');
-    await lane.idle();
+    await chooser.idle();
     expect(log.get(job.id)).toMatchObject({ end: { outcome: 'done', head: H2 }, settledAt: expect.any(String) });
     expect(ended.map((j) => j.id)).toEqual([job.id]);
     expect(lines.some((l) => l.includes('pushed 1234567: reviewed next'))).toBe(true);
@@ -168,13 +173,13 @@ describe('a fix round', () => {
     await blocking(1, H, [finding({})]);
     t3.sendOmitsRunId = true;
     makeLane();
-    await lane.pass();
+    await chooser.pass();
     await until(() => t3.threadStreamCount('thread-b') > 0);
     const job = fixes()[0]!;
     expect(job.runId).toBeNull();
     expect(log.get(job.id)!.end).toBeUndefined();
     t3.endRun('thread-b', 'completed');
-    await lane.idle();
+    await chooser.idle();
     expect(log.get(job.id)!.end).toMatchObject({ outcome: 'done' });
   });
 
@@ -182,12 +187,12 @@ describe('a fix round', () => {
     await builder();
     await blocking(1, H, [finding({})]);
     makeLane();
-    await lane.pass();
+    await chooser.pass();
     await until(() => t3.threadStreamCount('thread-b') > 0);
     t3.endRun('thread-b', 'completed');
-    await lane.idle();
+    await chooser.idle();
     expect(lines.some((l) => l.includes('without a push: the PR waits for you'))).toBe(true);
-    await lane.pass();
+    await chooser.pass();
     expect(t3.sends).toHaveLength(1);
     expect(lines.some((l) => l.includes('ended done and the head is still abcdef1: left for you'))).toBe(true);
   });
@@ -197,11 +202,12 @@ describe('a fix round', () => {
     await log.thread(build.id, { threadId: 'thread-b', runId: 'run-b', link: null });
     await blocking(1, H, [finding({})]);
     makeLane();
-    await lane.pass();
-    expect(lines.some((l) => l.includes('a build job is writing to claude/add-a-thing-3'))).toBe(true);
-    await log.ended(build.id, { outcome: 'done' });
+    await chooser.pass();
+    // a job open in the repo is the chooser's to wait on (one Claude job per repo, #210)
+    expect(lines.some((l) => l.includes('app: no new job now, b is its job'))).toBe(true);
+    await log.ended(build.id, { outcome: 'done', pr: { number: 4, url: '', state: 'open' } });
     gh.comments['owner/app#4']!.push({ author: 'me', createdAt: '2026-11-19T11:30:00Z', body: mark(2, 'clean', H2, []) });
-    await lane.pass();
+    await chooser.pass();
     expect(lines.some((l) => l.includes('its newest review comment is not the blocking review 1 of abcdef1'))).toBe(true);
     expect(t3.sends).toEqual([]);
   });
@@ -213,8 +219,8 @@ describe('a fix round', () => {
     const fetch = git.fetchPr.bind(git);
     git.fetchPr = async (f, n, b) => { served = []; return fetch(f, n, b); };
     makeLane({ repos: () => served });
-    await lane.pass();
-    await lane.idle();
+    await chooser.pass();
+    await chooser.idle();
     expect(t3.sends).toEqual([]);
     expect(fixes()[0]!.end).toMatchObject({ outcome: 'not-started', error: 'app is no longer served' });
     expect(gate.calls).toContain(`dropped ${fixes()[0]!.id}`);
@@ -222,8 +228,8 @@ describe('a fix round', () => {
     git.fetchPr = async () => H2;
     served = [APP];
     makeLane({ repos: () => served });
-    await lane.pass();
-    await lane.idle();
+    await chooser.pass();
+    await chooser.idle();
     expect(t3.sends).toEqual([]);
     expect(lines.some((l) => l.includes('the head moved from abcdef1 to 1234567'))).toBe(true);
   });
@@ -233,14 +239,14 @@ describe('a fix round', () => {
     await blocking(1, H, [finding({})]);
     gh.reviewPulls['owner/app'] = [pull({ branch: 'main', headRepo: 'someone/app' })];
     makeLane();
-    await lane.pass();
-    await lane.idle();
+    await chooser.pass();
+    await chooser.idle();
     expect(t3.sends).toEqual([]);
     expect(t3.launches).toEqual([]);
     const job = fixes()[0]!;
     expect(job.end).toMatchObject({ outcome: 'needs-user', error: expect.stringContaining('head is in someone/app, not owner/app') });
     expect(log.needingUser(APP.id)).toHaveLength(1);
-    await lane.answered(job.id);
+    await chooser.answered(job.id);
     expect(fixes()).toHaveLength(1);
   });
 
@@ -249,8 +255,8 @@ describe('a fix round', () => {
     await blocking(1, H, [finding({})]);
     gate.room = false;
     makeLane();
-    await lane.pass();
-    await lane.pass();
+    await chooser.pass();
+    await chooser.pass();
     expect(t3.sends).toEqual([]);
     expect(lines.filter((l) => l.includes('no fix round now, waits:'))).toHaveLength(1);
   });
@@ -263,7 +269,7 @@ describe('a fresh fixer', () => {
     await blocking(2, H, [finding({ status: 'open', raised: 1 })]);
     git.trees.push({ path: 'C:/t3/worktrees/app/claude-add-a-thing-3', branch: BRANCH });
     makeLane();
-    await lane.pass();
+    await chooser.pass();
     await until(() => t3.launches.length === 1);
     expect(t3.sends).toEqual([]);
     expect(t3.launches[0]).toMatchObject({
@@ -279,12 +285,12 @@ describe('a fresh fixer', () => {
     // the fresh fixer writes the PR from now on: the next round goes back to it
     t3.endRun('thread-1', 'completed');
     gh.heads[4] = H2;
-    await lane.idle();
+    await chooser.idle();
     const H3 = '9'.repeat(40);
     gh.reviewPulls['owner/app'] = [pull({ headSha: H3 })];
     git.heads[4] = H3;
     await blocking(3, H3, [finding({ id: 'F9', raised: 3 })]);
-    await lane.pass();
+    await chooser.pass();
     await until(() => t3.sends.length === 1);
     expect(t3.sends[0].threadId).toBe('thread-1');
   });
@@ -292,7 +298,7 @@ describe('a fresh fixer', () => {
   test("a PR no app thread wrote, with no worktree on its branch: a new worktree at H on the fix's own branch, pushing to the PR's", async () => {
     await blocking(1, H, [finding({})]);
     makeLane();
-    await lane.pass();
+    await chooser.pass();
     await until(() => t3.launches.length === 1);
     expect(t3.launches[0].workspaceStrategy).toEqual({ type: 'worktree', baseRef: H, branch: 'claude/fix-pr4-abcdef1' });
     expect(t3.launches[0].message).toContain('`git push origin HEAD:claude/add-a-thing-3`');
@@ -304,7 +310,7 @@ describe('a fresh fixer', () => {
     await blocking(1, H, [finding({})]);
     delete t3.threadState['thread-b'];
     makeLane();
-    await lane.pass();
+    await chooser.pass();
     await until(() => t3.launches.length === 1);
     expect(t3.sends).toEqual([]);
     expect(t3.launches[0].message).toContain("the PR's writer thread thread-b is gone in T3");
@@ -316,8 +322,8 @@ describe('a fresh fixer', () => {
     await blocking(1, H, [finding({})]);
     t3.wsMethods['orchestration.getThreadProjection'] = () => { throw new Error('busy'); };
     makeLane();
-    await lane.pass();
-    await lane.idle();
+    await chooser.pass();
+    await chooser.idle();
     expect(t3.launches).toEqual([]);
     expect(t3.sends).toEqual([]);
     expect(lines.some((l) => l.includes('not started'))).toBe(true);
@@ -328,7 +334,7 @@ describe('a fresh fixer', () => {
     await blocking(1, H, [finding({})]);
     t3.beforeSend = () => { delete t3.threadState['thread-b']; };
     makeLane();
-    await lane.pass();
+    await chooser.pass();
     await until(() => t3.launches.length === 1);
     expect(fixes()[0]!.end).toMatchObject({ outcome: 'not-started', error: expect.stringContaining('is gone in T3') });
     expect(t3.launches[0].message).toContain("the PR's writer thread thread-b is gone in T3");
@@ -348,7 +354,7 @@ describe("a send T3 refuses because the thread can't take a turn (F9)", () => {
       await blocking(1, H, [finding({})]);
       t3.sendFailure = failure;
       makeLane();
-      await lane.pass();
+      await chooser.pass();
       await until(() => t3.launches.length === 1);
       expect(fixes()[0]!.end).toMatchObject({ outcome: 'not-started', error: expect.stringContaining("can't take another turn") });
       expect(log.needingUser(APP.id)).toEqual([]);
@@ -364,12 +370,12 @@ describe('a send whose outcome is not known (F4)', () => {
     t3.sendFailure = { code: 'orchestration_error', message: "The run couldn't be read back." };
     t3.sendTaken = true;
     makeLane();
-    await lane.pass();
+    await chooser.pass();
     await until(() => t3.threadStreamCount('thread-b') > 0);
     const job = fixes()[0]!;
     expect(job).toMatchObject({ threadId: 'thread-b', runId: 'thread-b-run-2' });
     t3.endRun('thread-b', 'completed');
-    await lane.idle();
+    await chooser.idle();
     expect(log.get(job.id)!.end).toMatchObject({ outcome: 'done' });
     expect(t3.launches).toEqual([]);
   });
@@ -379,11 +385,11 @@ describe('a send whose outcome is not known (F4)', () => {
     await blocking(1, H, [finding({})]);
     t3.sendFailure = { code: 'orchestration_error', message: 'Something went wrong.' };
     makeLane();
-    await lane.pass();
-    await lane.idle();
+    await chooser.pass();
+    await chooser.idle();
     expect(fixes()[0]!.end).toMatchObject({ outcome: 'needs-user' });
     expect(log.needingUser(APP.id)).toHaveLength(1);
-    await lane.pass();
+    await chooser.pass();
     expect(t3.launches).toEqual([]);
   });
 
@@ -392,12 +398,12 @@ describe('a send whose outcome is not known (F4)', () => {
     await blocking(1, H, [finding({})]);
     t3.sendAnswerLost = true;
     makeLane();
-    await lane.pass();
+    await chooser.pass();
     await until(() => t3.threadStreamCount('thread-b') > 0);
     const job = fixes()[0]!;
     expect(job.runId).toBe('thread-b-run-2');
     t3.endRun('thread-b', 'completed');
-    await lane.idle();
+    await chooser.idle();
     expect(log.get(job.id)!.end).toMatchObject({ outcome: 'done' });
   });
 });
@@ -409,13 +415,13 @@ describe("after a restart, don't guess", () => {
     t3.sendAnswerLost = true;
     t3.beforeSend = () => { t3.wsMethods['orchestration.getThreadProjection'] = () => { throw new Error('busy'); }; };
     makeLane();
-    await lane.pass();
-    await lane.idle();
+    await chooser.pass();
+    await chooser.idle();
     const job = fixes()[0]!;
     expect(log.get(job.id)!.end).toMatchObject({ outcome: 'needs-user' });
     expect(log.needingUser(APP.id).map((j) => j.id)).toEqual([job.id]);
     t3.sendAnswerLost = false;
-    await lane.pass();
+    await chooser.pass();
     expect(t3.sends).toHaveLength(1); // the lost one T3 got; no other
   });
 
@@ -426,11 +432,11 @@ describe("after a restart, don't guess", () => {
     await log.thread(open.id, { threadId: 'thread-b', runId: null, link: null });
     t3.threadState['thread-b']!.runs.push({ id: 'run-new', threadId: 'thread-b', ordinal: 2, rootNodeId: 'n2', status: 'running' });
     makeLane();
-    void lane.start();
+    void chooser.start();
     await until(() => t3.threadStreamCount('thread-b') > 0);
     expect(log.get(open.id)!.end).toBeUndefined();
     t3.endRun('thread-b', 'completed');
-    await lane.idle();
+    await chooser.idle();
     expect(log.get(open.id)!.end).toMatchObject({ outcome: 'done' });
     expect(t3.sends).toEqual([]);
 
@@ -438,8 +444,8 @@ describe("after a restart, don't guess", () => {
     // the thread shows no run it didn't have before the send: the user's
     const lost = await log.started({ kind: 'fix', repo: APP.id, github: 'owner/app', issue: 4, branch: BRANCH, base: 'main', title: 'Queue runner fix: app#4', choice: BUILD, onFallback: false, sha: H2, round: 2, to: 'thread-b', knownRuns: ['run-b', 'run-new'] });
     makeLane();
-    await lane.start();
-    await lane.idle();
+    await chooser.start();
+    await chooser.idle();
     expect(log.get(lost.id)!.end).toMatchObject({ outcome: 'needs-user', error: expect.stringContaining('before T3 answered') });
   });
 
@@ -449,11 +455,11 @@ describe("after a restart, don't guess", () => {
     const open = await log.started({ kind: 'fix', repo: APP.id, github: 'owner/app', issue: 4, branch: BRANCH, base: 'main', title: 'Queue runner fix: app#4', choice: BUILD, onFallback: false, sha: H, round: 1, to: 'thread-b', knownRuns: ['run-b'] });
     t3.threadState['thread-b']!.runs.push({ id: 'run-taken', threadId: 'thread-b', ordinal: 2, rootNodeId: 'n2', status: 'running' });
     makeLane();
-    void lane.start();
+    void chooser.start();
     await until(() => t3.threadStreamCount('thread-b') > 0);
     expect(log.get(open.id)).toMatchObject({ threadId: 'thread-b', runId: 'run-taken' });
     t3.endRun('thread-b', 'completed');
-    await lane.idle();
+    await chooser.idle();
     expect(log.get(open.id)!.end).toMatchObject({ outcome: 'done' });
     expect(t3.sends).toEqual([]);
   });

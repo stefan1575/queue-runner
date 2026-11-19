@@ -11,6 +11,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { BuildLane, servedRepos } from '../build-lane.ts';
+import { Chooser } from '../chooser.ts';
 import { CostLog } from '../cost-log.ts';
 import { GitCli } from '../git.ts';
 import { GhGitHub, ghCli } from '../github.ts';
@@ -126,39 +127,42 @@ async function main() {
   gate.limitsFrom(log.jobs()); // a provider the last run saw run out stays held until its reset
   const say = (line: string) => console.log(`${new Date().toISOString()} ${line}`);
   const user = async () => briefName(view.get()) ?? 'the user';
+  // the chooser and the merge lane, made below; a lane's job that ends passes the chooser
+  const lanes: { chooser?: Chooser; merges?: MergeLane } = {};
+  const freed = () => void lanes.chooser?.pass();
   const lane = new BuildLane({
     repos: () => servedRepos(repos.list()), github, git: new GitCli(), mcp: t3Doors!.mcp, ws: t3Doors!.ws, gate,
-    catalog: () => catalog.current().catalog, jobs: () => settings.get().jobs, user, log, exists: existsSync, say,
+    catalog: () => catalog.current().catalog, jobs: () => settings.get().jobs, user, log, exists: existsSync, say, freed,
   });
   // The review lane (docs/app.md, Reviews): every open PR in a served repo, one review at a time.
-  // A review that ends tells the fix and merge lanes; a fix round that ends tells the review lane
-  // (its pushed head is reviewed next); a merge tells the build lane (docs/app.md, Fix rounds and
-  // merges). A conflict round that ends tells the review lane too; a review, a fix round or a merge
-  // that ends tells the conflict lane, since each may free a conflicted PR's turn (Conflict rounds).
-  const lanes: { fixes?: FixLane; merges?: MergeLane; conflicts?: ConflictLane } = {};
+  // The chooser (docs/app.md, How jobs are chosen) starts each served repo's one job: a fix round,
+  // a conflict round or a build, asked of their lanes in that order. A review that ends tells the
+  // chooser (a blocking one gets its round, a conflicted PR may get its turn) and the merge lane; a
+  // fix or conflict round that ends tells the review lane (its pushed head is reviewed next), and
+  // the chooser passes on any job's end (`freed`); a merge has the build lane read tickets again.
   const reviews = new ReviewLane({
     repos: () => servedRepos(repos.list()), github, git: new GitCli(), deps: new Deps(join(state, 'deps')),
     mcp: t3Doors!.mcp, ws: t3Doors!.ws, gate, catalog: () => catalog.current().catalog, jobs: () => settings.get().jobs,
     toolFree: () => settings.get().toolFreeInstances, user, log, stateDir: state, say,
-    ended: () => { void lanes.fixes?.pass(); void lanes.merges?.pass(); void lanes.conflicts?.pass(); },
+    ended: () => { void lanes.chooser?.pass(); void lanes.merges?.pass(); },
   });
   const fixes = new FixLane({
     repos: () => servedRepos(repos.list()), github, git: new GitCli(), mcp: t3Doors!.mcp, ws: t3Doors!.ws, gate,
     catalog: () => catalog.current().catalog, jobs: () => settings.get().jobs, user, log, exists: existsSync, say,
-    ended: () => { void reviews.pass(); void lanes.conflicts?.pass(); },
+    ended: () => void reviews.pass(), freed,
   });
   const merges = new MergeLane({
     repos: () => servedRepos(repos.list()), github, git: new GitCli(), mcp: t3Doors!.mcp, log, say,
-    merged: () => { void lane.pass(); void lanes.conflicts?.pass(); }, headMoved: () => void reviews.pass(),
+    merged: () => { lane.ticketsDue(); void lanes.chooser?.pass(); }, headMoved: () => void reviews.pass(),
   });
   const conflicts = new ConflictLane({
     repos: () => servedRepos(repos.list()), github, git: new GitCli(), mcp: t3Doors!.mcp, ws: t3Doors!.ws, gate,
     catalog: () => catalog.current().catalog, user, log, exists: existsSync, say,
-    ended: () => void reviews.pass(),
+    ended: () => void reviews.pass(), freed,
   });
-  lanes.fixes = fixes;
+  const chooser = new Chooser({ repos: () => servedRepos(repos.list()), lanes: [fixes, conflicts, lane], log, say });
   lanes.merges = merges;
-  lanes.conflicts = conflicts;
+  lanes.chooser = chooser;
 
   const shell: Shell = {
     singleInstance(onSecondStart) {
@@ -188,17 +192,19 @@ async function main() {
     hidden: process.argv.includes('--hidden'),
   });
   if (!desktop) return;
-  // Builds the log shows open are watched again before any pass, so a restart keeps one build per
-  // repo; then a pass on each change that may let one start.
-  void lane.start().then(() => {
-    gate.onChange(() => lane.usageChanged());
-    // a repo switched on or off passes at once; GitHub is polled for new tickets every 5 minutes
+  // Settle first: every job the log shows open is recovered by its lane before the first choice,
+  // so a restart keeps one job per repo; then a pass on usage, the repos changing and every minute
+  // (PRs, their reviews and checks are read from GitHub; new tickets at most every 5 minutes, and
+  // at once when the served set changes).
+  void chooser.start().then(() => {
+    gate.onChange(() => chooser.usageChanged());
     let servedKey = '';
     repos.onChange(() => {
       const key = servedRepos(repos.list()).map((r) => r.id).sort().join(' ');
-      if (key !== servedKey) { servedKey = key; void lane.pass(); }
+      if (key !== servedKey) { servedKey = key; lane.ticketsDue(); }
+      void chooser.pass();
     });
-    setInterval(() => void lane.pass(), 5 * 60_000);
+    setInterval(() => void chooser.pass(), 60_000);
   });
   // An open review the log shows is carried on with first; then a pass on each change that may
   // let one start, and every minute for PRs and their checks, as today's runner polls them.
@@ -207,21 +213,8 @@ async function main() {
     repos.onChange(() => void reviews.pass());
     setInterval(() => void reviews.pass(), 60_000);
   });
-  // Fix rounds the log shows open are watched again first; then a pass on usage, the repos and
-  // every minute, beside the reviews. Merges and marks pass on the same minute (checks and replies
-  // are read from GitHub), and on the repos changing.
-  void fixes.start().then(() => {
-    gate.onChange(() => fixes.usageChanged());
-    repos.onChange(() => void fixes.pass());
-    setInterval(() => void fixes.pass(), 60_000);
-  });
-  // Conflict rounds the log shows open are watched again first; then a pass on usage, the repos
-  // and every minute (GitHub works out whether a PR conflicts in its own time).
-  void conflicts.start().then(() => {
-    gate.onChange(() => conflicts.usageChanged());
-    repos.onChange(() => void conflicts.pass());
-    setInterval(() => void conflicts.pass(), 60_000);
-  });
+  // Merges and marks pass on the same minute (checks and replies are read from GitHub), and on the
+  // repos changing.
   void merges.pass().then(() => {
     repos.onChange(() => void merges.pass());
     setInterval(() => void merges.pass(), 60_000);

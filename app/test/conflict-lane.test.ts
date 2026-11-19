@@ -6,6 +6,7 @@
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { Chooser } from '../src/chooser.ts';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import type { BuildRepo } from '../src/build-lane.ts';
 import { ConflictLane, MAX_CONFLICT_ROUNDS, NO_CHECKS_GRACE_MS, type ConflictLaneDoors } from '../src/conflict-lane.ts';
@@ -102,6 +103,8 @@ let ws: T3Ws;
 let lines: string[];
 let ended: Job[];
 let lane: ConflictLane;
+/** The lane behind a chooser of its own: the chooser starts its jobs (#210). */
+let chooser: Chooser;
 let repoNow: BuildRepo;
 /** The one clock the lane and the job log read. */
 let clock: Date;
@@ -131,13 +134,15 @@ afterEach(async () => {
   await rm(dir, { recursive: true, force: true });
 });
 
-function makeLane(part: Partial<ConflictLaneDoors> = {}) {
+function makeLane(part: Partial<ConflictLaneDoors> = {}): Chooser {
   lane = new ConflictLane({
     repos: () => [repoNow], github: gh, git, mcp, ws, gate, catalog: () => catalog, user: async () => 'Pat', log,
     exists: () => true, say: (l) => lines.push(l), ended: (j) => ended.push(j), retry: () => () => {},
-    now: () => clock, ...part,
+    now: () => clock,
+    freed: () => void chooser.pass(), ...part,
   });
-  return lane;
+  chooser = new Chooser({ repos: () => lane['d'].repos(), lanes: [lane], log, say: (l) => lines.push(l), now: lane['now'] });
+  return chooser;
 }
 
 const rounds = () => log.jobs().filter((j) => j.kind === 'conflict');
@@ -158,7 +163,7 @@ describe('a conflict round', () => {
   test("a conflicting PR gets one thread on the conflict kind's settings, in the PR's worktree; its pushed head is reviewed next", async () => {
     git.trees.push({ path: 'C:/t3/worktrees/app/thing-3', branch: 'claude/thing-3' });
     makeLane();
-    await lane.pass();
+    await chooser.pass();
     await until(() => t3.launches.length === 1);
     expect(gate.calls).toContain('pick conflict:owner/app#4 conflict');
     expect(gate.calls).toContain('started conflict claude-haiku-5-5');
@@ -173,22 +178,22 @@ describe('a conflict round', () => {
     expect(r).toMatchObject({ sha: H, baseSha: B1, threadId: 'thread-1', choice: CONFLICT });
     expect(r.made).toBeUndefined(); // the PR's own worktree: nothing made (#156 F15)
     // a pass while it runs starts nothing beside it
-    await lane.pass();
+    await chooser.pass();
     expect(t3.launches).toHaveLength(1);
     await finish('thread-1', 4, H2);
-    await lane.idle();
+    await chooser.idle();
     expect(log.get(r.id)).toMatchObject({ end: { outcome: 'done', head: H2 }, settledAt: expect.any(String) });
     expect(ended.map((j) => j.id)).toEqual([r.id]);
     expect(lines.some((l) => l.includes('pushed 1234567: reviewed next'))).toBe(true);
     expect(log.stops()).toEqual([]);
     // the pushed head doesn't conflict: no round on it
-    await lane.pass();
+    await chooser.pass();
     expect(t3.launches).toHaveLength(1);
   });
 
   test('with no worktree on the PR\'s branch, a new one at H on its own branch, recorded as made, pushing to the PR\'s', async () => {
     makeLane();
-    await lane.pass();
+    await chooser.pass();
     await until(() => t3.launches.length === 1);
     expect(t3.launches[0].workspaceStrategy).toEqual({ type: 'worktree', baseRef: H, branch: 'claude/conflict-pr4-abcdef1' });
     expect(t3.launches[0].message).toContain('`git push origin HEAD:claude/thing-3`');
@@ -198,23 +203,23 @@ describe('a conflict round', () => {
 
   test('a round that ends without a push is a stop recorded for the stops ticket, and H gets no other round', async () => {
     makeLane();
-    await lane.pass();
+    await chooser.pass();
     await finish('thread-1', 4, null);
-    await lane.idle();
+    await chooser.idle();
     expect(log.stops()).toEqual([expect.objectContaining({
       cause: 'conflict', repo: APP.id, github: 'owner/app', pr: 4, sha: H, link: 't3://thread/thread-1',
       why: expect.stringContaining("couldn't resolve it (it ended done without a push)"),
     })]);
     expect(lines.some((l) => l.includes('without a push: a stop for you'))).toBe(true);
-    await lane.pass();
-    await lane.pass();
+    await chooser.pass();
+    await chooser.pass();
     expect(t3.launches).toHaveLength(1);
     expect(log.stops()).toHaveLength(1);
   });
 
   test('a conflict back after the base moved gets another round; back on the same tip, a stop that holds', async () => {
     makeLane();
-    await lane.pass();
+    await chooser.pass();
     // main moves on while round 1 runs, after it merged main at B1: its push conflicts again
     gh.tip = B2;
     await finish('thread-1', 4, H2, true);
@@ -223,30 +228,31 @@ describe('a conflict round', () => {
     expect(log.stops()).toEqual([]);
     // round 2's push conflicts again, and main is still at B2: a stop, not a third round
     await finish('thread-2', 4, H3, true);
-    await lane.idle();
-    await lane.pass();
+    await chooser.idle();
+    await chooser.pass();
     expect(t3.launches).toHaveLength(2);
     expect(log.stops()).toEqual([expect.objectContaining({ sha: H3, link: 't3://thread/thread-2', why: expect.stringContaining('merged main at b2b2b2b and main has not moved since') })]);
     // a stop is the user's: main moving on later doesn't start another round on H3
     gh.tip = B1;
-    await lane.pass();
+    await chooser.pass();
     expect(t3.launches).toHaveLength(2);
     expect(lines.at(-1)).toContain('conflict app#4: no conflict round now, left for you: it conflicts with main again at 9999999');
   });
 
   test("the base's tip is read from the branch, never the PR's base: a read that fails starts nothing and stops nothing", async () => {
     makeLane();
-    await lane.pass();
+    await chooser.pass();
     gh.tipFails = 1000;
     await finish('thread-1', 4, H2, true);
-    await lane.idle();
-    await lane.pass();
+    await chooser.idle();
+    await chooser.pass();
     expect(t3.launches).toHaveLength(1);
     expect(log.stops()).toEqual([]);
-    expect(lines.some((l) => l.includes('no conflict round now, reading it failed') && l.includes('HTTP 502'))).toBe(true);
+    // a read that fails leaves the repo for the next pass (#210)
+    expect(lines.some((l) => l.startsWith("app: PR #4 couldn't be read for its conflict round") && l.includes('HTTP 502'))).toBe(true);
     gh.tipFails = 0;
     gh.tip = B2;
-    await lane.pass();
+    await chooser.pass();
     await until(() => t3.launches.length === 2);
   });
 
@@ -257,7 +263,7 @@ describe('a conflict round', () => {
     }
     gh.tip = B2;
     makeLane();
-    await lane.pass();
+    await chooser.pass();
     expect(t3.launches).toEqual([]);
     expect(log.stops()[0]!.why).toContain(`${MAX_CONFLICT_ROUNDS} conflict rounds, main keeps moving under it`);
   });
@@ -268,20 +274,22 @@ describe('one conflicted PR at a time, oldest first', () => {
     gh.reviewPulls['owner/app'] = [pull(5), pull(4)];
     gh.conflicting.add('owner/app#5');
     makeLane();
-    await lane.pass();
+    await chooser.pass();
     await until(() => t3.launches.length === 1);
     expect(t3.launches[0].title).toBe('Queue runner conflict: app#4');
-    await until(() => lines.includes('conflict app#5: no conflict round now, the conflict round on PR #4 runs first: one conflicted PR at a time'));
+    // a pass while it runs starts nothing beside it: the repo's one Claude job (#210)
+    await chooser.pass();
+    expect(lines).toContain('app: no new job now, Queue runner conflict: app#4 is its job (one job per repo)');
     gh.checkStates[H2] = PASSED;
     await finish('thread-1', 4, H2);
-    await lane.idle();
+    await chooser.idle();
     // #4 is on its way to merging (reviewed next): #5 waits to resolve against what it lands on
-    await lane.pass();
+    await chooser.pass();
     expect(t3.launches).toHaveLength(1);
     expect(lines).toContain('conflict app#5: no conflict round now, PR #4 had a conflict round and is still on its way to merging (1234567 is reviewed next): one conflicted PR at a time');
     // #4 merged: gone from the open list
     gh.reviewPulls['owner/app'] = [pull(5)];
-    await lane.pass();
+    await chooser.pass();
     await until(() => t3.launches.length === 2);
     expect(t3.launches[1].title).toBe('Queue runner conflict: app#5');
   });
@@ -293,9 +301,9 @@ describe('one conflicted PR at a time, oldest first', () => {
       gh.conflicting.add('owner/app#5');
       gh.checkStates[H2] = PASSED;
       makeLane();
-      await lane.pass();
+      await chooser.pass();
       await finish('thread-1', 4, H2);
-      await lane.idle();
+      await chooser.idle();
       expect(t3.launches).toHaveLength(1);
     }
     async function review4(outcome: 'clean' | 'blocking') {
@@ -305,7 +313,7 @@ describe('one conflicted PR at a time, oldest first', () => {
       await log.ended(r.id, { outcome, verdict: outcome, link: url });
     }
     const goes5 = async () => {
-      await lane.pass();
+      await chooser.pass();
       await until(() => t3.launches.length === 2);
       expect(t3.launches[1].title).toBe('Queue runner conflict: app#5');
     };
@@ -339,7 +347,7 @@ describe('one conflicted PR at a time, oldest first', () => {
       repoNow = { ...APP, merge: 'runner' };
       await afterRound4();
       await review4('clean');
-      await lane.pass();
+      await chooser.pass();
       expect(t3.launches).toHaveLength(1);
       expect(lines.at(-1)).toContain('PR #4 had a conflict round and is still on its way to merging (clean at 1234567, merged next)');
       gh.threads['owner/app#4'] = 1;
@@ -353,7 +361,7 @@ describe('one conflicted PR at a time, oldest first', () => {
         await log.ended(r.id, { outcome: 'failed', error: 'the thread failed' });
       };
       for (let k = 1; k < MAX_FAILED; k++) await failed();
-      await lane.pass();
+      await chooser.pass();
       expect(t3.launches).toHaveLength(1);
       expect(lines.at(-1)).toContain('(1234567 is reviewed next)');
       await failed(); // the review lane leaves H2 until a new head
@@ -363,7 +371,7 @@ describe('one conflicted PR at a time, oldest first', () => {
     test('a head with no checks reported holds the others for NO_CHECKS_GRACE_MS after its round pushed it, then nothing (F7)', async () => {
       await afterRound4();
       delete gh.checkStates[H2];
-      await lane.pass();
+      await chooser.pass();
       expect(t3.launches).toHaveLength(1);
       expect(lines.at(-1)).toContain('(no checks reported on 1234567 yet, held until 2026-11-19T12:10:00.000Z at most)');
       clock = new Date(clock.getTime() + NO_CHECKS_GRACE_MS);
@@ -374,7 +382,7 @@ describe('one conflicted PR at a time, oldest first', () => {
       await afterRound4();
       gh.checkStates[H2] = { state: 'pending', pending: ['tests'], failed: [] };
       clock = new Date(clock.getTime() + 2 * NO_CHECKS_GRACE_MS);
-      await lane.pass();
+      await chooser.pass();
       expect(t3.launches).toHaveLength(1);
       expect(lines.at(-1)).toContain('(checks still running on 1234567 (tests))');
     });
@@ -407,7 +415,7 @@ describe('one conflicted PR at a time, oldest first', () => {
     test('a blocking review still holds the others: its fix round comes', async () => {
       await afterRound4();
       await review4('blocking');
-      await lane.pass();
+      await chooser.pass();
       expect(t3.launches).toHaveLength(1);
       expect(lines.at(-1)).toContain('(review 1 of 1234567 gets its fix round)');
     });
@@ -417,7 +425,7 @@ describe('one conflicted PR at a time, oldest first', () => {
     gh.reviewPulls['owner/app'] = [pull(4), pull(5)];
     gh.conflicting.add('owner/app#5');
     makeLane();
-    await lane.pass();
+    await chooser.pass();
     await finish('thread-1', 4, null); // no push: a stop on #4
     await until(() => t3.launches.length === 2);
     expect(t3.launches[1].title).toBe('Queue runner conflict: app#5');
@@ -428,8 +436,8 @@ describe('one conflicted PR at a time, oldest first', () => {
     gh.conflicting.add('owner/app#5');
     gate.room = false;
     makeLane();
-    await lane.pass();
-    await lane.pass();
+    await chooser.pass();
+    await chooser.pass();
     expect(t3.launches).toEqual([]);
     expect(lines.filter((l) => l.startsWith('conflict app#4: no conflict round now, waits:'))).toHaveLength(1);
     expect(lines).toContain('conflict app#5: no conflict round now, PR #4 resolves its conflict first: one conflicted PR at a time');
@@ -440,17 +448,18 @@ describe('what waits', () => {
   test('a blocking review on H waits for its fix round; a job writing to the branch, or a review running, waits', async () => {
     const review = await log.started({ ...job({ kind: 'review', round: 1 }), title: 'Queue runner review: app#4' });
     makeLane();
-    await lane.pass();
+    await chooser.pass();
     expect(lines.at(-1)).toBe('conflict app#4: no conflict round now, a review of PR #4 is running');
     await log.ended(review.id, { outcome: 'blocking', verdict: 'blocking' });
-    await lane.pass();
+    await chooser.pass();
     expect(lines.at(-1)).toBe('conflict app#4: no conflict round now, review 1 of abcdef1 is blocking: its fix round comes first');
     const fix = await log.started(job({ kind: 'fix', title: 'Queue runner fix: app#4', round: 1 }));
-    await lane.pass();
-    expect(lines.at(-1)).toBe('conflict app#4: no conflict round now, a fix job is writing to claude/thing-3');
+    await chooser.pass();
+    // a job running in the repo is the chooser's to wait on (#210)
+    expect(lines.at(-1)).toBe('app: no new job now, Queue runner fix: app#4 is its job (one job per repo)');
     // the fix round ended without a push: H is the user's, not a conflict round's
     await log.ended(fix.id, { outcome: 'done', head: H });
-    await lane.pass();
+    await chooser.pass();
     expect(lines.at(-1)).toBe('conflict app#4: no conflict round now, left for you: a fix round on abcdef1 ended done without a push');
     expect(t3.launches).toEqual([]);
   });
@@ -460,7 +469,7 @@ describe('what waits', () => {
     gh.computing.add('owner/app#4');
     gh.conflicting.add('owner/app#5');
     makeLane();
-    await lane.pass();
+    await chooser.pass();
     expect(t3.launches).toEqual([]);
     expect(lines).toEqual([
       "conflict app#4: no conflict round now, GitHub hasn't worked out yet whether abcdef1 conflicts with main; read again next pass",
@@ -468,7 +477,7 @@ describe('what waits', () => {
     ]);
     // GitHub answers: #4 conflicts, and it goes first
     gh.computing.clear();
-    await lane.pass();
+    await chooser.pass();
     await until(() => t3.launches.length === 1);
     expect(t3.launches[0].title).toBe('Queue runner conflict: app#4');
   });
@@ -476,39 +485,48 @@ describe('what waits', () => {
   test("a PR read that fails starts nothing", async () => {
     gh.pullFails = 1;
     makeLane();
-    await lane.pass();
+    await chooser.pass();
     expect(t3.launches).toEqual([]);
     expect(lines.some((l) => l.includes("GitHub couldn't be read for conflicts"))).toBe(true);
-    await lane.pass();
+    await chooser.pass();
     await until(() => t3.launches.length === 1);
   });
 
   test("a fork's PR gets no round: a stop, since it would push to this repo's branch of that name", async () => {
     gh.reviewPulls['owner/app'] = [pull(4, { headRepo: 'someone/app', branch: 'main' })];
     makeLane();
-    await lane.pass();
+    await chooser.pass();
     expect(t3.launches).toEqual([]);
     expect(log.stops()[0]!.why).toContain("its head is in someone/app, not owner/app: no conflict round pushes to a fork's branch");
   });
 
-  test('a fix round another lane starts on the branch while the round is fetched: the round starts nothing', async () => {
+  test('a job on the branch that waits on a question may write to it again: no round beside it', async () => {
+    const fix = await log.started(job({ kind: 'fix', title: 'Queue runner fix: app#4', round: 1, sha: H2 }));
+    await log.ended(fix.id, { outcome: 'waiting' });
+    makeLane();
+    await chooser.pass();
+    expect(lines.at(-1)).toBe('conflict app#4: no conflict round now, a fix job is writing to claude/thing-3');
+    expect(t3.launches).toEqual([]);
+  });
+
+  test('a review of the PR the review lane starts while the round is fetched: the round starts nothing', async () => {
     const fetch = git.fetchPr.bind(git);
     git.fetchPr = async (f, n, b) => {
-      await log.started(job({ kind: 'fix', title: 'Queue runner fix: app#4', round: 1 }));
+      await log.started({ ...job({ kind: 'review', round: 1 }), title: 'Queue runner review: app#4' });
       return fetch(f, n, b);
     };
     makeLane();
-    await lane.pass();
-    await lane.idle();
+    await chooser.pass();
+    await chooser.idle();
     expect(t3.launches).toEqual([]);
-    expect(rounds()[0]!.end).toMatchObject({ outcome: 'not-started', error: 'a fix job started on PR #4 meanwhile' });
+    expect(rounds()[0]!.end).toMatchObject({ outcome: 'not-started', error: 'a review of PR #4 started meanwhile' });
     expect(gate.calls.some((c) => c.startsWith('dropped conflict-'))).toBe(true);
   });
 
   test('a head that moved since listing starts nothing; the PR rests', async () => {
     git.fetchPr = async () => H2;
     makeLane();
-    await lane.pass();
+    await chooser.pass();
     expect(t3.launches).toEqual([]);
     expect(rounds()).toEqual([]);
     expect(lines.some((l) => l.includes('the head moved from abcdef1 to 1234567'))).toBe(true);
@@ -519,20 +537,20 @@ describe("after a restart, don't guess", () => {
   test('a launch whose answer was lost needs the user: its repo starts nothing until they answer', async () => {
     t3.launchAnswerLost = true;
     makeLane();
-    await lane.pass();
-    await lane.idle();
+    await chooser.pass();
+    await chooser.idle();
     const r = rounds()[0]!;
     expect(log.get(r.id)!.end).toMatchObject({ outcome: 'needs-user' });
     expect(log.needingUser(APP.id).map((j) => j.id)).toEqual([r.id]);
-    await lane.pass();
+    await chooser.pass();
     expect(t3.launches).toHaveLength(1);
   });
 
   test('a launch answer that names no thread needs the user, never a watch on no thread (N1)', async () => {
     t3.launchOmitsThreadId = true;
     makeLane();
-    await lane.pass();
-    await lane.idle();
+    await chooser.pass();
+    await chooser.idle();
     const r = rounds()[0]!;
     expect(log.get(r.id)).toMatchObject({ end: { outcome: 'needs-user', error: expect.stringContaining('named no thread') } });
     expect(log.get(r.id)!.threadId).toBeUndefined();
@@ -544,17 +562,17 @@ describe("after a restart, don't guess", () => {
     await log.thread(open.id, { threadId: 'thread-x', runId: 'run-x', link: null });
     t3.threadState['thread-x'] = { id: 'thread-x', projectId: APP.id, runtimeRequests: [], turnItems: [], runs: [{ id: 'run-x', threadId: 'thread-x', ordinal: 1, rootNodeId: 'n', status: 'running' }] };
     makeLane();
-    void lane.start();
+    void chooser.start();
     await finish('thread-x', 4, H2);
-    await lane.idle();
+    await chooser.idle();
     expect(log.get(open.id)!.end).toMatchObject({ outcome: 'done', head: H2 });
     expect(t3.launches).toEqual([]);
 
     lane.stop();
     const lost = await log.started(job({ sha: H2 }));
     makeLane();
-    await lane.start();
-    await lane.idle();
+    await chooser.start();
+    await chooser.idle();
     expect(log.get(lost.id)!.end).toMatchObject({ outcome: 'needs-user', error: expect.stringContaining('before T3 named its thread') });
     expect(t3.launches).toEqual([]);
   });

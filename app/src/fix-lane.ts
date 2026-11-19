@@ -15,10 +15,11 @@
 //   ->  its end from T3's thread events; the PR's head read again: pushed, or left for the user
 //   ->  the end recorded and the thread settled, then the review lane passes (`ended`)
 //
-// **One writer per PR:** no round while a build or fix on the branch is open, waits on a question
-// or was cut off by a usage limit; the review lane waits on a fix round the same way. One round
-// per head: a round on H that ended without a push leaves the PR at H, which was reviewed already,
-// so it waits for the user.
+// **When a round starts is the chooser's** (src/chooser.ts, #210): one job per repo, so no
+// round starts while another job of the repo's runs. A build or fix on the branch that waits on a
+// question or was cut off by a usage limit may write again: no round beside it; the review lane
+// waits on a fix round too. One round per head: a round on H that ended without a push leaves the
+// PR at H, which was reviewed already, so it waits for the user.
 //
 // **After a restart, don't guess** (#154, #155): a round is tied to a thread only by the id T3 gave
 // the app's own launch, or the id it sent to, saved before the send. A round the log shows open
@@ -35,6 +36,7 @@ import { kindModels, type Catalog, type Jobs, type ModelChoice } from './jobs.ts
 import { launchJob } from './launch.ts';
 import { closedIssues, JOB_BRANCH_PREFIX } from './picker.ts';
 import { readReviews, state, type Finding, type Review } from './review/ledger.ts';
+import type { RepoJobLane, Next } from './chooser.ts';
 import { ThreadSettler } from './settle.ts';
 import { ToolFailed, type T3Mcp } from './t3/mcp.ts';
 import type { Retry } from './t3/project-feed.ts';
@@ -58,6 +60,8 @@ export type FixLaneDoors = {
   say: (line: string) => void;
   /** A round ended (the review lane passes: its pushed head is reviewed next). */
   ended?: (job: Job) => void;
+  /** A round is over, or started nothing: the chooser passes. */
+  freed?: () => void;
   restMs?: number;
   retry?: Retry;
   now?: () => Date;
@@ -82,13 +86,15 @@ const goneText = (threadId: string, why: string) => `the PR's writer thread ${th
 const refusedText = (threadId: string, why: string) => `the PR's writer thread ${threadId} ${GONE_MARK}: T3 refused the send (${why})`;
 
 const join = (folder: string, name: string) => `${folder.replace(/[\\/]+$/, '')}/${name}`;
-const WRITING = (j: Job) => !j.end || j.end.outcome === 'waiting' || j.end.outcome === 'usage-limit';
+/** A job on the branch that ended on a question or a usage limit: it may write to it again. */
+const MAY_WRITE_AGAIN = (j: Job) => j.end?.outcome === 'waiting' || j.end?.outcome === 'usage-limit';
 
 /** Whether the blocking `review` of the PR's head H gets its fix round now (the PR's reviews to
  *  brief from) or why not: the one rule for it, which the lane's pass and the conflict lane's hold
  *  both ask (#157 F7). `on` says what it waits on: `loop`, the round on H running or cut off by a
- *  usage limit, or another job writing to the branch; `you`, a question, a round on H that ended,
- *  or a newest review comment that isn't this review. */
+ *  usage limit, or another job that may write to the branch again; `you`, a question, a round on
+ *  H that ended, or a newest review comment that isn't this review. A job running in the repo is
+ *  the chooser's to wait on (one job per repo). */
 export async function fixNext(d: { log: JobLog; github: Pick<GitHubReview, 'issueComments'> }, repo: BuildRepo, pr: ReviewPull, review: Job):
   Promise<{ why: string; on: 'loop' | 'you' } | { reviews: Review[] }> {
   const h7 = pr.headSha.slice(0, 7);
@@ -102,8 +108,8 @@ export async function fixNext(d: { log: JobLog; github: Pick<GitHubReview, 'issu
     if (last.end.outcome === 'usage-limit') return { why: 'its fix round was cut off by a usage limit and resumes after the reset', on: 'loop' };
     return { why: `a fix round on ${h7} ended ${last.end.outcome} and the head is still ${h7}: left for you`, on: 'you' };
   }
-  // one writer per PR
-  const writer = jobs.find((j) => j.kind !== 'review' && j.branch === pr.branch && WRITING(j));
+  // a job on the branch that may write to it again
+  const writer = jobs.find((j) => j.kind !== 'review' && j.branch === pr.branch && MAY_WRITE_AGAIN(j));
   if (writer) return { why: `a ${writer.kind} job is writing to ${pr.branch}`, on: writer.end?.outcome === 'waiting' ? 'you' : 'loop' };
   const reviews = readReviews(await d.github.issueComments(repo.github!, pr.number));
   const newest = reviews.at(-1);
@@ -123,7 +129,7 @@ class NotStarted extends Error {}
 /** The writer thread is gone in T3: the round goes to a fresh fixer at once (F3). */
 class ThreadGone extends Error {}
 
-export class FixLane {
+export class FixLane implements RepoJobLane {
   private d: FixLaneDoors;
   private now: () => Date;
   private settler: ThreadSettler;
@@ -132,8 +138,6 @@ export class FixLane {
   private watches = new Set<{ stop(): void }>();
   private why = new Map<string, string | null>();
   private resting = new Map<string, number>();
-  private passing: Promise<void> | null = null;
-  private again = false;
   private stopped = false;
   /** Writer threads T3 says are gone: their PRs' rounds go to fresh fixers. */
   private gone = new Set<string>();
@@ -144,13 +148,12 @@ export class FixLane {
     this.settler = new ThreadSettler(doors.mcp, doors.log, doors.say);
   }
 
-  /** Each round the log shows open is watched again (or needs the user), then a pass. */
-  start(): Promise<void> {
+  /** Each round the log shows open is watched again (or needs the user). */
+  recover(): void {
     for (const job of this.d.log.open()) {
       if (job.kind !== 'fix') continue;
       this.track(`${job.github}#${job.issue}`, this.resume(job));
     }
-    return this.pass();
   }
 
   stop() {
@@ -158,34 +161,18 @@ export class FixLane {
     for (const w of this.watches) w.stop();
   }
 
-  usageChanged(): void {
-    if ([...this.why.values()].some((w) => w?.startsWith('waits:'))) void this.pass();
+  usageChanged(): boolean {
+    return [...this.why.values()].some((w) => w?.startsWith('waits:'));
   }
 
-  async answered(jobId: string): Promise<void> {
-    if (!this.d.log.get(jobId)?.answeredAt) await this.d.log.answered(jobId);
-    await this.pass();
+  busy(repo: BuildRepo): boolean {
+    return [...this.running.keys()].some((k) => k.startsWith(`${repo.github}#`));
   }
 
   async idle(): Promise<void> {
-    while (this.running.size || this.passing || this.settler.pending().length) {
-      await Promise.allSettled([...this.running.values(), this.passing, ...this.settler.pending()]);
+    while (this.running.size || this.settler.pending().length) {
+      await Promise.allSettled([...this.running.values(), ...this.settler.pending()]);
     }
-  }
-
-  pass(): Promise<void> {
-    if (this.stopped) return Promise.resolve();
-    if (this.passing) {
-      this.again = true;
-      return this.passing;
-    }
-    this.passing = (async () => {
-      do {
-        this.again = false;
-        await this.passOnce();
-      } while (this.again && !this.stopped);
-    })().finally(() => { this.passing = null; });
-    return this.passing;
   }
 
   private note(key: string, name: string, why: string | null) {
@@ -199,54 +186,59 @@ export class FixLane {
       if (job?.end && !this.stopped) this.d.ended?.(job);
     }, (e) => this.d.say(`a fix round on ${key} stopped: ${(e as Error).message}`)).finally(() => {
       this.running.delete(key);
-      if (!this.stopped) void this.pass();
+      if (!this.stopped) this.d.freed?.();
     });
   }
 
-  private async passOnce() {
+  owed(): void {
     this.settler.owed('fix');
-    for (const repo of this.d.repos()) {
-      if (this.stopped) return;
-      if (!repo.github || this.d.log.needingUser(repo.id).length) continue;
-      let pulls: ReviewPull[];
-      try {
-        pulls = (await this.d.github.pullsToReview(repo.github)).sort((a, b) => a.number - b.number);
-      } catch (e) {
-        this.d.say(`${repo.title}: GitHub couldn't be read for fix rounds (${(e as Error).message})`);
-        continue;
-      }
-      for (const pr of pulls) {
-        if (this.stopped) return;
-        const key = `${repo.github}#${pr.number}`;
-        if (this.running.has(key)) continue;
-        const name = `fix ${repo.title}#${pr.number}`;
-        const blocking = this.blockingReview(repo, pr);
-        if (!blocking) { this.why.delete(key); continue; }
-        let ready: { why: string } | { reviews: Review[] };
-        try {
-          ready = await this.whyNot(repo, pr, blocking);
-        } catch (e) {
-          ready = { why: `reading it failed (${(e as Error).message})` };
-        }
-        if ('why' in ready) { this.note(key, name, ready.why); continue; }
-        if ((this.resting.get(key) ?? 0) > this.now().getTime()) continue;
-        // a fork's PR: a fixer would push to this repo's branch of that name (a fork's `main` is
-        // this repo's `main`), so none does; it needs the user (N2)
-        if (pr.headRepo !== undefined && pr.headRepo?.toLowerCase() !== repo.github.toLowerCase()) {
-          await this.forked(repo, pr, blocking);
-          continue;
-        }
-        const plan = this.plan(repo, pr, blocking, ready.reviews);
-        // the gate counts the round from now; the pass goes on once T3 has it, so the next PR's
-        // verdict counts this one
-        const letIn = this.letIn(key, name, plan);
-        if (!letIn) continue;
-        this.why.set(key, null);
-        await new Promise<void>((launched) => {
-          this.track(key, this.round(repo, pr, blocking, ready.reviews, plan, letIn, launched).finally(launched));
-        });
-      }
+  }
+
+  /** The repo's next fix round: the lowest-numbered PR whose blocking review gets its round now
+   *  and that the gate lets in. One the gate holds waits, and so does the repo unless a later PR's
+   *  round fits; a read that fails throws. */
+  async next(repo: BuildRepo): Promise<Next> {
+    if (this.stopped || !repo.github) return null;
+    let pulls: ReviewPull[];
+    try {
+      pulls = (await this.d.github.pullsToReview(repo.github)).sort((a, b) => a.number - b.number);
+    } catch (e) {
+      throw new Error(`GitHub couldn't be read for fix rounds (${(e as Error).message})`);
     }
+    let waits: string | null = null;
+    for (const pr of pulls) {
+      if (this.stopped) return null;
+      const key = `${repo.github}#${pr.number}`;
+      const name = `fix ${repo.title}#${pr.number}`;
+      const blocking = this.blockingReview(repo, pr);
+      if (!blocking) { this.why.delete(key); continue; }
+      let ready: { why: string } | { reviews: Review[] };
+      try {
+        ready = await this.whyNot(repo, pr, blocking);
+      } catch (e) {
+        throw new Error(`PR #${pr.number} couldn't be read for its fix round (${(e as Error).message})`);
+      }
+      if ('why' in ready) { this.note(key, name, ready.why); continue; }
+      if ((this.resting.get(key) ?? 0) > this.now().getTime()) continue;
+      // a fork's PR: a fixer would push to this repo's branch of that name (a fork's `main` is
+      // this repo's `main`), so none does; it needs the user (N2), and the repo waits on them
+      if (pr.headRepo !== undefined && pr.headRepo?.toLowerCase() !== repo.github.toLowerCase()) {
+        await this.forked(repo, pr, blocking);
+        return { waits: `PR #${pr.number} is a fork's: it needs you` };
+      }
+      const plan = this.plan(repo, pr, blocking, ready.reviews);
+      const letIn = this.letIn(key, name, plan);
+      if (!letIn) { waits ??= this.why.get(key) ?? 'the gate holds it'; continue; }
+      this.why.set(key, null);
+      // the gate counts the round from now; the chooser goes on once T3 has it, so the next
+      // repo's verdict counts this one
+      return {
+        launch: () => new Promise<void>((launched) => {
+          this.track(key, this.round(repo, pr, blocking, ready.reviews, plan, letIn, launched).finally(launched));
+        }),
+      };
+    }
+    return waits === null ? null : { waits };
   }
 
   /** The app's newest review of the PR's head, if it's blocking. */

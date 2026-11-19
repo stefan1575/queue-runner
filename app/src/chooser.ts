@@ -1,13 +1,13 @@
 // The chooser (#210; today's `Runner.plan`, `choose` and `_choose_in` in `queue_runner/run.py`,
-// ported, `docs/claude-lane.md` Two lanes and A Claude pass): one Claude job per served repo at a
-// time, repos side by side, chosen in one place (#50). The Claude lanes (fix rounds, conflict
-// rounds, builds) keep everything they decide about a job: which PR gets a round, its brief, its
+// ported): one job per served repo at a time (a build, a fix round or a conflict round: the jobs
+// that write to the repo; reviews and merges run beside them), repos side by side, chosen in one
+// place (#50). The lanes that start such jobs (fix rounds, conflict rounds, builds) keep everything they decide about a job: which PR gets a round, its brief, its
 // model, the gate. They don't decide when to start: each answers "your next job in this repo, if
-// any" (`ClaudeLane.next`), and the chooser starts at most one per repo each pass.
+// any" (`RepoJobLane.next`), and the chooser starts at most one per repo each pass.
 //
 //   settle first: every job the log shows open is recovered by its lane (`recover`) before the
 //   first choice  ->  each pass: each lane's owed bookkeeping (settles, PR lookups)  ->  the
-//   served repos that have no Claude job open (in the log or under way in a lane), none needing
+//   served repos that have no job open (in the log or under way in a lane), none needing
 //   the user, no done build's PR lookup owed, and no job a usage limit cut off before its reset
 //   ->  the repo that waited longest first (`waited`), the served order breaking a tie
 //   ->  in each: a fix round, a conflict round, a build, the first lane with one; a lane whose
@@ -19,15 +19,16 @@
 // while one runs runs once after it.
 import type { BuildRepo } from './build-lane.ts';
 import { AFTER_RESET_MS, LIMIT_UNKNOWN_MS } from './gate.ts';
-import type { Job, JobKind, JobLog } from './job-log.ts';
+import type { Job, JobLog } from './job-log.ts';
+import type { JobKind } from './jobs.ts';
 
 /** What a lane answers for a repo: a job to start (`launch` resolves once T3 has it, or once it
  *  started nothing; the lane tracks it to its end), a job that waits (the repo starts nothing else
  *  this pass), or nothing of this lane's. A read that fails throws. */
 export type Next = { launch: () => Promise<void> } | { waits: string } | null;
 
-/** A lane that starts Claude jobs, as the chooser asks it. */
-export interface ClaudeLane {
+/** A lane that starts a repo's jobs, as the chooser asks it. */
+export interface RepoJobLane {
   /** Watches again each of its jobs the log shows open, and settles each ended one not settled. */
   recover(): void;
   /** Its bookkeeping each pass, before any choice: settles and lookups owed. */
@@ -42,13 +43,13 @@ export interface ClaudeLane {
   idle(): Promise<void>;
 }
 
-/** The kinds that are a repo's one Claude job (#158's jobs join them). */
-export const CLAUDE_KINDS: readonly JobKind[] = ['build', 'fix', 'conflict'];
+/** The kinds that are a repo's one job at a time (#158's jobs join them). */
+export const REPO_JOB_KINDS: readonly JobKind[] = ['build', 'fix', 'conflict'];
 
 export type ChooserDoors = {
   repos: () => BuildRepo[];
   /** In today's order within a repo: fix rounds, conflict rounds, builds. */
-  lanes: ClaudeLane[];
+  lanes: RepoJobLane[];
   log: JobLog;
   say: (line: string) => void;
   now?: () => Date;
@@ -101,7 +102,7 @@ export class Chooser {
     } while (this.passing);
   }
 
-  /** One pass: at most one Claude job started in each served repo. A pass asked for while one
+  /** One pass: at most one job started in each served repo. A pass asked for while one
    *  runs runs once more after it, never beside it. */
   pass(): Promise<void> {
     if (this.stopped) return Promise.resolve();
@@ -118,10 +119,10 @@ export class Chooser {
     return this.passing;
   }
 
-  /** Since when the repo's work has waited for a Claude job: when its last one ended (one that
+  /** Since when the repo's work has waited for a job: when its last one ended (one that
    *  never reached a thread aside), or 0 (the longest) for none (`_waited`). */
   private waited(repo: BuildRepo): number {
-    const ends = this.d.log.jobs().filter((j) => j.repo === repo.id && CLAUDE_KINDS.includes(j.kind) && j.end && j.end.outcome !== 'not-started')
+    const ends = this.d.log.jobs().filter((j) => j.repo === repo.id && REPO_JOB_KINDS.includes(j.kind) && j.end && j.end.outcome !== 'not-started')
       .map((j) => Date.parse(j.end!.at));
     return Math.max(0, ...ends);
   }
@@ -129,14 +130,14 @@ export class Chooser {
   /** Why the repo gets no new job this pass before any lane is asked, or null. */
   private held(repo: BuildRepo): string | null {
     const jobs = this.d.log.jobs().filter((j) => j.repo === repo.id);
-    const open = jobs.find((j) => CLAUDE_KINDS.includes(j.kind) && !j.end);
-    if (open) return `${open.title} is its Claude job (one at a time)`;
-    if (this.d.lanes.some((l) => l.busy(repo))) return 'its Claude job is under way (one at a time)';
+    const open = jobs.find((j) => REPO_JOB_KINDS.includes(j.kind) && !j.end);
+    if (open) return `${open.title} is its job (one job per repo)`;
+    if (this.d.lanes.some((l) => l.busy(repo))) return 'its job is under way (one job per repo)';
     const user = this.d.log.needingUser(repo.id)[0];
     if (user) return `${user.title} needs you first`;
     const lookUp = jobs.find((j) => j.kind === 'build' && j.github && j.end?.outcome === 'done' && j.end.pr === undefined);
     if (lookUp) return `${lookUp.title}'s PR isn't known yet (its lookup failed; looked up again)`;
-    const cut = jobs.filter((j) => CLAUDE_KINDS.includes(j.kind) && j.end?.outcome === 'usage-limit').at(-1);
+    const cut = jobs.filter((j) => REPO_JOB_KINDS.includes(j.kind) && j.end?.outcome === 'usage-limit').at(-1);
     if (cut && resumesAt(cut) > this.now().getTime()) {
       return `${cut.title} was cut off by a usage limit and comes first, after ${new Date(resumesAt(cut)).toISOString()}`;
     }
@@ -145,7 +146,7 @@ export class Chooser {
 
   private note(repo: BuildRepo, why: string | null) {
     if (why === null) { this.said.delete(repo.id); return; }
-    if (this.said.get(repo.id) !== why) this.d.say(`${repo.title}: no new Claude job now, ${why}`);
+    if (this.said.get(repo.id) !== why) this.d.say(`${repo.title}: no new job now, ${why}`);
     this.said.set(repo.id, why);
   }
 
