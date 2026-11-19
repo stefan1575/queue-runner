@@ -173,7 +173,7 @@ async function main() {
     });
     setInterval(() => void lane.pass(), 5 * 60_000);
   });
-  // An open review the log shows is watched to its end first; then a pass on each change that may
+  // An open review the log shows is carried on with first; then a pass on each change that may
   // let one start, and every minute for PRs and their checks, as today's runner polls them.
   void reviews.start().then(() => {
     gate.onChange(() => reviews.usageChanged());

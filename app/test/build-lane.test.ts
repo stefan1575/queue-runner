@@ -401,6 +401,16 @@ describe('the end', () => {
     expect(t3.launches.map((l) => l.title)).toEqual(['Queue runner build: app#5', 'Queue runner build: app#6']);
   });
 
+  test('a review that needs the user holds builds in its repo too, and only there', async () => {
+    gh.ready['owner/app'] = [issue(5)];
+    const review = await log.started({ kind: 'review', repo: 'p-app', github: 'owner/app', issue: 4, branch: 'claude/x-3', base: 'main', title: 'Queue runner review: app#4', choice: BUILD, onFallback: false });
+    await log.ended(review.id, { outcome: 'needs-user', error: 'lost' });
+    await makeLane().pass();
+    expect(t3.launches).toEqual([]);
+    await lane.answered(review.id);
+    expect(t3.launches.map((l) => l.title)).toEqual(['Queue runner build: app#5']);
+  });
+
   test("a launch that never reached T3's tool call is not-started: nothing can have begun", async () => {
     gh.ready['owner/app'] = [issue(5)];
     const down = { call: async () => { throw new Error("T3's server can't be reached"); } };

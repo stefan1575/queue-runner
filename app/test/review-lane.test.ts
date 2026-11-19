@@ -3,11 +3,10 @@
 // of that commit; the reply's ledger decides; the comment, sol-review on that commit, follow-ups
 // and the Review row are posted; the thread is settled. With the review provider out of usage the
 // fallback reviews, named in the comment and the row.
-import { jobMark } from '../src/launch.ts';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, test } from 'vitest';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import type { BuildRepo } from '../src/build-lane.ts';
 import { CostLog } from '../src/cost-log.ts';
 import type { ReviewGit } from '../src/git.ts';
@@ -15,7 +14,7 @@ import type { ReviewPull } from '../src/github.ts';
 import { JobLog } from '../src/job-log.ts';
 import { DEFAULT_JOBS, type Jobs, type ModelChoice } from '../src/jobs.ts';
 import { readReviews } from '../src/review/ledger.ts';
-import { DryRunPoster } from '../src/review/post.ts';
+import { DryRunPoster, TABLE_END, TABLE_START } from '../src/review/post.ts';
 import { ReviewLane, type ReviewLaneDoors } from '../src/review-lane.ts';
 import { DEFAULT_SETTINGS, type Settings } from '../src/settings.ts';
 import { catalogFromConfig } from '../src/t3/catalog.ts';
@@ -72,10 +71,10 @@ class RoomyGate {
   forget() {}
 }
 
-const until = async (ok: () => boolean) => {
-  for (let i = 0; i < 400 && !ok(); i++) await new Promise((r) => setTimeout(r, 5));
-  expect(ok()).toBe(true);
-};
+const until = (ok: () => boolean) => vi.waitFor(() => { if (!ok()) throw new Error('not yet'); }, { timeout: 2000, interval: 5 });
+/** The lane's retry waits, run when the test says: no real timer (#202). */
+let retries: Set<() => void>;
+const retryNow = () => { const due = [...retries]; retries.clear(); for (const f of due) f(); };
 
 let dir: string;
 let t3: FakeT3;
@@ -107,6 +106,7 @@ beforeEach(async () => {
   lines = [];
   jobs = { ...DEFAULT_JOBS, build: { own: BUILD, fallback: null }, review: { own: REVIEW, fallback: FALLBACK } };
   toolFree = [REVIEW.provider, FALLBACK.provider];
+  retries = new Set();
 });
 afterEach(async () => {
   lane?.stop();
@@ -116,7 +116,7 @@ afterEach(async () => {
 function makeLane(part: Partial<ReviewLaneDoors> = {}) {
   lane = new ReviewLane({
     repos: () => [APP], github: gh, git, deps: null, mcp, ws, gate: new RoomyGate(), catalog: () => catalog, jobs: () => jobs, toolFree: () => toolFree,
-    user: async () => 'Pat', log, stateDir: join(dir, 'state'), say: (l) => lines.push(l), retry: (open) => { const t = setTimeout(open, 5); return () => clearTimeout(t); },
+    user: async () => 'Pat', log, stateDir: join(dir, 'state'), say: (l) => lines.push(l), retry: (again) => { retries.add(again); return () => { retries.delete(again); }; },
     now: () => new Date('2026-11-19T12:00:00Z'), ...part,
   });
   return lane;
@@ -334,120 +334,165 @@ describe('a review', () => {
     expect(gh.posted).toEqual([]);
     expect(lines.some((l) => l.startsWith('dry run: owner/app#4'))).toBe(true);
   });
-
-  test('a review the app was cut off from is watched to its end and counts as failed', async () => {
-    const job = await log.started({ kind: 'review', repo: 'p-app', github: 'owner/app', issue: 4, branch: 'b', base: 'main', title: 'Queue runner review: app#4', choice: REVIEW, onFallback: false, sha: H, round: 1 });
-    t3.threadState['thread-9'] = { id: 'thread-9', projectId: 'p-app', runtimeRequests: [], turnItems: [], messages: [], runs: [{ id: 'run-9', ordinal: 1, rootNodeId: 'n', status: 'running' }] };
-    await log.thread(job.id, { threadId: 'thread-9', runId: 'run-9', link: null });
-    gh.reviewPulls['owner/app'] = [];
-    makeLane();
-    void lane.start();
-    await until(() => t3.threadStreamCount('thread-9') > 0);
-    t3.endRun('thread-9', 'completed');
-    await lane.idle();
-    expect(log.get(job.id)!.end).toMatchObject({ outcome: 'failed', error: 'The app stopped mid-review.' });
-    expect(t3.toolCalls.filter((c) => c.tool === 't3_thread_organize').map((c) => c.args.threadId)).toEqual(['thread-9']);
-  });
 });
 
-describe('an app that stopped between the launch and the log', () => {
-  const started = () => log.started({ kind: 'review', repo: 'p-app', github: 'owner/app', issue: 4, branch: 'b', base: 'main', title: 'Queue runner review: app#4', choice: REVIEW, onFallback: false, sha: H, round: 1 });
-  /** A thread in T3; `of` is the job whose launch made it (its message carries that job's mark). */
-  const thread = (id: string, projectId: string, title: string, createdAt: string, of?: string) => {
-    const messages = [{ itemId: `${id}-msg`, type: 'user_message', runId: `${id}-run`, text: `${of ? `${jobMark(of)}
-
-` : ''}Review PR #4.` }];
-    t3.threadState[id] = { id, projectId, title, createdAt, runtimeRequests: [], turnItems: [], messages, runs: [{ id: `${id}-run`, ordinal: 1, rootNodeId: 'n', status: 'running' }] };
-  };
-
-  test("a later thread with the same title isn't taken for it: only the one whose message carries its job's mark", async () => {
-    const job = await started();
-    const at = (ms: number) => new Date(Date.parse(job.startedAt) + ms).toISOString();
-    thread('its-thread', 'p-app', job.title, at(700), job.id);
-    thread('later', 'p-app', job.title, at(60_000), 'review-another-job'); // another job's, same PR
-    thread('by-hand', 'p-app', job.title, at(90_000)); // made in T3 by hand, same title
-    makeLane();
-    void lane.start();
-    await until(() => t3.threadStreamCount('its-thread') > 0);
-    expect(log.get(job.id)).toMatchObject({ threadId: 'its-thread' });
-    expect(t3.threadStreamCount('later') + t3.threadStreamCount('by-hand')).toBe(0);
-    t3.endRun('later', 'completed'); // the other thread ending starts nothing: its own still runs
-    await new Promise((r) => setTimeout(r, 30));
-    expect(t3.launches).toEqual([]);
-    expect(log.get(job.id)!.end).toBeUndefined();
-    t3.endRun('its-thread', 'completed');
-    await until(() => t3.launches.length === 1);
-    await answer(1, reply([]));
-    await lane.idle();
-  });
-
-  test("only same-titled threads without its mark: none is its, so it counts as failed", async () => {
-    const job = await started();
-    thread('by-hand', 'p-app', job.title, new Date(Date.parse(job.startedAt) + 500).toISOString());
-    gh.reviewPulls['owner/app'] = [];
-    makeLane();
-    await lane.start();
-    await lane.idle();
-    expect(log.get(job.id)).toMatchObject({ end: { outcome: 'failed' } });
-    expect(log.get(job.id)!.threadId).toBeUndefined();
-  });
-
-  test("a launch heads its message with the job's mark", async () => {
+describe('it starts clean', () => {
+  test("a PR the Python runner reviewed, its Review table in the body, gets a fresh review 1, and its table is neither read nor rewritten", async () => {
+    const python = '## Review\n\n| Step | Time (UTC) | Commit | Verdict |\n|---|---|---|---|\n| [Sol review 2](https://x) | 2026-11-18 10:00 | `abcdef1` | **Clean** |\n';
+    gh.bodies['owner/app#4'] = `## Summary\n\nx\n\n${python}`;
+    // the Python runner's review of this very head: the app doesn't read it, so H isn't reviewed yet
+    gh.comments['owner/app#4'] = [{ author: 'someone', createdAt: '1', body: `## Sol review 2 · Clean\n\n<!-- sol-pr-review round=2 verdict=clean sha=${H} findings=W10= -->` }];
     makeLane();
     const passed = lane.pass();
     await answer(1, reply([]));
     await passed;
     await lane.idle();
-    expect(t3.launches[0].message.startsWith(`${jobMark(log.jobs()[0]!.id)}
-
-`)).toBe(true);
+    const comment = gh.posted.find((p) => p.what === 'comment')!;
+    expect(comment.body).toMatch(/^## Sol review 1 · Clean/);
+    expect(t3.launches[0].message).not.toContain('You last reviewed');
+    const body = gh.bodies['owner/app#4']!;
+    expect(body.startsWith(`## Summary\n\nx\n\n${python}\n${TABLE_START}\n| Step | Reviewer |`)).toBe(true);
+    expect(body.endsWith(`\n\n${TABLE_END}\n`)).toBe(true);
+    expect(gh.bodies['owner/app#4']).toContain(`| [Review 1](${comment.url}) | GPT-6.2-Sol High |`);
   });
+});
 
-  test('its review thread is found in T3 by project, title and start, and no second review starts until it ends', async () => {
-    const job = await started();
-    const at = (ms: number) => new Date(Date.parse(job.startedAt) + ms).toISOString();
-    thread('older', 'p-app', job.title, at(-3_600_000), 'review-older'); // an earlier review of the same PR
-    thread('its-thread', 'p-app', job.title, at(700), job.id);
+describe('after a restart', () => {
+  /** A review an app launched and then stopped watching (it quit): its job is open, its thread saved. */
+  async function cutOff() {
     makeLane();
-    void lane.start();
-    await until(() => t3.threadStreamCount('its-thread') > 0);
-    expect(log.get(job.id)).toMatchObject({ threadId: 'its-thread', runId: 'its-thread-run' });
-    await new Promise((r) => setTimeout(r, 30));
-    expect(t3.launches).toEqual([]); // the PR waits: its first review still runs in its checkout
-    expect(git.calls).toEqual([]);
-    t3.endRun('its-thread', 'completed');
-    await until(() => t3.launches.length === 1); // then it's reviewed afresh
-    expect(log.get(job.id)!.end).toMatchObject({ outcome: 'failed', error: 'The app stopped mid-review.' });
-    expect(t3.toolCalls.filter((c) => c.tool === 't3_thread_organize').map((c) => c.args.threadId)).toContain('its-thread');
-    expect(t3.toolCalls.filter((c) => c.tool === 't3_thread_organize').map((c) => c.args.threadId)).not.toContain('older');
-    await answer(1, reply([]));
+    void lane.pass();
+    await until(() => t3.threadStreamCount('thread-1') > 0);
+    lane.stop();
     await lane.idle();
-  });
+    const job = log.jobs()[0]!;
+    expect(job).toMatchObject({ threadId: 'thread-1', runId: 'run-1' });
+    expect(job.end).toBeUndefined();
+    // its checkout stays: the thread runs on in it
+    expect(git.calls.filter((c) => c.startsWith('removeCheckout'))).toEqual([]);
+    return job;
+  }
+  const organized = () => t3.toolCalls.filter((c) => c.tool === 't3_thread_organize').map((c) => c.args.threadId);
 
-  test("T3's threads unreadable at first: asked again until they answer, never taken as no thread", async () => {
-    const job = await started();
-    thread('its-thread', 'p-app', job.title, new Date(Date.parse(job.startedAt) + 500).toISOString(), job.id);
-    t3.shellFailures = 3;
+  test('a review with a saved thread id carries on with it: watched to its end, read, posted, its checkout removed and its thread settled', async () => {
+    const job = await cutOff();
     makeLane();
     void lane.start();
-    await until(() => t3.threadStreamCount('its-thread') > 0);
-    expect(t3.launches).toEqual([]);
-    expect(lines.filter((l) => /couldn't be read to find its thread/.test(l))).toHaveLength(3);
-    t3.endRun('its-thread', 'completed');
+    await until(() => t3.threadStreamCount('thread-1') > 0);
+    await lane.pass();
+    expect(t3.launches).toHaveLength(1); // no second review while it runs
+    t3.say('thread-1', reply([{ id: 'F1', tag: 'important', class: 'unchecked input', file: 'src/a.ts', line: 3, scenario: 'empty input crashes' }]));
+    t3.endRun('thread-1', 'completed');
     await until(() => log.get(job.id)!.end !== undefined);
-    await answer(1, reply([]));
     await lane.idle();
+    expect(log.get(job.id)).toMatchObject({ end: { outcome: 'blocking', verdict: 'blocking' }, settledAt: expect.any(String) });
+    expect(readReviews(gh.comments['owner/app#4']!)).toMatchObject([{ round: 1, verdict: 'blocking', sha: H }]);
+    expect(gh.posted.filter((p) => p.what === 'status')).toEqual([expect.objectContaining({ sha: H, state: 'failure' })]);
+    expect(gh.bodies['owner/app#4']).toContain('| [Review 1](');
+    expect(git.calls.at(-1)).toBe(`removeCheckout ${join(dir, 'state', 'checkouts', 'app-pr4')} refs/queue-runner/pr4`);
+    expect(organized()).toEqual(['thread-1']);
+    expect(t3.launches).toHaveLength(1);
   });
 
-  test('with no thread T3 made for it, it counts as failed at once', async () => {
-    const job = await started();
-    thread('other-pr', 'p-app', 'Queue runner review: app#5', new Date(Date.parse(job.startedAt) + 500).toISOString());
-    gh.reviewPulls['owner/app'] = [];
+  test("T3's reads failing or coming back empty for a moment are asked again, never taken as no reply or a failed review (F12)", async () => {
+    const job = await cutOff();
+    makeLane();
+    void lane.start();
+    await until(() => t3.threadStreamCount('thread-1') > 0);
+    t3.readFailures = 2;
+    t3.emptyReads = 1;
+    t3.say('thread-1', reply([]));
+    t3.endRun('thread-1', 'completed');
+    for (let i = 0; i < 3; i++) {
+      await until(() => retries.size > 0);
+      retryNow();
+    }
+    await until(() => log.get(job.id)!.end !== undefined);
+    await lane.idle();
+    expect(log.get(job.id)!.end).toMatchObject({ outcome: 'clean' });
+    expect(lines.filter((l) => /its reply couldn't be read/.test(l))).toHaveLength(2);
+    expect(lines.filter((l) => /reply empty; reading it again/.test(l))).toHaveLength(1);
+  });
+
+  test('a review posted before the app stopped is recorded, never posted twice', async () => {
+    const job = await cutOff();
+    gh.comments['owner/app#4'] = [{ author: 'me', createdAt: '2', body: `<!-- queue-runner-app review round=1 verdict=clean sha=${H} findings=W10= -->` }];
+    makeLane();
+    void lane.start();
+    await until(() => t3.threadStreamCount('thread-1') > 0);
+    t3.say('thread-1', reply([]));
+    t3.endRun('thread-1', 'completed');
+    await until(() => log.get(job.id)!.end !== undefined);
+    await lane.idle();
+    expect(log.get(job.id)!.end).toMatchObject({ outcome: 'clean', link: null });
+    expect(gh.posted).toEqual([]);
+    expect(lines.join('\n')).toMatch(/was posted before the app stopped; not posted again/);
+  });
+
+  test('one with no saved thread id needs the user: no thread is matched to it, its checkout stays, and its repo starts nothing until the user answers', async () => {
+    // a thread of its very title and project in T3: never taken for it
+    t3.threadState['same-title'] = { id: 'same-title', projectId: 'p-app', title: 'Queue runner review: app#4', runtimeRequests: [], turnItems: [], runs: [{ id: 'r', ordinal: 1, rootNodeId: 'n', status: 'running' }] };
+    const job = await log.started({ kind: 'review', repo: 'p-app', github: 'owner/app', issue: 4, branch: pull().branch, base: 'main', title: 'Queue runner review: app#4', choice: REVIEW, onFallback: false, sha: H, round: 1, reviewer: 'R' });
     makeLane();
     await lane.start();
     await lane.idle();
-    expect(log.get(job.id)!.end).toMatchObject({ outcome: 'failed' });
-    expect(t3.toolCalls.filter((c) => c.tool === 't3_thread_organize')).toEqual([]);
+    expect(log.get(job.id)).toMatchObject({ end: { outcome: 'needs-user', error: 'the app stopped before T3 named its thread' } });
+    expect(t3.threadStreamCount('same-title')).toBe(0);
+    expect(t3.toolCalls.filter((c) => c.tool !== 't3_project_list')).toEqual([]);
+    expect(git.calls).toEqual([]);
+    await lane.pass();
+    expect(t3.launches).toEqual([]);
+    expect(lines).toContain('app: no review while Queue runner review: app#4 needs you');
+    // the user answers: the repo is free, and the PR is reviewed afresh
+    const passed = lane.answered(job.id);
+    await answer(1, reply([]));
+    await passed;
+    await lane.idle();
+    expect(log.jobs().at(-1)).toMatchObject({ end: { outcome: 'clean' } });
+  });
+
+  test('a launch whose answer was lost needs the user: its checkout stays for the thread T3 may have started, and nothing else starts', async () => {
+    t3.launchAnswerLost = true;
+    makeLane();
+    await lane.pass();
+    await lane.idle();
+    const [job] = log.jobs();
+    expect(job).toMatchObject({ end: { outcome: 'needs-user', error: expect.stringMatching(/answer was lost/) } });
+    expect(job!.threadId).toBeUndefined();
+    expect(t3.threadStreamCount('thread-1')).toBe(0);
+    expect(git.calls.some((c) => c.startsWith('removeCheckout'))).toBe(false);
+    expect(organized()).toEqual([]);
+    t3.launchAnswerLost = false;
+    await lane.pass();
+    expect(t3.launches).toHaveLength(1);
+  });
+
+  test('a build that needs the user holds the review lane too: one ticket at a time, whichever lane', async () => {
+    const build = await log.started({ kind: 'build', repo: 'p-app', github: 'owner/app', issue: 3, branch: 'claude/x-3', base: 'main', title: 'Queue runner build: app#3', choice: BUILD, onFallback: false });
+    await log.ended(build.id, { outcome: 'needs-user', error: 'lost' });
+    makeLane();
+    await lane.pass();
+    expect(t3.launches).toEqual([]);
+    expect(lines).toEqual(['app: no review while Queue runner build: app#3 needs you']);
+  });
+});
+
+describe('a reply', () => {
+  test('T3 giving it empty three reads in a row fails the review', async () => {
+    makeLane();
+    const passed = lane.pass();
+    await until(() => t3.threadStreamCount('thread-1') > 0);
+    gh.reviewPulls['owner/app'] = []; // nothing to review after it
+    t3.endRun('thread-1', 'completed');
+    for (let i = 0; i < 2; i++) {
+      await until(() => retries.size > 0);
+      retryNow();
+    }
+    await passed;
+    await until(() => log.jobs()[0]!.end !== undefined);
+    await lane.idle();
+    expect(log.jobs()[0]!.end).toMatchObject({ outcome: 'failed', error: expect.stringMatching(/completed with an empty reply \(read 3 times\)/) });
+    expect(gh.posted).toEqual([]);
   });
 });
 

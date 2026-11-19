@@ -15,7 +15,7 @@ type ShellStream = { send(item: unknown): void; end(): void; ended: boolean };
 
 /** A thread's state as `orchestration.subscribeThread` shows it: its runs, runtime requests (a
  *  question to the user is a pending one) and turn items (a failed run's error among them). */
-export type FakeThread = { id: string; projectId: string; runs: any[]; runtimeRequests: any[]; turnItems: any[]; messages?: any[]; title?: string; createdAt?: string; branch?: string | null };
+export type FakeThread = { id: string; projectId: string; runs: any[]; runtimeRequests: any[]; turnItems: any[]; messages?: any[]; title?: string; branch?: string | null };
 
 export class FakeT3 {
   port = 3773;
@@ -34,8 +34,10 @@ export class FakeT3 {
   threadState: Record<string, FakeThread> = {};
   /** The open `subscribeThread` streams, by thread. */
   private threadStreams = new Map<string, Set<{ send(item: unknown): void; end(): void }>>();
-  /** How many `subscribeShell` streams fail before one answers (T3 down a while). */
-  shellFailures = 0;
+  /** How many `t3_thread_read` calls fail (T3 busy a moment), then how many more answer with no
+   *  items (an empty page, as T3 gives one now and then), before reads answer as they should. */
+  readFailures = 0;
+  emptyReads = 0;
   /** Answers `t3_thread_launch` with this failure instead (T3 refusing it). */
   launchFailure: { code: string; message: string } | null = null;
   /** `t3_thread_launch` runs, then its answer is lost (the connection drops before it arrives). */
@@ -193,9 +195,9 @@ export class FakeT3 {
     for (const s of this.shells) s.send(item);
   }
 
-  /** Each thread as T3's shell lists it (docs/app.md, The WebSocket API). */
+  /** Each launched thread as T3's shell snapshot lists it. */
   private shellThreads() {
-    return Object.values(this.threadState).map((t) => ({ id: t.id, projectId: t.projectId, title: t.title ?? null, branch: t.branch ?? null, createdAt: t.createdAt ?? new Date(0).toISOString(), latestRunId: t.runs.at(-1)?.id ?? null }));
+    return Object.values(this.threadState).map((t) => ({ id: t.id, projectId: t.projectId, title: t.title ?? null, branch: t.branch ?? null }));
   }
 
   private tool(name: string, args: any): { result?: unknown; failure?: { code: string; message: string } } {
@@ -210,7 +212,7 @@ export class FakeT3 {
       this.launches.push(args);
       const n = this.launches.length;
       this.threadState[`thread-${n}`] = {
-        id: `thread-${n}`, projectId: args.projectId, title: args.title, createdAt: new Date().toISOString(), runtimeRequests: [], turnItems: [],
+        id: `thread-${n}`, projectId: args.projectId, title: args.title, runtimeRequests: [], turnItems: [],
         messages: [{ itemId: `msg-${++this.n}`, type: 'user_message', runId: `run-${n}`, text: args.message }],
         branch: args.workspaceStrategy?.branch ?? null,
         runs: [{ id: `run-${n}`, threadId: `thread-${n}`, ordinal: 1, rootNodeId: `node-${n}`, status: 'running', completedAt: null }],
@@ -222,6 +224,8 @@ export class FakeT3 {
       // one item's text on, `textChunk` characters at a time (T3 truncates long text)
       const t = this.threadState[args.threadId];
       if (!t) return { failure: { code: 'not_found', message: 'The thread was not found.' } };
+      if (this.readFailures > 0) { this.readFailures--; return { failure: { code: 'busy', message: 'T3 is busy' } }; }
+      if (this.emptyReads > 0) { this.emptyReads--; return { result: { items: [], hasMore: false, nextPosition: null } }; }
       const cut = (item: any, from: number) => {
         const text = String(item.text).slice(from, from + this.textChunk);
         const more = from + this.textChunk < String(item.text).length;
@@ -391,10 +395,7 @@ export class FakeT3 {
           const exit = method ? { _tag: 'Success', value: method(msg.payload) } : { _tag: 'Failure', cause: { _tag: 'Die', defect: `no method ${msg.tag}` } };
           queueMicrotask(() => open && on.message(JSON.stringify({ _tag: 'Exit', requestId: msg.id, exit })));
         }
-        if (msg._tag === 'Request' && msg.tag === 'orchestration.subscribeShell' && this.shellFailures > 0) {
-          this.shellFailures--;
-          queueMicrotask(() => open && on.message(JSON.stringify({ _tag: 'Exit', requestId: msg.id, exit: { _tag: 'Failure', cause: { _tag: 'Die', defect: 'T3 is busy' } } })));
-        } else if (msg._tag === 'Request' && msg.tag === 'orchestration.subscribeShell') {
+        if (msg._tag === 'Request' && msg.tag === 'orchestration.subscribeShell') {
           // T3's shell stream: a snapshot of every project (and threads, which the app ignores),
           // then each change as it happens (docs/app.md, The WebSocket API).
           const stream: ShellStream = {

@@ -41,10 +41,15 @@ export type JobStart = {
   title: string;
   choice: ModelChoice;
   onFallback: boolean;
-  /** A review's: the commit it reviews, its round, and who reviews as its comment names them. */
+  /** A review's: the commit it reviews, its round, and who reviews as its comment names them;
+   *  its run folder, its checkout and the repo's folder that checkout is of, so a review the app
+   *  was cut off from carries on with its thread after a restart. */
   sha?: string;
   round?: number;
   reviewer?: string;
+  runDir?: string;
+  checkout?: string;
+  folder?: string;
   /** What the usage gate let the job in at, and T3's reading it was let in on: a job watched
    *  again after a restart is reserved and measured from these. Absent on a line an older app
    *  wrote, and on a job no gate let in (the live check's). */
@@ -211,7 +216,7 @@ export class JobLog {
     return this.all.get(id);
   }
 
-  /** Builds started and not ended: left by an app that stopped mid-job, or running now. */
+  /** Jobs started and not ended: left by an app that stopped mid-job, or running now. */
   open(): Job[] {
     return this.jobs().filter((j) => !j.end);
   }

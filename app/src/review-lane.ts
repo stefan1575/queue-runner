@@ -12,7 +12,7 @@
 //   ->  its end from T3's thread events; its reply read whole
 //   ->  decide (src/review/ledger.ts): the verdict from the reply's sol-findings block
 //   ->  post (src/review/post.ts): follow-ups, the comment, sol-review on H, the Review row
-//   ->  the end recorded, the checkout removed, the thread settled
+//   ->  the end recorded, the checkout removed, the thread settled (src/settle.ts)
 //
 // **No outside tools** (docs/reviews.md): a review runs only on a T3 provider instance the user
 // named as set up without them (`toolFreeInstances`), as today's fallback reviews run on the one
@@ -20,6 +20,15 @@
 // naming its driver, so the list is the user's word, and launchJob refuses any instance not on it.
 // The lane asks first, so such a review waits and says why instead of failing; nor does one run on
 // the instance builds run on, which has their tools, whatever the list says.
+//
+// **After a restart, don't guess** (#155, as #154's builds): a review the log shows open whose
+// thread id was saved carries on with that thread: watched to its end, its reply read, decided
+// and posted, as if the app had never stopped. One with no saved thread id (the app stopped
+// before T3 named it, or the launch was sent and its answer lost: `NoAnswer`) is never matched to
+// a thread by title, branch or project: it's recorded as needing the user, its checkout is left
+// for a thread that may run in it, and its repo starts nothing until the user answers. A read of
+// T3 or GitHub after the run that fails for a moment is tried again, never taken as "none" or as
+// a failed review.
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { reviewBrief, said } from './briefs/review.ts';
@@ -35,9 +44,10 @@ import { testsNote } from './review/deps.ts';
 import { decide, nextRound, readReviews, ReviewFailed, runnerPost, type Comment, type Decision } from './review/ledger.ts';
 import { GitHubPoster, PostFailed, type GitHubPosts, type Poster } from './review/post.ts';
 import type { BuildRepo } from './build-lane.ts';
+import { ThreadSettler } from './settle.ts';
 import { retryAfter, type Retry } from './t3/project-feed.ts';
+import { NoAnswer } from './t3/seams.ts';
 import type { T3Mcp } from './t3/mcp.ts';
-import { openJobThread } from './t3/job-thread.ts';
 import { watchThreadEnd, type ThreadEnd } from './t3/thread-end.ts';
 import { runReply } from './t3/thread-reply.ts';
 import type { T3Ws } from './t3/ws.ts';
@@ -90,35 +100,58 @@ export function reviewerName(catalog: Catalog, jobs: Jobs, choice: ModelChoice, 
   return `${name}, fallback while ${own ? provider(catalog, own.provider)?.label ?? own.provider : 'its own provider'} is out of usage`;
 }
 
+/** Reads of the reply that come back empty before the review counts as failed: T3 gives an empty
+ *  page now and then, so one is no answer, and the third in a row is the thread's own. */
+export const EMPTY_READS = 3;
+
+/** What a review needs after its launch, to read, decide and post: kept in the job log's start
+ *  line and the run folder's `review.json`, so a review carries on after a restart. */
+type Run = {
+  name: string; github: string; n: number; h: string; round: number; reviewer: string;
+  runDir: string; wt: string; folder: string; gone: boolean; hasReviewMd: boolean;
+};
+
+/** The lane was stopped while a review waited: it's left open, for the next start to carry on. */
+class Stopping extends Error {}
+
 export class ReviewLane {
   private d: ReviewLaneDoors;
   private poster: Poster;
   private now: () => Date;
+  private settler: ThreadSettler;
   private running: Promise<unknown> | null = null;
   private passing: Promise<void> | null = null;
   private again = false;
   private stopped = false;
   private watches = new Set<{ stop(): void }>();
+  /** Retry waits under way: stop() ends each one. */
+  private waits = new Set<() => void>();
   private why = new Map<string, string | null>();
   private holdSaid: string | null = null;
+  /** The needs-you hold last said for each repo, so it's said once. */
+  private heldSaid = new Map<string, string>();
 
   constructor(doors: ReviewLaneDoors) {
     this.d = doors;
     this.poster = doors.poster ?? new GitHubPoster(doors.github, doors.say);
     this.now = doors.now ?? (() => new Date());
+    this.settler = new ThreadSettler(doors.mcp, doors.log, doors.say);
   }
 
-  /** A review the log shows open (an app that stopped mid-review) is watched to its thread's end
-   *  and counted as failed; then a pass. */
+  /** Each review the log shows open (an app that stopped mid-review) carries on with its saved
+   *  thread, or needs the user without one; no other review starts until they're done. Then a
+   *  pass. */
   start(): Promise<void> {
     const open = this.d.log.open().filter((j) => j.kind === 'review');
-    if (open.length) this.track(Promise.all(open.map((j) => this.cutOff(j))));
+    if (open.length) this.track(Promise.all(open.map((j) => this.resume(j))));
     return this.pass();
   }
 
+  /** Stops watching: a review in T3 goes on, and the next start carries on with it. */
   stop() {
     this.stopped = true;
     for (const w of this.watches) w.stop();
+    for (const wake of [...this.waits]) wake();
   }
 
   /** T3 read new usage: a pass, if a review waits on the gate. */
@@ -126,14 +159,23 @@ export class ReviewLane {
     if (this.holdSaid) void this.pass();
   }
 
+  /** The user has answered a job that needed them (the Inbox ticket's to ask): its repo is free
+   *  again, and a pass runs. */
+  async answered(jobId: string): Promise<void> {
+    if (!this.d.log.get(jobId)?.answeredAt) await this.d.log.answered(jobId);
+    await this.pass();
+  }
+
   /** Whether a review runs now. */
   busy(): boolean {
     return this.running !== null;
   }
 
-  /** Settles once the review under way and any pass have ended (the tests wait on it). */
+  /** Settles once the review under way, any pass and any settle have ended (the tests wait on it). */
   async idle(): Promise<void> {
-    while (this.running || this.passing) await Promise.allSettled([this.running, this.passing]);
+    while (this.running || this.passing || this.settler.pending().length) {
+      await Promise.allSettled([this.running, this.passing, ...this.settler.pending()]);
+    }
   }
 
   pass(): Promise<void> {
@@ -151,8 +193,9 @@ export class ReviewLane {
     return this.passing;
   }
 
-  /** The review under way; once it ends, a pass, unless its head had moved: GitHub's list may
-   *  still show the old head, and a pass now would fetch the moved one again at once. */
+  /** The review under way; once it ends, a pass, unless its head had moved (GitHub's list may
+   *  still show the old head, and a pass now would fetch the moved one again at once) or the lane
+   *  stopped. */
   private track(p: Promise<unknown>) {
     this.running = p;
     p.then((job) => (job as Job | undefined)?.end?.outcome !== 'head-moved', (e) => {
@@ -160,7 +203,7 @@ export class ReviewLane {
       return true;
     }).then((again) => {
       this.running = null;
-      if (again) void this.pass();
+      if (again && !this.stopped) void this.pass();
     });
   }
 
@@ -171,10 +214,21 @@ export class ReviewLane {
   }
 
   private async passOnce() {
+    // an end recorded and its thread not settled: settled on its own, each pass
+    this.settler.owed('review');
     if (this.running) return;
     for (const repo of this.d.repos()) {
       if (this.stopped || this.running) return;
       if (!repo.github) continue;
+      // a job that needs the user holds its repo, whichever lane's it is (After a restart, don't guess)
+      const held = this.d.log.needingUser(repo.id)[0];
+      if (held) {
+        const text = `${repo.title}: no review while ${held.title} needs you`;
+        if (this.heldSaid.get(repo.id) !== text) this.d.say(text);
+        this.heldSaid.set(repo.id, text);
+        continue;
+      }
+      this.heldSaid.delete(repo.id);
       let pulls: ReviewPull[];
       try {
         pulls = (await this.d.github.pullsToReview(repo.github)).sort((a, b) => a.number - b.number);
@@ -263,78 +317,172 @@ export class ReviewLane {
     const earlier = readReviews(await this.d.github.issueComments(github, n));
     const round = nextRound(earlier);
     const title = reviewTitle(repo, n);
+    const runDir = join(this.d.stateDir, 'runs', `${slug(repo.title)}-pr${n}-r${round}-${stamp(this.now())}`);
+    const wt = join(this.d.stateDir, 'checkouts', `${slug(repo.title)}-pr${n}`);
     const job = await this.d.log.started({
       kind: 'review', repo: repo.id, github, issue: n, branch: pr.branch, base: pr.base, title,
-      choice: letIn.choice, onFallback: letIn.onFallback, sha: h, round, reviewer,
+      choice: letIn.choice, onFallback: letIn.onFallback, cost: letIn.cost, sha: h, round, reviewer,
+      runDir, checkout: wt, folder: repo.folder,
     });
     this.d.gate.started({ id: job.id, kind: 'review', choice: letIn.choice }, letIn.cost);
     const name = `review ${repo.title}#${n}`;
-    const runDir = join(this.d.stateDir, 'runs', `${slug(repo.title)}-pr${n}-r${round}-${stamp(this.now())}`);
-    const wt = join(this.d.stateDir, 'checkouts', `${slug(repo.title)}-pr${n}`);
     const write = (file: string, text: string) => writeFile(join(runDir, file), text);
-    const ran_: { thread: { threadId: string; runId: string | null; link: string | null } | null } = { thread: null };
-    let end: JobEnd;
+    let run: Run;
+    let launched;
     try {
       await mkdir(runDir, { recursive: true });
-      end = await (async (): Promise<JobEnd> => {
-        const fetched = await this.d.git.fetchPr(repo.folder, n, pr.base);
-        if (fetched !== h) {
-          this.d.say(`${name}: the head moved from ${h.slice(0, 7)} to ${fetched.slice(0, 7)}; next pass`);
-          return { outcome: 'head-moved', error: `Listed at ${h.slice(0, 7)}, fetched at ${fetched.slice(0, 7)}.`, runDir };
-        }
-        await mkdir(join(this.d.stateDir, 'checkouts'), { recursive: true });
-        await this.d.git.checkout(repo.folder, prRef(n), wt);
-        const prepared = this.d.deps ? await this.d.deps.prepare(slug(repo.title), wt) : null;
-        if (prepared?.how) this.d.say(`${name}: dependencies ${prepared.how}${prepared.ready ? '' : `: ${prepared.note}`}`);
-        const last = earlier.at(-1)?.sha ?? null;
-        const gone = round > 1 && !(last && await this.d.git.isAncestor(repo.folder, last, h));
-        const said_ = await this.conversation(github, n);
-        const files = await this.inputs(repo, pr, round, last, gone, runDir, wt, said_);
-        const guidelines = await readText(join(wt, 'REVIEW.md'));
-        const after = earlier.at(-1)?.at ?? '';
-        const brief = reviewBrief({
-          github, number: n, title: pr.title, branch: pr.branch, base: pr.base, sha: h, round, earlier, gone,
-          checkout: slash(wt), runDir: slash(runDir), projectFolder: slash(repo.folder), files,
-          hasAgents: await isFile(join(wt, 'AGENTS.md')), guidelines, tests: testsNote(prepared),
-          since: round > 1 ? said_.filter((c) => c.createdAt > after && !runnerPost(c.body)) : [],
-        });
-        await write('brief.md', brief);
-        this.d.say(`${name}: ${reviewer} reviews ${h.slice(0, 7)} (review ${round}) in ${runDir}`);
-        const launched = await launchJob(this.d.mcp, catalog, { kind: 'review', projectId: repo.id, title, brief, choice: letIn.choice, toolFree: this.d.toolFree(),
-          buildInstance: kindModels(this.d.jobs(), 'build', catalog).choice?.provider ?? null, jobId: job.id });
-        const thread = { threadId: launched.threadId, runId: launched.runId, link: launched.link };
-        ran_.thread = thread;
-        await this.d.log.thread(job.id, thread);
-        const ran = await this.watch(job.title, thread);
-        if (ran.outcome === 'usage-limit') {
-          this.d.say(`${name}: the reviewer ran out of usage; nothing counts, and the next review waits on the gate`);
-          return { outcome: 'out-of-usage', status: ran.status, error: ran.error, resetAt: ran.resetAt, runDir };
-        }
-        if (ran.outcome !== 'done') {
-          throw new ReviewFailed(ran.outcome === 'waiting' ? `The review thread ${thread.threadId} stopped to ask a question instead of reviewing.`
-            : `The review thread ${thread.threadId} ended ${ran.status}: ${ran.error ?? 'no error given'}`);
-        }
-        const reply = (await runReply(this.d.mcp, thread.threadId, thread.runId))?.trim();
-        if (!reply) throw new ReviewFailed(`The review thread ${thread.threadId} completed with an empty reply.`);
-        await write('reply.md', `${reply}\n`);
-        const d = decide({ repo: github, sha: h, round, earlier, hasReviewMd: guidelines !== null, reply, wt: slash(wt), runDir: slash(runDir), gone, reviewer, user: await this.d.user() });
-        return await this.post(name, github, n, d, runDir, write);
-      })();
+      const fetched = await this.d.git.fetchPr(repo.folder, n, pr.base);
+      if (fetched !== h) {
+        this.d.say(`${name}: the head moved from ${h.slice(0, 7)} to ${fetched.slice(0, 7)}; next pass`);
+        return await this.close(job, null, { outcome: 'head-moved', error: `Listed at ${h.slice(0, 7)}, fetched at ${fetched.slice(0, 7)}.`, runDir }, false);
+      }
+      await mkdir(join(this.d.stateDir, 'checkouts'), { recursive: true });
+      await this.d.git.checkout(repo.folder, prRef(n), wt);
+      const prepared = this.d.deps ? await this.d.deps.prepare(slug(repo.title), wt) : null;
+      if (prepared?.how) this.d.say(`${name}: dependencies ${prepared.how}${prepared.ready ? '' : `: ${prepared.note}`}`);
+      const last = earlier.at(-1)?.sha ?? null;
+      const gone = round > 1 && !(last && await this.d.git.isAncestor(repo.folder, last, h));
+      const said_ = await this.conversation(github, n);
+      const files = await this.inputs(repo, pr, round, last, gone, runDir, wt, said_);
+      const guidelines = await readText(join(wt, 'REVIEW.md'));
+      const after = earlier.at(-1)?.at ?? '';
+      const brief = reviewBrief({
+        github, number: n, title: pr.title, branch: pr.branch, base: pr.base, sha: h, round, earlier, gone,
+        checkout: slash(wt), runDir: slash(runDir), projectFolder: slash(repo.folder), files,
+        hasAgents: await isFile(join(wt, 'AGENTS.md')), guidelines, tests: testsNote(prepared),
+        since: round > 1 ? said_.filter((c) => c.createdAt > after && !runnerPost(c.body)) : [],
+      });
+      await write('brief.md', brief);
+      run = { name, github, n, h, round, reviewer, runDir, wt, folder: repo.folder, gone, hasReviewMd: guidelines !== null };
+      // what deciding needs that the log's start line doesn't hold, for a review carried on after a restart
+      await write('review.json', `${JSON.stringify({ gone: run.gone, hasReviewMd: run.hasReviewMd })}\n`);
+      this.d.say(`${name}: ${reviewer} reviews ${h.slice(0, 7)} (review ${round}) in ${runDir}`);
+      try {
+        launched = await launchJob(this.d.mcp, catalog, { kind: 'review', projectId: repo.id, title, brief, choice: letIn.choice, toolFree: this.d.toolFree(),
+          buildInstance: kindModels(this.d.jobs(), 'build', catalog).choice?.provider ?? null });
+      } catch (e) {
+        // sent and its answer lost: T3 may have started the thread, and nothing says which one it
+        // is. Any other failure (nothing sent, or a refusal T3 answered) started nothing
+        if (e instanceof NoAnswer) return await this.needsUser(job, (e as Error).message);
+        throw e;
+      }
     } catch (e) {
-      const error = e instanceof ReviewFailed || e instanceof PostFailed ? e.message : `${(e as Error).name}: ${(e as Error).message}`;
-      await writeFile(join(runDir, 'failed.txt'), `${error}\n`).catch(() => {});
-      this.d.say(`${name}: review failed, nothing counts: ${error}`);
-      end = { outcome: 'failed', error, runDir };
-    } finally {
-      await this.d.git.removeCheckout(repo.folder, wt, prRef(n));
+      return await this.close(job, { folder: repo.folder, wt, n }, await this.failed(name, runDir, e), false);
     }
-    const thread = ran_.thread;
-    if (thread) this.d.gate.finished(job.id);
+    const thread = { threadId: launched.threadId, runId: launched.runId, link: launched.link };
+    await this.d.log.thread(job.id, thread);
+    return this.carryOn({ ...job, ...thread }, run);
+  }
+
+  /** A review whose thread runs: watched to its end, read, decided and posted; then recorded, its
+   *  checkout removed and its thread settled. Stopped meanwhile, it's left open as it is. */
+  private async carryOn(job: Job, run: Run): Promise<Job> {
+    let end: JobEnd;
+    try {
+      end = await this.ran(job, run);
+    } catch (e) {
+      if (this.stopped) return job; // the next start carries on with its thread
+      end = await this.failed(run.name, run.runDir, e);
+    }
+    return this.close(job, run, end, true);
+  }
+
+  /** The run's end, its reply and what the review decided, posted. */
+  private async ran(job: Job, run: Run): Promise<JobEnd> {
+    const write = (file: string, text: string) => writeFile(join(run.runDir, file), text);
+    const ran = await this.watch(job.title, { threadId: job.threadId!, runId: job.runId ?? null });
+    if (ran.outcome === 'usage-limit') {
+      this.d.say(`${run.name}: the reviewer ran out of usage; nothing counts, and the next review waits on the gate`);
+      return { outcome: 'out-of-usage', status: ran.status, error: ran.error, resetAt: ran.resetAt, runDir: run.runDir };
+    }
+    if (ran.outcome !== 'done') {
+      throw new ReviewFailed(ran.outcome === 'waiting' ? `The review thread ${job.threadId} stopped to ask a question instead of reviewing.`
+        : `The review thread ${job.threadId} ended ${ran.status}: ${ran.error ?? 'no error given'}`);
+    }
+    const reply = await this.reply(run.name, job.threadId!, job.runId ?? null);
+    if (!reply) throw new ReviewFailed(`The review thread ${job.threadId} completed with an empty reply (read ${EMPTY_READS} times).`);
+    await write('reply.md', `${reply}\n`);
+    // read afresh, the app's own reviews only: the earlier rounds, and this one if it was posted
+    // before the app stopped, so it's never posted twice
+    const reviews = readReviews(await this.askAgain(run.name, 'its comments', () => this.d.github.issueComments(run.github, run.n)));
+    const earlier = reviews.filter((r) => r.round < run.round);
+    const d = decide({
+      repo: run.github, sha: run.h, round: run.round, earlier, hasReviewMd: run.hasReviewMd, reply,
+      wt: slash(run.wt), runDir: slash(run.runDir), gone: run.gone, reviewer: run.reviewer, user: await this.d.user(),
+    });
+    if (reviews.some((r) => r.round === run.round && r.sha === run.h)) {
+      this.d.say(`${run.name}: review ${run.round} on ${run.h.slice(0, 7)} was posted before the app stopped; not posted again`);
+      return { outcome: OUTCOMES[d.outcome], verdict: d.verdict, signals: d.signals.map((s) => s.signal), link: null, runDir: run.runDir };
+    }
+    return await this.post(run.name, run.github, run.n, d, run.runDir, write);
+  }
+
+  /** The run's reply, read whole. A read T3 fails is asked again after `retry`'s wait, never
+   *  taken as no reply (F12); one that comes back empty is read again, and only `EMPTY_READS` in
+   *  a row are the thread's own: null. */
+  private async reply(name: string, threadId: string, runId: string | null): Promise<string | null> {
+    for (let empty = 0; ;) {
+      const text = (await this.askAgain(name, 'its reply', () => runReply(this.d.mcp, threadId, runId)))?.trim();
+      if (text) return text;
+      if (++empty >= EMPTY_READS) return null;
+      this.d.say(`${name}: T3 gave its reply empty; reading it again`);
+      await this.wait();
+      if (this.stopped) throw new Stopping('the lane stopped');
+    }
+  }
+
+  /** `read`, asked again after `retry`'s wait while it throws: T3 or GitHub failing for a moment
+   *  is no answer. Throws Stopping once the lane stops. */
+  private async askAgain<T>(name: string, what: string, read: () => Promise<T>): Promise<T> {
+    for (;;) {
+      if (this.stopped) throw new Stopping('the lane stopped');
+      try {
+        return await read();
+      } catch (e) {
+        if (this.stopped) throw new Stopping('the lane stopped');
+        this.d.say(`${name}: ${what} couldn't be read (${(e as Error).message}); asking again`);
+        await this.wait();
+      }
+    }
+  }
+
+  /** `retry`'s wait; stop() ends it at once. */
+  private wait(): Promise<void> {
+    return new Promise<void>((done) => {
+      let cancel = () => {};
+      const wake = () => { this.waits.delete(wake); cancel(); done(); };
+      this.waits.add(wake);
+      cancel = (this.d.retry ?? retryAfter(30_000))(wake);
+    });
+  }
+
+  /** A review that failed: said and kept in its run folder; nothing counts. */
+  private async failed(name: string, runDir: string, e: unknown): Promise<JobEnd> {
+    const error = e instanceof ReviewFailed || e instanceof PostFailed ? e.message : `${(e as Error).name}: ${(e as Error).message}`;
+    await writeFile(join(runDir, 'failed.txt'), `${error}\n`).catch(() => {});
+    this.d.say(`${name}: review failed, nothing counts: ${error}`);
+    return { outcome: 'failed', error, runDir };
+  }
+
+  /** The end recorded, after its checkout (if one was made) is removed. The gate measures a
+   *  review that ran and drops one that didn't; a thread it ran in is settled, whatever the end:
+   *  nobody answers a review thread. */
+  private async close(job: Job, checkout: Pick<Run, 'folder' | 'wt' | 'n'> | null, end: JobEnd, launched: boolean): Promise<Job> {
+    if (checkout) await this.d.git.removeCheckout(checkout.folder, checkout.wt, prRef(checkout.n));
+    if (launched) this.d.gate.finished(job.id);
     else this.d.gate.dropped(job.id);
     const ended = await this.d.log.ended(job.id, end);
-    // recorded first, then settled: nobody answers a review thread, whatever its end
-    if (thread) await this.settle(name, thread.threadId);
+    if (launched) await this.settler.settle(ended);
     return ended;
+  }
+
+  /** A review T3 may have started a thread for, with no thread id the app could watch: recorded
+   *  as needing the user, never matched to a thread by its title, branch or project. Its checkout
+   *  stays (the thread may run in it), and its repo starts nothing until the user answers. */
+  private needsUser(job: Job, why: string): Promise<Job> {
+    this.d.gate.dropped(job.id);
+    this.d.say(`${job.title} needs you: ${why}. T3 may have started its thread; nothing else starts in ${job.github ?? job.repo} until you answer.`);
+    return this.d.log.ended(job.id, { outcome: 'needs-user', error: why, ...(job.runDir ? { runDir: job.runDir } : {}) });
   }
 
   private async post(name: string, github: string, n: number, d: Decision, runDir: string, write: (f: string, t: string) => Promise<void>): Promise<JobEnd> {
@@ -402,33 +550,29 @@ export class ReviewLane {
     }
   }
 
-  /** A review left open by an app that stopped mid-review: its thread (the log's, else the one
-   *  T3 has whose message carries the job's mark: the app may have stopped between T3's launch
-   *  and the log's line) is watched to its end, then the review counts as failed,
-   *  nothing posted, and the thread is settled. Until then the lane starts no review. */
-  private async cutOff(job: Job): Promise<Job> {
+  /** A review the log shows open, left by an app that stopped mid-review: reserved in the gate at
+   *  its logged cost; with its saved thread id it carries on with that thread, with none it needs
+   *  the user. A start line without what carrying on needs (an earlier app's) has its thread
+   *  watched to its end and counts as failed. */
+  private async resume(job: Job): Promise<Job> {
+    this.d.gate.started({ id: job.id, kind: 'review', choice: job.choice }, job.cost ?? {});
+    if (!job.threadId) return this.needsUser(job, 'the app stopped before T3 named its thread');
     const name = `review ${job.title}`;
-    const thread = await openJobThread(this.d.ws, this.d.mcp, this.d.log, job, this.d.retry ?? retryAfter(30_000), () => this.stopped, this.d.say);
-    if (thread === undefined) return job; // the app stopped again: left open for the next start
-    if (thread) {
-      const v = this.d.gate.check({ id: job.id, kind: 'review', choice: job.choice });
-      this.d.gate.started({ id: job.id, kind: 'review', choice: job.choice }, v.fits ? v.cost : {});
-      this.d.say(`${name}: cut off with the app; its thread runs on in ${thread.link ?? thread.threadId}: counted as failed once it ends`);
-      await this.watch(job.title, thread);
-      this.d.gate.finished(job.id);
+    this.d.say(`${name}: carrying on with its thread after the app stopped: ${job.link ?? job.threadId}`);
+    const kept = job.runDir ? await readText(join(job.runDir, 'review.json')) : null;
+    let saved: { gone?: unknown; hasReviewMd?: unknown } | null = null;
+    try { saved = kept ? JSON.parse(kept) : null; } catch { saved = null; }
+    if (!saved || !job.github || !job.sha || !job.round || !job.reviewer || !job.runDir || !job.checkout || !job.folder) {
+      try {
+        await this.watch(job.title, { threadId: job.threadId, runId: job.runId ?? null });
+      } catch {
+        return job; // stopped: left open for the next start
+      }
+      return this.close(job, null, { outcome: 'failed', error: 'The app stopped mid-review, and its start line has no run folder to carry on from.' }, true);
     }
-    const ended = await this.d.log.ended(job.id, { outcome: 'failed', error: 'The app stopped mid-review.' });
-    if (thread) await this.settle(name, thread.threadId);
-    this.d.say(`${name}: cut off with the app; counted as failed`);
-    return ended;
-  }
-
-  private async settle(name: string, threadId: string) {
-    try {
-      await this.d.mcp.call('t3_thread_organize', { threadId, action: 'settle' });
-    } catch (e) {
-      this.d.say(`${name}: settling its thread ${threadId} failed (${(e as Error).message}); left as it is`);
-    }
+    return this.carryOn(job, {
+      name, github: job.github, n: job.issue, h: job.sha, round: job.round, reviewer: job.reviewer,
+      runDir: job.runDir, wt: job.checkout, folder: job.folder, gone: saved.gone === true, hasReviewMd: saved.hasReviewMd === true,
+    });
   }
 }
-

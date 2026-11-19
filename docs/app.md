@@ -249,9 +249,7 @@ Which model does each kind of job (#152: #120's shape on #36's page, as the 2026
   value}]}, workspaceStrategy?: {type: worktree, baseRef, branch}}`, on the choice the usage gate
   let in (the kind's model or its fallback), never the settings read again: a setting changed
   after the gate answered can't move the job. A choice T3 can't run by then launches nothing
-  (docs/t3.md: Codex ignores `effort`, so the id matters). Given the job's id (a review's), the
-  message starts with its mark, `<!-- queue-runner job <id> -->`, so its thread is known as that
-  job's even if the app stops before it logs the thread.
+  (docs/t3.md: Codex ignores `effort`, so the id matters).
 - **The page** (Settings, Models): Default, then one row per kind, each "Follows Default" until
   set (an undo goes back), with its fallback under its model. The three dropdowns are fixed
   widths, so changing a provider moves nothing (#36). Models carries a blue count in the page
@@ -418,7 +416,7 @@ every open PR in a served repo without a review on its newest commit gets one, w
 - **One review at a time** (#106 runs them at once later). Each asks the usage gate
   (`UsageGate.pick`, kind `review`): the kind's own model, or its fallback while that provider has
   no room (#69); held, it says the gate's reason once and the pass ends. A pass runs at start (after
-  an open review is watched to its end), on T3's usage and the repos changing, after each review
+  an open review is carried on with), on T3's usage and the repos changing, after each review
   (but not after one whose head moved, so a stale list can't loop it), and every minute.
 - **No outside tools** (`docs/reviews.md`, A review has no outside tools): a review runs only on
   a T3 provider instance the user named as set up without them, the `toolFreeInstances` setting
@@ -448,8 +446,10 @@ every open PR in a served repo without a review on its newest commit gets one, w
   `pr.md`, each closed issue with its comments, `conversation.md`, `evidence/`. Its end comes
   from T3's thread events (Builds); its reply is the run's last assistant message, read whole
   through `t3_thread_read` (`view: messages`, paged, then `textOffset` while truncated; T3's CLI's
-  `runResultText`). A question, a failure or an empty reply fails the review; a usage limit is
-  `out-of-usage` and the next review waits on the gate.
+  `runResultText`). A read that fails (T3 or GitHub busy a moment) is asked again after a wait,
+  never taken as no reply; a reply that comes back empty is read again, and only three empty reads
+  in a row are the thread's own. A question, a failure or that empty reply fails the review; a
+  usage limit is `out-of-usage` and the next review waits on the gate.
 - **Decide and post** (`src/review/ledger.ts`, `src/review/post.ts`, today's `ledger.py` and
   `post.py`): the verdict from the reply's last `sol-findings` block; clean means no Important
   finding open. Then each new Pre-existing finding filed once as a `needs-triage` issue, the
@@ -469,17 +469,26 @@ every open PR in a served repo without a review on its newest commit gets one, w
   Markers and headings inside a fenced block are only text. A follow-up issue is known as the
   app's by its own mark (`<!-- queue-runner-app finding <repo>#<n> <id> -->`) or the same title,
   never by another runner's footer, whose finding IDs are its own reviews'.
-- **The job log:** kind `review`, `issue` the PR, with `sha`, `round` and `reviewer`; its end
-  `clean`, `blocking`, `stop`, `approach-note` (with `verdict`, `signals`, `link`), `failed`,
-  `out-of-usage` or `head-moved`. Once the end is recorded the thread is settled, whatever the end:
-  nobody answers a review thread. One the log shows open on start is watched to its end, counted
-  `failed` and settled, as today's `Reviewer.settle`. Its thread is the log's, else (the app
-  stopped after T3 took the launch but before the log's line) the one whose first message starts
-  with the job's mark, among those T3's shell lists in its project under its title made no
-  earlier than 5 s before its start record (`src/t3/job-thread.ts`). Never the newest with the
-  title: every review of a PR has the same one, so a later thread could be taken for it. Threads
-  that can't be read are asked again, never taken as no thread.
-  No review starts until it ends, so a thread that runs on never has its checkout replaced under it.
+- **The job log:** kind `review`, `issue` the PR, with `sha`, `round`, `reviewer`, the `cost` it
+  was let in at, its `runDir`, its `checkout` and the repo's `folder`; its end `clean`, `blocking`,
+  `stop`, `approach-note` (with `verdict`, `signals`, `link`), `failed`, `out-of-usage`,
+  `head-moved` or `needs-user`. Once the end is recorded the thread is settled, whatever the end
+  (nobody answers a review thread), with the builds' settle (`src/settle.ts`: a `settled` line,
+  and an end with none settled on the next pass).
+- **After a restart, don't guess** (as Builds): a review the log shows open whose thread id was
+  saved carries on with that thread, before any other review starts: watched to its end, its reply
+  read, decided and posted from its start line and the run folder's `review.json` (what deciding
+  needs that the start line doesn't hold), its checkout removed and its thread settled. One posted
+  before the app stopped (the app's own comment for its round and H is on the PR) is recorded, not
+  posted again. One with no saved thread id (the app stopped before T3 named it) and a launch whose
+  answer was lost (`NoAnswer`) end `needs-user`: no thread is ever matched to it by title, branch,
+  project or anything listed in T3, its checkout stays for the thread T3 may have started, and its
+  repo starts nothing, review or build, until the user answers (`ReviewLane.answered`; the Inbox
+  ticket asks). A start line without a run folder (an earlier app's) has its thread watched to
+  its end and counts `failed`.
+- **The review lane and the build lane** share the repo's one ticket at a time (#179): the build
+  lane starts nothing while a PR is open, and the review lane reviews that PR; a review waits while
+  a build writes to its branch, and a job of either lane that needs the user holds both.
 - **Not yet:** merging a clean review and fix rounds (#156), conflict rounds (#157), stops (#158).
 
 ## Setup
