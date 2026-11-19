@@ -21,7 +21,10 @@ beforeEach(async () => {
   await writeFile(runtime, JSON.stringify({ origin: t3.origin }));
   ws = new T3Ws(runtimeAddress(runtime), t3.cli, t3.http, t3.connect);
 });
-afterEach(() => rm(dir, { recursive: true, force: true }));
+afterEach(async () => {
+  vi.useRealTimers();
+  await rm(dir, { recursive: true, force: true });
+});
 
 const until = (f: () => boolean) => vi.waitFor(() => { if (!f()) throw new Error('not yet'); }, { timeout: 2000, interval: 5 });
 
@@ -62,12 +65,19 @@ describe("T3's catalog, kept current", () => {
   });
 
   test('a stream that ends says why, keeps the last catalog and is asked again', async () => {
-    const source = T3Catalog.start(ws, 10);
+    // The wait before asking again is on the fake clock, moved on by the test. `until` moves it
+    // on too, by 5 ms a check, hence a second to spare before the 30 s.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const source = T3Catalog.start(ws, 30_000);
     await until(() => source.current().catalog !== null);
     t3.dropSockets();
     await until(() => source.current().error !== undefined);
     expect(source.current().error).toMatch(/closed/);
     expect(source.current().catalog).not.toBeNull();
+    const asked = () => t3.frames.filter((f) => f.tag === 'subscribeServerConfig').length;
+    vi.advanceTimersByTime(29_000);
+    expect(asked()).toBe(1);
+    vi.advanceTimersByTime(1_000);
     await until(() => source.current().error === undefined);
     expect(t3.frames.filter((f) => f.tag === 'subscribeServerConfig')).toHaveLength(2);
     source.stop();
