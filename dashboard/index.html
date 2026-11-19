@@ -56,6 +56,15 @@
     back-and-forth; B where it gets stuck; C each ticket's journey as a bar of its steps. The
     sample's `history` is new for this take. A repo with no favicon shows its first two letters
     in capitals. Take 27 is earlier/take-27.html.
+  - PROTOTYPE, with sample data only (#29, take 29): the slot under the board and the lanes is the
+    roadmap, as a thread answers "what's on the roadmap?", but written by the runner from tickets
+    and PRs with fixed wording, no model. ?variant=a|b|c, the same three for both scopes. A, in a
+    sentence: one repo is a row per effort (its spec, then how far, what's left, what's yours),
+    opening to its tickets by stage; all repositories is a row per repo. B, written out: the whole
+    answer as text, with the table inside it. C, a grid by stage: efforts (or repos) down, Done,
+    Moving, Yours, Ready, Held across. Above each, what's in the way: the tickets that wait on
+    you and hold others. Take 28's look-back views are earlier/take-28.html, parked for an
+    Analytics page.
   - A feature's bar has a cell per ticket, left to right: done (done means live), merged but not
     live, in a PR, building, waiting on you, ready, blocked. Colour is the state's family and a
     hatched cell is the earlier step in it: green hatched is merged and not live, amber hatched
@@ -1662,6 +1671,110 @@ body.page-ov26 .top-col, body.page-ov26 main { max-width: 1480px; }
 .o28-end.run { color: var(--run); }
 .o28-jrow .o28-story { padding-left: 14px; }
 
+/* ---------------------------------------------------------------- overview, take 29 (PROTOTYPE, #29) */
+/* The slot under the board and the lanes is the roadmap, as a thread answers it: a row per effort
+   (one repo) or per repo (all), each a sentence the runner fills from tickets and PRs. */
+.o29 > .q12-head h2 { white-space: nowrap; }
+.o29 > .q12-head .ov26-hint { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.o29 h4 { margin: 0; }
+.o29-way { padding: 14px 20px 6px; }
+.o29-way h3 { font: 600 14px/1.3 var(--sans); color: var(--mute); margin-bottom: 6px; }
+.o29-way ol { display: grid; gap: 4px; }
+.o29-way li { position: relative; padding-left: 16px; font-size: 15px; line-height: 1.5; max-width: 104ch; color: var(--ink-2); }
+.o29-way li::before { content: ""; position: absolute; left: 0; top: .62em; width: 7px; height: 7px; border-radius: 50%; background: var(--you); }
+.o29-clear { padding: 14px 20px 6px; color: var(--mute); font-size: 15px; }
+.o29-tbl { width: 100%; border-collapse: collapse; margin: 4px 0 8px; }
+.o29-tbl th { text-align: left; font: 500 13px/1.3 var(--sans); color: var(--dim); padding: 8px 12px; }
+.o29-tbl td { padding: 11px 12px; vertical-align: top; border-top: 1px solid var(--line-soft); font-size: 15px; line-height: 1.5; }
+.o29-tbl th:first-child, .o29-tbl td:first-child { padding-left: 20px; }
+.o29-tbl th:last-child, .o29-tbl td:last-child { padding-right: 20px; }
+.o29-e { width: 24%; min-width: 200px; }
+.o29-sp { width: 64px; white-space: nowrap; }
+.o29-tg { display: inline-flex; align-items: flex-start; gap: 6px; margin-left: -4px; padding: 0; border: 0; background: none; font: 600 15.5px/1.45 var(--sans); color: var(--ink); text-align: left; cursor: pointer; }
+.o29-tg:hover { text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--btn-line); }
+.o29-chev .i { width: 16px; height: 16px; margin-top: 3px; color: var(--dim); transition: transform .12s; }
+.o29-r.open .o29-chev .i { transform: rotate(90deg); }
+.o29-nm { display: inline-block; padding-left: 18px; font: 600 15.5px/1.45 var(--sans); }
+.o29-doc .o29-nm, .o29-grid .o29-nm { padding-left: 0; }
+.o29-r.d1 .o29-e { padding-left: 44px; }
+.o29-r.grp .o29-nm { color: var(--ink-2); }
+.o29-r.grp .o29-s { color: var(--mute); }
+.o29-spec { font-weight: 500; color: var(--mute); }
+.o29-s { color: var(--ink-2); }
+.o29-y, .o29-y .ov-t { color: var(--you); }
+.o29-y .ov-t { text-decoration-color: var(--you-line); }
+.o29-x td { padding: 0; border-top: 0; }
+.o29-stages { display: grid; gap: 12px; margin: 0 20px 14px 44px; padding: 12px 14px; border: 1px solid var(--line-soft); border-radius: 10px; background: var(--sunk); }
+.o29-stage { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 12px; align-items: start; }
+.o29-stage h4 { display: flex; gap: 6px; font: 600 13.5px/1.65 var(--sans); color: var(--ink-2); }
+.o29-stage h4 span { font-weight: 400; color: var(--dim); }
+.o29-stage.run h4 { color: var(--run); }
+.o29-stage.you h4 { color: var(--you); }
+.o29-stage.hold h4 { color: var(--mute); }
+.o29-stage ol { display: grid; gap: 3px; }
+.o29-stage li { display: grid; grid-template-columns: 54px minmax(0, 1fr) minmax(0, 1.15fr); gap: 10px; align-items: baseline; font-size: 14.5px; }
+.o29-tt, .o29-why { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.o29-why { color: var(--mute); font-size: 13.5px; }
+.o29-done { font-size: 13.5px; color: var(--mute); }
+.o29-done .ov-t { font-weight: 500; color: var(--mute); }
+/* B, written out */
+.o29-doc { padding: 16px 20px 20px; }
+.o29-doc .o29-tbl { width: calc(100% + 40px); margin: 10px -20px 6px; }
+.o29-lead { font-size: 16px; line-height: 1.5; max-width: 80ch; }
+.o29-doc h3 { font: 600 15px/1.3 var(--sans); margin: 18px 0 6px; }
+.o29-doc ul { display: grid; gap: 4px; max-width: 104ch; }
+.o29-doc ul li { position: relative; padding-left: 16px; font-size: 15px; line-height: 1.5; color: var(--ink-2); }
+.o29-doc ul li::before { content: ""; position: absolute; left: 2px; top: .68em; width: 5px; height: 5px; border-radius: 50%; background: var(--btn-line); }
+.o29-doc li b { font-weight: 600; color: var(--ink); }
+.o29-doc .o29-way, .o29-doc .o29-clear { padding: 0; }
+.o29-doc .o29-way h3 { font: 600 15px/1.3 var(--sans); color: var(--ink); margin: 18px 0 6px; }
+.o29-doc .o29-clear { margin-top: 16px; }
+.o29-rcard > .q12-head h2 { display: flex; align-items: center; gap: 8px; }
+.o29-rcard > .q12-head .rlogo { width: 22px; height: 22px; font-size: 11px; }
+/* C, a grid by stage */
+.o29-grid th:not(:first-child), .o29-grid td:not(:first-child) { width: 15.5%; }
+.o29-grid .o29-e { width: auto; white-space: nowrap; }
+.o29-grid .o29-spec { margin-left: 4px; }
+.o29-cell { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
+.o29-chip { display: inline-block; height: 24px; padding: 0 8px; border-radius: 7px; border: 1px solid var(--line); background: var(--raised); font: 600 13px/22px var(--sans); color: var(--ink); text-decoration: none; }
+.o29-chip:hover { border-color: currentColor; }
+.o29-chip.run { background: var(--run-wash); border-color: transparent; color: var(--run); }
+.o29-chip.you { background: var(--you-wash); border-color: var(--you-line); color: var(--you); }
+.o29-chip.hold { background: none; border-style: dashed; color: var(--mute); }
+.o29-more { font-size: 13px; color: var(--mute); }
+.o29-num { font: 600 19px/1.3 var(--display); }
+.o29-num.run { color: var(--run); }
+.o29-num.you { color: var(--you); }
+.o29-num.ok { color: var(--ok); }
+.o29-num.hold { color: var(--mute); }
+.o29-num.z { color: var(--dim); font-weight: 400; }
+.o29-of { font-size: 13.5px; color: var(--mute); }
+/* a repository's cell: picks it in the sidebar */
+.o29-rb { display: inline-flex; align-items: center; gap: 10px; padding: 0; border: 0; background: none; font: 600 15.5px/1.4 var(--sans); color: var(--ink); text-align: left; cursor: pointer; }
+.o29-rb .rlogo { width: 26px; height: 26px; border-radius: 7px; font-size: 11px; }
+.o29-rb .i { width: 15px; height: 15px; color: var(--dim); }
+.o29-rb:hover b { text-decoration: underline; text-underline-offset: 3px; }
+.o29-rb b { font-weight: 600; white-space: nowrap; }
+.o29-nw { white-space: nowrap; }
+.o29-wayline { display: block; margin-top: 3px; color: var(--mute); }
+@media (max-width: 860px) {
+  .o29-tbl thead { display: none; }
+  .o29-tbl, .o29-tbl tbody, .o29-tbl tr, .o29-tbl td { display: block; width: auto; }
+  .o29-tbl td, .o29-tbl td:first-child, .o29-tbl td:last-child { border-top: 0; padding: 2px 16px; }
+  .o29-tbl tr.o29-r { border-top: 1px solid var(--line-soft); padding: 10px 0; }
+  .o29-r.d1 .o29-e { padding-left: 34px; }
+  .o29-e { min-width: 0; }
+  .o29-stages { margin: 6px 16px 12px; }
+  .o29-stage { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+  .o29-stage li { grid-template-columns: 54px minmax(0, 1fr); }
+  .o29-why { grid-column: 2; white-space: normal; }
+  .o29-grid td[data-h] { display: flex; gap: 10px; align-items: center; }
+  .o29-grid td[data-h]::before { content: attr(data-h); width: 64px; flex: none; font-size: 13px; color: var(--dim); }
+  .o29-grid td:not(:first-child) { width: auto; }
+  .o29-grid td.nil { display: none; }
+  .o29-doc .o29-tbl { width: auto; margin: 10px -20px 6px; }
+}
+
 @media (max-width: 1100px) {
   .o28-rowhead { display: none; }
   .o28-repo { grid-template-columns: 1fr auto; row-gap: 8px; }
@@ -1752,7 +1865,7 @@ if (theme) document.documentElement.dataset.theme = theme;
 const sampleName = new URLSearchParams(location.search).get("sample");
 const ui = { page: "overview", repo: "", view: "list", pr: null, ask: null, hold: null, sel: null, pop: null, nav: false, rail: false,
   variant: "a", feature: "", open: [], qview: "", qeffort: "",
-  o28: { f: "", open: new Set(), pick: "" } };   // take 28: the number picked, the tickets opened, the bar picked   // qview, qeffort: the Queue (take 12)   // the Queue: which arrangement, the feature it's narrowed to (A), the features unfolded (B)
+  o28: { f: "", open: new Set(), pick: "" }, o29: { open: new Set(), shut: new Set() } };   // take 29: the efforts opened, and those shut that start open   // take 28: the number picked, the tickets opened, the bar picked   // qview, qeffort: the Queue (take 12)   // the Queue: which arrangement, the feature it's narrowed to (A), the features unfolded (B)
 
 function recall(k) { try { return localStorage.getItem("qr." + k); } catch { return null; } }
 function remember(k, v) { try { localStorage.setItem("qr." + k, v); } catch { /* a private window */ } }
@@ -2456,7 +2569,7 @@ function plateCalm(p) {
 // on the roadmap", per repo). Take 25 is earlier/take-25.html.
 function overview() {
   const W = work();
-  const body = overview28(W);   // take 28; take 26's ovProgress and ovRoadmap are earlier/take-27.html
+  const body = overview29(W);   // take 29; take 28's look-back views are earlier/take-28.html, take 26's ovProgress and ovRoadmap earlier/take-27.html
   return `<div class="q12 ov26">${ovPlateLine(W)}${qNow(W)}${body}</div>${protoBar()}`;
 }
 
@@ -2474,7 +2587,8 @@ const V28 = {
   all: { a: "A row per repo", b: "This week, clickable", c: "Two weeks, side by side" },
   one: { a: "The last 30 days", b: "Where it gets stuck", c: "Ticket journeys" },
 };
-const variantName = (k) => V28[ui.repo ? "one" : "all"][k] || "";
+const V29 = { a: "In a sentence", b: "Written out", c: "A grid by stage" };   // take 29: the same three for all repositories and for one
+const variantName = (k) => V29[k] || "";
 const DAYMS = 86400e3;
 const hist = (W) => (snap.history || []).filter((t) => W.repos.includes(t.repo));
 const tKey = (t) => `${t.repo}#${t.n}`;
@@ -2726,6 +2840,209 @@ function oneJourneys28(W) {
   return `<section class="card o28" aria-label="Ticket journeys"><header class="q12-head"><h2>Ticket journeys</h2><span class="ov26-hint">The last 30 days, newest first. Each bar is one ticket's time, split by step</span>
       <span class="o28-key">${FAM.map(([k, n]) => `<span><i class="s ${k}"></i>${n}</span>`).join("")}</span></header>
     <div class="o28-pad"><ol class="o28-journeys">${rows}</ol></div></section>`;
+}
+
+// ---- take 29 (Stefan, 2026-11-19): he asked two threads "what's on the roadmap for this repo?"
+// and liked the answer that was a table, a row per effort with a sentence on where it stands; the
+// other sorted tickets by stage, and he liked that too. So the slot is that answer, written by the
+// runner with fixed wording (no model), three ways, the same ?variant= key for both scopes:
+//   A, in a sentence: a row per effort (one repo) or per repo (all). An effort opens to its
+//      tickets by stage, so both answers are in it.
+//   B, written out: the whole answer as text, sections and all, the table inside it.
+//   C, a grid by stage: efforts or repos down, the stages across.
+// A sentence has up to three parts, each there only when it has something to say: how far, what's
+// left (named when four or fewer), what's yours. Above the table, what's in the way: a ticket that
+// waits on you, or sits outside what the runner serves, and holds others behind it.
+const MOVING29 = ["building", "review", "fixing", "fixing-itself", "merged"];
+const MOVE29 = { building: "building", review: "in review", fixing: "in a fix round", "fixing-itself": "fixing itself", merged: "merged, not live" };
+function facts29(its, W) {
+  const at = (i) => W.qpos.get(key(i)) ?? 999;
+  const open = its.filter((i) => i.state !== "done");
+  const yours = open.filter((i) => MINE.has(i.state));
+  const moving = open.filter((i) => MOVING29.includes(i.state)).sort((a, b) => MOVING29.indexOf(a.state) - MOVING29.indexOf(b.state) || a.n - b.n);
+  const rest = open.filter((i) => !MINE.has(i.state) && !MOVING29.includes(i.state));
+  const ready = rest.filter((i) => i.state === "ready" && !W.blockersOf(i).length && !repoOff(i.repo)).sort((a, b) => at(a) - at(b) || a.n - b.n);
+  const held = rest.filter((i) => !ready.includes(i));
+  return { its, open, yours, moving, ready, held, done: its.length - open.length };
+}
+const repoFacts29 = (W, r) => facts29((snap.issues || []).filter((i) => i.repo === r).sort((a, b) => a.n - b.n), W);
+const blockers29 = (i, W) => [...new Set(W.blockersOf(i).map(({ b }) => b))].map((b) => (W.outside.has(b) ? { ...W.outside.get(b), outside: true } : W.byKey.get(b)));
+const yours29 = (i) => { const a = i.state === "you" ? askFor(i) : null; return a ? askWords(a)[0].toLowerCase() : i.state === "you" ? "waits on you" : i.state; };
+function held29(i, W, r) {
+  const bs = blockers29(i, W);
+  if (bs.length) return `after ${bs.map((b) => refOf(b, r)).join(", ")}`;
+  return repoOff(i.repo) ? "its repository is stopped" : i.state === "not-ready" ? "not ready" : "blocked";
+}
+const word29 = (i, W, r) => MOVE29[i.state] || (i.state === "ready" && !W.blockersOf(i).length && !repoOff(i.repo) ? (W.qpos.get(key(i)) === 1 ? "next" : "ready") : held29(i, W, r));
+// Where an effort stands, in a sentence.
+function say29(f, W, r, loose) {
+  const L = (i) => tLink(i, undefined, r);
+  const far = loose ? plural(f.open.length, "open ticket", "open tickets") : !f.its.length ? "No tickets yet" : !f.open.length ? "All done"
+    : f.done ? `${f.done} of ${f.its.length} done` : f.moving.length ? "None done yet" : "Nothing started";
+  const others = [...f.moving, ...f.ready, ...f.held];
+  let left = "";
+  if (others.length && others.length <= 4) left = `Left: ${others.map((i) => `${L(i)} (${esc(word29(i, W, r))})`).join(", ")}`;
+  else if (others.length) {
+    const bits = f.moving.map((i) => `${L(i)} ${esc(MOVE29[i.state])}`);
+    if (f.ready.length) bits.push(`${L(f.ready[0])} ${esc(word29(f.ready[0], W, r))}${f.ready.length > 1 ? `, ${f.ready.length - 1} more ready` : ""}`);
+    if (f.held.length) bits.push(`${f.held.length} held`);
+    left = `Left: ${bits.join(", ")}`;
+  }
+  const yours = f.yours.length ? `<span class="o29-y">Yours: ${f.yours.map((i) => `${L(i)} (${esc(yours29(i))})`).join(", ")}</span>` : "";
+  return `${[far, left, yours].filter(Boolean).join(". ")}.`;
+}
+// What's in the way in these repositories: each ticket that won't move without you (or sits
+// outside what the runner serves) and the tickets held behind it, the biggest hold first.
+function inWay29(W, repos) {
+  const groups = new Map();
+  for (const i of snap.issues || []) {
+    if (!repos.includes(i.repo) || i.state === "done") continue;
+    for (const it of blockers29(i, W)) {
+      const root = it.outside ? it : rootOf(it, W);
+      if (!root || !heldSay(root) || (!root.outside && key(root) === key(i))) continue;
+      const k = root.outside ? root.key : key(root);
+      if (!groups.has(k)) groups.set(k, { root, holds: new Map() });
+      groups.get(k).holds.set(key(i), i);
+    }
+  }
+  return [...groups.values()].sort((a, b) => b.holds.size - a.holds.size);
+}
+function wayWord29(x) {
+  if (x.outside) return `is in ${x.repo}, which the runner doesn't serve`;
+  const a = x.state === "you" ? askFor(x) : null;
+  if (a) return { stuck: "is stuck", decision: "waits for your decision", merge: "waits for your merge", broken: "is broken" }[a.kind] || "waits on you";
+  return { you: "waits on you", "ready-for-human": "is yours to build", "needs-triage": "is yours to triage", "fixing-itself": "is fixing itself" }[x.state]
+    || (repoOff(x.repo) ? "is in a stopped repository" : "waits");
+}
+const wayRef29 = (x, r) => (x.outside ? `<a class="ov-t" href="${esc(x.url || "")}" target="_blank" rel="noreferrer">${esc(x.repo)}#${x.n}</a>` : tLink(x, undefined, r));
+function way29(W, r) {
+  const ws = inWay29(W, [r]), stopped = repoOff(r) ? `<li>You stopped ${esc(r)}, so neither Claude nor ChatGPT takes up its work.</li>` : "";
+  if (!ws.length && !stopped) return `<p class="o29-clear">Nothing is in the way: whatever waits here, waits on work the runner does by itself.</p>`;
+  const row = ({ root, holds }) => {
+    const hs = [...holds.values()].sort((a, b) => a.n - b.n);
+    return `<li>${wayRef29(root, r)} ${esc(root.title)} ${esc(wayWord29(root))}, and holds ${hs.length > 5 ? plural(hs.length, "ticket", "tickets") : hs.map((i) => tLink(i, undefined, r)).join(", ")}.</li>`;
+  };
+  return `<div class="o29-way"><h3>In the way</h3><ol>${stopped}${ws.map(row).join("")}</ol></div>`;
+}
+// A repo's rows: each effort with open work in build order, the efforts inside one under it,
+// then the tickets with no effort.
+function efforts29(W, r) {
+  const E = effortsOf(W, r), rows = [], byN = (a, b) => a.n - b.n;
+  const walk = (n, depth) => {
+    const subs = subsOf(n, W);
+    rows.push({ id: n.id, n, depth, subs: subs.length, f: facts29(W.tickets(n.id).sort(byN), W) });
+    subs.forEach((s) => walk(s, depth + 1));
+  };
+  E.open.forEach((n) => walk(n, 0));
+  if (E.loose.length) rows.push({ id: `none:${r}`, n: null, depth: 0, subs: 0, f: facts29([...E.loose].sort(byN), W) });
+  return rows;
+}
+const specLink29 = (x, r) => (x.n && x.n.n ? `<a class="ov-t o29-spec" href="${esc(issueUrl({ repo: r, n: x.n.n }))}" target="_blank" rel="noreferrer" title="${esc(KINDNAME[x.n.kind] || "Spec")} #${x.n.n}">#${x.n.n}</a>` : "");
+const rowSay29 = (x, W, r) => (x.subs ? `${x.f.done} of ${x.f.its.length} done, across ${plural(x.subs, "effort", "efforts")}.` : say29(x.f, W, r, !x.n));
+const isOpen29 = (x) => !x.subs && !ui.o29.shut.has(x.id) && (ui.o29.open.has(x.id) || x.f.open.length > 8);
+// An effort opened: its tickets by stage, each with why it stands there.
+function stages29(f, W, r) {
+  const cap = (t) => t[0].toUpperCase() + t.slice(1);
+  const line = (i) => { const why = f.held.includes(i) && i.state !== "blocked" ? cap(held29(i, W, r)) : whyOf(i, W); return `<li>${tLink(i, undefined, r)}<span class="o29-tt">${esc(i.title)}</span><span class="o29-why" title="${esc(why)}">${esc(why)}</span></li>`; };
+  const groups = [["Moving", f.moving, "run"], ["Yours", f.yours, "you"], ["Ready", f.ready, ""], ["Held", f.held, "hold"]].filter((g) => g[1].length);
+  const done = f.its.filter((i) => i.state === "done");
+  return `<div class="o29-stages">${groups.map(([name, its, cls]) => `<div class="o29-stage ${cls}"><h4>${name}<span>${its.length}</span></h4><ol>${its.map(line).join("")}</ol></div>`).join("")}
+    ${done.length ? `<p class="o29-done">Done: ${done.map((i) => tLink(i, undefined, r)).join(", ")}</p>` : ""}</div>`;
+}
+// The table itself. `opens`: a row opens to its tickets by stage (A); else it only reads (B).
+function table29(W, r, opens) {
+  const tr = (x) => {
+    const open = opens && isOpen29(x), name = x.n ? esc(x.n.title) : "No effort";
+    const cell = opens && !x.subs ? `<button class="o29-tg" data-act="o29-row" data-k="${esc(x.id)}" data-open="${open ? 1 : 0}" aria-expanded="${open}"><span class="o29-chev">${ICON.right}</span>${name}</button>` : `<span class="o29-nm">${name}</span>`;
+    return `<tr class="o29-r d${Math.min(x.depth, 1)}${open ? " open" : ""}${x.subs ? " grp" : ""}"><td class="o29-e">${cell}</td><td class="o29-sp">${specLink29(x, r)}</td><td class="o29-s">${rowSay29(x, W, r)}</td></tr>
+      ${open ? `<tr class="o29-x"><td colspan="3">${stages29(x.f, W, r)}</td></tr>` : ""}`;
+  };
+  const rows = efforts29(W, r);
+  if (!rows.length) return `<p class="o29-clear">Nothing open in ${esc(r)}.</p>`;
+  return `<table class="o29-tbl"><thead><tr><th>Effort</th><th>Spec</th><th>Where it stands</th></tr></thead><tbody>${rows.map(tr).join("")}</tbody></table>`;
+}
+// A repo in a sentence: how much is left, what moves, what comes next, what's yours.
+function repoSay29(W, r) {
+  const f = repoFacts29(W, r), efforts = efforts29(W, r).filter((x) => x.n && !x.subs).length, L = (i) => tLink(i, undefined, r);
+  if (!f.open.length) return "Nothing open.";
+  const building = f.moving.filter((i) => i.state === "building"), inPr = f.moving.filter((i) => ["review", "fixing", "fixing-itself"].includes(i.state)), merged = f.moving.filter((i) => i.state === "merged");
+  const bits = [building.length ? `Claude is building ${building.map(L).join(", ")}` : "", inPr.length ? `${inPr.length} in a PR` : "", merged.length ? `${merged.length} merged, not live` : "",
+    repoOff(r) ? "" : f.ready.length ? `${L(f.ready[0])} is next` : ""].filter(Boolean);
+  return [repoOff(r) ? "Stopped by you" : "", `${plural(efforts, "effort", "efforts")}, ${plural(f.open.length, "ticket", "tickets")} left`, bits.join(", ") || "Nothing is moving",
+    f.yours.length ? `<span class="o29-y o29-nw">${plural(f.yours.length, "waits", "wait")} on you</span>` : ""].filter(Boolean).join(". ") + ".";
+}
+function repoWay29(W, r) {
+  const ws = inWay29(W, [r]);
+  return ws.length ? `<span class="o29-wayline">In the way: ${ws.slice(0, 4).map(({ root, holds }) => `${wayRef29(root, r)} holds ${holds.size}`).join(", ")}${ws.length > 4 ? `, and ${ws.length - 4} more` : ""}.</span>` : "";
+}
+const repoCell29 = (r) => `<button class="o29-rb" data-act="repo" data-repo="${esc(r)}" title="See ${esc(r)}'s efforts">${repoLogo(r)}<b>${esc(r)}</b>${ICON.right}</button>${offTag(r)}`;
+const head29 = (title, hint, extra = "") => `<header class="q12-head"><h2>${title}</h2><span class="ov26-hint">${hint}</span>${extra}</header>`;
+
+function overview29(W) {
+  const v = ui.variant;
+  if (!W.repos.length) return `<section class="card"><p class="empty">No repository.</p></section>`;
+  if (!ui.repo) return v === "b" ? allDoc29(W) : v === "c" ? allGrid29(W) : allSay29(W);
+  return v === "b" ? oneDoc29(W) : v === "c" ? oneGrid29(W) : oneSay29(W);
+}
+
+// ---- One repo, A: a row per effort, in a sentence; a row opens to its tickets by stage.
+function oneSay29(W) {
+  const r = ui.repo;
+  return `<section class="card o29" aria-label="Roadmap">${head29("Roadmap", "A row per effort. Open one for its tickets by stage", toQueue())}
+    ${way29(W, r)}${table29(W, r, true)}</section>`;
+}
+// ---- All repositories, A: a row per repo, in a sentence. The name picks it in the sidebar.
+function allSay29(W) {
+  const rows = W.repos.map((r) => `<tr class="o29-r"><td class="o29-e">${repoCell29(r)}</td><td class="o29-s">${repoSay29(W, r)}${repoWay29(W, r)}</td></tr>`).join("");
+  return `<section class="card o29" aria-label="Roadmap">${head29("Roadmap", "A row per repository. Pick one for its efforts")}
+    <table class="o29-tbl"><thead><tr><th>Repository</th><th>Where it stands</th></tr></thead><tbody>${rows}</tbody></table></section>`;
+}
+
+// ---- B, written out: the answer as a thread gives it, top to bottom, nothing to open.
+function lead29(W, r) {
+  const f = repoFacts29(W, r), efforts = efforts29(W, r).filter((x) => x.n && !x.subs).length;
+  if (!f.open.length) return `<p class="o29-lead">Nothing is open in ${esc(r)}.</p>`;
+  return `<p class="o29-lead">${repoOff(r) ? "You stopped this repository, so nothing starts here. " : ""}${plural(efforts, "effort has", "efforts have")} open work: ${plural(f.open.length, "ticket", "tickets")} left, ${f.moving.length} moving, ${f.ready.length} ready to build, ${f.held.length} held${f.yours.length ? `, and <span class="o29-y o29-nw">${f.yours.length} waiting on you</span>` : ""}.</p>`;
+}
+function doc29(W, r) {
+  const f = repoFacts29(W, r), T = (i) => `${tLink(i, undefined, r)} ${esc(i.title)}`, CAP = 6;
+  const effortOf = (i) => { const n = W.nodes.get(W.nodes.get(key(i)).parent); return n && n.t === "effort" ? n.title : "no effort"; };
+  const kinds = [...new Set(f.yours.map(yours29))];
+  const yours = kinds.map((k) => `<li><b>${esc(k.includes("-") ? k : k[0].toUpperCase() + k.slice(1))}:</b> ${f.yours.filter((i) => yours29(i) === k).map(T).join("; ")}</li>`).join("");
+  const moving = f.moving.map((i) => `<li>${T(i)}: ${esc(whyOf(i, W))}</li>`).join("");
+  const ready = f.ready.slice(0, CAP).map((i) => `<li>${T(i)} <span class="dim">(${esc(effortOf(i))})</span></li>`).join("") + (f.ready.length > CAP ? `<li>And ${f.ready.length - CAP} more, in the Queue.</li>` : "");
+  const behind = new Map();
+  f.held.forEach((i) => { const k = held29(i, W, r); behind.set(k, [...(behind.get(k) || []), i]); });
+  const held = [...behind].map(([k, its]) => `<li><b>${esc(k[0].toUpperCase() + k.slice(1))}:</b> ${its.map((i) => tLink(i, undefined, r)).join(", ")}</li>`).join("");
+  const sec = (title, body) => (body ? `<h3>${title}</h3><ul>${body}</ul>` : "");
+  return `${lead29(W, r)}${table29(W, r, false)}${sec("Waiting on you", yours)}${sec("Moving", moving)}${sec("Ready to build, in the runner's order", ready)}${sec("Held", held)}${way29(W, r)}`;
+}
+function oneDoc29(W) {
+  return `<section class="card o29" aria-label="Roadmap">${head29("Roadmap", "Written out, top to bottom", toQueue())}<div class="o29-doc">${doc29(W, ui.repo)}</div></section>`;
+}
+// All repositories: each repo's answer, shortened to its lead, its table and what's in the way.
+function allDoc29(W) {
+  return W.repos.map((r) => `<section class="card o29 o29-rcard" aria-label="${esc(r)}"><header class="q12-head"><h2>${repoLogo(r)}${esc(r)}${offTag(r)}</h2><span class="ov26-hint"></span><button class="link ov-to" data-act="repo" data-repo="${esc(r)}">The whole answer</button></header>
+    <div class="o29-doc">${lead29(W, r)}${table29(W, r, false)}${way29(W, r)}</div></section>`).join("");
+}
+
+// ---- C, a grid by stage: efforts (or repos) down, the stages across.
+const chip29 = (i, cls, W) => { const ask = i.state === "you" ? askFor(i) : null; return `<a class="o29-chip ${cls}" ${ask ? goto("inbox", ask) : `href="${esc(issueUrl(i))}" target="_blank" rel="noreferrer"`} title="${esc(i.title)}: ${esc(whyOf(i, W))}">#${i.n}</a>`; };
+const GRID29 = [["moving", "Moving", "run"], ["yours", "Yours", "you"], ["ready", "Ready", ""], ["held", "Held", "hold"]];
+function oneGrid29(W) {
+  const r = ui.repo, CAP = 8;
+  const cell = (its, cls) => `<span class="o29-cell">${its.slice(0, CAP).map((i) => chip29(i, cls, W)).join("")}${its.length > CAP ? `<span class="o29-more">and ${its.length - CAP} more</span>` : ""}</span>`;
+  const rows = efforts29(W, r).map((x) => `<tr class="o29-r d${Math.min(x.depth, 1)}${x.subs ? " grp" : ""}"><td class="o29-e"><span class="o29-nm">${x.n ? esc(x.n.title) : "No effort"}</span> ${specLink29(x, r)}</td>
+      <td data-h="Done"><span class="o29-of">${x.n ? `${x.f.done} of ${x.f.its.length}` : ""}</span></td>${GRID29.map(([k, name, cls]) => `<td data-h="${name}"${x.subs || !x.f[k].length ? ` class="nil"` : ""}>${x.subs ? "" : cell(x.f[k], cls)}</td>`).join("")}</tr>`).join("");
+  return `<section class="card o29" aria-label="Roadmap">${head29("Roadmap", "Efforts down, stages across. A number opens its ticket", toQueue())}
+    ${way29(W, r)}<table class="o29-tbl o29-grid"><thead><tr><th>Effort</th><th>Done</th>${GRID29.map(([, name]) => `<th>${name}</th>`).join("")}</tr></thead><tbody>${rows}</tbody></table></section>`;
+}
+function allGrid29(W) {
+  const num = (n, cls) => `<span class="o29-num ${n ? cls : "z"}">${n}</span>`;
+  const rows = W.repos.map((r) => { const f = repoFacts29(W, r); return `<tr class="o29-r"><td class="o29-e">${repoCell29(r)}</td>
+      <td data-h="Done">${num(f.done, "ok")}</td>${GRID29.map(([k, name, cls]) => `<td data-h="${name}">${num(f[k].length, cls)}</td>`).join("")}</tr>`; }).join("");
+  return `<section class="card o29" aria-label="Roadmap">${head29("Roadmap", "Tickets by stage, a row per repository. Pick one for its efforts")}
+    <table class="o29-tbl o29-grid"><thead><tr><th>Repository</th><th>Done</th>${GRID29.map(([, name]) => `<th>${name}</th>`).join("")}</tr></thead><tbody>${rows}</tbody></table></section>`;
 }
 
 // What waits on you, as a board (Stefan, 2026-11-18, take 27): a column per tag that needs you,
@@ -3062,7 +3379,7 @@ const repoHead = (r, W, extra = "") => {
 const QVIEWS = [["progress", "Progress"], ["order", "Order"], ["board", "Board"], ["graph", "Graph"]];
 const qOpen = new Set((() => { try { return JSON.parse(recall("qopen") || "[]"); } catch { return []; } })());
 // The sample addresses can open efforts and pick a view (?qopen=id,id&qview=board), for screenshots.
-{ const q = new URLSearchParams(location.search); if (q.get("qopen")) q.get("qopen").split(",").forEach((id) => qOpen.add(id)); if (q.get("qview")) ui.qview = q.get("qview"); }
+{ const q = new URLSearchParams(location.search); if (q.get("qopen")) q.get("qopen").split(",").forEach((id) => qOpen.add(id)); if (q.get("qview")) ui.qview = q.get("qview"); if (q.get("o29")) q.get("o29").split(",").forEach((id) => ui.o29.open.add(id)); }   // ?o29=<effort id>,...: take 29's rows opened, for a screenshot
 // Take 21: how much Progress's bars show, three ways to judge (?pbar=a|b|c, remembered).
 const PBARS = [["a", "Done only"], ["b", "Done and yours"], ["c", "Every state"]];   // take 22: b shows yours, not moving
 ui.pbar = "c";   // take 23: every state, always; the switch is gone
@@ -3910,7 +4227,7 @@ document.addEventListener("click", (e) => {
       if (d.ask) { ui.ask = d.ask; ui.hold = null; }   // a link that opens the Inbox at one ask
       address(true); draw(); scrollTo(0, 0);
       return;
-    case "repo": ui.repo = d.repo; remember("repo", d.repo); ui.pop = null; ui.sel = null; ui.o28.f = ""; ui.o28.pick = ""; if (e.target.closest(".o28")) scrollTo(0, 0); break;
+    case "repo": ui.repo = d.repo; remember("repo", d.repo); ui.pop = null; ui.sel = null; ui.o28.f = ""; ui.o28.pick = ""; if (e.target.closest(".o28, .o29")) scrollTo(0, 0); break;
     case "ask": ui.ask = d.id; ui.hold = null; break;
     case "unread": {
       const a = inboxOrder().find((x) => x.id === d.id);
@@ -3928,6 +4245,7 @@ document.addEventListener("click", (e) => {
     case "o28-f": ui.o28.f = ui.o28.f === d.f ? "" : d.f; break;   // take 28: a number lists its tickets
     case "o28-row": if (ui.o28.open.has(d.k)) ui.o28.open.delete(d.k); else ui.o28.open.add(d.k); break;
     case "o28-pick": ui.o28.pick = ui.o28.pick === d.k ? "" : d.k; break;
+    case "o29-row": { const was = d.open === "1"; ui.o29[was ? "shut" : "open"].add(d.k); ui.o29[was ? "open" : "shut"].delete(d.k); break; }   // take 29: an effort opens to its tickets by stage
     case "ov-effort": {   // PROTOTYPE (#29, take 25): an effort opens the Queue's Progress at it
       if (e.ctrlKey || e.metaKey || e.shiftKey) return;
       e.preventDefault();
