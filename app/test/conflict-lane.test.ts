@@ -374,6 +374,17 @@ describe("after a restart, don't guess", () => {
     expect(t3.launches).toHaveLength(1);
   });
 
+  test('a launch answer that names no thread needs the user, never a watch on no thread (N1)', async () => {
+    t3.launchOmitsThreadId = true;
+    makeLane();
+    await lane.pass();
+    await lane.idle();
+    const r = rounds()[0]!;
+    expect(log.get(r.id)).toMatchObject({ end: { outcome: 'needs-user', error: expect.stringContaining('named no thread') } });
+    expect(log.get(r.id)!.threadId).toBeUndefined();
+    expect(log.needingUser(APP.id).map((j) => j.id)).toEqual([r.id]);
+  });
+
   test('a round the log shows open is watched again on its thread; one with no thread line needs the user', async () => {
     const open = await log.started(job({ baseSha: B1 }));
     await log.thread(open.id, { threadId: 'thread-x', runId: 'run-x', link: null });

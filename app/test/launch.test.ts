@@ -10,6 +10,7 @@ import { JobError, launchJob, noToolsRefusal } from '../src/launch.ts';
 import { catalogFromConfig } from '../src/t3/catalog.ts';
 import { T3Mcp } from '../src/t3/mcp.ts';
 import { runtimeAddress } from '../src/t3/real.ts';
+import { NoAnswer } from '../src/t3/seams.ts';
 import { FakeT3 } from './fake-t3.ts';
 
 let dir: string;
@@ -34,6 +35,16 @@ const last = (p: typeof a) => {
 const job = { projectId: 'p1', title: 'Build #7', brief: 'Build issue #7.' };
 
 describe('launching a job', () => {
+  test("an answer that names no thread is a lost answer (NoAnswer), never a thread id of undefined (#157 N1)", async () => {
+    t3.serverConfig = { version: 1, type: 'snapshot', config };
+    t3.launchOmitsThreadId = true;
+    const own = last(a);
+    const sent = launchJob(mcp, catalog, { ...job, kind: 'build', choice: { provider: own.provider, model: own.model, effort: own.effort } });
+    await expect(sent).rejects.toThrow(NoAnswer);
+    await expect(sent).rejects.toThrow("T3's answer named no thread");
+    expect(t3.launches).toHaveLength(1);
+  });
+
   test("each kind launches on the choice it's given: the kind's own, else Default's, as kindModels resolves them", async () => {
     const def = last(b), own = last(a);
     const jobs: Jobs = { ...DEFAULT_JOBS, default: { provider: def.provider, model: def.model, effort: def.effort }, review: { own: { provider: own.provider, model: own.model, effort: own.effort }, fallback: null } };
