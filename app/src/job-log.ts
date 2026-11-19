@@ -368,9 +368,10 @@ export class JobLog {
     return new Set(this.jobs().filter((j) => j.kind === 'build' && j.repo === repo && j.end?.outcome !== 'not-started').map((j) => j.issue));
   }
 
-  /** When the repo's last job ended (one that never reached a thread aside), or null for none. */
-  lastEnded(repo: string): string | null {
-    const ends = this.jobs().filter((j) => j.repo === repo && j.end && j.end.outcome !== 'not-started').map((j) => j.end!.at);
+  /** When the repo's last job of `kinds` (every kind if none named) ended, one that never reached
+   *  a thread aside, or null for none. */
+  lastEnded(repo: string, kinds?: readonly JobKind[]): string | null {
+    const ends = this.jobs().filter((j) => j.repo === repo && (!kinds || kinds.includes(j.kind)) && j.end && j.end.outcome !== 'not-started').map((j) => j.end!.at);
     return ends.sort().at(-1) ?? null;
   }
 }

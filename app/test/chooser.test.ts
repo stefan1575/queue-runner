@@ -154,7 +154,7 @@ async function blocking(repo: BuildRepo, n: number, sha = H) {
 const claude = () => log.jobs().filter((j) => j.kind !== 'review');
 const started = (kind: string) => log.jobs().filter((j) => j.kind === kind && j.end?.outcome !== 'not-started');
 
-describe('one Claude job per repo', () => {
+describe('one job per repo', () => {
   test('a PR with a blocking review and a conflict at once gets one job, the fix round; its conflict round comes only after that round ends', async () => {
     gh.reviewPulls['owner/app'] = [pull(APP, 4)];
     gh.conflicting.add('owner/app#4');
@@ -254,7 +254,7 @@ describe('one Claude job per repo', () => {
     makeChooser();
     await chooser.pass();
     expect(t3.launches.map((l) => l.title)).toEqual(['Queue runner build: lib#2']);
-    expect(lines.some((l) => l.startsWith('app: GitHub couldn\'t be read for fix rounds') && l.endsWith('nothing starts there this pass'))).toBe(true);
+    expect(lines.filter((l) => l.startsWith("app: no new job now, GitHub couldn't be read for fix rounds") && l.endsWith('tried again next pass'))).toHaveLength(1);
     gh.listFails.clear();
     await chooser.pass();
     expect(t3.launches.map((l) => l.title)).toEqual(['Queue runner build: lib#2', 'Queue runner build: app#1']);

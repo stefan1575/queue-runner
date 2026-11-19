@@ -249,7 +249,7 @@ describe('a conflict round', () => {
     expect(t3.launches).toHaveLength(1);
     expect(log.stops()).toEqual([]);
     // a read that fails leaves the repo for the next pass (#210)
-    expect(lines.some((l) => l.startsWith("app: PR #4 couldn't be read for its conflict round") && l.includes('HTTP 502'))).toBe(true);
+    expect(lines.some((l) => l.startsWith("app: no new job now, PR #4 couldn't be read for its conflict round") && l.includes('HTTP 502'))).toBe(true);
     gh.tipFails = 0;
     gh.tip = B2;
     await chooser.pass();

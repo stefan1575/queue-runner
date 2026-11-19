@@ -7,8 +7,8 @@
 //   that PR, and every newer one, waits for GitHub's answer on a later pass)
 //   ->  nothing that may write to the branch again (a question, a usage limit), no review of the
 //       PR is running, H's blocking review has had its fix round, nothing on H is left for the
-//       user, it's no stop  ->  oldest first, one at a time  ->  the gate (kind `conflict`)  ->  the PR's head fetched (moved: nothing starts), the
-//       base's own tip read from GitHub  ->  the brief (src/briefs/conflict.ts)  ->  a new thread
+//       user, it's no stop  ->  oldest first, one at a time  ->  the gate (kind `conflict`)
+//   ->  the PR's head fetched (moved: nothing starts), the base's own tip read from GitHub  ->  the brief (src/briefs/conflict.ts)  ->  a new thread
 //   ->  its end from T3's thread events; the PR's head read again: pushed (reviewed next) or not,
 //       which is a stop  ->  the end recorded and the thread settled, then the review lane passes
 //

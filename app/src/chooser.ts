@@ -1,9 +1,10 @@
 // The chooser (#210; today's `Runner.plan`, `choose` and `_choose_in` in `queue_runner/run.py`,
 // ported): one job per served repo at a time (a build, a fix round or a conflict round: the jobs
 // that write to the repo; reviews and merges run beside them), repos side by side, chosen in one
-// place (#50). The lanes that start such jobs (fix rounds, conflict rounds, builds) keep everything they decide about a job: which PR gets a round, its brief, its
-// model, the gate. They don't decide when to start: each answers "your next job in this repo, if
-// any" (`RepoJobLane.next`), and the chooser starts at most one per repo each pass.
+// place (#50). The lanes that start such jobs (fix rounds, conflict rounds, builds) keep
+// everything they decide about a job: which PR gets a round, its brief, its model, the gate. They
+// don't decide when to start: each answers "your next job in this repo, if any"
+// (`RepoJobLane.next`), and the chooser starts at most one per repo each pass.
 //
 //   settle first: every job the log shows open is recovered by its lane (`recover`) before the
 //   first choice  ->  each pass: each lane's owed bookkeeping (settles, PR lookups)  ->  the
@@ -11,8 +12,8 @@
 //   the user, no done build's PR lookup owed, and no job a usage limit cut off before its reset
 //   ->  the repo that waited longest first (`waited`), the served order breaking a tie
 //   ->  in each: a fix round, a conflict round, a build, the first lane with one; a lane whose
-//       job waits (the gate, a needs-user record) leaves the repo for the next pass, as does a
-//       read that fails, which never holds back another repo
+//       job waits (the gate, a fork's PR now needing the user) leaves the repo for the next pass,
+//       as does a read that fails, which never holds back another repo
 //
 // A job a usage limit cut off comes first in its repo, as today's: resuming it is the limits
 // ticket's, so until then it holds its repo till its reset. Passes don't overlap: one asked for
@@ -122,9 +123,8 @@ export class Chooser {
   /** Since when the repo's work has waited for a job: when its last one ended (one that
    *  never reached a thread aside), or 0 (the longest) for none (`_waited`). */
   private waited(repo: BuildRepo): number {
-    const ends = this.d.log.jobs().filter((j) => j.repo === repo.id && REPO_JOB_KINDS.includes(j.kind) && j.end && j.end.outcome !== 'not-started')
-      .map((j) => Date.parse(j.end!.at));
-    return Math.max(0, ...ends);
+    const at = this.d.log.lastEnded(repo.id, REPO_JOB_KINDS);
+    return at ? Date.parse(at) : 0;
   }
 
   /** Why the repo gets no new job this pass before any lane is asked, or null. */
@@ -160,14 +160,14 @@ export class Chooser {
       if (this.stopped) return;
       const held = this.held(repo);
       if (held) { this.note(repo, held); continue; }
-      this.note(repo, null);
+      let failed: string | null = null;
       for (const lane of this.d.lanes) {
         let next: Next;
         try {
           next = await lane.next(repo);
         } catch (e) {
           // a read that failed is never "nothing to do": the repo is left for the next pass
-          this.d.say(`${repo.title}: ${(e as Error).message}; nothing starts there this pass`);
+          failed = `${(e as Error).message}; tried again next pass`;
           break;
         }
         if (this.stopped) return;
@@ -177,6 +177,7 @@ export class Chooser {
         if ('launch' in next) await next.launch();
         break;
       }
+      this.note(repo, failed);
     }
   }
 }

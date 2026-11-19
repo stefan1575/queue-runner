@@ -82,6 +82,9 @@ describe('JobLog', () => {
     now = new Date('2026-11-19T13:00:00Z');
     await log.ended((await log.started(start(2))).id, { outcome: 'not-started' });
     expect(log.lastEnded('p1')).toBe('2026-11-19T12:00:00.000Z');
+    // of some kinds only (the chooser's repo jobs, #210)
+    expect(log.lastEnded('p1', [start(1).kind])).toBe('2026-11-19T12:00:00.000Z');
+    expect(log.lastEnded('p1', ['review'])).toBeNull();
   });
 
   test('a torn last line is cut off; a bad line before others is an error', async () => {

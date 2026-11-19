@@ -4,7 +4,8 @@
 // repo that waited longest first. Asked for a repo's next job (`next`):
 //
 //   new tickets read from GitHub at most every 5 minutes (sooner after a build ends, a merge, the
-//   served repos changing or usage changing while one waits)  ->  pick (src/picker.ts)  ->  the usage gate lets it in, on the build kind's model or its fallback
+//   served repos changing or usage changing while one waits)  ->  pick (src/picker.ts)
+//   ->  the usage gate lets it in, on the build kind's model or its fallback
 //   ->  fetch origin/<base>  ->  a leftover branch of the job's name holds the job (branch-exists)
 //   ->  the brief (src/briefs/build.ts)  ->  t3_thread_launch in a worktree from origin/<base>
 //   ->  its end from T3's thread events (src/t3/thread-end.ts)  ->  the end recorded in the job log
@@ -18,7 +19,8 @@
 // each pass. A job T3 may have
 // started a thread for that the app has no id of (its launch was sent and the answer lost, or the
 // app stopped before the id was saved) needs the user (#154, After a restart, don't guess): it's
-// recorded as such and its repo starts nothing until the user answers (`answered`). A repo whose
+// recorded as such and its repo starts nothing until the user answers
+// (`Chooser.answered`). A repo whose
 // job started no thread rests `restMs` before it's tried again. The usage the job was let in on
 // and T3's first reading after it are the gate's cost record (`usage.jsonl`, by the same job id);
 // both the reading and the cost it was let in at are in its start line, so a job watched again
