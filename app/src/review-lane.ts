@@ -1,7 +1,8 @@
 // The review lane (#155; today's `queue_runner/review.py`, ported, docs/flow.md The review loop):
 // every open PR in a served repo without a review on its newest commit H gets one, whoever opened
-// it, once the checks on H pass (`sol-review` not counted). One review at a time for now (#106
-// runs them at once later). A review:
+// it, once the checks on H pass (`sol-review` not counted) and GitHub says H doesn't conflict
+// with its base (#157: a conflict round comes first; not known yet waits too). One review at a time for now (#106 runs them at once
+// later). A review:
 //
 //   the usage gate lets it in, on the review kind's model or, while that provider has no room, its
 //   fallback (#69)  ->  the PR's head fetched; moved since listing: head-moved, nothing counts
@@ -34,7 +35,7 @@ import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { reviewBrief, said } from './briefs/review.ts';
 import { holdText } from './gate.ts';
-import type { GitHubReview, ReviewPull } from './github.ts';
+import type { GitHubMerge, GitHubReview, ReviewPull } from './github.ts';
 import { prRef, type ReviewGit } from './git.ts';
 import { REVIEWED, type Job, type JobEnd, type JobLog } from './job-log.ts';
 import { kindModels, model, provider, type Catalog, type Jobs, type ModelChoice } from './jobs.ts';
@@ -60,7 +61,7 @@ const OUTCOMES = { merge: 'clean', fix: 'blocking', stop: 'stop', 'approach-note
 
 export type ReviewLaneDoors = {
   repos: () => BuildRepo[];
-  github: GitHubReview & GitHubPosts;
+  github: GitHubReview & GitHubPosts & Pick<GitHubMerge, 'pull'>;
   git: ReviewGit;
   /** Links a checkout's dependencies in; null installs nothing. */
   deps: Pick<Deps, 'prepare'> | null;
@@ -86,6 +87,53 @@ export type ReviewLaneDoors = {
   /** A review ended (#156: a blocking one gets a fix round, a clean one merges). */
   ended?: (job: Job) => void;
 };
+
+/** What the review lane does with the PR's head H, and why: the one rule for it, which the lane's
+ *  own pass and the conflict lane's hold both ask (#157 F7). `why` null: H is reviewed now (once
+ *  the gate lets it in). Otherwise `on` says what it waits on:
+ *  - `loop`: something the loop itself brings, with nothing from the user: a job writing to the
+ *    branch, a rest after a review that started no thread, checks still running, GitHub working
+ *    out whether H conflicts, a conflict round first;
+ *  - `checks`: no checks reported on H yet. It's reviewed once some are, which a repo with no CI,
+ *    or a path filter that skips every check on H, never does;
+ *  - `you`: nothing until the user or a new head: a question on the branch, MAX_FAILED failed
+ *    reviews of H, a review of H on GitHub the app's log doesn't have, a failed check;
+ *  - `reviewed`: the app reviewed H; what follows is the fix or merge lane's.
+ *  Cheapest checks first. `rest`: when the PR's rest after a review that started no thread ends. */
+export async function reviewNext(d: { log: JobLog; github: Pick<GitHubReview, 'issueComments' | 'checks'> & Pick<GitHubMerge, 'pull'> },
+  repo: BuildRepo, pr: ReviewPull, rest: Date | null = null): Promise<{ why: null } | { why: string; on: 'loop' | 'checks' | 'you' | 'reviewed' }> {
+  const h = pr.headSha;
+  const h7 = h.slice(0, 7);
+  const jobs = d.log.jobs().filter((j) => j.repo === repo.id);
+  // one writer per PR: a build writing to its branch, or one that may write again
+  const writer = jobs.find((j) => j.kind !== 'review' && j.branch === pr.branch
+    && (!j.end || j.end.outcome === 'waiting' || j.end.outcome === 'usage-limit'));
+  if (writer) {
+    return !writer.end ? { why: `a ${writer.kind} job is still writing to its branch`, on: 'loop' }
+      : writer.end.outcome === 'waiting' ? { why: `its ${writer.kind} waits for an answer, and may write to the branch again`, on: 'you' }
+      : { why: `its ${writer.kind} was cut off by a usage limit and resumes after the reset`, on: 'loop' };
+  }
+  const done = jobs.filter((j) => j.kind === 'review' && j.issue === pr.number && j.sha === h && j.end);
+  const ran = done.filter((j) => REVIEWED.includes(j.end!.outcome));
+  if (ran.length) return { why: `the app reviewed ${h7} already (review ${ran.at(-1)!.round}, ${ran.at(-1)!.end!.outcome})`, on: 'reviewed' };
+  if (rest) return { why: `its last review started no thread; it rests until ${rest.toISOString()}`, on: 'loop' };
+  const failed = done.filter((j) => j.end!.outcome === 'failed').length;
+  if (failed >= MAX_FAILED) return { why: `${failed} failed reviews on ${h7}: left until a new head`, on: 'you' };
+  for (const r of readReviews(await d.github.issueComments(repo.github!, pr.number))) {
+    if (r.sha && h.startsWith(r.sha)) return { why: `review ${r.round} is on ${h7} already (${r.verdict})`, on: 'you' };
+  }
+  const checks = await d.github.checks(repo.github!, h);
+  if (checks.state === 'pending') return { why: `checks still running on ${h7} (${checks.pending.join(', ')})`, on: 'loop' };
+  if (checks.state === 'none') return { why: `no checks reported on ${h7} yet`, on: 'checks' };
+  if (checks.state === 'failed') return { why: `a check failed on ${h7} (${checks.failed.join(', ')})`, on: 'you' };
+  // a head that conflicts with its base gets a conflict round first (#157), as today's runner
+  // waits: its pushed head is what's reviewed. GitHub still working it out (null) isn't known
+  // yet: it's read again on a later pass, never reviewed ahead of a conflict round (#157 F5)
+  const mergeable = (await d.github.pull(repo.github!, pr.number)).mergeable;
+  if (mergeable === false) return { why: `${h7} conflicts with ${pr.base}: a conflict round (or a stop) comes first`, on: 'loop' };
+  if (mergeable === null) return { why: `GitHub hasn't worked out yet whether ${h7} conflicts with ${pr.base}; read again next pass`, on: 'loop' };
+  return { why: null };
+}
 
 export const reviewTitle = (repo: BuildRepo, n: number) => `Queue runner review: ${repo.title}#${n}`;
 const slug = (s: string) => s.replace(/[^A-Za-z0-9._-]+/g, '-');
@@ -265,34 +313,10 @@ export class ReviewLane {
     }
   }
 
-  /** Why this PR isn't reviewed now, or null if it is: cheapest checks first. */
+  /** Why this PR isn't reviewed now, or null if it is (`reviewNext`, the one rule for it). */
   async whyNot(repo: BuildRepo, pr: ReviewPull): Promise<string | null> {
-    const h = pr.headSha;
-    const h7 = h.slice(0, 7);
-    const jobs = this.d.log.jobs().filter((j) => j.repo === repo.id);
-    // one writer per PR: a build writing to its branch, or one that may write again
-    const writer = jobs.find((j) => j.kind !== 'review' && j.branch === pr.branch
-      && (!j.end || j.end.outcome === 'waiting' || j.end.outcome === 'usage-limit'));
-    if (writer) {
-      return !writer.end ? `a ${writer.kind} job is still writing to its branch`
-        : writer.end.outcome === 'waiting' ? `its ${writer.kind} waits for an answer, and may write to the branch again`
-        : `its ${writer.kind} was cut off by a usage limit and resumes after the reset`;
-    }
-    const done = jobs.filter((j) => j.kind === 'review' && j.issue === pr.number && j.sha === h && j.end);
-    const ran = done.filter((j) => REVIEWED.includes(j.end!.outcome));
-    if (ran.length) return `the app reviewed ${h7} already (review ${ran.at(-1)!.round}, ${ran.at(-1)!.end!.outcome})`;
     const rest = this.resting.get(`${repo.github}#${pr.number}`) ?? 0;
-    if (rest > this.now().getTime()) return `its last review started no thread; it rests until ${new Date(rest).toISOString()}`;
-    const failed = done.filter((j) => j.end!.outcome === 'failed').length;
-    if (failed >= MAX_FAILED) return `${failed} failed reviews on ${h7}: left until a new head`;
-    for (const r of readReviews(await this.d.github.issueComments(repo.github!, pr.number))) {
-      if (r.sha && h.startsWith(r.sha)) return `review ${r.round} is on ${h7} already (${r.verdict})`;
-    }
-    const checks = await this.d.github.checks(repo.github!, h);
-    if (checks.state === 'pending') return `checks still running on ${h7} (${checks.pending.join(', ')})`;
-    if (checks.state === 'none') return `no checks reported on ${h7} yet`;
-    if (checks.state === 'failed') return `a check failed on ${h7} (${checks.failed.join(', ')})`;
-    return null;
+    return (await reviewNext(this.d, repo, pr, rest > this.now().getTime() ? new Date(rest) : null)).why;
   }
 
   /** Asks the gate; a review let in starts (tracked, one at a time). False when it waits. */

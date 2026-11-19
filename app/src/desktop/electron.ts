@@ -19,6 +19,7 @@ import { Deps } from '../review/deps.ts';
 import { ReviewLane } from '../review-lane.ts';
 import { FixLane } from '../fix-lane.ts';
 import { MergeLane } from '../merge-lane.ts';
+import { ConflictLane } from '../conflict-lane.ts';
 import { UsageGate } from '../usage-gate.ts';
 import { windowsPlatform } from '../platform/windows.ts';
 import { checkJobs, DEFAULT_JOBS } from '../jobs.ts';
@@ -132,25 +133,32 @@ async function main() {
   // The review lane (docs/app.md, Reviews): every open PR in a served repo, one review at a time.
   // A review that ends tells the fix and merge lanes; a fix round that ends tells the review lane
   // (its pushed head is reviewed next); a merge tells the build lane (docs/app.md, Fix rounds and
-  // merges).
-  const lanes: { fixes?: FixLane; merges?: MergeLane } = {};
+  // merges). A conflict round that ends tells the review lane too; a review, a fix round or a merge
+  // that ends tells the conflict lane, since each may free a conflicted PR's turn (Conflict rounds).
+  const lanes: { fixes?: FixLane; merges?: MergeLane; conflicts?: ConflictLane } = {};
   const reviews = new ReviewLane({
     repos: () => servedRepos(repos.list()), github, git: new GitCli(), deps: new Deps(join(state, 'deps')),
     mcp: t3Doors!.mcp, ws: t3Doors!.ws, gate, catalog: () => catalog.current().catalog, jobs: () => settings.get().jobs,
     toolFree: () => settings.get().toolFreeInstances, user, log, stateDir: state, say,
-    ended: () => { void lanes.fixes?.pass(); void lanes.merges?.pass(); },
+    ended: () => { void lanes.fixes?.pass(); void lanes.merges?.pass(); void lanes.conflicts?.pass(); },
   });
   const fixes = new FixLane({
     repos: () => servedRepos(repos.list()), github, git: new GitCli(), mcp: t3Doors!.mcp, ws: t3Doors!.ws, gate,
     catalog: () => catalog.current().catalog, jobs: () => settings.get().jobs, user, log, exists: existsSync, say,
-    ended: () => void reviews.pass(),
+    ended: () => { void reviews.pass(); void lanes.conflicts?.pass(); },
   });
   const merges = new MergeLane({
     repos: () => servedRepos(repos.list()), github, git: new GitCli(), mcp: t3Doors!.mcp, log, say,
-    merged: () => void lane.pass(), headMoved: () => void reviews.pass(),
+    merged: () => { void lane.pass(); void lanes.conflicts?.pass(); }, headMoved: () => void reviews.pass(),
+  });
+  const conflicts = new ConflictLane({
+    repos: () => servedRepos(repos.list()), github, git: new GitCli(), mcp: t3Doors!.mcp, ws: t3Doors!.ws, gate,
+    catalog: () => catalog.current().catalog, user, log, exists: existsSync, say,
+    ended: () => void reviews.pass(),
   });
   lanes.fixes = fixes;
   lanes.merges = merges;
+  lanes.conflicts = conflicts;
 
   const shell: Shell = {
     singleInstance(onSecondStart) {
@@ -206,6 +214,13 @@ async function main() {
     gate.onChange(() => fixes.usageChanged());
     repos.onChange(() => void fixes.pass());
     setInterval(() => void fixes.pass(), 60_000);
+  });
+  // Conflict rounds the log shows open are watched again first; then a pass on usage, the repos
+  // and every minute (GitHub works out whether a PR conflicts in its own time).
+  void conflicts.start().then(() => {
+    gate.onChange(() => conflicts.usageChanged());
+    repos.onChange(() => void conflicts.pass());
+    setInterval(() => void conflicts.pass(), 60_000);
   });
   void merges.pass().then(() => {
     repos.onChange(() => void merges.pass());

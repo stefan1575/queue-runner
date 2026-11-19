@@ -13,6 +13,7 @@
 // launches nothing.
 import { model, usable, type Catalog, type JobKind, type ModelChoice } from './jobs.ts';
 import type { T3Mcp } from './t3/mcp.ts';
+import { NoAnswer } from './t3/seams.ts';
 
 /** Nothing to launch on: the choice's provider or model isn't one T3 runs now. */
 export class JobError extends Error {}
@@ -75,5 +76,11 @@ export async function launchJob(mcp: Pick<T3Mcp, 'call'>, catalog: Catalog, job:
     ...(job.worktree ? { workspaceStrategy: { type: 'worktree', ...job.worktree } }
       : job.worktreePath ? { workspaceStrategy: { type: 'existing_worktree', worktreePath: job.worktreePath } } : {}),
   });
-  return { threadId: launched?.threadId, runId: launched?.runId ?? null, link: launched?.link ?? null, choice };
+  // an answer that names no thread may still have started one: every lane treats it as a lost
+  // answer (the job needs the user), never as a thread to watch; so may an answer with no content
+  // at all (`undefined`, which JSON.stringify gives back as undefined)
+  if (typeof launched?.threadId !== 'string' || !launched.threadId) {
+    throw new NoAnswer(`t3_thread_launch was sent and T3's answer named no thread: ${(JSON.stringify(launched) ?? 'nothing').slice(0, 200)}`);
+  }
+  return { threadId: launched.threadId, runId: launched.runId ?? null, link: launched.link ?? null, choice };
 }

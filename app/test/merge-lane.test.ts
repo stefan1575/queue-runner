@@ -189,6 +189,19 @@ describe('in a repo where the runner merges', () => {
     expect(await why()).toBe('its newest review comment is not a clean review of abcdef1');
   });
 
+  test("GitHub not knowing yet whether it conflicts (mergeable null) is no merge: read again, merged once it says (#157 F5)", async () => {
+    await built();
+    await answered();
+    await review(1, H, 'clean');
+    gh.prs['owner/app#4'] = github({ mergeable: null });
+    await makeLane().pass();
+    expect(gh.posted.filter((p) => p.what === 'merge')).toEqual([]);
+    expect(lines).toContain("merge app#4: not now, GitHub hasn't worked out yet whether it conflicts; read again next pass");
+    gh.prs['owner/app#4'] = github();
+    await lane.pass();
+    expect(gh.posted.filter((p) => p.what === 'merge')).toHaveLength(1);
+  });
+
   test('a repo switched to the user merging while the re-check reads GitHub is marked, never merged', async () => {
     await built();
     await answered();
@@ -497,6 +510,20 @@ describe('in a repo where the user merges', () => {
     expect(git.calls.filter((c) => c.includes('again') || c === `deleteBranch ${BRANCH}`)).toEqual([]);
     expect(settledThreads()).not.toContain('thread-new');
     expect(steps('merge')[0]!.cleanedAt).toEqual(expect.any(String));
+  });
+
+  test("no mark while GitHub doesn't know yet whether it conflicts, and a mark already on stays through it (#157 F5)", async () => {
+    await review(1, H, 'clean');
+    gh.prs['owner/app#4'] = github({ mergeable: null });
+    await makeLane().pass();
+    expect(steps('ready')).toEqual([]);
+    gh.prs['owner/app#4'] = github();
+    await lane.pass();
+    expect(steps('ready').map((s) => s.end?.outcome)).toEqual(['marked']);
+    gh.prs['owner/app#4'] = github({ mergeable: null, labels: [READY] });
+    await lane.pass();
+    expect(steps('ready').map((s) => s.end?.outcome)).toEqual(['marked']);
+    expect(gh.prs['owner/app#4']!.labels).toEqual([READY]);
   });
 
   test('the mark comes off when the head moves; a marked PR closed unmerged loses it too', async () => {

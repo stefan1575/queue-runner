@@ -24,6 +24,17 @@ const start = (issue: number, repo = 'p1'): JobStart => ({
 });
 
 describe('JobLog', () => {
+  test('a stop is written once per PR, head and cause, and read back on the next open (#157)', async () => {
+    const log = await JobLog.open(file, () => now);
+    const stop = { cause: 'conflict' as const, repo: 'p1', github: 'o/r', pr: 4, sha: 'a'.repeat(40), why: 'no push', link: null };
+    const first = await log.stopped(stop);
+    expect(await log.stopped({ ...stop, why: 'said again' })).toEqual(first);
+    await log.stopped({ ...stop, sha: 'b'.repeat(40) });
+    const again = await JobLog.open(file);
+    expect(again.stops().map((s) => [s.sha[0], s.why])).toEqual([['a', 'no push'], ['b', 'no push']]);
+    expect(again.stopOn('p1', 4, 'a'.repeat(40), 'conflict')).toMatchObject({ why: 'no push', at: '2026-11-19T10:00:00.000Z' });
+  });
+
   test('a start, its thread and its end are read back on the next open', async () => {
     const log = await JobLog.open(file, () => now);
     const job = await log.started(start(1));
