@@ -205,6 +205,28 @@ describe('a fix round', () => {
     expect(t3.sends).toEqual([]);
   });
 
+  test('a repo switched off while the round is fetched and briefed sends nothing; a head that moved starts nothing', async () => {
+    await builder();
+    await blocking(1, H, [finding({})]);
+    let served = [APP];
+    const fetch = git.fetchPr.bind(git);
+    git.fetchPr = async (f, n, b) => { served = []; return fetch(f, n, b); };
+    makeLane({ repos: () => served });
+    await lane.pass();
+    await lane.idle();
+    expect(t3.sends).toEqual([]);
+    expect(fixes()[0]!.end).toMatchObject({ outcome: 'not-started', error: 'app is no longer served' });
+    expect(gate.calls).toContain(`dropped ${fixes()[0]!.id}`);
+
+    git.fetchPr = async () => H2;
+    served = [APP];
+    makeLane({ repos: () => served });
+    await lane.pass();
+    await lane.idle();
+    expect(t3.sends).toEqual([]);
+    expect(lines.some((l) => l.includes('the head moved from abcdef1 to 1234567'))).toBe(true);
+  });
+
   test("the gate holds a send on the builder's model: it waits and says why once", async () => {
     await builder();
     await blocking(1, H, [finding({})]);

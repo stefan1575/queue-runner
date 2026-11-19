@@ -138,8 +138,12 @@ export class MergeLane {
         }
         this.note(key, name, why);
         if (why) continue;
-        if ((repo.merge ?? 'me') === 'runner') await this.merge(repo, pr);
-        else await this.mark(repo, pr);
+        // asked again after the re-check's reads: a repo switched off, or to the user merging,
+        // meanwhile is never merged by the app
+        const now = this.d.repos().find((r) => r.id === repo.id);
+        if (!now) continue;
+        if ((now.merge ?? 'me') === 'runner') await this.merge(now, pr);
+        else await this.mark(now, pr);
       }
     }
   }
@@ -195,11 +199,25 @@ export class MergeLane {
       commit = await this.d.github.merge(github, pr.number, h);
     } catch (e) {
       const error = (e as Error).message;
-      let now: string | null = null;
+      let now: { state: string; headSha: string } | null = null;
       if (!(e instanceof HeadMoved)) {
-        try { now = (await this.d.github.pull(github, pr.number)).headSha; } catch { now = null; }
+        try {
+          now = await this.d.github.pull(github, pr.number);
+        } catch {
+          // a merge whose answer was lost may have landed: the step stays open, and the next
+          // pass reads GitHub again (cutOff) rather than take it as failed
+          this.d.say(`${name}: the merge at ${h.slice(0, 7)} got no clear answer (${error}), and GitHub can't say yet whether it merged; next pass`);
+          return;
+        }
+        if (now.state === 'merged') {
+          const done = await this.d.log.stepEnded(step.id, { outcome: 'merged', by: 'app' });
+          this.d.say(`${name}: merged at ${h.slice(0, 7)}, though GitHub's answer was lost (${error})`);
+          await this.cleanUp(repo, done);
+          this.d.merged?.(repo);
+          return;
+        }
       }
-      if (e instanceof HeadMoved || (now && now !== h)) {
+      if (e instanceof HeadMoved || (now && now.headSha !== h)) {
         await this.d.log.stepEnded(step.id, { outcome: 'head-moved', error });
         this.d.say(`${name}: the head moved from ${h.slice(0, 7)} before the merge; the new head is reviewed first`);
         this.d.headMoved?.();
@@ -276,8 +294,13 @@ export class MergeLane {
         continue;
       }
       const now = await this.d.github.pull(repo.github!, n);
-      if (now.state === 'merged') await this.userMerged(repo, last, now.headSha);
-      else if (now.state === 'closed') await this.unmark(repo, last, 'closed without merging');
+      if (now.state === 'merged') {
+        // the label goes too, so a merged PR isn't left saying it's ready (said if it fails)
+        if (now.labels.includes(READY)) {
+          await this.d.github.removeLabel(repo.github!, n, READY).catch((e: Error) => this.d.say(`merge ${repo.title}#${n}: removing ${READY} failed (${e.message})`));
+        }
+        await this.userMerged(repo, last, now.headSha);
+      } else if (now.state === 'closed') await this.unmark(repo, last, 'closed without merging');
     }
   }
 

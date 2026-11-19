@@ -182,6 +182,50 @@ describe('in a repo where the runner merges', () => {
     expect(await why()).toBe('its newest review comment is not a clean review of abcdef1');
   });
 
+  test('a repo switched to the user merging while the re-check reads GitHub is marked, never merged', async () => {
+    await built();
+    await answered();
+    await review(1, H, 'clean');
+    const checks = gh.checks.bind(gh);
+    gh.checks = async (r, sha) => { repo = ME; return checks(r, sha); };
+    await makeLane().pass();
+    expect(gh.posted.filter((p) => p.what === 'merge')).toEqual([]);
+    expect(steps('ready').map((s) => s.end?.outcome)).toEqual(['marked']);
+  });
+
+  test("a merge whose answer was lost is never taken as failed: GitHub is read again, and a merge that landed is recorded", async () => {
+    await built();
+    await answered();
+    await review(1, H, 'clean');
+    // the merge lands on GitHub, its answer is lost, and GitHub can't be read for a moment
+    gh.beforeMerge = () => {
+      gh.prs['owner/app#4']!.state = 'merged';
+      gh.pullFails = 1;
+      gh.beforeMerge = () => {};
+      throw new Error('gh api PUT merge failed (-1): socket hang up');
+    };
+    await makeLane().pass();
+    expect(steps('merge')[0]!.end).toBeUndefined();
+    gh.reviewPulls['owner/app'] = [];
+    await lane.pass();
+    await lane.idle();
+    expect(steps('merge')).toHaveLength(1);
+    expect(steps('merge')[0]).toMatchObject({ end: { outcome: 'merged' }, cleanedAt: expect.any(String) });
+    expect(merged).toEqual(['p-app']);
+  });
+
+  test('a merge that failed with GitHub answering and the PR still at H is failed, and two leave H alone', async () => {
+    await built();
+    await answered();
+    await review(1, H, 'clean');
+    gh.mergeFails = 2;
+    await makeLane().pass();
+    await lane.pass();
+    await lane.pass();
+    expect(steps('merge').map((s) => s.end?.outcome)).toEqual(['failed', 'failed']);
+    expect(lines.some((l) => l.includes('2 merges failed on abcdef1: left until a new head'))).toBe(true);
+  });
+
   test('a blocking review never merges', async () => {
     await review(1, H, 'blocking');
     await makeLane().pass();
@@ -243,6 +287,7 @@ describe('in a repo where the user merges', () => {
     await lane.pass();
     await lane.idle();
     expect(gh.posted.filter((p) => p.what === 'merge')).toEqual([]);
+    expect(gh.posted.at(-1)).toEqual({ what: 'unlabel', repo: 'owner/app', n: 4, label: READY });
     expect(steps('merge')[0]).toMatchObject({ end: { outcome: 'merged', by: 'user' }, cleanedAt: expect.any(String) });
     expect(git.calls).toContain(`removeWorktree ${WT}`);
     expect(settledThreads()).toEqual(['thread-b']);

@@ -22,6 +22,7 @@ import { GitCli } from '../src/git.ts';
 import { GhGitHub, HeadMoved } from '../src/github.ts';
 import { JobLog } from '../src/job-log.ts';
 import { MergeLane } from '../src/merge-lane.ts';
+import { JOB_BRANCH_PREFIX } from '../src/picker.ts';
 import { decide, readReviews } from '../src/review/ledger.ts';
 import { GitHubPoster } from '../src/review/post.ts';
 import { T3Mcp } from '../src/t3/mcp.ts';
@@ -49,7 +50,7 @@ const commitAs = ['-c', 'user.name=queue runner live check', '-c', 'user.email=l
 const repo = { ...(await sandboxRepo(mcp, github)), merge: 'runner' as const };
 const state = await mkdtemp(join(tmpdir(), 'qr-live-merge-'));
 const stamp = new Date().toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 15);
-const branch = `claude/live-merge-${stamp}`;
+const branch = `${JOB_BRANCH_PREFIX}live-merge-${stamp}`;
 const wt = join(state, 'build-worktree');
 const log = await JobLog.open(join(state, 'jobs.jsonl'));
 const say = (l: string) => console.log(`  ${l}`);
