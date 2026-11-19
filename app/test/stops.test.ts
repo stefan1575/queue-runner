@@ -468,3 +468,14 @@ describe('the Approach note lands, and a decision is recovered by its thread (#1
     expect(t3.launches).toHaveLength(1);
   });
 });
+
+describe("a round's question recorded with its end, its stop not yet (#158 F2)", () => {
+  test('the next pass records the stop from the end, once, and files the question', async () => {
+    await ran({}, { outcome: 'done', head: 'f'.repeat(40), question: 'Drop v1?' });
+    makeDesk();
+    await desk.pass();
+    await desk.pass();
+    expect(log.stops()).toEqual([expect.objectContaining({ cause: 'question', why: expect.stringContaining('asks you: Drop v1?') })]);
+    expect(posted('comment').find((p) => p.n === 101)!.body).toContain('The question:\n\n> Drop v1?');
+  });
+});

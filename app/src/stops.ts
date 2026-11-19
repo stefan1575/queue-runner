@@ -229,7 +229,10 @@ export class StopDesk {
       const base = { repo: job.repo, github: repo.github!, pr: job.issue, sha: on === 'issue' ? null : job.sha ?? null, link: job.link ?? null, on, job: job.id };
       const o = job.end.outcome;
       let stop: StopStart | null = null;
-      if (job.kind === 'review' && o === 'approach-note') {
+      if ((job.kind === 'fix' || job.kind === 'conflict') && job.end.question) {
+        // its lane records it with the end; an app that stopped between the two records it here
+        stop = askedStop(job, job.end.question);
+      } else if (job.kind === 'review' && o === 'approach-note') {
         stop = { ...base, cause: 'cap', why: `review ${job.round} of ${job.sha!.slice(0, 7)} is still blocking at the cap (review ${CAP})`, link: job.end.link ?? null };
       } else if (o === 'needs-user' && job.kind !== 'decision') {
         stop = { ...base, cause: 'needs-user', why: `${job.title} may have started a T3 thread the app has no id of (${job.end.error ?? 'its answer was lost'}): look in T3, and answer here once it's dealt with` };
