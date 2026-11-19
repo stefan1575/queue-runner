@@ -6,6 +6,11 @@ export class T3Error extends Error {}
 /** T3 refused the token: revoked, expired, or minted for another server. */
 export class Unauthorized extends T3Error {}
 
+/** A tool call was sent and no readable answer came back (the connection dropped, T3 answered
+ *  5xx, or its answer can't be read): T3 may have done it. A refusal T3 did answer is a plain
+ *  T3Error, and so is a failure before the call was sent. */
+export class NoAnswer extends T3Error {}
+
 export type HttpRequest = { method: string; headers: Record<string, string>; body?: string };
 export type HttpAnswer = { status: number; headers: Record<string, string>; text: string };
 /** One HTTP request; throws when the server can't be reached. Header names are lower case. */

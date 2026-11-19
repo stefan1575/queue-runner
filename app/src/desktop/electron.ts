@@ -10,7 +10,12 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { BuildLane, servedRepos } from '../build-lane.ts';
+import { CostLog } from '../cost-log.ts';
+import { GitCli } from '../git.ts';
 import { GhGitHub, ghCli } from '../github.ts';
+import { JobLog } from '../job-log.ts';
+import { UsageGate } from '../usage-gate.ts';
 import { windowsPlatform } from '../platform/windows.ts';
 import { checkJobs, DEFAULT_JOBS } from '../jobs.ts';
 import { Repositories } from '../repos.ts';
@@ -29,7 +34,7 @@ import { stateFolder } from '../state-folder.ts';
 import { CHANNELS } from './bridge.ts';
 import { startDesktop, type Shell } from './shell.ts';
 import { T3TimeFormat } from '../t3/time-format.ts';
-import { RunnerView } from './view.ts';
+import { briefName, RunnerView } from './view.ts';
 
 const here = dirname(fileURLToPath(import.meta.url)); // desktop-dist/
 const assets = join(here, '..', 'desktop');
@@ -65,7 +70,8 @@ const page = (hash = '') => ({ file: join(here, 'renderer', 'index.html'), hash 
 async function main() {
   await app.whenReady();
   const userData = app.getPath('userData');
-  const settings = await SettingsStore.open(stateFolder(join(userData, 'machine.json'), join(userData, 'state')));
+  const state = stateFolder(join(userData, 'machine.json'), join(userData, 'state'));
+  const settings = await SettingsStore.open(state);
   let win: BrowserWindow | null = null;
   // Windows' own folder dialog, over the window when it's open.
   const pickFolder = async () => {
@@ -76,6 +82,7 @@ async function main() {
   const github = new GhGitHub();
   // What T3 offers each job and its usage, T3's projects and Setup's checks, kept current from
   // T3; a shoot shows a sample of each instead (docs/app.md, Screenshots).
+  let t3Doors: { mcp: T3Mcp; ws: T3Ws } | null = null;
   const { catalog, repos, setup } = shootTo
     ? await (async () => {
       const config = fixture('server-config.json').config;
@@ -90,6 +97,7 @@ async function main() {
       const ws = new T3Ws(address, cli, fetchHttp, nodeConnect);
       const mcp = new T3Mcp(address, cli, fetchHttp);
       const feed = T3ProjectFeed.start(ws);
+      t3Doors = { mcp, ws };
       return {
         catalog: T3Catalog.start(ws),
         repos: Repositories.start({ feed, github, settings, mcp, pickFolder }),
@@ -105,6 +113,16 @@ async function main() {
   ipcMain.handle(CHANNELS.setup, () => view.checkSetup());
 
   if (shootTo) return shoot(shootTo, settings);
+
+  // The build lane (docs/app.md, Builds): served repos only; until the cutover only the sandboxes
+  // are ever served (Rules).
+  const gate = new UsageGate(catalog, () => settings.get(), await CostLog.open(join(state, 'usage.jsonl')));
+  const lane = new BuildLane({
+    repos: () => servedRepos(repos.list()), github, git: new GitCli(), mcp: t3Doors!.mcp, ws: t3Doors!.ws, gate,
+    catalog: () => catalog.current().catalog, jobs: () => settings.get().jobs,
+    user: async () => briefName(view.get()) ?? 'the user', log: await JobLog.open(join(state, 'jobs.jsonl')),
+    exists: existsSync, say: (line) => console.log(`${new Date().toISOString()} ${line}`),
+  });
 
   const shell: Shell = {
     singleInstance(onSecondStart) {
@@ -134,6 +152,18 @@ async function main() {
     hidden: process.argv.includes('--hidden'),
   });
   if (!desktop) return;
+  // Builds the log shows open are watched again before any pass, so a restart keeps one build per
+  // repo; then a pass on each change that may let one start.
+  void lane.start().then(() => {
+    gate.onChange(() => lane.usageChanged());
+    // a repo switched on or off passes at once; GitHub is polled for new tickets every 5 minutes
+    let servedKey = '';
+    repos.onChange(() => {
+      const key = servedRepos(repos.list()).map((r) => r.id).sort().join(' ');
+      if (key !== servedKey) { servedKey = key; void lane.pass(); }
+    });
+    setInterval(() => void lane.pass(), 5 * 60_000);
+  });
   view.onChange((v) => win?.webContents.send(CHANNELS.changed, v));
   // The window only hides; the app lives in the tray until Quit.
   app.on('window-all-closed', () => {});

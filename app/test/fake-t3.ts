@@ -13,6 +13,10 @@ export type FakeProject = { id: string; title: string; workspaceRoot: string; ar
 
 type ShellStream = { send(item: unknown): void; end(): void; ended: boolean };
 
+/** A thread's state as `orchestration.subscribeThread` shows it: its runs, runtime requests (a
+ *  question to the user is a pending one) and turn items (a failed run's error among them). */
+export type FakeThread = { id: string; projectId: string; runs: any[]; runtimeRequests: any[]; turnItems: any[]; title?: string; branch?: string | null };
+
 export class FakeT3 {
   port = 3773;
   sessions: Session[] = [];
@@ -26,6 +30,14 @@ export class FakeT3 {
   private shells: ShellStream[] = [];
   /** Every `t3_thread_launch` a client made: its arguments, as T3 got them. */
   launches: any[] = [];
+  /** Each thread a client launched, by id. */
+  threadState: Record<string, FakeThread> = {};
+  /** The open `subscribeThread` streams, by thread. */
+  private threadStreams = new Map<string, Set<{ send(item: unknown): void; end(): void }>>();
+  /** Answers `t3_thread_launch` with this failure instead (T3 refusing it). */
+  launchFailure: { code: string; message: string } | null = null;
+  /** `t3_thread_launch` runs, then its answer is lost (the connection drops before it arrives). */
+  launchAnswerLost = false;
   /** WebSocket methods that answer once, by tag: the value T3's Exit carries. Any other
    *  method but subscribeServerConfig ends in a Failure. */
   wsMethods: Record<string, (payload: any) => unknown> = {};
@@ -117,8 +129,59 @@ export class FakeT3 {
     this.shells = [];
   }
 
+  /** A thread event, as T3 sends it on `subscribeThread`: the item (`run`, `runtime-request` or
+   *  `turn-item`) replaces the one with its id in the thread's state, and every open stream on
+   *  the thread is told. */
+  threadEvent(threadId: string, type: 'run' | 'runtime-request' | 'turn-item', payload: any) {
+    const t = this.threadState[threadId]!;
+    const list = type === 'run' ? t.runs : type === 'runtime-request' ? t.runtimeRequests : t.turnItems;
+    const at = list.findIndex((x) => x.id === payload.id);
+    if (at >= 0) list[at] = payload; else list.push(payload);
+    for (const s of this.threadStreams.get(threadId) ?? []) {
+      s.send({ kind: 'event', sequence: ++this.n, event: { id: `event-${this.n}`, threadId, type: `${type}.updated`, payload } });
+    }
+  }
+
+  private run(threadId: string) { return this.threadState[threadId]!.runs.at(-1); }
+
+  /** The thread's run ends: `completed`, `failed`, `interrupted`, `cancelled`... */
+  endRun(threadId: string, status: string) {
+    this.threadEvent(threadId, 'run', { ...this.run(threadId), status, completedAt: '2026-11-19T12:00:00.000Z' });
+  }
+
+  /** The thread's run stops on a question to the user: a pending request, the run waiting. */
+  askUser(threadId: string) {
+    const run = this.run(threadId);
+    this.threadEvent(threadId, 'runtime-request', { id: `request-${++this.n}`, nodeId: run.rootNodeId, kind: 'user_input', status: 'pending' });
+    this.threadEvent(threadId, 'run', { ...run, status: 'waiting' });
+  }
+
+  /** The thread's run fails on the provider's usage limit, as T3 records it: a failed error item
+   *  on the run's root node with the failure's class, then the run failed. */
+  hitUsageLimit(threadId: string, resetAt: string | null) {
+    const run = this.run(threadId);
+    this.threadEvent(threadId, 'turn-item', {
+      id: `item-${++this.n}`, type: 'error', status: 'failed', runId: run.id, nodeId: run.rootNodeId,
+      failure: { class: 'usage_limit', message: "You've hit your limit", resetAt },
+    });
+    this.endRun(threadId, 'failed');
+  }
+
+  /** T3 ends every thread stream (a restart, say). */
+  endThreadStreams() {
+    for (const set of this.threadStreams.values()) for (const s of [...set]) s.end();
+  }
+
+  /** How many thread streams are open on a thread. */
+  threadStreamCount(threadId: string) { return this.threadStreams.get(threadId)?.size ?? 0; }
+
   /** How many shell streams are open. */
   get shellCount() { return this.shells.length; }
+
+  /** Each launched thread as T3's shell snapshot lists it. */
+  private shellThreads() {
+    return Object.values(this.threadState).map((t) => ({ id: t.id, projectId: t.projectId, title: t.title ?? null, branch: t.branch ?? null }));
+  }
 
   private tell(item: unknown) {
     for (const s of this.shells) s.send(item);
@@ -132,9 +195,19 @@ export class FakeT3 {
       return { result: { projects: this.projects.slice(cursor, cursor + limit), nextCursor: next } };
     }
     if (name === 't3_thread_launch') {
+      if (this.launchFailure) return { failure: this.launchFailure };
       this.launches.push(args);
       const n = this.launches.length;
+      this.threadState[`thread-${n}`] = {
+        id: `thread-${n}`, projectId: args.projectId, runtimeRequests: [], turnItems: [],
+        title: args.title, branch: args.workspaceStrategy?.branch ?? null,
+        runs: [{ id: `run-${n}`, threadId: `thread-${n}`, ordinal: 1, rootNodeId: `node-${n}`, status: 'running', completedAt: null }],
+      };
       return { result: { threadId: `thread-${n}`, runId: `run-${n}`, link: `t3://thread/thread-${n}`, projectId: args.projectId, modelSelection: args.modelSelection, status: 'running' } };
+    }
+    if (name === 't3_thread_organize') {
+      if (!this.threadState[args.threadId]) return { failure: { code: 'not_found', message: 'The thread was not found.' } };
+      return { result: { threadId: args.threadId, action: args.action } };
     }
     if (name === 't3_project_create') {
       if (this.projects.some((p) => p.workspaceRoot === args.workspaceRoot)) {
@@ -227,6 +300,7 @@ export class FakeT3 {
         if (msg.id === undefined) return { status: 202, headers: {}, text: '' };
         if (msg.method !== 'tools/call') return json(200, { jsonrpc: '2.0', id: msg.id, error: { message: 'unknown method' } });
         const done = this.tool(msg.params.name, msg.params.arguments);
+        if (this.launchAnswerLost && msg.params.name === 't3_thread_launch') throw new Error('socket hang up');
         if (done.failure) return json(200, { jsonrpc: '2.0', id: msg.id, result: { isError: true, content: [{ text: JSON.stringify(done.failure) }] } });
         const data = `data: ${JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { structuredContent: done.result } })}\n\n`;
         return { status: 200, headers: { 'content-type': 'text/event-stream' }, text: data };
@@ -244,9 +318,10 @@ export class FakeT3 {
       || u.searchParams.get('orchestrationProtocol') !== '2' || !s || s.subject === 'mcp-client';
     let open = !refused;
     let shell: ShellStream | null = null;
+    let threadStream: (() => void) | null = null;
     queueMicrotask(() => (refused ? on.closed(false, 'refused') : on.open()));
     const mine: ((v: any) => void)[] = [];
-    const forget = () => { for (const m of mine) this.configStreams.delete(m); };
+    const forget = () => { for (const m of mine) this.configStreams.delete(m); threadStream?.(); };
     const drop = () => { if (open) { open = false; forget(); on.closed(true, 'T3 stopped'); } };
     if (!refused) this.closers.add(drop);
     return {
@@ -258,6 +333,28 @@ export class FakeT3 {
           this.configStreams.add(sub);
           mine.push(sub);
           queueMicrotask(() => sub(this.serverConfig));
+        } else if (msg._tag === 'Request' && msg.tag === 'orchestration.subscribeThread') {
+          // T3's thread stream: a snapshot of the thread's projection, then each change
+          const t = this.threadState[msg.payload?.threadId];
+          if (!t) {
+            const exit = { _tag: 'Failure', cause: { _tag: 'Fail', error: { message: `no thread ${msg.payload?.threadId}` } } };
+            queueMicrotask(() => open && on.message(JSON.stringify({ _tag: 'Exit', requestId: msg.id, exit })));
+            return;
+          }
+          const set = this.threadStreams.get(t.id) ?? new Set();
+          this.threadStreams.set(t.id, set);
+          const stream = {
+            send: (item: unknown) => queueMicrotask(() => open && on.message(JSON.stringify({ _tag: 'Chunk', requestId: msg.id, values: [item] }))),
+            end: () => {
+              set.delete(stream);
+              if (!open) return;
+              open = false;
+              queueMicrotask(() => on.closed(true, 'T3 stopped'));
+            },
+          };
+          set.add(stream);
+          threadStream = () => set.delete(stream);
+          stream.send({ kind: 'snapshot', snapshotSequence: this.n, projection: structuredClone({ thread: { id: t.id, projectId: t.projectId }, runs: t.runs, runtimeRequests: t.runtimeRequests, turnItems: t.turnItems }) });
         } else if (msg._tag === 'Request' && msg.tag !== 'orchestration.subscribeShell') {
           const method = this.wsMethods[msg.tag];
           const exit = method ? { _tag: 'Success', value: method(msg.payload) } : { _tag: 'Failure', cause: { _tag: 'Die', defect: `no method ${msg.tag}` } };
@@ -278,7 +375,7 @@ export class FakeT3 {
           };
           shell = stream;
           this.shells.push(stream);
-          stream.send({ kind: 'snapshot', snapshot: { schemaVersion: 2, snapshotSequence: this.n, projects: this.projects.map((p) => ({ ...p, scripts: [] })), threads: [{ id: 't1' }], archivedThreads: [] } });
+          stream.send({ kind: 'snapshot', snapshot: { schemaVersion: 2, snapshotSequence: this.n, projects: this.projects.map((p) => ({ ...p, scripts: [] })), threads: [{ id: 't1' }, ...this.shellThreads()], archivedThreads: [] } });
           stream.send({ kind: 'synchronized' });
           stream.send({ kind: 'thread.updated', sequence: this.n, location: 'active', thread: { id: 't1' } });
         }

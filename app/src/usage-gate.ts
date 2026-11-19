@@ -10,6 +10,9 @@
 // - **Measured:** a job's usage before (the reading it was let in on) and after (T3's first
 //   reading taken after it ended) is appended to the cost log, with the other jobs that ran on
 //   the same login meanwhile (then it teaches nothing).
+// - **Whose login:** a job started before T3 has named its provider's login (a build watched again
+//   on a cold start, before T3's first catalog) is given it once T3 does, so it counts against
+//   that login whichever came first (#154 F10).
 import type { CostLog } from './cost-log.ts';
 import { reading, spentOf, type Cost, type Reading } from './costs.ts';
 import { checkJob, type GateJob, type Hold, type RunningJob, type Verdict } from './gate.ts';
@@ -24,7 +27,8 @@ export type Pick =
   | { fits: true; choice: ModelChoice; onFallback: boolean; cost: Cost }
   | { fits: false; until: Date | null; hold: Hold };
 
-type Running = RunningJob & { job: GateJob; before: Reading; started: Date; beside: Set<string> };
+/** `account` is null until T3 names the login of the job's provider. */
+type Running = Omit<RunningJob, 'account'> & { account: string | null; job: GateJob; before: Reading; started: Date; beside: Set<string> };
 type Ended = Running & { ended: Date };
 
 export class UsageGate {
@@ -35,6 +39,8 @@ export class UsageGate {
   private running = new Map<string, Running>();
   private toMeasure: Ended[] = [];
   private lastEnd = new Map<string, Date>();
+  /** Ends of jobs whose login T3 hadn't named yet, by provider: their login's `lastEnd` once it does. */
+  private unplacedEnd = new Map<string, Date>();
   private held = new Map<string, Held>();
   private listeners = new Set<() => void>();
 
@@ -44,6 +50,7 @@ export class UsageGate {
     this.log = log;
     this.now = now;
     source.onChange(() => {
+      this.placeJobs();
       void this.measure();
       for (const l of this.listeners) l();
     });
@@ -59,14 +66,37 @@ export class UsageGate {
     return this.source.current().usage.find((u) => u.provider === provider);
   }
 
+  /** Gives each running job T3 hadn't named the login of yet its login, now T3 has, and counts
+   *  it beside the jobs already running there. */
+  private placeJobs() {
+    for (const [provider, at] of this.unplacedEnd) {
+      const account = this.usage(provider)?.account;
+      if (!account) continue;
+      if (at > (this.lastEnd.get(account) ?? new Date(0))) this.lastEnd.set(account, at);
+      this.unplacedEnd.delete(provider);
+    }
+    for (const r of this.running.values()) {
+      if (r.account !== null) continue;
+      const account = this.usage(r.job.choice.provider)?.account;
+      if (!account) continue;
+      for (const other of this.running.values()) {
+        if (other === r || other.account !== account) continue;
+        other.beside.add(r.id);
+        r.beside.add(other.id);
+      }
+      r.account = account;
+    }
+  }
+
   /** Whether this job, on this model, fits now. */
   check(job: GateJob): Verdict {
+    this.placeJobs();
     const u = this.usage(job.choice.provider);
     const catalog = this.source.current().catalog;
     const m = catalog ? model(catalog, job.choice) : undefined;
     return checkJob({
       job, usage: u, model: { id: job.choice.model, ...(m ? { label: m.label } : {}) },
-      running: [...this.running.values()], shares: this.settings().shares, records: this.log.records(),
+      running: [...this.running.values()].filter((r): r is Running & RunningJob => r.account !== null), shares: this.settings().shares, records: this.log.records(),
       now: this.now(), lastEnd: u ? this.lastEnd.get(u.account) ?? null : null,
     });
   }
@@ -109,13 +139,22 @@ export class UsageGate {
     this.held.delete(id);
   }
 
-  /** The job started on `choice`, let in at `cost`: it counts as running until `finished`. */
-  started(job: GateJob, cost: Cost) {
-    const u = this.usage(job.choice.provider);
-    const account = u?.account ?? `${job.choice.provider}:${job.choice.provider}`;
-    const r: Running = { id: job.id, account, cost, job, before: reading(u?.checkedAt ?? null, u?.windows ?? []), started: this.now(), beside: new Set() };
+  /** T3's reading of this choice's provider now: the `before` a job let in now is measured from. */
+  reading(choice: ModelChoice): Reading {
+    const u = this.usage(choice.provider);
+    return reading(u?.checkedAt ?? null, u?.windows ?? []);
+  }
+
+  /** The job started on `choice`, let in at `cost` on the reading `before` (T3's reading now
+   *  unless given: a job watched again after a restart passes the one it was let in on, never one
+   *  taken mid-run). It counts as running until `finished`. */
+  started(job: GateJob, cost: Cost, before: Reading = this.reading(job.choice)) {
+    this.placeJobs();
+    const account = this.usage(job.choice.provider)?.account ?? null;
+    const r: Running = { id: job.id, account, cost, job, before, started: this.now(), beside: new Set() };
+    // a login T3 hasn't named yet is one per provider: jobs on it are beside each other already
     for (const other of this.running.values()) {
-      if (other.account !== account) continue;
+      if (account !== null ? other.account !== account : other.account !== null || other.job.choice.provider !== job.choice.provider) continue;
       other.beside.add(job.id);
       r.beside.add(other.id);
     }
@@ -127,11 +166,20 @@ export class UsageGate {
   finished(id: string) {
     const r = this.running.get(id);
     if (!r) return;
+    this.placeJobs();
     this.running.delete(id);
     const at = this.now();
-    this.lastEnd.set(r.account, at);
+    if (r.account !== null) this.lastEnd.set(r.account, at);
+    else this.unplacedEnd.set(r.job.choice.provider, at);
     this.toMeasure.push({ ...r, ended: at });
     void this.measure();
+  }
+
+  /** A job let in that never reached a thread (T3 refused it, a leftover branch): it stops
+   *  counting and, having spent nothing, teaches nothing. */
+  dropped(id: string) {
+    if (!this.running.delete(id)) return;
+    for (const other of this.running.values()) other.beside.delete(id);
   }
 
   /** The jobs counted as running, by id. */

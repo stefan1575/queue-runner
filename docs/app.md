@@ -8,8 +8,8 @@ could serve (#149), opens as a desktop window that keeps running in the tray, wi
 Repositories, below), knows which model does each kind of job and launches it (#152; Job
 models, below), gates every job on its provider's usage, keeping your share of each week
 (#153; Usage, below), has a Setup page that says what's missing before it can work (#162; Setup,
-below), and ships as a Windows installer built by CI on a version tag (#164; The installer,
-below).
+below), ships as a Windows installer built by CI on a version tag (#164; The installer,
+below), and builds a served repo's next ticket into a PR (#154; Builds, below).
 
 ## Run it
 
@@ -19,6 +19,7 @@ pnpm --dir app start -- --list    # every T3 project, its folder and GitHub remo
 pnpm --dir app live:sign-in       # the live sign-in check (Live checks, below)
 pnpm --dir app live:launch        # the live launch check, sandbox only (Live checks, below)
 pnpm --dir app live:usage         # each provider's usage as the app reads it; acts on no project
+pnpm --dir app live:build         # the live build check, sandbox only (Live checks, below)
 pnpm --dir app desktop            # builds and opens the desktop app (The desktop app, below)
 pnpm --dir app installer          # builds the Windows installer into installer-dist/ (The installer, below)
 ```
@@ -53,7 +54,7 @@ home or app-data folders, `T3_HOME` or `T3CODE_HOME`, T3's real runtime file or 
 the settings tickets export as `SETTINGS_PATH` (`test/real-settings.ts` lists them all).
 
 **Tests get time from a fake clock and files from a temp folder** (#202): none waits for real
-time to pass or a real file watcher to fire, and a `vi.waitFor` waits only on the test's own fakes (`FakeT3.address`, the settings in `test/memory-files.ts`), never on real file I/O, which a test awaits; `test/no-real-time.test.ts` fails a test that reads
+time to pass or a real file watcher to fire, and a `vi.waitFor` waits only on the test's own fakes (`FakeT3.address`, the settings and the job log in `test/memory-files.ts`), never on real file I/O, which a test awaits; `test/no-real-time.test.ts` fails a test that reads
 the real clock or runs on a real timer that no `vi.useFakeTimers()` around it fakes (a `toFake` list fakes only what it names), naming it (`test/real-time.ts`). Both checks read every app test file, `renderer/test/` included (`test/app-test-files.ts`).
 
 ## Rules for every rebuild ticket
@@ -66,7 +67,9 @@ the real clock or runs on a real timer that no `vi.useFakeTimers()` around it fa
   clock). The app reads that one setting, never writes the file, and watches it. The exception
   goes once T3's server serves client settings.
 - **Seams, faked in tests:** T3 (MCP and WebSocket; `src/t3/seams.ts`: HTTP, the socket, the
-  CLI, the address), GitHub (`src/github.ts`), and the platform (Windows: tray, notifications,
+  CLI, the address), GitHub (`src/github.ts`; `test/fake-github.ts` for the build lane's reads),
+  local git in a served repo's folder (`src/git.ts`: the fetch and leftover-branch check a build
+  needs, since T3 does neither), and the platform (Windows: tray, notifications,
   start at logon, wake). Tests never touch the network, T3, GitHub or the Task Scheduler
   (`test/fake-t3.ts` answers in memory). A temp folder a test makes is removed after it
   (`afterEach` with `rm(..., {recursive: true, force: true})`).
@@ -81,7 +84,9 @@ the real clock or runs on a real timer that no `vi.useFakeTimers()` around it fa
   `test/no-model-names.test.ts` fails on one in `src`, `renderer/src` or `live`, comments
   included (tests and their fixtures may name them). The GitHub-facing
   names (`sol-review` status, `sol-findings` ledger, `<!-- sol-finding -->` marks) stay as they
-  are, because open PRs in served repos read them across the cutover.
+  are, because open PRs in served repos read them across the cutover. So does the job branch
+  prefix (`JOB_BRANCH_PREFIX`, `src/picker.ts`), since a branch today's runner left counts as in
+  flight, and a repo's own `CLAUDE.md` is looked for by name: the test allows those two literals.
 - **The briefs stay self-contained:** no skill names, no slash commands, nothing outside the repo
   (today's `tests/test_templates.py` rule, ported with the templates).
 - **Live checks** are scripts under `app/live/` that refuse any project but the sandboxes, like
@@ -253,7 +258,7 @@ Which model does each kind of job (#152: #120's shape on #36's page, as the 2026
 The usage gate (#153: #68 stories 20 and 29, #122's design, today's `docs/usage.md` ported per
 provider). `src/usage.ts`, `src/shares.ts`, `src/costs.ts`, `src/cost-log.ts`, `src/gate.ts` (the
 decision, pure) and `src/usage-gate.ts` (the state around it). The lanes that call it are later
-tickets; the tests drive it on fake T3's events.
+tickets but the build lane (Builds, below); the tests drive it on fake T3's events.
 
 - **Where each number comes from in T3** (found live 2026-11-19, T3 0.1.9; `pnpm --dir app
   live:usage`): every provider in `subscribeServerConfig`'s `providers` has `usageLimits`:
@@ -274,6 +279,8 @@ tickets; the tests drive it on fake T3's events.
   instances on one login (seen: `claudeAgent` and `claudeReviewer`) show the same windows, and a
   job running on either counts against both. Its name, in every reason and share row, is the
   shortest of its instances' names.
+  A job started before T3 has named its provider's login (a build watched again on a cold start,
+  before T3's first catalog) is given that login once T3 does, and counts against it from then.
 - **The gate** (`checkJob`), before any job, reviews included (#106): each window of the job's
   provider that counts its model (a `<kind> · <family>` window counts only models whose id or
   name holds the family) must fit used + the expected cost of every job running on the same
@@ -302,6 +309,89 @@ tickets; the tests drive it on fake T3's events.
   usage for shows one row greyed, Coming soon. A provider that isn't connected shows no row (#36's
   open question 8): its jobs can't run anyway. Stefan's 5% of Claude's week is set at the
   cutover, not in code.
+
+## Builds
+
+The first job end to end (#154): a served repo's next ticket becomes a PR, as today's runner
+builds (`docs/flow.md`, `docs/claude-lane.md`). `src/build-lane.ts`, `src/picker.ts`,
+`src/briefs/build.ts`, `src/briefs/rules.ts`, `src/t3/thread-end.ts`, `src/job-log.ts`, `src/git.ts`.
+
+- **Picking** (`src/picker.ts`, today's picker ported, `docs/layout.md`): an open issue labelled
+  `ready-for-agent`, every blocker closed (GitHub's native blocked-by count, and `#N`,
+  `owner/name#N` or issue URLs on a `Blocked by:` line or under a `## Blocked by` heading), not
+  in flight (a `claude/*-<issue>` branch, an open PR on one or closing it, or one GitHub links to
+  it), not a spec with open sub-issues, not held by the job log; lowest number first. Only repos
+  switched to Served with a GitHub remote are read (`servedRepos`). The base is GitHub's default
+  branch.
+- **The brief** (`src/briefs/build.ts`): `templates/build.md` ported, with the user's name
+  (Settings, Name; else the gh account's name, else its login) in place of "Stefan". It names no
+  skill, no slash command and no path outside the repo (`test/brief.test.ts`): where today's brief
+  names the runner's `scripts/evidence.py`, it says in words what that script does (compare the
+  before and after, commit the shots to the `evidence` branch under `pr-<n>/` without touching
+  the job's branch, link each by that commit).
+- **Each rule is written once** (`src/briefs/rules.ts`): a rule more than one brief needs (the
+  Before you push list, today's `templates/check.md` from closed PR #196; the screenshots; what
+  is the user's to decide) is written there and filled into each brief that needs it. The build
+  brief goes through Before you push before it pushes. `test/brief.test.ts` fails a brief file
+  that writes one of them out itself.
+- **Starting:** fetch `origin/<base>` (T3 doesn't), with the refspec named
+  (`+refs/heads/<base>:refs/remotes/origin/<base>`), so the tracking ref is written whatever the
+  clone's own refspec covers (a single-branch clone of another branch); then a leftover local
+  branch of the job's name holds the job (`branch-exists`, said in the log line) and T3 isn't
+  asked; else `launchJob` on the very model the gate let the job in on (its kind's or its
+  fallback; Settings isn't read again) in a worktree from `origin/<base>` on
+  `claude/<slug>-<issue>`, titled `Queue runner build: <project>#<n>`. The served set is asked
+  again after the GitHub reads and right before the launch call: a repo switched off meanwhile
+  gets no gate verdict, or is `not-started`.
+- **After a restart, don't guess** (#154): a job is tied to a thread only by the thread id T3
+  gave its own launch, never by a thread's title, branch or project. A launch that was sent and
+  whose answer was lost (the connection dropped, T3 answered 5xx or unreadably: `NoAnswer`,
+  `src/t3/seams.ts`) may still have started a thread, so it isn't taken as not started: the job
+  ends `needs-user`, is dropped from the gate unmeasured, holds its issue, and its repo starts
+  nothing until the user answers (`BuildLane.answered`, an `answered` line in the job log; the
+  Inbox ticket asks). A launch T3 refused, or one that failed before the call was sent, started
+  nothing: `not-started`.
+- **One ticket at a time per repo** (#179): no build while the repo has an open PR, whoever
+  opened it, read before the ticket is picked and again right before the launch (a PR opened
+  meanwhile makes the job `not-started`). Clean means merged. The app merges nothing yet, so it
+  has no live steps to wait on: the merge ticket adds that wait.
+- **One build per repo, repos side by side** (#50): each pass takes every served repo with no build
+  running, the one whose last job ended longest ago first (the job log's `lastEnded`). Each asks
+  the usage gate first (`UsageGate.pick`, kind `build`); a held one says its reason once and waits.
+  A pass waits for each build it starts to be launched, so the gate counts it before the next
+  repo's verdict. A repo whose job started no thread (`not-started`, `branch-exists`) rests 5
+  minutes. In the desktop app a pass runs at start, when the served set changes, when T3 reads new
+  usage while a build is held, and every 5 minutes (GitHub is polled for new tickets).
+- **The end comes from T3's thread events** (`src/t3/thread-end.ts`; The WebSocket API, below), not
+  polling: `done` (the run completed; `done-no-pr` when GitHub answered that no PR came from the
+  branch; a lookup that failed is never "none": the end has no `pr`, each pass, a start's
+  included, looks it up again, and a `pr` line records what it found), `waiting` (a
+  pending runtime request: a question to the user), `usage-limit` (with T3's `resetAt`) or
+  `failed` (with the error item's message). A stream that drops opens again after 5 seconds.
+- **The job log** is `jobs.jsonl` in the state folder (`src/job-log.ts`, today's `state.py` cut to
+  a build): `start` (the model the gate let it in on, the cost it was let in at and T3's reading it
+  was let in on, `cost` and `before`), `thread` (once T3 names it), `end` and, for a `needs-user`
+  end, `answered` once the user has answered; `settled` once its thread is settled; `pr` once a
+  PR lookup that failed at the end is done.
+  Every build that started holds its issue but `not-started` (releasing is a later ticket). The
+  usage before and after a job are its record in the gate's `usage.jsonl`, by the same job id: the
+  gate counts the job from its let-in and measures it on T3's first reading after its end; a job
+  that got no thread is dropped from the gate unmeasured.
+- **Settling:** once the end is recorded, the thread is settled (`t3_thread_organize {threadId,
+  action: settle}`; #68 story 5). Only threads the app launched are settled (story 13): the id
+  comes from its own launch. One waiting on a question is left for the Inbox ticket and one
+  stopped by a usage limit for the limits ticket; both are recorded as such and left unsettled.
+  A settle is recorded (`settled`); an end with none (the app stopped between the two, or the
+  settle failed) is settled on the next pass, a start's included. A log from before `settled`
+  lines settles its ended builds' threads once more on the first start, which leaves a settled
+  thread as it is.
+- **An app that stopped mid-build:** on start, each build the log shows open is watched again to
+  its end before any pass (so its repo still has one build), reserved in the gate at its logged
+  `cost` and measured from its logged `before`, never from a reading taken mid-run (a line with
+  neither, an older app's, is measured as teaching nothing). One with no saved thread id
+  needs the user, as a lost launch answer does (After a restart, don't guess, above): no thread
+  is adopted for it, and its repo starts nothing until the user answers.
+- **The app's log** is its console for now (`say`): a line per start, hold, end and failure.
 
 ## Setup
 
@@ -404,6 +494,19 @@ is a T3Error with its `code: message`. Projects: `t3_project_list {cursor, limit
   `repositoryIdentity`, `archivedAt`, `scripts` and more. The app (`src/t3/project-feed.ts`)
   opens the stream again at once on `snapshot-required`, so its whole snapshot replaces what was
   missed, and leaves out a project whose `archivedAt` is set, as T3 hides it.
+- **`orchestration.subscribeThread {threadId}`** (scope `orchestration:read`; seen live
+  2026-11-19 against T3 0.1.9, a Haiku thread in the sandbox): a `{kind: "snapshot",
+  snapshotSequence, projection}` whose projection has `thread`, `runs`, `attempts`, `nodes`,
+  `runtimeRequests`, `messages`, `turnItems` and more, then `{kind: "event", sequence, event:
+  {type, payload, ...}}` items. Types seen: `provider-session.*`, `provider-thread.updated`,
+  `provider-turn.updated`, `run.updated`, `run-attempt.updated`, `node.updated`,
+  `message.updated`, `turn-item.updated`, `checkpoint.captured`; T3's schema adds
+  `runtime-request.updated`. A run's `status` is one of `preparing`, `queued`, `starting`,
+  `running`, `waiting`, `completed`, `interrupted`, `failed`, `cancelled`, `rolled_back`; the
+  live run went `running`, then `waiting` for half a second, then `completed`. A runtime request
+  is `pending`, `resolved`, `expired` or `cancelled`. A usage limit is a failed run whose root
+  node's latest failed `error` turn item has `failure.class: usage_limit` and `failure.resetAt`
+  (T3's own `latestRootProviderFailure` in `server.asar`).
 - **`subscribeServerConfig`** (scope `orchestration:read`). Its payload's flags are all optional
   (`environmentThemes`, `usageLimitSources`, `usageLimitsCommand`, `workspaceSnapshotsOnDemand`,
   `providerCatalogsOnDemand`). With `{}` T3 sent one Chunk of 726,605 bytes with one value,
@@ -462,6 +565,14 @@ is killed is code -1 with Node's reason in stderr, never a gh exit code (so is t
   `effort: low` on their runs; Codex's `gpt-6-astra` run carried `reasoningEffort: low` but failed
   on ChatGPT's usage limit, so a completed Codex run is owed (the Python check ran one at
   `reasoningEffort: high` on 2026-11-17, docs/t3.md).
+- `app/live/build.ts` (`pnpm --dir app live:build [-- --run <instance>:<model>]`): the
+  "queue-runner sandbox" project only, like today's `scripts/live_sandbox.py`. A hand-made issue
+  (add a line to README, commit, push to `origin`; the sandbox has no GitHub, so no picking, no
+  PR) built through `BuildLane.build`, numbered afresh each run so an earlier run's branch never
+  holds it, on T3's default model at its lowest effort unless `--run` names one; the gate isn't
+  asked. It checks the end was `done`, the branch is on `origin`, the thread ran in its own
+  worktree on the job branch on the asked model, and it was settled. **Run 2026-11-19** on Haiku
+  5.5 at low: all ok, in about 20 seconds.
 - `app/live/usage.ts` (`pnpm --dir app live:usage [-- --minutes N]`): acts on no project. It
   subscribes to T3's server config and prints each connected provider's windows as the app reads
   them, then each `providerStatuses` event that changes one, for N minutes (5 by default). **Run
