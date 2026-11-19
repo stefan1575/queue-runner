@@ -91,3 +91,17 @@ describe('labels', () => {
     await expect(down.removeLabel('o/r', 4, 'ready-to-merge')).rejects.toThrow(GitHubError);
   });
 });
+
+describe('branchHead (#157)', () => {
+  test("reads the base branch's own tip from the branches API, the name escaped", async () => {
+    const calls: { args: string[] }[] = [];
+    const gh = new GhGitHub(fakeGh(() => json({ name: 'release/2', commit: { sha: 'tip' } }), calls), () => true);
+    expect(await gh.branchHead('o/r', 'release/2')).toBe('tip');
+    expect(calls[0]!.args).toEqual(['api', 'repos/o/r/branches/release%2F2']);
+  });
+
+  test('an answer with no commit, or gh failing, is a GitHubError, never a tip', async () => {
+    await expect(new GhGitHub(fakeGh(() => json({ message: 'odd' })), () => true).branchHead('o/r', 'main')).rejects.toThrow(GitHubError);
+    await expect(new GhGitHub(fakeGh(() => ({ code: 1, stderr: 'HTTP 502' })), () => true).branchHead('o/r', 'main')).rejects.toThrow(GitHubError);
+  });
+});

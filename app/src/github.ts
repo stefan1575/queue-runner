@@ -96,6 +96,9 @@ export interface GitHubMerge {
   pull(repo: string, n: number): Promise<MergePull>;
   /** Merges the PR at `sha` only, with a merge commit: its sha. HeadMoved when the head isn't `sha`. */
   merge(repo: string, n: number, sha: string): Promise<string | null>;
+  /** The commit a branch points at now, from the branches API: a base's own tip (#157), never a
+   *  PR's `base.sha`, which GitHub refreshes only when the PR's branch is pushed. */
+  branchHead(repo: string, branch: string): Promise<string>;
   /** How many of the PR's review threads are unresolved, every page read. */
   openThreads(repo: string, n: number): Promise<number>;
   addLabel(repo: string, n: number, label: string): Promise<void>;
@@ -406,6 +409,12 @@ export class GhGitHub implements GitHub, GitHubAccount, GitHubLabels, GitHubWork
     }
     if (answer?.merged !== true) throw new GitHubError(`GitHub didn't merge ${repo}#${n}: ${answer?.message ?? 'no reason given'}`);
     return typeof answer.sha === 'string' ? answer.sha : null;
+  }
+
+  async branchHead(repo: string, branch: string): Promise<string> {
+    const b = await this.api([`repos/${repo}/branches/${encodeURIComponent(branch)}`], `${repo} branch ${branch}`);
+    if (typeof b?.commit?.sha !== 'string') throw new GitHubError(`gh api ${repo} branch ${branch} named no commit`);
+    return b.commit.sha;
   }
 
   async openThreads(repo: string, n: number): Promise<number> {

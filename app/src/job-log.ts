@@ -19,6 +19,10 @@
 //   branches removed, the PR's threads settled) is a `cleaned` line, and its folders T3 still held
 //   then are a `swept` line once they're gone. A merge started with no end (the app stopped
 //   mid-merge) is read from GitHub on the next pass; one merged and not cleaned is cleaned then.
+// - **Stops** (#157, for the stops ticket #158): a PR left for the user on its head H, with why: a
+//   conflict a conflict round couldn't resolve (it ended without a push), one back on the same base
+//   tip the last round merged, or too many rounds as the base keeps moving. One `stop` line per
+//   PR, head and cause; nothing more happens to it yet.
 import { appendFile, mkdir, readFile, truncate } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import type { Cost, Reading } from './costs.ts';
@@ -63,6 +67,9 @@ export type JobStart = {
   knownRuns?: string[];
   fresh?: string;
   workBranch?: string;
+  /** A conflict round's (#157): the base branch's own tip as GitHub had it when the round started
+   *  (its branches API, never the PR's `base.sha`), the base the round merges in. */
+  baseSha?: string;
   /** What the usage gate let the job in at, and T3's reading it was let in on: a job watched
    *  again after a restart is reserved and measured from these. Absent on a line an older app
    *  wrote, and on a job no gate let in (the live check's). */
@@ -87,7 +94,7 @@ export type JobEnd = {
   signals?: string[];
   link?: string | null;
   runDir?: string;
-  /** A fix round's: the PR's head once it ended (null when GitHub couldn't say). */
+  /** A fix or conflict round's: the PR's head once it ended (null when GitHub couldn't say). */
   head?: string | null;
 };
 export type Job = JobStart & { id: string; startedAt: string } & Partial<JobThread>
@@ -105,6 +112,10 @@ export type StepOutcome = 'merged' | 'failed' | 'head-moved' | 'marked' | 'unmar
 export type StepStart = { kind: 'merge' | 'ready'; repo: string; github: string; pr: number; branch: string; sha: string };
 export type StepEnd = { outcome: StepOutcome; error?: string | null; by?: 'app' | 'user'; commit?: string | null; why?: string };
 export type Step = StepStart & { id: string; startedAt: string; end?: StepEnd & { at: string }; cleanedAt?: string; left?: string[]; sweptAt?: string };
+
+/** A PR left for the user on its head (#157; the stops ticket, #158, acts on them). */
+export type StopStart = { cause: 'conflict'; repo: string; github: string; pr: number; sha: string; why: string; link: string | null };
+export type Stop = StopStart & { id: string; at: string };
 
 export class JobLogError extends Error {}
 
@@ -137,13 +148,15 @@ type Event =
   | ({ event: 'step'; step: string; at: string } & StepStart)
   | ({ event: 'step-end'; step: string; at: string } & StepEnd)
   | { event: 'cleaned'; step: string; at: string; left: string[] }
-  | { event: 'swept'; step: string; at: string };
+  | { event: 'swept'; step: string; at: string }
+  | ({ event: 'stop'; stop: string; at: string } & StopStart);
 
 export class JobLog {
   private file: string;
   private files: JobLogFiles;
   private all = new Map<string, Job>();
   private steps_ = new Map<string, Step>();
+  private stops_ = new Map<string, Stop>();
   private writing: Promise<void> = Promise.resolve();
   private now: () => Date;
   private n = 0;
@@ -179,6 +192,11 @@ export class JobLog {
   }
 
   private fold(e: Event) {
+    if (e.event === 'stop') {
+      const { event, stop, ...rest } = e;
+      this.stops_.set(stop, { ...rest, id: stop });
+      return;
+    }
     if (e.event === 'step') {
       const { event, step, at, ...start } = e;
       this.steps_.set(step, { ...start, id: step, startedAt: at });
@@ -296,6 +314,26 @@ export class JobLog {
 
   steps(): Step[] {
     return [...this.steps_.values()];
+  }
+
+  /** A PR left for the user on its head, written once: a stop already there for the same PR, head
+   *  and cause is that one, and nothing is written. */
+  async stopped(start: StopStart): Promise<Stop> {
+    const there = this.stopOn(start.repo, start.pr, start.sha, start.cause);
+    if (there) return there;
+    const at = this.now().toISOString();
+    const id = `stop-${at.replace(/[-:.]/g, '')}-${++this.n}`;
+    await this.append({ event: 'stop', stop: id, at, ...start });
+    return this.stops_.get(id)!;
+  }
+
+  stops(): Stop[] {
+    return [...this.stops_.values()];
+  }
+
+  /** The stop recorded on the PR's head for `cause`, if any. */
+  stopOn(repo: string, pr: number, sha: string, cause: StopStart['cause']): Stop | undefined {
+    return this.stops().find((s) => s.repo === repo && s.pr === pr && s.sha === sha && s.cause === cause);
   }
 
   get(id: string): Job | undefined {
