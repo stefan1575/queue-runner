@@ -6,8 +6,8 @@
 // the PR body, on every repo (#36), its Reviewer column naming who reviewed. The app reads and
 // changes only what it posted itself: its own marker on a follow-up issue, its own table between
 // its own markers. The comment is the review's record: if it can't be posted the review failed and
-// nothing counts. Anything after it that fails is said and
-// left; the review stands.
+// nothing counts. `post` ends at the comment; `finish` writes the status and the row, and throws
+// `FinishFailed` while either hasn't landed: the lane calls it again until both have (F14).
 import { cell, OPEN, where, withIssues, type Decision, type Finding } from './ledger.ts';
 
 export const TRIAGE = 'needs-triage';
@@ -18,6 +18,8 @@ const TABLE_RULE = '|---|---|---|---|---|';
 
 /** The review comment couldn't be posted: nothing is on the PR, so the review failed. */
 export class PostFailed extends Error {}
+/** The comment is on the PR, but `sol-review` on H or its Review row didn't land: try again. */
+export class FinishFailed extends Error {}
 
 export type OpenIssue = { number: number; title: string; body: string; url: string };
 
@@ -133,10 +135,11 @@ export function withReviewRow(body: string, row: string): string {
 }
 
 export interface Poster {
-  /** Posts the review; its comment's URL (null for a dry run). PostFailed if the comment didn't post. */
+  /** Files the follow-ups and posts the comment; its URL (null for a dry run). PostFailed if the
+   *  comment didn't post. */
   post(repo: string, n: number, d: Decision): Promise<string | null>;
-  /** What follows a comment already on the PR (posted before the app stopped): `sol-review` on H
-   *  and its Review row, unless the row is there already. */
+  /** What follows the comment once it's on the PR: `sol-review` on H and its Review row, unless
+   *  the row is there already. Safe to call again; FinishFailed until both have landed. */
   finish(repo: string, n: number, d: Decision, url: string): Promise<void>;
 }
 
@@ -180,27 +183,29 @@ export class GitHubPoster implements Poster {
       throw new PostFailed(`Posting the review comment failed (${(e as Error).message}).`);
     }
     this.say(`${name}: posted ${url}`);
-    await this.finish(repo, n, d, url);
     return url;
   }
 
   async finish(repo: string, n: number, d: Decision, url: string): Promise<void> {
     const name = `review ${repo}#${n}`;
+    const failed: string[] = [];
     try { // on H, the commit reviewed, whatever the PR's head is by now
       await this.gh.setStatus(repo, d.sha, STATUS_CONTEXT, d.status.state, d.status.description, url);
       this.say(`${name}: ${STATUS_CONTEXT} ${d.status.state} on ${d.sha.slice(0, 7)}`);
     } catch (e) {
-      this.say(`${name}: setting ${STATUS_CONTEXT} on ${d.sha.slice(0, 7)} failed: ${(e as Error).message}`);
+      failed.push(`setting ${STATUS_CONTEXT} on ${d.sha.slice(0, 7)} failed (${(e as Error).message})`);
     }
     try { // read afresh: someone may have edited the body while the review ran
       const body = await this.gh.pullBody(repo, n);
-      if (body.includes(`[Review ${d.round}](${url})`)) return; // its row is there already
-      const next = withReviewRow(body, reviewRow(d, url, this.now()));
-      await this.write('pr-body.md', next);
-      await this.gh.editPullBody(repo, n, next);
+      if (!body.includes(`[Review ${d.round}](${url})`)) { // its row isn't there already
+        const next = withReviewRow(body, reviewRow(d, url, this.now()));
+        await this.write('pr-body.md', next);
+        await this.gh.editPullBody(repo, n, next);
+      }
     } catch (e) {
-      this.say(`${name}: adding the Review row to the PR body failed: ${(e as Error).message}`);
+      failed.push(`adding the Review row to the PR body failed (${(e as Error).message})`);
     }
+    if (failed.length) throw new FinishFailed(`${failed.join('; ')}.`);
   }
 
   /** Files each new Pre-existing finding once: its issue's URL by finding id, and the ids that failed. */

@@ -327,6 +327,29 @@ describe('a review', () => {
     expect(gh.posted.filter((p) => p.what === 'comment')).toHaveLength(1);
   });
 
+  test('sol-review or the row failing after the comment is tried again until it lands; the job stays open meanwhile (F14)', async () => {
+    gh.failing.add('status');
+    gh.failing.add('body');
+    makeLane();
+    const passed = lane.pass();
+    await answer(1, reply([]));
+    await passed;
+    await until(() => retries.size > 0);
+    expect(log.jobs()[0]!.end).toBeUndefined();
+    expect(lines.join('\n')).toMatch(/the review is posted, but setting sol-review on abcdef1 failed .* Trying again after a wait\./);
+    gh.failing.delete('body');
+    retryNow();
+    await until(() => retries.size > 0);
+    expect(log.jobs()[0]!.end).toBeUndefined();
+    gh.failing.delete('status');
+    retryNow();
+    await until(() => log.jobs()[0]!.end !== undefined);
+    await lane.idle();
+    expect(log.jobs()[0]!.end).toMatchObject({ outcome: 'clean' });
+    expect(gh.posted.map((p) => p.what)).toEqual(['comment', 'body', 'status']);
+    expect(gh.posted[2]).toMatchObject({ sha: H, state: 'success' });
+  });
+
   test("only on an instance named as set up without outside tools: another one, though not the build's, waits and launches nothing", async () => {
     toolFree = [FALLBACK.provider];
     makeLane();
@@ -496,6 +519,26 @@ describe('after a restart', () => {
     expect(gh.posted[0]).toMatchObject({ sha: H, state: 'success', url });
     expect(gh.bodies['owner/app#4']).toContain(`| [Review 1](${url}) |`);
     expect(lines.join('\n')).toMatch(/is on the PR already \(posted before the app stopped\); not posted again/);
+  });
+
+  test('a status that never landed before the app stopped is set by the next start, the comment not posted again (F14)', async () => {
+    gh.failing.add('status');
+    makeLane();
+    void lane.pass();
+    await answer(1, reply([]));
+    await until(() => retries.size > 0);
+    lane.stop();
+    await lane.idle();
+    const job = log.jobs()[0]!;
+    expect(job.end).toBeUndefined(); // left open: the next start carries on
+    gh.failing.delete('status');
+    makeLane();
+    await lane.start();
+    await until(() => log.get(job.id)!.end !== undefined);
+    await lane.idle();
+    expect(log.get(job.id)!.end).toMatchObject({ outcome: 'clean' });
+    expect(gh.posted.map((p) => p.what)).toEqual(['comment', 'body', 'status']);
+    expect(t3.launches).toHaveLength(1);
   });
 
   test('one with no saved thread id needs the user: no thread is matched to it, its checkout stays, and its repo starts nothing until the user answers', async () => {

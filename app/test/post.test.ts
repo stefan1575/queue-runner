@@ -4,7 +4,7 @@
 import { describe, expect, test } from 'vitest';
 import { GhGitHub, type Gh } from '../src/github.ts';
 import { decide, readReviews } from '../src/review/ledger.ts';
-import { GitHubPoster, PostFailed, reviewRow, TABLE_END, TABLE_START, withReviewRow } from '../src/review/post.ts';
+import { FinishFailed, GitHubPoster, PostFailed, reviewRow, TABLE_END, TABLE_START, withReviewRow } from '../src/review/post.ts';
 import { FakeReviewGitHub } from './fake-github.ts';
 
 const SHA = 'abcdef1234567890abcdef1234567890abcdef12';
@@ -19,7 +19,10 @@ describe('GitHubPoster', () => {
     const gh = new FakeReviewGitHub();
     gh.bodies['owner/app#4'] = '## Summary\n\nx\n\n## Evidence\n\ny\n\n## Merge Danger\n\nz\n';
     const said: string[] = [];
-    const url = await new GitHubPoster(gh, (l) => said.push(l), async () => {}, () => AT).post('owner/app', 4, d([PRE]));
+    const poster = new GitHubPoster(gh, (l) => said.push(l), async () => {}, () => AT);
+    const url = await poster.post('owner/app', 4, d([PRE]));
+    expect(gh.posted.map((p) => p.what)).toEqual(['issue', 'comment']); // post ends at the comment
+    await poster.finish('owner/app', 4, d([PRE]), url);
     expect(gh.posted.map((p) => p.what)).toEqual(['issue', 'comment', 'status', 'body']);
     const [issue, comment, status, body] = gh.posted;
     expect(issue).toMatchObject({ labels: ['needs-triage'], title: 'temp folder never removed (src/x.ts)' });
@@ -34,7 +37,7 @@ describe('GitHubPoster', () => {
     const gh = new FakeReviewGitHub();
     gh.open['owner/app'] = [{ number: 7, title: 'other', body: 'x <!-- queue-runner-app finding owner/app#4 F1 -->', url: 'https://github.com/owner/app/issues/7' }];
     await new GitHubPoster(gh, () => {}).post('owner/app', 4, d([PRE]));
-    expect(gh.posted.map((p) => p.what)).toEqual(['comment', 'status', 'body']);
+    expect(gh.posted.map((p) => p.what)).toEqual(['comment']);
     expect(gh.posted[0]!.body).toContain('F1 → [#7]');
   });
 
@@ -45,7 +48,7 @@ describe('GitHubPoster', () => {
       { number: 8, title: 'else', body: 'From https://github.com/owner/app/pull/4\n<sub>Finding F1, filed by sol-pr-review.</sub>', url: 'https://github.com/owner/app/issues/8' },
     ];
     await new GitHubPoster(gh, () => {}).post('owner/app', 4, d([PRE]));
-    expect(gh.posted.map((p) => p.what)).toEqual(['issue', 'comment', 'status', 'body']);
+    expect(gh.posted.map((p) => p.what)).toEqual(['issue', 'comment']);
   });
 
   test('finishing a comment already posted sets sol-review again, and adds its row only if the body lacks it', async () => {
@@ -67,13 +70,21 @@ describe('GitHubPoster', () => {
     expect(readReviews([{ author: 'me', createdAt: '1', body: gh2.posted[0]!.body }])[0]!.findings[0]).toMatchObject({ unfiled: true });
   });
 
-  test('the status or the row failing is said, and the review stands', async () => {
+  test('the status or the row failing throws FinishFailed after trying both; finishing again lands them (F14)', async () => {
     const gh = new FakeReviewGitHub();
+    const poster = new GitHubPoster(gh, () => {});
+    const url = await poster.post('owner/app', 4, d());
     gh.failing.add('status');
     gh.failing.add('body');
-    const said: string[] = [];
-    await expect(new GitHubPoster(gh, (l) => said.push(l)).post('owner/app', 4, d())).resolves.toContain('issuecomment');
-    expect(said.join('\n')).toMatch(/setting sol-review on abcdef1 failed[\s\S]*adding the Review row to the PR body failed/);
+    const tried = poster.finish('owner/app', 4, d(), url);
+    await expect(tried).rejects.toThrow(FinishFailed);
+    await expect(tried).rejects.toThrow(/setting sol-review on abcdef1 failed .*; adding the Review row to the PR body failed/);
+    gh.failing.delete('body');
+    await expect(poster.finish('owner/app', 4, d(), url)).rejects.toThrow(/^setting sol-review/);
+    expect(gh.posted.map((p) => p.what)).toEqual(['comment', 'body']);
+    gh.failing.delete('status');
+    await poster.finish('owner/app', 4, d(), url);
+    expect(gh.posted.map((p) => p.what)).toEqual(['comment', 'body', 'status']); // the row isn't added twice
   });
 });
 

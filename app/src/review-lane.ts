@@ -11,7 +11,8 @@
 //   ->  t3_thread_launch with the checkout as its working folder (T3's existing_worktree)
 //   ->  its end from T3's thread events; its reply read whole
 //   ->  decide (src/review/ledger.ts): the verdict from the reply's sol-findings block
-//   ->  post (src/review/post.ts): follow-ups, the comment, sol-review on H, the Review row
+//   ->  post (src/review/post.ts): follow-ups, the comment; then sol-review on H and the Review
+//       row, tried again until both land (the job stays open meanwhile, across a restart too)
 //   ->  the end recorded, the checkout removed, the thread settled (src/settle.ts)
 //
 // **No outside tools** (docs/reviews.md): a review runs only on a T3 provider instance the user
@@ -42,7 +43,7 @@ import { closedIssues } from './picker.ts';
 import type { Deps } from './review/deps.ts';
 import { testsNote } from './review/deps.ts';
 import { decide, nextRound, readReviews, ReviewFailed, runnerPost, type Comment, type Decision, type Review } from './review/ledger.ts';
-import { GitHubPoster, PostFailed, type GitHubPosts, type Poster } from './review/post.ts';
+import { FinishFailed, GitHubPoster, PostFailed, type GitHubPosts, type Poster } from './review/post.ts';
 import type { BuildRepo } from './build-lane.ts';
 import { ThreadSettler } from './settle.ts';
 import { retryAfter, type Retry } from './t3/project-feed.ts';
@@ -429,24 +430,46 @@ export class ReviewLane {
       wt: slash(run.wt), runDir: slash(run.runDir), gone: run.gone, reviewer: run.reviewer, user: await this.d.user(),
     });
     const posted = (list: Review[]) => list.find((r) => r.round === run.round && r.sha === run.h);
-    const done = async (had: Review, why: string): Promise<JobEnd> => {
+    const already = (had: Review, why: string) => {
       this.d.say(`${run.name}: review ${run.round} on ${run.h.slice(0, 7)} is on the PR already (${why}); not posted again`);
-      if (had.url) await this.poster.finish(run.github, run.n, d, had.url);
-      return { outcome: OUTCOMES[d.outcome], verdict: d.verdict, signals: d.signals.map((s) => s.signal), link: had.url ?? null, runDir: run.runDir };
+      return had.url ?? null;
     };
+    let url: string | null;
     const had = posted(reviews);
-    if (had) return done(had, 'posted before the app stopped');
-    // a comment that fails to post is posted again after the wait, unless it got there after all
+    if (had) url = already(had, 'posted before the app stopped');
+    else {
+      // a comment that fails to post is posted again after the wait, unless it got there after all
+      for (;;) {
+        try {
+          url = await this.post(run.name, run.github, run.n, d, write);
+          break;
+        } catch (e) {
+          if (!(e instanceof PostFailed)) throw e;
+          this.d.say(`${run.name}: ${e.message} Posting it again after a wait.`);
+          await this.wait();
+          if (this.stopped) throw new Stopping('the lane stopped');
+          const now = posted(readReviews(await this.askAgain(run.name, 'its comments', () => this.d.github.issueComments(run.github, run.n))));
+          if (now) { url = already(now, 'its post failed and got there after all'); break; }
+        }
+      }
+    }
+    if (url) await this.finish(run.name, run.github, run.n, d, url);
+    return { outcome: OUTCOMES[d.outcome], verdict: d.verdict, signals: d.signals.map((s) => s.signal), link: url, runDir: run.runDir };
+  }
+
+  /** `sol-review` on H and the Review row, once the comment is on the PR: tried again after each
+   *  wait until both land (F14). The job stays open meanwhile, so a stop or a restart carries on
+   *  here: the next start finds the comment on the PR and finishes it. */
+  private async finish(name: string, github: string, n: number, d: Decision, url: string): Promise<void> {
     for (;;) {
+      if (this.stopped) throw new Stopping('the lane stopped');
       try {
-        return await this.post(run.name, run.github, run.n, d, run.runDir, write);
+        return await this.poster.finish(github, n, d, url);
       } catch (e) {
-        if (!(e instanceof PostFailed)) throw e;
-        this.d.say(`${run.name}: ${e.message} Posting it again after a wait.`);
-        await this.wait();
         if (this.stopped) throw new Stopping('the lane stopped');
-        const now = posted(readReviews(await this.askAgain(run.name, 'its comments', () => this.d.github.issueComments(run.github, run.n))));
-        if (now) return done(now, 'its post failed and got there after all');
+        const why = e instanceof FinishFailed ? e.message : `${(e as Error).name}: ${(e as Error).message}`;
+        this.d.say(`${name}: the review is posted, but ${why} Trying again after a wait.`);
+        await this.wait();
       }
     }
   }
@@ -519,7 +542,8 @@ export class ReviewLane {
     return this.d.log.ended(job.id, { outcome: 'needs-user', error: why, ...(job.runDir ? { runDir: job.runDir } : {}) });
   }
 
-  private async post(name: string, github: string, n: number, d: Decision, runDir: string, write: (f: string, t: string) => Promise<void>): Promise<JobEnd> {
+  /** The decision written to the run folder and the comment posted: its URL (null for a dry run). */
+  private async post(name: string, github: string, n: number, d: Decision, write: (f: string, t: string) => Promise<void>): Promise<string | null> {
     await write('comment.md', d.body);
     await write('decision.json', `${JSON.stringify({
       repo: github, pr: n, round: d.round, sha: d.sha, verdict: d.verdict, outcome: d.outcome, signals: d.signals,
@@ -529,7 +553,7 @@ export class ReviewLane {
     const url = await this.poster.post(github, n, d);
     const why = d.signals.length ? ` (${d.signals.map((s) => s.text).join('; ')})` : '';
     this.d.say(`${name}: review ${d.round} on ${d.sha.slice(0, 7)} is ${d.verdict} by ${d.reviewer}, next: ${d.outcome}${why}`);
-    return { outcome: OUTCOMES[d.outcome], verdict: d.verdict, signals: d.signals.map((s) => s.signal), link: url, runDir };
+    return url;
   }
 
   /** Everything said on the PR: its comments, review threads and review bodies, oldest first. */

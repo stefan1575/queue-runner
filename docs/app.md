@@ -467,7 +467,9 @@ every open PR in a served repo without a review on its newest commit gets one, w
   Commit, Verdict. The comment and the Reviewer cell name who reviewed: the model and effort as T3 labels
   them, and on the fallback `, fallback while <provider> is out of usage` (`reviewerName`). gh writes send their JSON on stdin (`--input -`). A comment
   that fails to post is posted again after a wait, unless the PR's comments show it got there
-  after all; the status or the row failing is said and left. The run folder keeps `brief.md`, `reply.md`, `comment.md`, `decision.json`.
+  after all. Once the comment is on the PR, the status and the row are tried again after each
+  wait until both land, the job left open meanwhile: a stop or a restart carries on there, finds
+  the comment posted, and sets them (F14). The run folder keeps `brief.md`, `reply.md`, `comment.md`, `decision.json`.
 - **It starts clean** (#155): the app reads only what it posted itself. Its review comments carry
   their own marker (`<!-- queue-runner-app review round=N verdict=V sha=H findings=<base64> -->`);
   the Python runner's and the old script's (`<!-- sol-pr-review`) and hand-posted ones
