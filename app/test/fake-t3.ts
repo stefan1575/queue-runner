@@ -52,6 +52,11 @@ export class FakeT3 {
   sendAnswerLost = false;
   /** `t3_thread_send` answers without the new run's id. */
   sendOmitsRunId = false;
+  /** With `sendFailure`: T3 takes the send (its new run starts), then answers with the failure,
+   *  as when it can't read the run back (`orchestration_error`). */
+  sendTaken = false;
+  /** Runs as a send arrives, before T3 looks at it (a thread deleted meanwhile, say). */
+  beforeSend: () => void = () => {};
   /** WebSocket methods that answer once, by tag: the value T3's Exit carries. Any other
    *  method but subscribeServerConfig ends in a Failure. */
   wsMethods: Record<string, (payload: any) => unknown> = {};
@@ -231,9 +236,10 @@ export class FakeT3 {
     }
     if (name === 't3_thread_send') {
       // a message to a thread: a new run on it (T3's `queue` mode starts a new turn)
+      this.beforeSend();
       const t = this.threadState[args.threadId];
-      if (this.sendFailure) return { failure: this.sendFailure };
       if (!t) return { failure: { code: 'not_found', message: 'The thread was not found.' } };
+      if (this.sendFailure && !this.sendTaken) return { failure: this.sendFailure };
       this.sends.push(args);
       const ordinal = Math.max(0, ...t.runs.map((r) => r.ordinal ?? 0)) + 1;
       const id = `${t.id}-run-${ordinal}`;
@@ -242,6 +248,7 @@ export class FakeT3 {
       for (const s of this.threadStreams.get(t.id) ?? []) {
         s.send({ kind: 'event', sequence: ++this.n, event: { id: `event-${this.n}`, threadId: t.id, type: 'run.updated', payload: t.runs.at(-1) } });
       }
+      if (this.sendFailure) return { failure: this.sendFailure }; // taken, then answered as failed
       return { result: this.sendOmitsRunId ? { threadId: t.id } : { threadId: t.id, runId: id } };
     }
     if (name === 't3_thread_read') {
@@ -421,7 +428,12 @@ export class FakeT3 {
           const own = msg.tag === 'orchestration.getThreadProjection' && this.threadState[msg.payload?.threadId]
             ? () => structuredClone({ thread: { id: msg.payload.threadId }, runs: this.threadState[msg.payload.threadId]!.runs }) : undefined;
           const method = this.wsMethods[msg.tag] ?? own;
-          const exit = method ? { _tag: 'Success', value: method(msg.payload) } : { _tag: 'Failure', cause: { _tag: 'Die', defect: `no method ${msg.tag}` } };
+          let exit: unknown;
+          try {
+            exit = method ? { _tag: 'Success', value: method(msg.payload) } : { _tag: 'Failure', cause: { _tag: 'Die', defect: `no method ${msg.tag}` } };
+          } catch (e) { // the method failing in T3: a Failure, as T3 ends it
+            exit = { _tag: 'Failure', cause: { _tag: 'Fail', error: (e as Error).message } };
+          }
           queueMicrotask(() => open && on.message(JSON.stringify({ _tag: 'Exit', requestId: msg.id, exit })));
         }
         if (msg._tag === 'Request' && msg.tag === 'orchestration.subscribeShell') {

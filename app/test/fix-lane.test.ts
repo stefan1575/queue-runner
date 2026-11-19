@@ -281,23 +281,93 @@ describe('a fresh fixer', () => {
     expect(fixes()[0]).toMatchObject({ workBranch: 'claude/fix-pr4-abcdef1', fresh: "no thread of the app's wrote this PR" });
   });
 
-  test("the builder's thread gone (T3 turns the send down): nothing counts, and the next pass sends a fresh fixer", async () => {
+  test("the builder's thread deleted in T3 before the round: a fresh fixer, never a send (F3)", async () => {
     await builder();
     await blocking(1, H, [finding({})]);
-    t3.sendFailure = { code: 'not_found', message: 'The thread was not found.' };
+    delete t3.threadState['thread-b'];
     makeLane();
     await lane.pass();
     await until(() => t3.launches.length === 1);
-    expect(fixes()[0]!.end).toMatchObject({ outcome: 'not-started', error: expect.stringContaining('T3 turned the round down:') });
-    expect(t3.launches[0].message).toContain('T3 turned down a round sent to its thread thread-b');
+    expect(t3.sends).toEqual([]);
+    expect(t3.launches[0].message).toContain("the PR's writer thread thread-b is gone in T3");
+    expect(fixes().map((j) => j.fresh ? 'fresh' : 'sent')).toEqual(['fresh']);
+  });
+
+  test('a thread T3 reads fine but whose projection fails for a moment is no fresh fixer: the PR rests and tries the send again', async () => {
+    await builder();
+    await blocking(1, H, [finding({})]);
+    t3.wsMethods['orchestration.getThreadProjection'] = () => { throw new Error('busy'); };
+    makeLane();
+    await lane.pass();
+    await lane.idle();
+    expect(t3.launches).toEqual([]);
+    expect(t3.sends).toEqual([]);
+    expect(lines.some((l) => l.includes('not started'))).toBe(true);
+  });
+
+  test("the thread deleted as the send arrives (T3 says not found): nothing counts, and the next pass sends a fresh fixer", async () => {
+    await builder();
+    await blocking(1, H, [finding({})]);
+    t3.beforeSend = () => { delete t3.threadState['thread-b']; };
+    makeLane();
+    await lane.pass();
+    await until(() => t3.launches.length === 1);
+    expect(fixes()[0]!.end).toMatchObject({ outcome: 'not-started', error: expect.stringContaining('is gone in T3') });
+    expect(t3.launches[0].message).toContain("the PR's writer thread thread-b is gone in T3");
+  });
+});
+
+describe('a send whose outcome is not known (F4)', () => {
+  test('T3 takes the send and answers orchestration_error: its new run is the round, watched to its end; no fresh fixer beside it', async () => {
+    await builder();
+    await blocking(1, H, [finding({})]);
+    t3.sendFailure = { code: 'orchestration_error', message: "The run couldn't be read back." };
+    t3.sendTaken = true;
+    makeLane();
+    await lane.pass();
+    await until(() => t3.threadStreamCount('thread-b') > 0);
+    const job = fixes()[0]!;
+    expect(job).toMatchObject({ threadId: 'thread-b', runId: 'thread-b-run-2' });
+    t3.endRun('thread-b', 'completed');
+    await lane.idle();
+    expect(log.get(job.id)!.end).toMatchObject({ outcome: 'done' });
+    expect(t3.launches).toEqual([]);
+  });
+
+  test('a failed send on a thread that shows no new run needs the user: no fresh fixer, the repo starts nothing', async () => {
+    await builder();
+    await blocking(1, H, [finding({})]);
+    t3.sendFailure = { code: 'orchestration_error', message: 'Something went wrong.' };
+    makeLane();
+    await lane.pass();
+    await lane.idle();
+    expect(fixes()[0]!.end).toMatchObject({ outcome: 'needs-user' });
+    expect(log.needingUser(APP.id)).toHaveLength(1);
+    await lane.pass();
+    expect(t3.launches).toEqual([]);
+  });
+
+  test('a send whose answer was lost and whose new run shows on the thread is watched, not left for the user', async () => {
+    await builder();
+    await blocking(1, H, [finding({})]);
+    t3.sendAnswerLost = true;
+    makeLane();
+    await lane.pass();
+    await until(() => t3.threadStreamCount('thread-b') > 0);
+    const job = fixes()[0]!;
+    expect(job.runId).toBe('thread-b-run-2');
+    t3.endRun('thread-b', 'completed');
+    await lane.idle();
+    expect(log.get(job.id)!.end).toMatchObject({ outcome: 'done' });
   });
 });
 
 describe("after a restart, don't guess", () => {
-  test('a send whose answer was lost needs the user: its repo starts nothing until they answer', async () => {
+  test("a send whose answer was lost, on a thread that can't be read after, needs the user: its repo starts nothing until they answer", async () => {
     await builder();
     await blocking(1, H, [finding({})]);
     t3.sendAnswerLost = true;
+    t3.beforeSend = () => { t3.wsMethods['orchestration.getThreadProjection'] = () => { throw new Error('busy'); }; };
     makeLane();
     await lane.pass();
     await lane.idle();
@@ -325,10 +395,26 @@ describe("after a restart, don't guess", () => {
     expect(t3.sends).toEqual([]);
 
     lane.stop();
-    const lost = await log.started({ kind: 'fix', repo: APP.id, github: 'owner/app', issue: 4, branch: BRANCH, base: 'main', title: 'Queue runner fix: app#4', choice: BUILD, onFallback: false, sha: H2, round: 2, to: 'thread-b', knownRuns: [] });
+    // the thread shows no run it didn't have before the send: the user's
+    const lost = await log.started({ kind: 'fix', repo: APP.id, github: 'owner/app', issue: 4, branch: BRANCH, base: 'main', title: 'Queue runner fix: app#4', choice: BUILD, onFallback: false, sha: H2, round: 2, to: 'thread-b', knownRuns: ['run-b', 'run-new'] });
     makeLane();
     await lane.start();
     await lane.idle();
     expect(log.get(lost.id)!.end).toMatchObject({ outcome: 'needs-user', error: expect.stringContaining('before T3 answered') });
+  });
+
+  test('a round the app stopped before T3 answered, whose thread shows the new run, is watched on it (F4)', async () => {
+    await builder();
+    await blocking(1, H, [finding({})]);
+    const open = await log.started({ kind: 'fix', repo: APP.id, github: 'owner/app', issue: 4, branch: BRANCH, base: 'main', title: 'Queue runner fix: app#4', choice: BUILD, onFallback: false, sha: H, round: 1, to: 'thread-b', knownRuns: ['run-b'] });
+    t3.threadState['thread-b']!.runs.push({ id: 'run-taken', threadId: 'thread-b', ordinal: 2, rootNodeId: 'n2', status: 'running' });
+    makeLane();
+    void lane.start();
+    await until(() => t3.threadStreamCount('thread-b') > 0);
+    expect(log.get(open.id)).toMatchObject({ threadId: 'thread-b', runId: 'run-taken' });
+    t3.endRun('thread-b', 'completed');
+    await lane.idle();
+    expect(log.get(open.id)!.end).toMatchObject({ outcome: 'done' });
+    expect(t3.sends).toEqual([]);
   });
 });

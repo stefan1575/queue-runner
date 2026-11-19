@@ -68,8 +68,11 @@ export const fixTitle = (repo: BuildRepo, n: number) => `Queue runner fix: ${rep
  *  round pushes to the PR's own branch. */
 export const fixBranch = (n: number, sha: string) => `${JOB_BRANCH_PREFIX}fix-pr${n}-${sha.slice(0, 7)}`;
 
-/** How a round's end says T3 turned its send down, so the next round goes to a fresh fixer. */
-const REFUSED = 'T3 turned the round down:';
+/** How a round's end says its thread is gone in T3, so the next round goes to a fresh fixer. */
+const GONE_MARK = 'is gone in T3';
+/** How T3 says a thread isn't there, on MCP (`not_found`) or in a WebSocket failure. */
+const GONE = /not[_ ]?found|no such thread|does not exist|was deleted/i;
+const goneText = (threadId: string, why: string) => `the PR's writer thread ${threadId} ${GONE_MARK} (${why})`;
 
 const join = (folder: string, name: string) => `${folder.replace(/[\\/]+$/, '')}/${name}`;
 const WRITING = (j: Job) => !j.end || j.end.outcome === 'waiting' || j.end.outcome === 'usage-limit';
@@ -81,6 +84,8 @@ type Plan =
 
 /** A round that started no thread, for a reason the lane gives. */
 class NotStarted extends Error {}
+/** The writer thread is gone in T3: the round goes to a fresh fixer at once (F3). */
+class ThreadGone extends Error {}
 
 export class FixLane {
   private d: FixLaneDoors;
@@ -94,6 +99,8 @@ export class FixLane {
   private passing: Promise<void> | null = null;
   private again = false;
   private stopped = false;
+  /** Writer threads T3 says are gone: their PRs' rounds go to fresh fixers. */
+  private gone = new Set<string>();
 
   constructor(doors: FixLaneDoors) {
     this.d = doors;
@@ -241,9 +248,9 @@ export class FixLane {
     // the thread that writes the PR: its builder's, or the fresh fixer's that took over since
     const writer = jobs.filter((j) => j.threadId && (j.kind === 'build' || (j.kind === 'fix' && j.fresh))).at(-1);
     if (!writer) return { why: "no thread of the app's wrote this PR" };
-    if (jobs.some((j) => j.kind === 'fix' && j.to === writer.threadId && j.end?.error?.startsWith(REFUSED))) {
-      return { why: `T3 turned down a round sent to its thread ${writer.threadId}` };
-    }
+    const gone = this.gone.has(writer.threadId!) ? 'T3 says so'
+      : jobs.some((j) => j.kind === 'fix' && j.to === writer.threadId && j.end?.error?.includes(GONE_MARK)) ? 'a round sent to it found it gone' : null;
+    if (gone) return { why: goneText(writer.threadId!, gone) };
     return { send: writer };
   }
 
@@ -282,9 +289,11 @@ export class FixLane {
       if (fetched !== h) throw new NotStarted(`the head moved from ${h.slice(0, 7)} to ${fetched.slice(0, 7)}; it's reviewed first`);
       if (plan.send) {
         where = { kind: 'thread' };
-        // the runs the thread has now: its new one is the round's, also after a restart
-        const projection = await this.d.ws.request('orchestration.getThreadProjection', { threadId: plan.send.threadId });
-        knownRuns = (Array.isArray(projection?.runs) ? projection.runs : []).map((r: any) => r?.id).filter((x: unknown): x is string => typeof x === 'string');
+        // the runs the thread has now: its new one is the round's, also after a restart. A thread
+        // that's gone takes no round: a fresh fixer does (F3)
+        const runs = await this.threadRuns(plan.send.threadId!);
+        if (runs === 'gone') throw new ThreadGone(plan.send.threadId!);
+        knownRuns = runs;
       } else {
         const own = (await this.d.git.worktrees(repo.folder)).find((w) => w.branch === pr.branch);
         if (own) {
@@ -297,6 +306,12 @@ export class FixLane {
       }
       brief = await this.brief(repo, pr, review, reviews, where, plan.why ?? null);
     } catch (e) {
+      if (e instanceof ThreadGone) {
+        this.gone.add(e.message);
+        this.d.say(`${name}: ${goneText(e.message, 'T3 says so')}; a fresh fixer takes the round`);
+        onLaunched();
+        return null; // the pass after this one plans it fresh
+      }
       return this.notStartedBefore(repo, pr, name, e, onLaunched);
     }
     const job = await this.d.log.started({
@@ -324,12 +339,65 @@ export class FixLane {
         thread = { threadId: launched.threadId, runId: launched.runId, link: launched.link };
       }
     } catch (e) {
-      // sent and its answer lost: T3 may have started the turn, and nothing says which run it is
+      // a send whose outcome isn't known (its answer lost, or T3 answering a failure after it may
+      // have taken it) is never "not started" (F4): the thread is read, and it's the new run there
+      if (plan.send && (e instanceof NoAnswer || e instanceof ToolFailed)) {
+        return this.unknownSend(job, plan.send.threadId!, plan.send.link ?? null, knownRuns, e as Error, onLaunched);
+      }
+      // a launch sent and its answer lost: T3 may have started the thread, and nothing says which
       if (e instanceof NoAnswer) return this.needsUser(job, (e as Error).message);
-      // the thread is gone or can't take another turn: the next pass sends a fresh fixer
-      if (plan.send && e instanceof ToolFailed) return this.notStarted(job, `${REFUSED} ${(e as Error).message}`, false);
+      // refused before it ran (a 4xx, a refused token), or never sent: nothing started
       return this.notStarted(job, (e as Error).message);
     }
+    await this.d.log.thread(job.id, thread);
+    onLaunched();
+    return this.watch({ ...job, ...thread });
+  }
+
+  /** The thread's run ids, oldest first, or `gone` when T3 says it isn't there. The projection
+   *  failing otherwise is asked of T3's MCP, which says whether the thread is there; a thread
+   *  that's there but couldn't be read throws, for the round to rest and try again. */
+  private async threadRuns(threadId: string): Promise<string[] | 'gone'> {
+    let why: string;
+    try {
+      const p = await this.d.ws.request('orchestration.getThreadProjection', { threadId });
+      if (Array.isArray(p?.runs)) {
+        return [...p.runs].sort((a: any, b: any) => (a?.ordinal ?? 0) - (b?.ordinal ?? 0))
+          .map((r: any) => r?.id).filter((x: unknown): x is string => typeof x === 'string');
+      }
+      why = `T3 gave thread ${threadId} no runs`;
+    } catch (e) {
+      if (GONE.test((e as Error).message)) return 'gone';
+      why = (e as Error).message;
+    }
+    try {
+      await this.d.mcp.call('t3_thread_read', { threadId, limit: 1 });
+    } catch (e) {
+      if (e instanceof ToolFailed && GONE.test(e.message)) return 'gone';
+      throw e;
+    }
+    throw new Error(`thread ${threadId}'s runs couldn't be read: ${why}`);
+  }
+
+  /** A send T3 may have taken: the thread read again. Gone, nothing ran and the next pass sends a
+   *  fresh fixer; showing a run it didn't have before, that run is the round's, watched; else (no
+   *  new run, or the thread can't be read) the round needs the user (#154's rule). */
+  private async unknownSend(job: Job, threadId: string, link: string | null, knownRuns: string[], e: Error, onLaunched: () => void): Promise<Job> {
+    let runs: string[] | 'gone' | null;
+    try {
+      runs = await this.threadRuns(threadId);
+    } catch {
+      runs = null;
+    }
+    if (runs === 'gone') {
+      this.gone.add(threadId);
+      onLaunched();
+      return this.notStarted(job, goneText(threadId, e.message), false);
+    }
+    const fresh = runs?.filter((r) => !knownRuns.includes(r)).at(-1);
+    if (!fresh) return this.needsUser(job, `the round sent to thread ${threadId} got no clear answer (${e.message}), and the thread shows no new run`);
+    this.d.say(`${job.title}: T3 answered the send unclearly (${e.message}), but thread ${threadId} shows its new run ${fresh}: watching it`);
+    const thread = { threadId, runId: fresh, link };
     await this.d.log.thread(job.id, thread);
     onLaunched();
     return this.watch({ ...job, ...thread });
@@ -381,7 +449,12 @@ export class FixLane {
 
   private async resume(job: Job): Promise<Job> {
     this.d.gate.started({ id: job.id, kind: 'fix', choice: job.choice }, job.cost ?? {});
-    if (!job.threadId) return this.needsUser(job, job.to ? 'the app stopped before T3 answered the round sent to its thread' : 'the app stopped before T3 named its thread');
+    // a send the app stopped before T3 answered is one whose outcome isn't known (F4): the thread
+    // read shows whether it took it
+    if (!job.threadId && job.to) {
+      return this.unknownSend(job, job.to, null, job.knownRuns ?? [], new Error('the app stopped before T3 answered the round sent to its thread'), () => {});
+    }
+    if (!job.threadId) return this.needsUser(job, 'the app stopped before T3 named its thread');
     this.d.say(`Watching ${job.title} again: ${job.link ?? job.threadId}`);
     return this.watch(job);
   }
