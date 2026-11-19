@@ -13,7 +13,8 @@ below), builds a served repo's next ticket into a PR (#154; Builds, below), revi
 open PR on its newest commit, posting the review with its ledger (#155; Reviews, below), and
 closes the loop: a blocking review gets a fix round, and a clean one merges or is marked ready to
 merge (#156; Fix rounds and merges, below), and a PR that conflicts with its base gets a conflict
-round (#157; Conflict rounds, below).
+round (#157; Conflict rounds, below), each repo's one job at a time chosen in one place (#210; How
+jobs are chosen, below).
 
 ## Run it
 
@@ -325,6 +326,47 @@ tickets but the build lane (Builds, below); the tests drive it on fake T3's even
   open question 8): its jobs can't run anyway. Stefan's 5% of Claude's week is set at the
   cutover, not in code.
 
+## How jobs are chosen
+
+One job per served repo at a time, repos side by side, chosen in one place (#210, porting #50:
+`queue_runner/run.py` `plan`, `choose`, `_choose_in`, `_waited`; `docs/claude-lane.md` Two lanes
+and A Claude pass). `src/chooser.ts`. A repo's job is a build, a fix round or a conflict round
+(`REPO_JOB_KINDS`; #158's jobs join them); reviews and merges run beside it, and still skip a PR
+whose branch a job of the repo's writes to (Reviews; Fix rounds and merges).
+
+- **The lanes decide what, the chooser decides when.** The fix, conflict and build lanes keep
+  everything they decide about a job: which PR gets a round, its brief, its model, the gate. Each
+  answers "your next job in this repo" (`RepoJobLane.next`): a job to start, one that waits (the
+  gate holds it, or a fork's PR now needs the user), or none. No lane starts a job from a timer
+  of its own.
+- **In a repo, today's order:** a job a usage limit cut off, then a fix round, a conflict round,
+  a build; the first lane with a job gives the repo's one. One that waits leaves the repo waiting
+  this pass: nothing later in the order goes ahead of it. Resuming a cut-off job is the limits
+  ticket's: until then it holds its repo until its reset (T3's `resetAt` and 2 minutes, or an hour
+  after its end with none, as the gate holds its provider), and then the repo goes on.
+- **Which repos:** each pass takes every served repo but one with a job open (in the job log, or
+  under way in a lane: recovering, starting or running), one with a job that needs the user and
+  no answer (`Chooser.answered` frees it; the Inbox ticket asks), or one with a done build whose
+  PR lookup failed and is owed. The repo whose last job ended longest ago goes first (`waited`:
+  builds, fix and conflict rounds only, `not-started` ones aside), the served order breaking a
+  tie, so when the gate has room for one more, the repo that waited longest gets it. A pass waits
+  for each job it starts to be launched, so the gate counts it before the next repo's verdict.
+  Why a repo got nothing is said once, until it changes.
+- **Settle first:** on start each lane recovers every job of its kind the log shows open (`recover`:
+  each lane's After a restart, don't guess, below) before the first choice, and the repo is held
+  meanwhile. A recovery that can't tell (a T3 or GitHub read failed) leaves a `needs-user` end,
+  which holds the repo too.
+- **A read that fails while choosing** (a lane's GitHub reads, or T3's) leaves that repo for the
+  next pass, said in the log: it never counts as nothing to do in that repo, so a later lane in the
+  order isn't asked, and it never holds back another repo.
+- **Passes don't overlap:** one asked for while one runs (a timer and a job's end at once) runs
+  once after it, never beside it. One writer per PR follows: a repo has one job at a time.
+- **When:** in the desktop app, at start (after recovery), on any job's end (`freed`), on a
+  review's end, on T3's usage changing while a job waits on the gate, on the repos changing, after
+  a merge, and every minute. New tickets are read from GitHub no more often than every 5 minutes
+  per repo (`TICKETS_MS`), as today's runner polls them, and at once after a build ends, a merge,
+  the served set changing, or usage changing while a build waits.
+
 ## Builds
 
 The first job end to end (#154): a served repo's next ticket becomes a PR, as today's runner
@@ -363,20 +405,17 @@ builds (`docs/flow.md`, `docs/claude-lane.md`). `src/build-lane.ts`, `src/picker
   whose answer was lost (the connection dropped, T3 answered 5xx or unreadably: `NoAnswer`,
   `src/t3/seams.ts`) may still have started a thread, so it isn't taken as not started: the job
   ends `needs-user`, is dropped from the gate unmeasured, holds its issue, and its repo starts
-  nothing until the user answers (`BuildLane.answered`, an `answered` line in the job log; the
+  nothing until the user answers (`Chooser.answered`, an `answered` line in the job log; the
   Inbox ticket asks). A launch T3 refused, or one that failed before the call was sent, started
   nothing: `not-started`.
 - **One ticket at a time per repo** (#179): no build while the repo has an open PR, whoever
   opened it, read before the ticket is picked and again right before the launch (a PR opened
   meanwhile makes the job `not-started`). Clean means merged (Fix rounds and merges, below); merged
   is the end, with no live steps to wait on (#68), and a merge passes the build lane at once.
-- **One build per repo, repos side by side** (#50): each pass takes every served repo with no build
-  running, the one whose last job ended longest ago first (the job log's `lastEnded`). Each asks
-  the usage gate first (`UsageGate.pick`, kind `build`); a held one says its reason once and waits.
-  A pass waits for each build it starts to be launched, so the gate counts it before the next
-  repo's verdict. A repo whose job started no thread (`not-started`, `branch-exists`) rests 5
-  minutes. In the desktop app a pass runs at start, when the served set changes, when T3 reads new
-  usage while a build is held, and every 5 minutes (GitHub is polled for new tickets).
+- **When a build starts** is the chooser's (How jobs are chosen, above): the repo's one job, after
+  its fix and conflict rounds. The build lane reads a repo's tickets at most every 5 minutes, and
+  asks the usage gate first (`UsageGate.pick`, kind `build`); a held one says its reason once and
+  waits. A repo whose job started no thread (`not-started`, `branch-exists`) rests 5 minutes.
 - **The end comes from T3's thread events** (`src/t3/thread-end.ts`; The WebSocket API, below), not
   polling: `done` (the run completed; `done-no-pr` when GitHub answered that no PR came from the
   branch; a lookup that failed is never "none": the end has no `pr`, each pass, a start's
@@ -401,7 +440,7 @@ builds (`docs/flow.md`, `docs/claude-lane.md`). `src/build-lane.ts`, `src/picker
   lines settles its ended builds' threads once more on the first start, which leaves a settled
   thread as it is.
 - **An app that stopped mid-build:** on start, each build the log shows open is watched again to
-  its end before any pass (so its repo still has one build), reserved in the gate at its logged
+  its end before the first choice (`recover`; its repo is held meanwhile), reserved in the gate at its logged
   `cost` and measured from its logged `before`, never from a reading taken mid-run (a line with
   neither, an older app's, is measured as teaching nothing). One with no saved thread id
   needs the user, as a lost launch answer does (After a restart, don't guess, above): no thread
@@ -518,9 +557,8 @@ every open PR in a served repo without a review on its newest commit gets one, w
 - **The review lane and the build lane** share the repo's one ticket at a time (#179): the build
   lane starts nothing while a PR is open, and the review lane reviews that PR; a review waits while
   a build writes to its branch, and a job of either lane that needs the user holds both.
-- **Not yet:** stops (#158). A review that ends tells the fix, merge and conflict lanes
-  (`ended`), so a blocking one gets its round and a clean one merges without waiting for the
-  minute's pass.
+- **Not yet:** stops (#158). A review that ends tells the chooser and the merge lane (`ended`), so
+  a blocking one gets its round and a clean one merges without waiting for the minute's pass.
 
 ## Fix rounds and merges
 
@@ -533,9 +571,10 @@ merge half of `src/github.ts` and `src/git.ts`.
 - **Which PRs get a round** (`FixLane`): the app's newest review of the PR's head H is `blocking`
   (a `stop` or `approach-note` goes to the user, #158), it's still the PR's newest review comment,
   no round ran on H yet (one per head: a round that ended without a push leaves the PR at H, which
-  was reviewed already, so it waits for the user), and nothing writes to the branch (a build or fix
-  open, waiting on a question or cut off by a usage limit: one writer per PR, and the review lane
-  waits on a fix round the same way). A repo with a job that needs the user starts none.
+  was reviewed already, so it waits for the user), and no build or fix on the branch ended on a
+  question or a usage limit (it may write to the branch again). When a round starts, and that no
+  other job of the repo's runs beside it, is the chooser's (How jobs are chosen, above); the review
+  lane waits on a fix round on the PR's branch.
 - **Back to the builder:** the round goes to the thread that wrote the PR, its build's or the
   fresh fixer's that took over since, with `t3_thread_send {threadId, message, mode: queue}`
   (`queue` starts a new turn and never steers one), so it starts with that thread's context. The
@@ -582,7 +621,7 @@ merge half of `src/github.ts` and `src/git.ts`.
 - **After a restart, don't guess** (as Builds): a round the log shows open with its thread line is
   watched again; a send without one is read as above; a fresh fixer's launch without one, or one
   whose answer was lost, ends `needs-user`, and the repo starts nothing until the user answers
-  (`FixLane.answered`).
+  (`Chooser.answered`).
 - **A fork's PR gets no fixer** (#156 N2): a head in another repo than the PR's (GitHub's
   `head.repo`, or none for a deleted fork) would have a fixer push to this repo's branch of that
   name, a fork's `main` being this repo's `main`. Its blocking review ends a round on H as
@@ -626,8 +665,9 @@ merge half of `src/github.ts` and `src/git.ts`.
   never counts it. A merge step with no end (the app stopped mid-merge) is read from GitHub on the
   next pass: merged, or failed. A read that fails is said and tried next pass, never taken as
   merged or gone.
-- **When:** the fix lane watches open rounds again at start, then passes on usage, the repos, each
-  review's end and every minute; the merge lane on each review's end, the repos and every minute.
+- **When:** a fix round starts when the chooser chooses it (How jobs are chosen, above); the fix
+  lane recovers open rounds at start. The merge lane passes on each review's end, the repos and
+  every minute.
 
 ## Conflict rounds
 
@@ -641,14 +681,15 @@ A PR whose head conflicts with its base gets a conflict round (#157; `docs/flow.
   just after the base moves) is not known yet: that PR gets no round, and no newer conflicting PR
   goes ahead of it, until a later pass reads GitHub's answer (#157 F5). A read that fails leaves
   the repo for the next pass, never taken as "no conflict". A conflicting
-  PR waits while a job writes to its branch (one writer per PR: the fix and review lanes wait on a
-  conflict round the same way), while a review of it runs, and while its head's blocking review
+  PR waits while a build or fix on its branch ended on a question or a usage limit (it may write
+  again), while a review of it runs (also one started while the round was briefed: the round is
+  then `not-started`), and while its head's blocking review
   hasn't had its fix round (that comes first). A head left for the user gets none: a stop on it, a
   review on it that ended `stop` or `approach-note`, a fix or conflict round on it that ended
   without a push, or a `ready-to-merge` mark on it. A repo with a job that needs the user starts
   none.
 - **One conflicted PR at a time,** lowest number first, as today's runner: while a round runs in
-  the repo, or another open PR that had a round is still being moved by the loop (it's on its way
+  the repo (the repo's one job: How jobs are chosen, above), or another open PR that had a round is still being moved by the loop (it's on its way
   to merging, so the next resolves against the base it lands on), the next waits. Moved means the
   lanes act on it without the user (`moving`), asked of each lane's own rule (`reviewNext`,
   `fixNext`, `mergeNext`, which the lanes' own passes use) so the hold and the lanes never disagree:
@@ -692,9 +733,9 @@ A PR whose head conflicts with its base gets a conflict round (#157; `docs/flow.
   until a new head.
 - **After a restart, don't guess** (as Builds): a round the log shows open with its thread line is
   watched again; one without, and a launch whose answer was lost (`NoAnswer`), end `needs-user`,
-  and the repo starts nothing until the user answers (`ConflictLane.answered`).
-- **When:** open rounds are watched again at start; then a pass on usage, the repos, each review,
-  fix round and merge that ends, and every minute.
+  and the repo starts nothing until the user answers (`Chooser.answered`).
+- **When:** a conflict round starts when the chooser chooses it (How jobs are chosen, above); the
+  conflict lane recovers open rounds at start.
 
 ## Setup
 
