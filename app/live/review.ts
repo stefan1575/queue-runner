@@ -3,10 +3,11 @@
 // through the review lane's own `review`, with a poster that posts nothing. It says what adoption
 // would decide, then reviews anyway (the sandbox has no CI, so its checks never pass).
 //
-// The PR's clone is a fresh one in a temp folder. The review's thread runs in the "queue-runner
-// sandbox" T3 project (it refuses to run without exactly one), the only T3 project a live check
-// may use: T3 starts a thread only in a project, and the brief sends it to the checkout. Costs one
-// review thread.
+// The review runs in the "queue-runner sandbox" T3 project (it refuses to run without exactly one,
+// or when its folder isn't a clone of the sandbox), the only T3 project a live check may use. Its
+// checkout of the PR's head is a worktree of that project's own folder, as the app's are, since T3
+// binds a thread only to one of the project's own worktrees (live/sandbox.ts); the lane removes it
+// at the end. When T3 refuses the launch anyway, the check says so. Costs one review thread.
 //
 // `--pr N` names the PR, and the check writes nothing to GitHub. With no PR open to review,
 // `--open-pr` instead opens a small one of its own (a branch with one flawed function), which
@@ -23,7 +24,7 @@
 //     pnpm --dir app live:review -- --pr N --run <instance>:<model> [--state <folder>]
 //     pnpm --dir app live:review -- --open-pr --run <instance>:<model> [--state <folder>]
 import { execFileSync } from 'node:child_process';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { GitCli } from '../src/git.ts';
@@ -41,9 +42,7 @@ import { catalogFromConfig } from '../src/t3/catalog.ts';
 import { T3Mcp } from '../src/t3/mcp.ts';
 import { fetchHttp, nodeConnect, runtimeAddress, t3Cli } from '../src/t3/real.ts';
 import { T3Ws } from '../src/t3/ws.ts';
-
-const SANDBOX = 'queue-runner sandbox';
-const GITHUB = 'stefan1575/queue-runner-sandbox';
+import { notStartedLine, sandboxRepo, SANDBOX_GITHUB as GITHUB } from './sandbox.ts';
 
 const arg = (flag: string) => process.argv.flatMap((a, i) => (process.argv[i - 1] === flag ? [a] : []))[0];
 const address = runtimeAddress();
@@ -69,10 +68,7 @@ if (!arg('--run') || (asked === undefined) === !openPr) {
   process.exit(2);
 }
 
-const projects: any[] = (await mcp.call('t3_project_list', { cursor: 0, limit: 100 })).projects;
-const sandbox = projects.filter((p) => p.title === SANDBOX);
-if (sandbox.length !== 1) throw new Error(`expected one T3 project called "${SANDBOX}", found ${sandbox.length}: refusing`);
-const project = sandbox[0];
+const repo = await sandboxRepo(mcp, github);
 
 const catalog: Catalog = catalogFromConfig((await ws.first('subscribeServerConfig', { workspaceSnapshotsOnDemand: true })).config);
 const [provider, ...rest] = arg('--run')!.split(':');
@@ -90,15 +86,15 @@ if (refused) {
 }
 
 const state = await mkdtemp(join(tmpdir(), 'qr-live-review-'));
-const clone = join(state, 'clone');
-run(state, 'gh', 'repo', 'clone', GITHUB, clone, '--', '--quiet');
-if (run(clone, 'gh', 'repo', 'view', '--json', 'nameWithOwner', '-q', '.nameWithOwner') !== GITHUB) throw new Error(`the clone isn't ${GITHUB}: refusing`);
 
 let opened: { number: number; branch: string } | null = null;
 let n = Number(asked ?? 0);
 if (asked !== undefined && !(Number.isInteger(n) && n > 0)) throw new Error(`--pr ${asked} is not a PR number`);
 if (openPr) {
-  // a PR of its own: one function with a bug a review should find
+  // a PR of its own: one function with a bug a review should find, pushed from a clone of its own
+  // so the sandbox project's folder keeps its branch
+  const clone = join(state, 'clone');
+  run(state, 'gh', 'repo', 'clone', GITHUB, clone, '--', '--quiet');
   const branch = `live-review-${Date.now()}`;
   run(clone, 'git', 'checkout', '-q', '-b', branch);
   await writeFile(join(clone, 'average.js'), '// The average of a list of numbers.\nexport function average(xs) {\n  let sum = 0;\n  for (let i = 0; i <= xs.length; i++) sum += xs[i];\n  return sum / xs.length;\n}\n');
@@ -116,7 +112,7 @@ try {
   if (!pr) throw new Error(`#${n} is not an open PR in ${GITHUB}`);
   const before = (await github.issueComments(GITHUB, n)).length;
   // an open sandbox PR may carry sol-review from an earlier review: compared, not expected empty
-  const statuses = () => run(clone, 'gh', 'api', `repos/${GITHUB}/commits/${pr.headSha}/statuses`, '-q', '[.[] | select(.context == "sol-review")] | length');
+  const statuses = () => run(state, 'gh', 'api', `repos/${GITHUB}/commits/${pr.headSha}/statuses`, '-q', '[.[] | select(.context == "sol-review")] | length');
   const statusesBefore = statuses();
   const log = await JobLog.open(join(state, 'jobs.jsonl'));
   const said: string[] = [];
@@ -128,11 +124,12 @@ try {
     user: async () => 'the live check', log, stateDir: state, poster: new DryRunPoster((l) => said.push(l)),
     say: (l) => { said.push(l); console.log(`  ${l}`); },
   });
-  const repo = { id: project.id, title: 'queue-runner-sandbox', folder: clone, github: GITHUB };
   console.log(`Adoption would say: ${(await lane.whyNot(repo, pr)) ?? 'review it'}`);
   console.log(`Reviewing ${GITHUB}#${n} at ${pr.headSha.slice(0, 7)} on ${choice.provider} ${choice.model} at ${choice.effort}`);
   const job = await lane.review(repo, pr, { choice, onFallback: false, cost: {}, reviewer: reviewerName(catalog, jobs, choice, false) });
   console.log(JSON.stringify(job, null, 2));
+  const refused = notStartedLine(job.end);
+  if (refused) console.log(refused);
 
   const outcome = job.end?.outcome ?? 'none';
   check('the review read a verdict from its ledger', ['clean', 'blocking', 'stop', 'approach-note'].includes(outcome), `${outcome}${job.end?.error ? `: ${job.end.error}` : ''}`);
@@ -147,13 +144,13 @@ try {
   const thread = [...(shell.snapshot?.threads ?? []), ...(shell.snapshot?.archivedThreads ?? [])].find((t: any) => t.id === job.threadId);
   check('its thread is settled', Boolean(thread?.settledAt) || thread?.settledOverride === 'settled', `settledAt ${thread?.settledAt ?? null}`);
   const norm = (p: unknown) => String(p ?? '').replace(/\\/g, '/').toLowerCase();
-  check('it ran in its checkout of the head, not the clone', Boolean(job.checkout) && norm(thread?.worktreePath) === norm(job.checkout), String(thread?.worktreePath ?? null));
+  check("it ran in its checkout of the head, not the project's folder", Boolean(job.checkout) && norm(thread?.worktreePath) === norm(job.checkout), String(thread?.worktreePath ?? null));
   check("its run was on the review kind's model", thread?.modelSelection?.model === choice.model, JSON.stringify(thread?.modelSelection));
-  check('the checkout is gone', !run(clone, 'git', 'worktree', 'list').includes('checkouts'));
+  check('the checkout is gone', Boolean(job.checkout) && !norm(run(repo.folder, 'git', 'worktree', 'list')).includes(norm(job.checkout)));
   console.log(`Run folder kept for reading: ${runDir}`);
 } finally {
   if (opened) {
-    run(clone, 'gh', 'pr', 'close', String(opened.number), '--repo', GITHUB, '--delete-branch');
+    run(state, 'gh', 'pr', 'close', String(opened.number), '--repo', GITHUB, '--delete-branch');
     console.log(`Closed #${opened.number} and deleted ${opened.branch}`);
   }
 }

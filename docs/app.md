@@ -687,8 +687,12 @@ is killed is code -1 with Node's reason in stderr, never a gh exit code (so is t
   <instance>:<model> [--state <folder>]`): today's `scripts/live_review.py` for the app, dry run. One real review of
   one open PR in `stefan1575/queue-runner-sandbox` only (it refuses another clone), through
   `ReviewLane.review` with a `DryRunPoster`, after saying what adoption would decide (the sandbox
-  has no CI, so it reviews anyway). The PR's clone is fresh in a temp folder; the thread runs in
-  the "queue-runner sandbox" T3 project, since none holds the GitHub sandbox. `--pr N` reviews that
+  has no CI, so it reviews anyway). The review runs in the "queue-runner sandbox" T3 project, whose
+  folder must be a clone of the GitHub sandbox, and its checkout of the head is a worktree of that
+  folder, removed at the end: T3 binds `existing_worktree` only to one of the project's own `git
+  worktree list` paths (its launch's `assertProjectWorktree`, read in the installed server
+  2026-11-19), so a checkout of a clone elsewhere is refused before a review starts (#155 F18).
+  When T3 refuses the launch anyway, the check prints `T3 didn't start the review:` and its reason. `--pr N` reviews that
   PR and writes nothing to GitHub. `--open-pr` instead opens a small PR of its own (one function
   with an off-by-one), which writes to GitHub: it pushes a branch and opens the PR, then closes it
   and deletes the branch at the end. With neither (or both) it prints its usage and does nothing.
