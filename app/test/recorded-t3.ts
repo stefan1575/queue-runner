@@ -74,10 +74,21 @@ export class RecordedT3 {
   /** Every MCP tool call, with its arguments. */
   calls: { tool: string; args: any }[] = [];
   private tools = new Map<string, Answer[]>();
+  /** The tools whose answers each answer one call (`answerEach`). */
+  private each = new Set<string>();
 
   /** `tool`'s answers, in order; the last answers every call after it. */
   answer(tool: string, ...answers: Answer[]): this {
     this.tools.set(tool, answers);
+    this.each.delete(tool);
+    return this;
+  }
+
+  /** `tool`'s answers, in order, each for one call: a call after the last fails, as
+   *  `tests/test_t3.py`'s `FakeMcp` pops its waits. */
+  answerEach(tool: string, ...answers: Answer[]): this {
+    this.tools.set(tool, answers);
+    this.each.add(tool);
     return this;
   }
 
@@ -89,11 +100,11 @@ export class RecordedT3 {
   /** More calls than any test makes: a seam that loops on a repeated answer fails, not hangs. */
   static readonly MOST_CALLS = 100;
 
-  private static next(from: Map<string, Answer[]>, key: string, args: any, made: number): any {
+  private static next(from: Map<string, Answer[]>, key: string, args: any, made: number, each: boolean): any {
     if (made > RecordedT3.MOST_CALLS) throw new Error(`more than ${RecordedT3.MOST_CALLS} calls: the seam is looping`);
     const answers = from.get(key);
-    if (!answers?.length) throw new Error(`no recorded answer for ${key}`);
-    const a = answers.length > 1 ? answers.shift() : answers[0];
+    if (!answers?.length) throw new Error(each ? `${key} called once more than its answers` : `no recorded answer for ${key}`);
+    const a = each || answers.length > 1 ? answers.shift() : answers[0];
     return typeof a === 'function' ? a(args) : a;
   }
 
@@ -108,7 +119,7 @@ export class RecordedT3 {
     if (msg.id === undefined) return { status: 202, headers: {}, text: '' };
     const { name, arguments: args } = msg.params;
     this.calls.push({ tool: name, args });
-    const rec = RecordedT3.next(this.tools, name, args, this.calls.length);
+    const rec = RecordedT3.next(this.tools, name, args, this.calls.length, this.each.has(name));
     return {
       status: rec.call.status, headers: { 'content-type': rec.call.contentType },
       text: JSON.stringify({ ...rec.call.body, id: msg.id }),

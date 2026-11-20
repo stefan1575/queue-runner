@@ -60,7 +60,7 @@ const WAITING: Record<string, any> = {
 
 describe('StartTest', () => {
   test('launches with the model its effort and a worktree in full access', async () => {
-    const r = t3().answer('t3_thread_wait', onA('mcp-thread_wait-completed')).answer('t3_thread_read', onA('mcp-thread_read-completed'));
+    const r = t3().answerEach('t3_thread_wait', onA('mcp-thread_wait-completed')).answer('t3_thread_read', onA('mcp-thread_read-completed'));
     await seam(r).start(SANDBOX.workspaceRoot, 'Line one\nLine two', { title: 'A job', worktree: 'origin/main', branch: 'claude/x-4', ...CLAUDE });
     expect(r.argsOf('t3_thread_launch')).toStrictEqual([{
       projectId: SANDBOX.id, title: 'A job', message: 'Line one\nLine two', runtimeMode: 'full-access',
@@ -70,19 +70,19 @@ describe('StartTest', () => {
   });
 
   test('with no worktree it runs in the project folder', async () => {
-    const r = t3().answer('t3_thread_wait', onA('mcp-thread_wait-completed')).answer('t3_thread_read', onA('mcp-thread_read-completed'));
+    const r = t3().answerEach('t3_thread_wait', onA('mcp-thread_wait-completed')).answer('t3_thread_read', onA('mcp-thread_read-completed'));
     await seam(r).start(SANDBOX.workspaceRoot, 'Do it.', { title: 'A job', ...CLAUDE });
     expect(r.argsOf('t3_thread_launch')[0]).not.toHaveProperty('workspaceStrategy');
   });
 
   test('a codex model gets its effort as reasoning effort', async () => {
-    const r = t3().answer('t3_thread_wait', onA('mcp-thread_wait-completed')).answer('t3_thread_read', onA('mcp-thread_read-completed'));
+    const r = t3().answerEach('t3_thread_wait', onA('mcp-thread_wait-completed')).answer('t3_thread_read', onA('mcp-thread_read-completed'));
     await seam(r).start(SANDBOX.workspaceRoot, 'Do it.', { title: 'A job', provider: 'codex', model: 'gpt-6.2-sol', effort: 'high' });
     expect(r.argsOf('t3_thread_launch')[0].modelSelection.options).toStrictEqual([{ id: 'reasoningEffort', value: 'high' }]);
   });
 
   test('a completed run gives its last reply in full', async () => {
-    const r = t3().answer('t3_thread_wait', onA('mcp-thread_wait-completed')).answer('t3_thread_read', reads([
+    const r = t3().answerEach('t3_thread_wait', onA('mcp-thread_wait-completed')).answer('t3_thread_read', reads([
       item('user_message', 'Do it.'),
       item('assistant_message', 'An earlier word', `${RUN_A}0`),
       item('assistant_message', 'First'),
@@ -96,7 +96,7 @@ describe('StartTest', () => {
 
   test('it waits in slices until the run ends', async () => {
     const running = onA('mcp-thread_wait-running');
-    const r = t3().answer('t3_thread_wait', running, running, onA('mcp-thread_wait-completed'))
+    const r = t3().answerEach('t3_thread_wait', running, running, onA('mcp-thread_wait-completed'))
       .answer('t3_thread_read', onA('mcp-thread_read-completed'));
     const result = await seam(r).start(SANDBOX.workspaceRoot, 'Do it.', { title: 'A job', ...CLAUDE });
     expect(result.exit_code).toBe(0);
@@ -104,7 +104,7 @@ describe('StartTest', () => {
   });
 
   test('a failed run is exit 1 with its error', async () => {
-    const r = t3().answer('t3_thread_wait', onA('mcp-thread_wait-failed-unknown-model'))
+    const r = t3().answerEach('t3_thread_wait', onA('mcp-thread_wait-failed-unknown-model'))
       .answer('t3_thread_read', onA('mcp-thread_read-activity-failed-unknown-model'));
     const result = await seam(r).start(SANDBOX.workspaceRoot, 'Do it.', { title: 'A job', ...CLAUDE });
     expect([result.exit_code, result.status, result.reply, result.error])
@@ -113,17 +113,22 @@ describe('StartTest', () => {
   });
 
   test.each(['secret-pending', 'approval-pending'])('a run waiting for an answer is exit 2 (%s)', async (state) => {
-    const r = t3().answer('t3_thread_wait', onA(`mcp-thread_wait-${state}`)).answer('t3_thread_read', byView(WAITING[state]));
+    const r = t3().answerEach('t3_thread_wait', onA(`mcp-thread_wait-${state}`), onA(`mcp-thread_wait-${state}`))
+      .answer('t3_thread_read', byView(WAITING[state]));
     const result = await seam(r).start(SANDBOX.workspaceRoot, 'Do it.', { title: 'A job', ...CLAUDE });
     expect([result.exit_code, result.status, result.reply, result.error]).toStrictEqual([2, 'waiting', null, null]);
     expect(r.argsOf('t3_thread_wait').map((a) => a.timeoutMs)).toStrictEqual([15000, 1]);
   });
 
   test('a pending request that just ended is the runs end', async () => {
-    const r = t3().answer('t3_thread_wait', onA('mcp-thread_wait-secret-pending'), onA('mcp-thread_wait-completed'))
-      .answer('t3_thread_read', byView({ ...WAITING['secret-pending'], messages: onA('mcp-thread_read-completed') }));
+    // an approval (T3's pending runtime request), answered during the short recheck; each wait
+    // answers once, so a wait after the run completed fails
+    const r = t3().answerEach('t3_thread_wait', onA('mcp-thread_wait-approval-pending'), onA('mcp-thread_wait-completed'))
+      .answer('t3_thread_read', byView({ ...WAITING['approval-pending'], messages: onA('mcp-thread_read-completed') }));
     const result = await seam(r).start(SANDBOX.workspaceRoot, 'Do it.', { title: 'A job', ...CLAUDE });
     expect([result.exit_code, result.reply]).toStrictEqual([0, 'ok']);
+    expect(content(onA('mcp-thread_read-approval-pending')).thread.pendingRequestCount).toBe(1);
+    expect(r.argsOf('t3_thread_wait').map((a) => a.timeoutMs)).toStrictEqual([15000, 1]);
   });
 
   test('a card of an earlier run is not the new runs question', async () => {
@@ -132,7 +137,7 @@ describe('StartTest', () => {
     const run2 = RUN_A.replace(/:1$/, ':2');
     const onRun2 = (rec: any) => withContent(rec, (c) => ({ ...c, runId: run2 }));
     const r = new RecordedT3().answer('t3_thread_send', onRun2(onA('mcp-thread_send-unknown-model')))
-      .answer('t3_thread_wait', onRun2(onA('mcp-thread_wait-secret-pending')), onRun2(onA('mcp-thread_wait-completed')))
+      .answerEach('t3_thread_wait', onRun2(onA('mcp-thread_wait-secret-pending')), onRun2(onA('mcp-thread_wait-completed')))
       .answer('t3_thread_read', byView({ ...WAITING['secret-pending'], messages: reads([item('assistant_message', 'Done.', run2)]) }));
     const result = await seam(r).send(A, 'Go on.');
     expect([result.exit_code, result.run_id, result.status, result.reply]).toStrictEqual([0, run2, 'completed', 'Done.']);
@@ -146,7 +151,7 @@ describe('StartTest', () => {
 
   test('a relative folder matches its projects absolute root', async () => {
     // config keeps a served repo's path as written ('.'); T3 holds the absolute root
-    const here = withContent(PROJECTS, (c) => ({ ...c, projects: [{ ...c.projects[1], id: 'proj-here', workspaceRoot: process.cwd() }] }));
+    const here = withContent(PROJECTS, (c) => ({ ...c, projects: [{ ...SANDBOX, id: 'proj-here', workspaceRoot: process.cwd() }] }));
     const r = t3().answer('t3_project_list', here);
     await seam(r).launch('.', 'Ask.', { title: 'Decide: x', ...CLAUDE });
     expect(r.argsOf('t3_thread_launch')[0].projectId).toBe('proj-here');
@@ -169,18 +174,21 @@ describe('StartTest', () => {
 
 describe('ShowAndListTest', () => {
   test('show gives the thread and its latest messages', async () => {
+    // Python's check that the CLI was asked for 2 messages: the thread says more than 2, and
+    // show gives its last 2
     const read = recording('mcp-thread_read-approval-interrupted');
     const thread_id = recordedThread(read);
-    const r = new RecordedT3().answer('t3_thread_read', read);
+    const said = ['One', 'Two', 'Three', 'Four'].map((t, i) => item(i % 2 ? 'assistant_message' : 'user_message', t));
+    const r = new RecordedT3().answer('t3_thread_read', byView({ thread: read, messages: reads(said) }));
     const [thread, messages] = await seam(r).show(thread_id, 2);
     expect(r.argsOf('t3_thread_read')[0]).toStrictEqual({ threadId: thread_id, limit: 1, runLimit: 1 });
+    expect(messages.map((m) => [m.role, m.text])).toStrictEqual([['user', 'Three'], ['assistant', 'Four']]);
     expect(thread.status).toBe('interrupted');
     expect(thread.title).toBe('t3-api-facts C2 (research, safe to delete)');
     expect(thread.link.startsWith('https://app.t3.codes/threads/')).toBe(true);
     expect(thread.active).toBe(false);
     expect(thread.worktree_path).toBeNull();
     expect(thread.pending_requests).toBe(0);
-    expect(messages.length).toBeGreaterThan(0);
     expect(messages.every((m) => ['user', 'assistant'].includes(m.role))).toBe(true);
   });
 
@@ -241,7 +249,7 @@ describe('ShowAndListTest', () => {
   test('send waits for the reply', async () => {
     // thread G's send, which started a run at once (`delivery: started`), as on thread A
     const sent = onA('mcp-thread_send-unknown-model');
-    const r = new RecordedT3().answer('t3_thread_send', sent).answer('t3_thread_wait', onA('mcp-thread_wait-completed'))
+    const r = new RecordedT3().answer('t3_thread_send', sent).answerEach('t3_thread_wait', onA('mcp-thread_wait-completed'))
       .answer('t3_thread_read', onA('mcp-thread_read-completed'));
     const result = await seam(r).send(A, 'Go on.');
     expect(r.argsOf('t3_thread_send')).toStrictEqual([{ threadId: A, message: 'Go on.', mode: 'queue' }]);
@@ -257,7 +265,7 @@ describe('ShowAndListTest', () => {
 
   test('send waiting for an answer is exit 2', async () => {
     const r = new RecordedT3().answer('t3_thread_send', onA('mcp-thread_send-unknown-model'))
-      .answer('t3_thread_wait', onA('mcp-thread_wait-secret-pending'))
+      .answerEach('t3_thread_wait', onA('mcp-thread_wait-secret-pending'), onA('mcp-thread_wait-secret-pending'))
       .answer('t3_thread_read', byView(WAITING['secret-pending']));
     const result = await seam(r).send(A, 'Go on.');
     expect([result.exit_code, result.status]).toStrictEqual([2, 'waiting']);
