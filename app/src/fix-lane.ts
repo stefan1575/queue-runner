@@ -26,9 +26,10 @@
 // with its thread line is watched again (a sent round on its new run, told apart from the runs the
 // thread had before by `knownRuns`). A send whose answer was lost, or that the app stopped before T3
 // answered, is decided by reading the thread: until a read succeeds it stays open, its repo held,
-// and is read again on later passes; a read that leaves doubt, and a launch whose answer was lost
-// (`NoAnswer`), need the user: its repo starts nothing until they answer. A thread is gone only
-// when T3's thread list reads fine without it, never on an error's text (#210 F15).
+// and is read again when T3 pushes a change to the thread or its stream opens again, never on a
+// timer (#210 F6); a read that leaves doubt, and a launch whose answer was lost (`NoAnswer`), need
+// the user: its repo starts nothing until they answer. A thread is gone only when T3's thread list
+// reads fine without it, never on an error's text (#210 F15).
 import { fixBrief, type FixWhere } from './briefs/fix.ts';
 import type { BuildRepo } from './build-lane.ts';
 import { holdText } from './gate.ts';
@@ -44,7 +45,7 @@ import { ThreadSettler } from './settle.ts';
 import { ToolFailed, type T3Mcp } from './t3/mcp.ts';
 import type { Retry } from './t3/project-feed.ts';
 import { NoAnswer } from './t3/seams.ts';
-import { readThread, watchJobThread, type ThreadEnd } from './t3/thread-end.ts';
+import { followThread, readThread, watchJobThread, type ThreadEnd, type ThreadRead } from './t3/thread-end.ts';
 import type { T3Ws } from './t3/ws.ts';
 import type { UsageGate } from './usage-gate.ts';
 
@@ -85,10 +86,6 @@ const GONE_MARK = "can't take another turn";
 const NOT_SENDABLE = new Set(['thread_not_found', 'thread_not_sendable', 'invalid_request']);
 const goneText = (threadId: string, why: string) => `the PR's writer thread ${threadId} is gone in T3, so it ${GONE_MARK} (${why})`;
 const refusedText = (threadId: string, why: string) => `the PR's writer thread ${threadId} ${GONE_MARK}: T3 refused the send (${why})`;
-
-/** How long a send whose outcome isn't known waits, after its thread couldn't be read, before a
- *  pass reads the thread again (#210 F6). */
-export const SEND_READ_MS = 60_000;
 
 const join = (folder: string, name: string) => `${folder.replace(/[\\/]+$/, '')}/${name}`;
 /** A job on the branch that ended on a question or a usage limit: it may write to it again. */
@@ -146,9 +143,6 @@ export class FixLane implements RepoJobLane {
   private stopped = false;
   /** Writer threads T3 says are gone: their PRs' rounds go to fresh fixers. */
   private gone = new Set<string>();
-  /** Sends whose outcome isn't known and whose thread couldn't be read, by job id: when a pass
-   *  reads it again, with the thread's link and why the send's outcome isn't known. */
-  private reread = new Map<string, { at: number; link: string | null; why: string }>();
 
   constructor(doors: FixLaneDoors) {
     this.d = doors;
@@ -201,15 +195,6 @@ export class FixLane implements RepoJobLane {
 
   owed(): void {
     this.settler.owed('fix');
-    // a send whose thread couldn't be read: read again once its wait is over (F6)
-    const now = this.now().getTime();
-    for (const [id, r] of this.reread) {
-      const job = this.d.log.get(id);
-      if (!job || job.end || job.threadId || !job.to) { this.reread.delete(id); continue; }
-      const key = `${job.github}#${job.issue}`;
-      if (r.at > now || this.running.has(key)) continue;
-      this.track(key, this.unknownSend(job, job.to, r.link, job.knownRuns ?? [], new Error(r.why), () => {}));
-    }
   }
 
   /** The repo's next fix round: the lowest-numbered PR whose blocking review gets its round now
@@ -416,29 +401,34 @@ export class FixLane implements RepoJobLane {
     return runIds(read.projection);
   }
 
-  /** A send T3 may have taken: the thread read again. Gone, nothing ran and the next pass sends a
-   *  fresh fixer; showing a run it didn't have before, that run is the round's, watched; showing
-   *  none, the round needs the user (#154's rule). A thread that can't be read says nothing yet:
-   *  the round stays open, its repo held, and a pass reads it again after SEND_READ_MS (F6). */
+  /** A send T3 may have taken: the thread read, as T3 pushes its changes, until a read answers
+   *  (`followThread`). Gone (its thread list reads fine without it), nothing ran and the next pass
+   *  sends a fresh fixer; showing a run it didn't have before, that run is the round's, watched;
+   *  showing none, the round needs the user (#154's rule). A thread that can't be read says
+   *  nothing yet: the round stays open, its repo held, and it's read again on the thread's next
+   *  change or when its stream opens again, never on a timer (#210 F6). */
   private async unknownSend(job: Job, threadId: string, link: string | null, knownRuns: string[], e: Error, onLaunched: () => void): Promise<Job> {
-    let runs: string[] | 'gone';
+    let said = false;
+    const w = followThread<Answered>(this.d.ws, threadId, (read) => {
+      if (!('unreadable' in read)) return read;
+      if (!said) this.d.say(`${job.title}: the round sent to thread ${threadId} got no clear answer (${e.message}), and the thread can't be read now (${read.unreadable}): read again on its next change or when its stream opens again; nothing else starts in ${job.github ?? job.repo} meanwhile`);
+      said = true;
+      onLaunched(); // the pass goes on; the round stays open, holding its repo
+      return null;
+    }, this.d.retry, (why) => this.d.say(`${job.title}: T3's thread stream dropped (${why}); opening it again`));
+    this.watches.add(w);
+    let read: Answered;
     try {
-      runs = await this.threadRuns(threadId);
-    } catch (r) {
-      if (!this.reread.has(job.id)) {
-        this.d.say(`${job.title}: the round sent to thread ${threadId} got no clear answer (${e.message}), and the thread can't be read now (${(r as Error).message}): read again on a later pass; nothing else starts in ${job.github ?? job.repo} meanwhile`);
-      }
-      this.reread.set(job.id, { at: this.now().getTime() + SEND_READ_MS, link, why: e.message });
-      onLaunched();
-      return job;
+      read = await w.end;
+    } finally {
+      this.watches.delete(w);
     }
-    this.reread.delete(job.id);
-    if (runs === 'gone') {
+    if ('gone' in read) {
       this.gone.add(threadId);
       onLaunched();
-      return this.notStarted(job, goneText(threadId, e.message), false);
+      return this.notStarted(job, goneText(threadId, `${e.message}; T3's thread list doesn't have it`), false);
     }
-    const fresh = runs.filter((r) => !knownRuns.includes(r)).at(-1);
+    const fresh = runIds(read.projection).filter((r) => !knownRuns.includes(r)).at(-1);
     if (!fresh) return this.needsUser(job, `the round sent to thread ${threadId} got no clear answer (${e.message}), and the thread shows no new run`);
     this.d.say(`${job.title}: T3 answered the send unclearly (${e.message}), but thread ${threadId} shows its new run ${fresh}: watching it`);
     const thread = { threadId, runId: fresh, link };
@@ -537,6 +527,9 @@ export class FixLane implements RepoJobLane {
     return ended;
   }
 }
+
+/** A thread read that answered: its projection, or gone. */
+type Answered = Exclude<ThreadRead, { unreadable: string }>;
 
 /** A projection's run ids, oldest first. */
 const runIds = (projection: any): string[] => [...projection.runs]

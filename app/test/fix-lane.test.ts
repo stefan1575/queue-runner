@@ -444,52 +444,55 @@ describe('a round whose run waits on the user in T3 (#210)', () => {
 });
 
 describe("after a restart, don't guess", () => {
-  test("a send whose answer was lost, on a thread that can't be read after, stays open and is read again on a later pass; its repo starts nothing meanwhile (#210 F6)", async () => {
+  test("a send whose answer was lost, on a thread that can't be read after, stays open; it's read again when its stream opens again, never on a pass (#210 F6)", async () => {
     await builder();
     await blocking(1, H, [finding({})]);
     t3.sendAnswerLost = true;
     t3.beforeSend = () => { t3.wsMethods['orchestration.getThreadProjection'] = () => { throw new Error('busy'); }; };
-    let clock = new Date('2026-11-19T12:00:00Z');
-    makeLane({ now: () => clock });
+    const retries = new Set<() => void>();
+    makeLane({ retry: (again) => { retries.add(again); return () => { retries.delete(again); }; } });
     await chooser.pass();
-    await chooser.idle();
     const job = fixes()[0]!;
+    await until(() => lines.some((l) => l.includes("the thread can't be read now") && l.includes('read again on its next change or when its stream opens again')));
     expect(log.get(job.id)!.end).toBeUndefined();
     expect(log.needingUser(APP.id)).toEqual([]);
     t3.sendAnswerLost = false;
-    await chooser.pass();
-    expect(t3.sends).toHaveLength(1); // the lost one T3 got; no other
-    // T3 reads again; a pass before the wait is over doesn't read the thread yet, one after does:
-    // the new run is the round's, watched to its end
+    // T3 reads fine again, and nothing has changed in the thread: passes read nothing
     delete t3.wsMethods['orchestration.getThreadProjection'];
+    const reads = t3.projectionReads;
     await chooser.pass();
-    await chooser.idle();
+    await chooser.pass();
+    expect(t3.projectionReads).toBe(reads);
     expect(log.get(job.id)!.threadId).toBeUndefined();
-    clock = new Date('2026-11-19T12:01:00Z');
-    await chooser.pass();
-    await until(() => t3.threadStreamCount('thread-b') > 0);
+    expect(t3.sends).toHaveLength(1); // the lost one T3 got; no other
+    // its stream opens again (T3 restarted): read then, and the new run is the round's
+    t3.endThreadStreams();
+    await until(() => retries.size > 0);
+    for (const f of [...retries]) { retries.delete(f); f(); }
+    await until(() => log.get(job.id)!.threadId !== undefined);
     expect(log.get(job.id)).toMatchObject({ threadId: 'thread-b', runId: 'thread-b-run-2' });
+    await until(() => t3.threadStreamCount('thread-b') > 0);
     t3.endRun('thread-b', 'completed');
     await chooser.idle();
     expect(log.get(job.id)!.end).toMatchObject({ outcome: 'done' });
     expect(t3.sends).toHaveLength(1);
   });
 
-  test("a round the app stopped before T3 answered, whose thread can't be read at start, stays open until a read says; no new run then needs the user (#210 F6)", async () => {
+  test("a round the app stopped before T3 answered, whose thread can't be read at start, stays open until a read says; read on the thread's next change, no new run then needs the user (#210 F6)", async () => {
     await builder();
     await blocking(1, H, [finding({})]);
     const open = await log.started({ kind: 'fix', repo: APP.id, github: 'owner/app', issue: 4, branch: BRANCH, base: 'main', title: 'Queue runner fix: app#4', choice: BUILD, onFallback: false, sha: H, round: 1, to: 'thread-b', knownRuns: ['run-b'] });
     t3.wsMethods['orchestration.getThreadProjection'] = () => { throw new Error('busy'); };
-    let clock = new Date('2026-11-19T12:00:00Z');
-    makeLane({ now: () => clock });
+    makeLane();
     await chooser.start();
-    await chooser.idle();
-    expect(log.get(open.id)!.end).toBeUndefined();
-    expect(lines.some((l) => l.includes("the thread can't be read now") && l.includes('read again on a later pass'))).toBe(true);
-    delete t3.wsMethods['orchestration.getThreadProjection'];
-    clock = new Date('2026-11-19T12:01:00Z');
+    await until(() => lines.some((l) => l.includes("the thread can't be read now")));
     await chooser.pass();
-    await chooser.idle();
+    expect(log.get(open.id)!.end).toBeUndefined();
+    expect(log.needingUser(APP.id)).toEqual([]);
+    delete t3.wsMethods['orchestration.getThreadProjection'];
+    // T3 pushes a change to the thread: it's read then
+    t3.threadEvent('thread-b', 'run', { ...t3.threadState['thread-b']!.runs[0] });
+    await until(() => log.get(open.id)!.end !== undefined);
     expect(log.get(open.id)!.end).toMatchObject({ outcome: 'needs-user', error: expect.stringContaining('shows no new run') });
     expect(t3.sends).toEqual([]);
   });
