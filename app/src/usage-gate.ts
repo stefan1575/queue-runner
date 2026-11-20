@@ -26,6 +26,7 @@ import type { Job } from './job-log.ts';
 import { kindModels, model, type JobKind, type ModelChoice } from './jobs.ts';
 import type { Settings } from './settings.ts';
 import type { CatalogSource } from './t3/catalog-source.ts';
+import type { Phase, ThreadEnd } from './t3/thread-end.ts';
 import type { ProviderUsage } from './usage.ts';
 
 export type Held = { hold: Hold; until: Date | null; since: Date };
@@ -253,4 +254,38 @@ export class UsageGate {
   settled(): Promise<void> {
     return this.measuring;
   }
+}
+
+/** A job's runs after its question (#210 F13): the user may answer it in T3 at any moment, and
+ *  the run on the answer spends from its login as any job does. Its first run was measured at
+ *  the question. A run on an answer is reserved in the gate while it runs, at the cost the job
+ *  was let in at, and measured from T3's reading when it turned to running; one already running
+ *  when first seen (after a restart, say) is measured from no reading, so it teaches nothing
+ *  rather than measure from mid-run. A further question ends its reservation, measured; its end
+ *  reaches the gate as a first run's does, a usage limit holding its provider. */
+export function afterQuestion(gate: { started: UsageGate['started']; finished: UsageGate['finished'] }, job: Job) {
+  let reserved = false;
+  let seen: Phase | null = null;
+  const reserve = (before?: Reading) => {
+    gate.started({ id: job.id, kind: job.kind, choice: job.choice }, job.cost ?? {}, before);
+    reserved = true;
+  };
+  return {
+    phase(p: Phase) {
+      const was = seen;
+      seen = p;
+      if (p === 'running' && !reserved) reserve(was === 'asking' ? undefined : reading(null, []));
+      else if (p === 'asking' && reserved) {
+        gate.finished(job.id);
+        reserved = false;
+      }
+    },
+    ended(end: ThreadEnd) {
+      const limit = end.outcome === 'usage-limit' ? { resetAt: end.resetAt } : undefined;
+      // a run that hit its limit unseen (it ran while the app was off) still holds its provider
+      if (!reserved && limit) reserve(reading(null, []));
+      if (reserved) gate.finished(job.id, limit);
+      reserved = false;
+    },
+  };
 }

@@ -13,7 +13,7 @@ import { T3Catalog, type CatalogSource, type CatalogState } from '../src/t3/cata
 import { catalogFromConfig } from '../src/t3/catalog.ts';
 import { usageFromProviders } from '../src/usage.ts';
 import { T3Ws } from '../src/t3/ws.ts';
-import { UsageGate } from '../src/usage-gate.ts';
+import { afterQuestion, UsageGate } from '../src/usage-gate.ts';
 import { FakeT3 } from './fake-t3.ts';
 
 const snapshot = JSON.parse(await readFile(new URL('./fixtures/server-config.json', import.meta.url), 'utf8'));
@@ -207,6 +207,63 @@ describe('every job waits for room in its own provider', () => {
     expect(lines).toHaveLength(1);
     expect(lines[0]).toMatchObject({ provider: 'claudeAgent', model: 'claude-opus-5-5', effort: 'medium', kind: 'build', job: 'build a#1', spent: { five_hour: 4, seven_day: 1, seven_day_fable: 0 } });
     expect(gate.check({ ...job, id: 'build a#2' }).fits).toBe(true);
+  });
+});
+
+describe('a job that asked a question (#210 F13)', () => {
+  const asked = { id: 'build a#1', kind: 'build' as const, choice: OPUS, cost: { five_hour: 60, seven_day: 15 } };
+
+  test("the run on its answer is reserved while it runs, measured from the reading it resumed on, and its usage limit holds its provider", async () => {
+    jobs({ build: { own: OPUS, fallback: null } });
+    await t3Reads('2026-11-18T19:06:00Z', () => { window('claudeAgent', 'five_hour').usedPercent = 10; });
+    now = new Date('2026-11-18T19:06:30Z');
+    // its first run, measured at its question
+    gate.started(asked, asked.cost);
+    gate.finished(asked.id);
+    await t3Reads('2026-11-18T19:10:00Z', () => { window('claudeAgent', 'five_hour').usedPercent = 20; });
+    now = new Date('2026-11-18T19:10:30Z');
+    const resumed = afterQuestion(gate, asked as any);
+    resumed.phase('asking');
+    expect(gate.pick('build b#2', 'build')).toMatchObject({ fits: true }); // a question spends nothing
+    // answered in T3: it runs again, and holds its room against a second build on the login
+    resumed.phase('running');
+    expect(gate.runningJobs()).toEqual([asked.id]);
+    expect(gate.pick('build b#2', 'build')).toMatchObject({ fits: false, hold: { why: 'running', jobs: [asked.id] } });
+    now = new Date('2026-11-18T19:20:00Z');
+    resumed.ended({ outcome: 'usage-limit', status: 'failed', resetAt: '2026-11-18T20:40:00.000Z', error: 'limit' });
+    expect(gate.runningJobs()).toEqual([]);
+    expect(gate.pick('build b#2', 'build')).toMatchObject({ fits: false, hold: { why: 'limit', at: '2026-11-18T20:40:00.000Z' } });
+    await t3Reads('2026-11-18T19:21:00Z', () => { window('claudeAgent', 'five_hour').usedPercent = 32; });
+    await gate.settled();
+    // two records: the first run's, and the run on the answer's from 20% (never the part before
+    // the question again)
+    const lines = (await readFile(join(dir, 'usage.jsonl'), 'utf8')).trim().split('\n').map((l) => JSON.parse(l));
+    expect(lines.map((l) => [l.job, l.before.checkedAt, l.spent?.five_hour])).toEqual([
+      [asked.id, '2026-11-18T19:06:00Z', 10],
+      [asked.id, '2026-11-18T19:10:00Z', 12],
+    ]);
+  });
+
+  test('one already running when first seen (after a restart) is reserved and teaches nothing; a further question ends its reservation', async () => {
+    jobs({ build: { own: OPUS, fallback: null } });
+    const resumed = afterQuestion(gate, asked as any);
+    resumed.phase('running');
+    expect(gate.runningJobs()).toEqual([asked.id]);
+    resumed.phase('asking');
+    expect(gate.runningJobs()).toEqual([]);
+    resumed.ended({ outcome: 'done', status: 'completed' });
+    expect(gate.runningJobs()).toEqual([]);
+    await t3Reads('2026-11-18T19:30:00Z', () => {});
+    await gate.settled();
+    const lines = (await readFile(join(dir, 'usage.jsonl'), 'utf8')).trim().split('\n').map((l) => JSON.parse(l));
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({ job: asked.id, spent: null });
+  });
+
+  test('one that hit its usage limit unseen (while the app was off) still holds its provider', async () => {
+    jobs({ build: { own: OPUS, fallback: null } });
+    afterQuestion(gate, asked as any).ended({ outcome: 'usage-limit', status: 'failed', resetAt: '2026-11-18T20:40:00.000Z', error: null });
+    expect(gate.pick('build b#2', 'build')).toMatchObject({ fits: false, hold: { why: 'limit' } });
   });
 });
 

@@ -45,7 +45,7 @@ import type { Retry } from './t3/project-feed.ts';
 import { NoAnswer } from './t3/seams.ts';
 import { threadGone, watchThreadEnd, type ThreadEnd } from './t3/thread-end.ts';
 import type { T3Ws } from './t3/ws.ts';
-import type { UsageGate } from './usage-gate.ts';
+import { afterQuestion, type UsageGate } from './usage-gate.ts';
 
 export type FixLaneDoors = {
   repos: () => BuildRepo[];
@@ -537,9 +537,11 @@ export class FixLane implements RepoJobLane {
   private async watch(job: Job, asked = false): Promise<Job> {
     // after a question, the thread's newest run since the send: an answer may go on in its run or
     // start a new one
+    // after a question: the run on its answer is reserved in the gate while it runs (#210 F13)
+    const resumed = afterQuestion(this.d.gate, job);
     const w = watchThreadEnd(this.d.ws, job.threadId!, asked ? null : job.runId ?? null, this.d.retry,
-      (why) => this.d.say(`${job.title}: T3's thread stream dropped (${why}); opening it again`), new Set(job.knownRuns ?? []), asked ? 'wait' : 'end',
-      () => threadGone(this.d.mcp, job.threadId!));
+      (why) => this.d.say(`${job.title}: T3's thread stream dropped (${why}); opening it again`), new Set(job.knownRuns ?? []),
+      { questions: asked ? 'wait' : 'end', phase: (p) => resumed.phase(p), gone: () => threadGone(this.d.mcp, job.threadId!) });
     this.watches.add(w);
     let end: ThreadEnd;
     try {
@@ -547,8 +549,9 @@ export class FixLane implements RepoJobLane {
     } finally {
       this.watches.delete(w);
     }
-    // the gate measured the job at its question; the run on the answer isn't let in again
+    // a first run's end reaches the gate here; a run on an answer's as `resumed` has it
     if (!asked) this.d.gate.finished(job.id, end.outcome === 'usage-limit' ? { resetAt: end.resetAt } : undefined);
+    else resumed.ended(end);
     const record: JobEnd = { outcome: end.outcome as JobEnd['outcome'], status: end.status };
     if (end.outcome === 'failed') record.error = end.error;
     if (end.outcome === 'usage-limit') Object.assign(record, { resetAt: end.resetAt, error: end.error });

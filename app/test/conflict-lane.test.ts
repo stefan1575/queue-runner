@@ -514,6 +514,27 @@ describe('what waits', () => {
     expect(t3.launches).toEqual([]);
   });
 
+  test('a round that asks a question: its run on an answer given in T3 is reserved in the gate while it runs (#210 F13)', async () => {
+    git.trees.push({ path: 'C:/t3/worktrees/app/thing-3', branch: 'claude/thing-3' });
+    makeLane();
+    await chooser.pass();
+    await until(() => rounds()[0]?.threadId !== undefined);
+    const round = rounds()[0]!;
+    await until(() => t3.threadStreamCount(round.threadId!) > 0);
+    t3.askUser(round.threadId!);
+    await until(() => log.get(round.id)!.end?.outcome === 'waiting');
+    const mine = () => gate.calls.filter((c) => c.startsWith('started') || c === `finished ${round.id}`);
+    expect(mine()).toEqual(['started conflict claude-haiku-5-5', `finished ${round.id}`]);
+    t3.answerInT3(round.threadId!);
+    await until(() => mine().length === 3);
+    expect(mine()[2]).toBe('started conflict claude-haiku-5-5');
+    gh.push(4, H2, false);
+    t3.endRun(round.threadId!, 'completed');
+    await chooser.idle();
+    expect(mine()).toEqual(['started conflict claude-haiku-5-5', `finished ${round.id}`, 'started conflict claude-haiku-5-5', `finished ${round.id}`]);
+    expect(log.get(round.id)!.end).toMatchObject({ outcome: 'done', head: H2 });
+  });
+
   test('a review of the PR the review lane starts while the round is fetched: the round starts nothing', async () => {
     const fetch = git.fetchPr.bind(git);
     git.fetchPr = async (f, n, b) => {

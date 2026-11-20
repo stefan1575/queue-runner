@@ -46,7 +46,7 @@ import type { T3Mcp } from './t3/mcp.ts';
 import { NoAnswer } from './t3/seams.ts';
 import { threadGone, watchThreadEnd, type ThreadEnd } from './t3/thread-end.ts';
 import type { T3Ws } from './t3/ws.ts';
-import type { UsageGate } from './usage-gate.ts';
+import { afterQuestion, type UsageGate } from './usage-gate.ts';
 
 /** A repo the lane builds in: a served T3 project. `github` is null only for the live check's
  *  sandbox, which has no GitHub: no picking, no comments and no PR to look for. `merge` says who
@@ -329,9 +329,11 @@ export class BuildLane implements RepoJobLane {
 
   private async watch(job: Job, github: string | null, asked = false): Promise<Job> {
     // after a question, the thread's newest run: an answer may go on in its run or start a new one
+    // after a question: the run on its answer is reserved in the gate while it runs (#210 F13)
+    const resumed = afterQuestion(this.d.gate, job);
     const w = watchThreadEnd(this.d.ws, job.threadId!, asked ? null : job.runId ?? null, this.d.retry,
-      (why) => this.d.say(`${job.title}: T3's thread stream dropped (${why}); opening it again`), new Set(), asked ? 'wait' : 'end',
-      () => threadGone(this.d.mcp, job.threadId!));
+      (why) => this.d.say(`${job.title}: T3's thread stream dropped (${why}); opening it again`), new Set(),
+      { questions: asked ? 'wait' : 'end', phase: (p) => resumed.phase(p), gone: () => threadGone(this.d.mcp, job.threadId!) });
     this.watches.add(w);
     let end: ThreadEnd;
     try {
@@ -339,8 +341,9 @@ export class BuildLane implements RepoJobLane {
     } finally {
       this.watches.delete(w);
     }
-    // the gate measured the job at its question; the run on the answer isn't let in again
+    // a first run's end reaches the gate here; a run on an answer's as `resumed` has it
     if (!asked) this.d.gate.finished(job.id, end.outcome === 'usage-limit' ? { resetAt: end.resetAt } : undefined);
+    else resumed.ended(end);
     const record: JobEnd = { outcome: end.outcome as JobEnd['outcome'], status: end.status };
     if (end.outcome === 'done' && github) {
       // a job may open its PR and stop after; done without one is done-no-pr. A lookup that

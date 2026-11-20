@@ -452,6 +452,40 @@ describe('the end', () => {
     expect(retries.size).toBe(0);
   });
 
+  test("a build's run on an answer given in T3 is reserved in the gate while it runs, a further question ending it, and its usage limit reaches the gate (#210 F13)", async () => {
+    gh.ready['owner/app'] = [issue(5)];
+    const gate = new RoomyGate();
+    await makeLane({ gate: gate as any }).pass();
+    await watching('thread-1');
+    const id = log.jobs()[0]!.id;
+    t3.askUser('thread-1');
+    await until(() => log.jobs()[0]!.end?.outcome === 'waiting');
+    expect(gate.calls.filter((c) => c.includes(id))).toEqual([`started ${id}`, `finished ${id}`]);
+    t3.answerInT3('thread-1');
+    await until(() => gate.calls.length === 4);
+    t3.askUser('thread-1');
+    await until(() => gate.calls.length === 5);
+    t3.answerInT3('thread-1');
+    await until(() => gate.calls.length === 6);
+    t3.hitUsageLimit('thread-1', '2026-11-19T15:00:00.000Z');
+    await chooser.idle();
+    expect(gate.calls.slice(3)).toEqual([`started ${id}`, `finished ${id}`, `started ${id}`, `finished ${id} out of usage until 2026-11-19T15:00:00.000Z`]);
+    expect(log.get(id)!.end).toMatchObject({ outcome: 'usage-limit' });
+  });
+
+  test("after a restart a build left waiting whose thread is already running on an answer is reserved in the gate until it ends (#210 F13)", async () => {
+    const waiting = await log.started({ kind: 'build', repo: 'p-app', github: 'owner/app', issue: 5, branch: 'claude/x-5', base: 'main', title: 'Queue runner build: app#5', choice: BUILD, onFallback: false, cost: { five_hour: 10 } });
+    await log.thread(waiting.id, { threadId: 'thread-w', runId: 'run-w', link: 't3://thread/thread-w' });
+    await log.ended(waiting.id, { outcome: 'waiting', request: 'user_input' });
+    t3.threadState['thread-w'] = { id: 'thread-w', projectId: 'p-app', runtimeRequests: [], turnItems: [], runs: [{ id: 'run-w', threadId: 'thread-w', ordinal: 1, rootNodeId: 'n', status: 'running' }] };
+    const gate = new RoomyGate();
+    void makeLane({ gate: gate as any }).start();
+    await until(() => gate.calls.includes(`started ${waiting.id}`));
+    t3.endRun('thread-w', 'completed');
+    await chooser.idle();
+    expect(gate.calls.filter((c) => c.includes(waiting.id))).toEqual([`started ${waiting.id}`, `finished ${waiting.id}`]);
+  });
+
   test("after a restart a repo with a build left waiting and another build open watches both: the waiting one isn't left holding the repo once the other ends (#210 F12)", async () => {
     gh.ready['owner/app'] = [issue(7)];
     // an older app left build A waiting on a question and started build B beside it in the repo

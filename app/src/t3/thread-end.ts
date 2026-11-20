@@ -32,12 +32,15 @@ type State = { runs: Map<string, any>; requests: Map<string, any>; errors: Map<s
 
 const byId = (list: unknown) => new Map((Array.isArray(list) ? list : []).filter((x) => typeof x?.id === 'string').map((x) => [x.id, x]));
 
+/** The run `endOf` reads: `runId`, or the latest not in `known`. */
+const runOf = (state: State, runId: string | null, known: ReadonlySet<string>) => runId ? state.runs.get(runId)
+  : [...state.runs.values()].filter((r) => !known.has(r.id)).sort((a, b) => (a.ordinal ?? 0) - (b.ordinal ?? 0)).at(-1);
+
 /** The end of `runId` (the thread's latest run when null, leaving out the runs in `known`: a
  *  message sent to a thread that had them starts a new one) as the state shows it, or null while
  *  it runs or before that new run shows. */
 export function endOf(state: State, runId: string | null, known: ReadonlySet<string> = new Set()): ThreadEnd | null {
-  const run = runId ? state.runs.get(runId)
-    : [...state.runs.values()].filter((r) => !known.has(r.id)).sort((a, b) => (a.ordinal ?? 0) - (b.ordinal ?? 0)).at(-1);
+  const run = runOf(state, runId, known);
   if (!run) return null;
   const status: string = run.status;
   if (!ENDED.has(status)) {
@@ -77,15 +80,30 @@ export async function threadGone(mcp: Pick<T3Mcp, 'call'>, threadId: string): Pr
   }
 }
 
+/** Where a watched run is, after a question (`WatchOptions.phase`). */
+export type Phase = 'asking' | 'running';
+
+export type WatchOptions = {
+  /** `wait`: a question isn't an end, and the watch goes on until the run has ended (a job left
+   *  waiting, which runs again once the user answers it in T3; #210 F5). */
+  questions?: 'end' | 'wait';
+  /** With `questions: 'wait'`: told each time the run turns to a question (`asking`) or to
+   *  running on an answer (`running`), once per change, also across a stream opened again; the
+   *  first state seen is told too (#210 F13). */
+  phase?: (phase: Phase) => void;
+  /** Whether T3 confirms the thread missing: asked when a stream drops, which is opened again
+   *  only on a no; a yes ends the watch, failed with status `gone` (#210 F11). */
+  gone?: () => Promise<boolean>;
+};
+
 /** Watches one thread until `runId` ends or stops on a question (with no `runId`, its newest run
- *  not in `known`). `onDown` hears why a stream dropped, before it's opened again. With
- *  `questions: 'wait'` a question isn't an end: the watch goes on until the run has ended (a job
- *  left waiting, which runs again once the user answers it in T3; #210 F5). With `gone`, a stream
- *  that drops is opened again only once `gone` says T3 hasn't confirmed the thread missing; one it
- *  has ends the watch, failed with status `gone` (#210 F11). */
+ *  not in `known`). `onDown` hears why a stream dropped, before it's opened again. `options`:
+ *  `WatchOptions`. */
 export function watchThreadEnd(ws: Pick<T3Ws, 'subscribe'>, threadId: string, runId: string | null,
   retry: Retry = retryAfter(5_000), onDown: (why: string) => void = () => {}, known: ReadonlySet<string> = new Set(),
-  questions: 'end' | 'wait' = 'end', gone?: () => Promise<boolean>): Watch {
+  options: WatchOptions = {}): Watch {
+  const { questions = 'end', phase, gone } = options;
+  let told: Phase | null = null;
   let stopped = false;
   let close = () => {};
   let rejectStop: (e: Error) => void = () => {};
@@ -111,7 +129,12 @@ export function watchThreadEnd(ws: Pick<T3Ws, 'subscribe'>, threadId: string, ru
           else return;
         } else return;
         const got = endOf(state, runId, known);
-        if (!got || (got.outcome === 'waiting' && questions === 'wait')) return;
+        if (questions === 'wait' && (!got || got.outcome === 'waiting')) {
+          const now: Phase | null = got ? 'asking' : runOf(state, runId, known) ? 'running' : null;
+          if (now && now !== told) { told = now; phase?.(now); }
+          return;
+        }
+        if (!got) return;
         found = true;
         sub.close();
         resolve(got);

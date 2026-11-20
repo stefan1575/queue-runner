@@ -369,8 +369,16 @@ whose branch a job of the repo's writes to (Reviews; Fix rounds and merges).
   Once the run has ended, its real end (`done`, `failed`...) is recorded in the question's place
   and the thread is settled as that end says. After a restart each lane watches its jobs left
   `waiting` the same way, every one, even beside another job open in the repo (an older app's
-  build left waiting beside the build it started next; #210 F12). The gate measured the job at its question; the run on the answer isn't
-  let in again.
+  build left waiting beside the build it started next; #210 F12).
+- **A run on an answer counts in the gate** (#210 F13; `afterQuestion`, `src/usage-gate.ts`): the
+  gate measured the job's first run at its question. A run on an answer (given in T3 or here) isn't
+  asked into the gate, since it's already going, but it's reserved there while it runs, at the cost
+  the job was let in at, so the gate counts it beside other repos' jobs on the same login. It's
+  measured from T3's reading when it turned to running, never from the job's start, so the part
+  before the question isn't measured twice; one already running when first seen (after a restart)
+  is measured from no reading and teaches nothing. A further question ends its reservation,
+  measured; its end reaches the gate as a first run's does, and a usage limit holds the provider
+  (also one it hit while the app was off).
 - **Settle first:** on start each lane recovers every job of its kind the log shows open (`recover`:
   each lane's After a restart, don't guess, below) before the first choice, and the repo is held
   meanwhile. A recovery that can't tell (a T3 or GitHub read failed) leaves a `needs-user` end,
