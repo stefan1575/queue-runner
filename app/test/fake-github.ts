@@ -19,6 +19,15 @@ export class FakeGitHub implements GitHubWork {
 
   async readyIssues(repo: string) { this.reads.push(`readyIssues ${repo}`); return structuredClone(this.ready[repo] ?? []); }
   async issueState(repo: string, n: number) { return this.states[`${repo}#${n}`] ?? 'closed'; }
+  /** Each issue's labels, by `owner/name#N`; an issue not in `states` is open here. */
+  labels: Record<string, string[]> = {};
+  /** While above 0, each label read fails (GitHub down a moment) and counts it down. */
+  labelReadFails = 0;
+  async issueLabels(repo: string, n: number) {
+    this.reads.push(`issueLabels ${repo}#${n}`);
+    if (this.labelReadFails > 0) { this.labelReadFails--; throw new Error('gh api failed (1): HTTP 502'); }
+    return { open: (this.states[`${repo}#${n}`] ?? 'open') === 'open', labels: [...(this.labels[`${repo}#${n}`] ?? [])] };
+  }
   async branches(repo: string, prefix: string) { return (this.branchList[repo] ?? []).filter((b) => b.startsWith(prefix)); }
   async openPulls(repo: string) { return structuredClone(this.pulls[repo] ?? []); }
   async issueComments(repo: string, n: number) { return structuredClone(this.comments[`${repo}#${n}`] ?? []); }

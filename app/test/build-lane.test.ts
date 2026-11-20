@@ -396,6 +396,71 @@ describe('the end', () => {
     expect(gate.calls.filter((c) => c.includes(id))).toEqual([`started ${id}`, `finished ${id}`]);
   });
 
+  test("a build whose issue has needs-info when its run ends hasn't ended: its repo held and its thread unsettled, GitHub read each pass, until the label is off (#211's GitHub hold)", async () => {
+    gh.ready['owner/app'] = [issue(5), issue(6)];
+    await makeLane().pass();
+    await watching('thread-1');
+    const id = log.jobs()[0]!.id;
+    // the builder asks on its issue, swaps its label and ends its turn
+    gh.labels['owner/app#5'] = ['needs-info'];
+    t3.endRun('thread-1', 'completed');
+    await until(() => lines.includes("Queue runner build: app#5 waits on you on GitHub (owner/app#5 is labelled needs-info). Nothing else starts in owner/app until it's answered and its run has finished: t3://thread/thread-1"));
+    await chooser.pass();
+    expect(log.get(id)!.end).toBeUndefined();
+    expect(t3.launches).toHaveLength(1);
+    expect(organized()).toEqual([]);
+    // each pass reads GitHub again, and T3 not at all
+    const reads = t3.projectionReads;
+    const asked = gh.reads.filter((r) => r === 'issueLabels owner/app#5').length;
+    await chooser.pass();
+    await until(() => gh.reads.filter((r) => r === 'issueLabels owner/app#5').length > asked);
+    expect(t3.projectionReads).toBe(reads);
+    expect(log.get(id)!.end).toBeUndefined();
+    // GitHub can't be read for a pass: still held, said once
+    gh.labelReadFails = 2;
+    await chooser.pass();
+    await chooser.pass();
+    await until(() => gh.labelReadFails === 0);
+    expect(lines.filter((l) => l.startsWith("Queue runner build: app#5: GitHub couldn't be read for its question"))).toHaveLength(1);
+    expect(log.get(id)!.end).toBeUndefined();
+    // answered: the label off, read on the next pass, and the build has ended
+    gh.labels['owner/app#5'] = ['ready-for-agent'];
+    await chooser.pass();
+    await until(() => organized().length === 1);
+    expect(log.get(id)!.end).toMatchObject({ outcome: 'done-no-pr', status: 'completed' });
+    await until(() => t3.launches.length === 2);
+  });
+
+  test("a build held on GitHub that goes on in T3 is followed on: its new run's end, with the label off, ends it", async () => {
+    gh.ready['owner/app'] = [issue(5)];
+    await makeLane().pass();
+    await watching('thread-1');
+    const id = log.jobs()[0]!.id;
+    gh.labels['owner/app#5'] = ['needs-info'];
+    t3.endRun('thread-1', 'completed');
+    await until(() => lines.some((l) => l.includes('waits on you on GitHub')));
+    // the user answers in the thread itself: a new run, and the builder takes the label off
+    t3.userWrites('thread-1');
+    await until(() => lines.includes('Queue runner build: app#5: its thread t3://thread/thread-1 goes on'));
+    gh.labels['owner/app#5'] = [];
+    t3.endRun('thread-1', 'completed');
+    await until(() => log.get(id)!.end !== undefined);
+    expect(log.get(id)!.end).toMatchObject({ outcome: 'done-no-pr' });
+  });
+
+  test('a build held on GitHub whose thread is deleted in T3 has ended: no run can go on in it', async () => {
+    gh.ready['owner/app'] = [issue(5)];
+    await makeLane().pass();
+    await watching('thread-1');
+    const id = log.jobs()[0]!.id;
+    gh.labels['owner/app#5'] = ['needs-info'];
+    t3.endRun('thread-1', 'completed');
+    await until(() => lines.some((l) => l.includes('waits on you on GitHub')));
+    t3.deleteThread('thread-1');
+    await until(() => log.get(id)!.end !== undefined);
+    expect(log.get(id)!.end).toMatchObject({ outcome: 'failed', status: 'gone' });
+  });
+
   test('T3 restarting while the run waits on a question cancels the run and keeps the question, answerable as a message: still waiting on the user, the repo held; the answer is a new turn, followed to its end (#210 F16)', async () => {
     gh.ready['owner/app'] = [issue(5), issue(6)];
     await makeLane().pass();

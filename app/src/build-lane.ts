@@ -10,7 +10,8 @@
 //   ->  the brief (src/briefs/build.ts)  ->  t3_thread_launch in a worktree from origin/<base>
 //   ->  its end from T3's thread (src/t3/thread-end.ts, `watchJobThread`): a run that waits on the
 //       user in T3 (a question, a login or secret card) hasn't ended, and its repo stays held until
-//       it has (#210)  ->  the end recorded in the job log
+//       it has (#210); nor has one whose issue has `needs-info` (its question on GitHub, read each
+//       pass, src/github-hold.ts)  ->  the end recorded in the job log
 //   ->  the thread settled (#68 story 5), unless it stopped on a usage limit (the limits
 //       ticket's)  ->  the settle recorded in the job log
 //
@@ -31,6 +32,7 @@ import { buildBrief } from './briefs/build.ts';
 import { reading } from './costs.ts';
 import { holdText } from './gate.ts';
 import type { GitHubWork } from './github.ts';
+import { QuestionHold } from './github-hold.ts';
 import type { Git } from './git.ts';
 import { settles, type Job, type JobEnd, type JobLog } from './job-log.ts';
 import type { Catalog, Jobs } from './jobs.ts';
@@ -100,6 +102,8 @@ export class BuildLane implements RepoJobLane {
    *  watched to its end (#210 F12). */
   private building = new Map<Promise<Job>, string>();
   private watches = new Set<{ stop(): void }>();
+  /** Each watched build's question on GitHub, read again each pass while it waits on one. */
+  private holds = new Set<QuestionHold>();
   private settler: ThreadSettler;
   /** PR lookups owed after one failed, under way, by job id. */
   private lookingUp = new Map<string, Promise<void>>();
@@ -169,6 +173,16 @@ export class BuildLane implements RepoJobLane {
     this.settler.owed('build');
     // a done build whose PR lookup failed: looked up again each pass, a restart's first included
     for (const job of this.d.log.prOwed()) if (job.kind === 'build') void this.lookUp(job);
+    // a build whose runs have ended with its question open on GitHub: GitHub read again, on its
+    // timer (the pass), never T3
+    for (const hold of this.holds) if (hold.waiting) hold.refresh();
+  }
+
+  /** The build's question open on GitHub: its issue still open and labelled `needs-info` (the
+   *  build brief has the builder swap `ready-for-agent` for it when it asks), or null. */
+  private async question(github: string, n: number): Promise<string | null> {
+    const issue = await this.d.github.issueLabels(github, n);
+    return issue.open && issue.labels.includes('needs-info') ? `${github}#${n} is labelled needs-info` : null;
   }
 
   /** The repo's next build: its next ticket, while it has no open PR, if the gate lets it in. Its
@@ -317,13 +331,19 @@ export class BuildLane implements RepoJobLane {
    *  hasn't ended, and the build stays open, its repo held and its cost in the gate, until it has.
    *  The gate measures it once, at that end, from the reading it was let in on (#210 F18). */
   private async watch(job: Job, github: string | null): Promise<Job> {
-    const w = watchJobThread(this.d.ws, { ...job, threadId: job.threadId! }, this.d.say, this.d.retry);
+    const hold = github ? new QuestionHold(() => this.question(github, job.issue), (l) => this.d.say(`${job.title}: ${l}`)) : undefined;
+    const w = watchJobThread(this.d.ws, { ...job, threadId: job.threadId! }, this.d.say, this.d.retry, hold);
+    if (hold) {
+      hold.recheck = () => w.recheck();
+      this.holds.add(hold);
+    }
     this.watches.add(w);
     let end: ThreadEnd;
     try {
       end = await w.end;
     } finally {
       this.watches.delete(w);
+      if (hold) this.holds.delete(hold);
     }
     this.d.gate.finished(job.id, end.outcome === 'usage-limit' ? { resetAt: end.resetAt } : undefined);
     const record: JobEnd = { outcome: end.outcome as JobEnd['outcome'], status: end.status };

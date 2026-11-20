@@ -47,6 +47,9 @@ export interface GitHubWork {
   /** The open issues labelled `ready-for-agent`, PRs left out. */
   readyIssues(repo: string): Promise<Issue[]>;
   issueState(repo: string, n: number): Promise<'open' | 'closed'>;
+  /** Whether an issue is open, and its label names: a build's question on GitHub is its issue's
+   *  `needs-info` (#211). */
+  issueLabels(repo: string, n: number): Promise<{ open: boolean; labels: string[] }>;
   /** The repo's branch names that start with `prefix`. */
   branches(repo: string, prefix: string): Promise<string[]>;
   openPulls(repo: string): Promise<Pull[]>;
@@ -279,6 +282,11 @@ export class GhGitHub implements GitHub, GitHubAccount, GitHubLabels, GitHubWork
 
   async issueState(repo: string, n: number): Promise<'open' | 'closed'> {
     return (await this.api([`repos/${repo}/issues/${n}`], `${repo}#${n}`)).state === 'open' ? 'open' : 'closed';
+  }
+
+  async issueLabels(repo: string, n: number): Promise<{ open: boolean; labels: string[] }> {
+    const issue = await this.api([`repos/${repo}/issues/${n}`], `${repo}#${n}`);
+    return { open: issue.state === 'open', labels: (issue.labels ?? []).map((l: any) => (typeof l === 'string' ? l : String(l?.name ?? ''))) };
   }
 
   async branches(repo: string, prefix: string): Promise<string[]> {
