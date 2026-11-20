@@ -10,16 +10,20 @@
 // `t3_thread_send`, then the wait `start` already used), and its database and transcript reads
 // through the WebSocket (`orchestration.subscribeThread`'s snapshot, which is the whole
 // projection, and `subscribeServerConfig`). Where the note found the MCP read hiding a state, the
-// read that shows it is used:
+// read that shows it is added:
 //
 // - **Waiting on the user.** `pendingRequestCount` counts pending runtime requests only, so a
 //   secret card reads 0 with the run `running`, and `t3_thread_wait` times out on it as on an
-//   approval. T3's shell (`orchestration.getThreadFamily`) has `pendingRuntimeRequest` for both
-//   (the note, section 1, Waiting on the user). `_finish` and `show` read it there.
+//   approval (the note, section 1, Waiting on the user). `_finish` and `show` add the run's own
+//   secret cards still `waiting` (its `secret_request` items on the activity view). A card counts
+//   only for the run it belongs to: T3's shell (`pendingRuntimeRequest`) also shows a link card
+//   after its run ended (`waitsOnUser`, the note), which Python's read never counted.
 //
 // TypeScript's differences only: every call is async, a Python dataclass is a frozen class built
 // from its fields by name, and a field Python reads as `x['key']` is an error when missing.
-import { resolve } from 'node:path';
+import { realpath } from 'node:fs/promises';
+import { homedir } from 'node:os';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { when } from './state.ts';
 import type { T3Mcp } from './t3/mcp.ts';
 import { T3Error } from './t3/seams.ts';
@@ -72,6 +76,16 @@ const normcase = (p: string) => (process.platform === 'win32' ? resolve(p).toLow
 /** A relative folder is read from the runner's working directory, as the CLI read it: a served
  *  repo's path stays as config.toml wrote it ('.'), T3 holds the absolute root. */
 const _same_folder = (a: string, b: string) => normcase(a) === normcase(b);
+
+/** `~` and `~/...` from the home folder, as T3's CLI expands a `--project` (`expandHomePath`). */
+function _expand_home(p: string): string {
+  if (p === '~') return homedir();
+  if (p.startsWith('~/') || p.startsWith('~\\')) return join(homedir(), p.slice(2));
+  return p;
+}
+
+/** The path with its links resolved, or as it is when that fails (the CLI's `realPath`). */
+const _real = (p: string): Promise<string> => realpath(p).catch(() => p);
 
 export class RunResult {
   readonly exit_code!: number;        // 0 completed, 1 ended otherwise, 2 waiting for an answer
@@ -161,30 +175,53 @@ function _thread(raw: Json): Thread {
 /** A message item's role, as `t3 thread show` names it. */
 const ROLES: Readonly<Record<string, string>> = { user_message: 'user', assistant_message: 'assistant' };
 
-/** T3 Code through its local server: MCP tools for the thread calls, the WebSocket for the shell's
- *  waits-on-the-user. */
+/** T3 Code through its local server's MCP tools. */
 export class T3Server {
   readonly mcp: Pick<T3Mcp, 'call'>;
-  readonly ws: Pick<T3Ws, 'request'>;
   readonly effort_option: EffortOption;
 
-  constructor(mcp: Pick<T3Mcp, 'call'>, ws: Pick<T3Ws, 'request'>, effort_option: EffortOption) {
+  constructor(mcp: Pick<T3Mcp, 'call'>, effort_option: EffortOption) {
     this.mcp = mcp;
-    this.ws = ws;
     this.effort_option = effort_option;
+  }
+
+  /** Every T3 project: each page of `t3_project_list`. */
+  private async _projects(): Promise<Json[]> {
+    const projects: Json[] = [];
+    let cursor: Json = 0;
+    while (cursor !== null && cursor !== undefined) {
+      const page = obj(await this.mcp.call('t3_project_list', { cursor, limit: 100 }));
+      projects.push(...list(page.projects));
+      cursor = get(page, 'nextCursor');
+    }
+    return projects;
   }
 
   /** The id of the T3 project whose folder is `folder`. */
   private async _project(folder: string): Promise<string> {
-    let cursor: Json = 0;
-    while (cursor !== null && cursor !== undefined) {
-      const page = obj(await this.mcp.call('t3_project_list', { cursor, limit: 100 }));
-      for (const p of list(page.projects)) {
-        if (get(p, 'workspaceRoot') && _same_folder(p.workspaceRoot, folder)) return p.id;
-      }
-      cursor = get(page, 'nextCursor');
+    for (const p of await this._projects()) {
+      if (get(p, 'workspaceRoot') && _same_folder(p.workspaceRoot, folder)) return p.id;
     }
     throw new T3Error(`No T3 Code project matches '${folder}'`);
+  }
+
+  /** The project `t3 thread list --project` names (`resolveProject` in T3's binCli): a project id,
+   *  else the project whose folder holds the path, both with their links resolved, the deepest
+   *  folder when they nest. A relative path is read from the working directory. */
+  private async _project_holding(identifier: string): Promise<string> {
+    const projects = await this._projects();
+    const byId = projects.find((p) => get(p, 'id') === identifier);
+    if (byId !== undefined) return byId.id;
+    const target = await _real(resolve(_expand_home(identifier)));
+    let deepest: { id: string; root: string } | null = null;
+    for (const p of projects) {
+      const root = await _real(need(p, 'workspaceRoot'));
+      const rel = relative(root, target);
+      const inside = rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
+      if (inside && (deepest === null || root.length > deepest.root.length)) deepest = { id: p.id, root };
+    }
+    if (deepest === null) throw new T3Error(`No T3 Code project holds '${identifier}'`);
+    return deepest.id;
   }
 
   /** `t3_thread_launch` with the model and its effort named: `{threadId, runId, ...}`. */
@@ -227,25 +264,26 @@ export class T3Server {
     return obj(await this.mcp.call('t3_thread_wait', { threadId: thread_id, runId: run_id, timeoutMs: timeout_ms }));
   }
 
-  /** Whether the thread waits on the user, as T3's shell says (`pendingRuntimeRequest`): an
-   *  approval, a question or a secret card. `pendingRequestCount` on the MCP read misses a secret
-   *  card, and `t3_thread_wait` times out on both (the note, section 1). A thread the shell doesn't
-   *  list (archived, deleted) waits on nobody. */
-  private async _waits_on_user(thread_id: string): Promise<boolean> {
-    const family = obj(await this.ws.request('orchestration.getThreadFamily', { threadId: thread_id }));
-    const shell = list(family.threads).find((t) => get(t, 'id') === thread_id);
-    return Boolean(get(shell ?? {}, 'pendingRuntimeRequest'));
+  /** How many of `run_id`'s secret cards still wait on the user: its `secret_request` items on
+   *  the activity view, `waiting` (the note, section 1: a secret card is a turn item, never a
+   *  runtime request, so `pendingRequestCount` leaves it out). Another run's card isn't this
+   *  run's question. */
+  private async _cards_waiting(thread_id: string, run_id: string | null): Promise<number> {
+    if (!run_id) return 0;
+    return (await this._items(thread_id, 'activity')).filter((i) => get(i, 'runId') === run_id
+      && get(i, 'type') === 'secret_request' && get(i, 'status') === 'waiting').length;
   }
 
   /** Waits for the run as `t3 thread start --wait --json` does (`waitForRun` and `finishRun` in
-   *  T3's binCli): slices of `t3_thread_wait`; a thread waiting on the user after a timed-out
-   *  slice is a run waiting for an answer, unless one more short wait ends it. */
+   *  T3's binCli): slices of `t3_thread_wait`; a pending request after a timed-out slice, or a
+   *  secret card of this run, is a run waiting for an answer, unless one more short wait ends it. */
   private async _finish(thread_id: string, run_id: string): Promise<RunResult> {
     let waited: Json;
     for (;;) {
       waited = await this._wait(thread_id, run_id, WAIT_SLICE_MS);
       if (!waited.timedOut) break;
-      if (await this._waits_on_user(thread_id)) {
+      const read = obj(await this.mcp.call('t3_thread_read', { threadId: thread_id, limit: 1, runLimit: 1 }));
+      if (get(obj(get(read, 'thread')), 'pendingRequestCount') || await this._cards_waiting(thread_id, run_id)) {
         waited = await this._wait(thread_id, run_id, 1);
         if (waited.timedOut) {
           return new RunResult({ exit_code: 2, thread_id, run_id, status: 'waiting', reply: null, error: null });
@@ -312,12 +350,13 @@ export class T3Server {
   }
 
   /** The thread and its last `messages` messages (`t3 thread show --messages <n> --json`), each
-   *  in full. Its pending requests count a secret card too, which the MCP read leaves out. */
+   *  in full. Its pending requests add its live run's waiting secret cards (`activeRunId`), which
+   *  the MCP read leaves out. */
   async show(thread_id: string, messages = 3): Promise<[Thread, Message[]]> {
     const read = obj(await this.mcp.call('t3_thread_read', { threadId: thread_id, limit: 1, runLimit: 1 }));
     const raw = need(read, 'thread');
-    const waits = await this._waits_on_user(thread_id);
-    const thread = _thread({ ...raw, pendingRequestCount: get(raw, 'pendingRequestCount') || (waits ? 1 : 0) });
+    const cards = await this._cards_waiting(thread_id, get(raw, 'activeRunId'));
+    const thread = _thread({ ...raw, pendingRequestCount: (get(raw, 'pendingRequestCount') || 0) + cards });
     const said = (await this._items(thread_id, 'messages')).filter((i) => Object.hasOwn(ROLES, get(i, 'type') ?? ''));
     const last = messages > 0 ? said.slice(-messages) : [];
     const out: Message[] = [];
@@ -325,18 +364,19 @@ export class T3Server {
     return [thread, out];
   }
 
-  /** The threads of the project whose folder is `project` (`t3 thread list --project`), every
-   *  page: T3 lists the active ones, newest first. */
+  /** The threads of the project `project` names (`t3 thread list --project`: a project id or a
+   *  path inside its folder), every page, as T3's CLI lists them: the active ones, newest first,
+   *  without delegated threads (`includeSubagents: false`). */
   async list(project: string): Promise<Thread[]> {
-    const projectId = await this._project(project);
+    const projectId = await this._project_holding(project);
     const threads: Thread[] = [];
-    let cursor: Json = null;
-    for (;;) {
-      const page = obj(await this.mcp.call('t3_thread_list', { projectId, limit: 100, ...(cursor === null ? {} : { cursor }) }));
+    let cursor: Json = 0;
+    while (cursor !== null && cursor !== undefined) {
+      const page = obj(await this.mcp.call('t3_thread_list', { projectId, includeSubagents: false, limit: 100, cursor }));
       threads.push(...list(page.threads).map(_thread));
       cursor = get(page, 'nextCursor');
-      if (cursor === null || cursor === undefined) return threads;
     }
+    return threads;
   }
 
   /** Settles a thread the runner started: it leaves T3's sidebar and stays readable. */
@@ -456,27 +496,33 @@ export class T3Store {
     return [true, _reset(failure)];
   }
 
-  /** The thread's last real call: its newest provider turn's `tokenUsage`, where `usedTokens` is
-   *  the call's whole prompt, cached or not, plus its reply (input plus output in every recorded
-   *  turn), and the request started at `promptCacheExpiresAt` less `promptCacheTtlMs`, the start
-   *  T3 counts the cache's hour from. A turn with no `tokenUsage` (a run that failed before the
-   *  provider answered) isn't a call. */
+  /** The thread's last real call: the newest provider turn `tokenUsage` a call wrote, by its
+   *  `updatedAt`. T3 writes a call's usage from the provider's (its adapter's
+   *  `...ProviderTurnTokenUsage` in server.asar): `inputTokens`, the whole prompt, cached or not, and `outputTokens`, the
+   *  reply, whose sum is Python's. A compaction writes only a count (`usedTokens`, with no input
+   *  or output: `emitContextUsage`), which isn't a call, so the call before it is the last. A turn
+   *  with no `tokenUsage` (a run that failed before the provider answered) isn't a call either.
+   *
+   *  The request's start: T3 keeps it only inside the cache expiry it writes on a call that wrote
+   *  cache (`promptCacheExpiresAt`, the request's start plus `promptCacheTtlMs`). A call that only
+   *  read the cache gets neither, and its start is read as when T3 last recorded the call's usage
+   *  (`updatedAt`, while its reply streamed), which T3 writes on every call. */
   async last_call(thread_id: string): Promise<LastCall> {
     const projection = await this._projection(thread_id);
     let newest: { at: Date; usage: Json } | null = null;
     for (const turn of list(projection?.providerTurns)) {
       const usage = get(turn, 'tokenUsage');
       if (usage === null || typeof usage !== 'object') continue;
+      if (typeof get(usage, 'inputTokens') !== 'number' || typeof get(usage, 'outputTokens') !== 'number') continue;
       const at = _when(get(usage, 'updatedAt'));
       if (at !== null && (newest === null || at > newest.at)) newest = { at, usage };
     }
     if (newest === null) return new LastCall(null, null);
-    const { usage } = newest;
+    const { at, usage } = newest;
     const expires = _when(get(usage, 'promptCacheExpiresAt'));
     const ttl = get(usage, 'promptCacheTtlMs');
-    const started = expires !== null && typeof ttl === 'number' ? new Date(expires.getTime() - ttl) : null;
-    const tokens = typeof get(usage, 'usedTokens') === 'number' ? usage.usedTokens : null;
-    return new LastCall(started, tokens, newest.at);
+    const started = expires !== null && typeof ttl === 'number' ? new Date(expires.getTime() - ttl) : at;
+    return new LastCall(started, usage.inputTokens + usage.outputTokens, at);
   }
 
   async context_tokens(thread_id: string): Promise<number | null> {

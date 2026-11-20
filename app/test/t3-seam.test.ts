@@ -4,7 +4,10 @@
 // ported onto the MCP calls that replace the CLI; the one on Python's missing MCP client is left
 // out (the seam always has one). The cases after `ShowAndListTest` are the port's own: the reads
 // that replace Python's database and transcripts, and the calls test_t3.py doesn't cover.
-import { describe, expect, test } from 'vitest';
+import { mkdir, mkdtemp, rm, symlink } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, describe, expect, test } from 'vitest';
 import {
   LastCall, T3Error, T3Server, T3Store, auto_resume_warning, find_job_thread, settle_quietly,
 } from '../src/t3-seam.ts';
@@ -29,7 +32,7 @@ function t3(): RecordedT3 {
 // Each model's effort option, from T3's recorded catalog: Claude's `effort`, Codex's `reasoningEffort`
 const CATALOG = catalogFromConfig(value(recording('ws-subscribeServerConfig-snapshot')).config);
 const effortOption = (provider: string, m: string) => model(CATALOG, { provider, model: m })?.effortOption ?? null;
-const seam = (r: RecordedT3) => new T3Server(r.mcp, r.ws, effortOption);
+const seam = (r: RecordedT3) => new T3Server(r.mcp, effortOption);
 const onA = (name: string) => about(recording(name), A);
 
 /** A timeline item shaped as the recorded reply of thread A. */
@@ -41,6 +44,21 @@ const item = (type: string, text: string, run = RUN_A, extra: object = {}) =>
 const reads = (items: any[]) => (args: any) => withContent(onA('mcp-thread_read-completed'), (c) => (args.itemId
   ? { ...c, items: [{ ...item('assistant_message', ' and the rest.'), itemId: args.itemId }] }
   : { ...c, items, hasMore: false, nextPosition: items.length }));
+
+/** `t3_thread_read` answered by what it asks for: the thread (no view), the activity view, or the
+ *  messages view (the thread's recording when none is given). */
+const byView = (views: { thread: any; activity?: any; messages?: any }) => (args: any) => {
+  const answer = args.view === 'activity' ? views.activity : args.view === 'messages' ? views.messages : views.thread;
+  return typeof answer === 'function' ? answer(args) : answer ?? views.thread;
+};
+
+// Thread A's reads while its run waits on the user. T3's MCP read counts an approval as a pending
+// request but not a secret card (the note, section 1): the run's waiting secret_request items on
+// the activity view are read beside it.
+const WAITING: Record<string, any> = {
+  'approval-pending': { thread: onA('mcp-thread_read-approval-pending') },
+  'secret-pending': { thread: onA('mcp-thread_read-secret-pending'), activity: onA('mcp-thread_read-activity-secret-pending') },
+};
 
 describe('StartTest', () => {
   test('launches with the model its effort and a worktree in full access', async () => {
@@ -81,7 +99,6 @@ describe('StartTest', () => {
   test('it waits in slices until the run ends', async () => {
     const running = onA('mcp-thread_wait-running');
     const r = t3().answer('t3_thread_wait', running, running, onA('mcp-thread_wait-completed'))
-      .answerWs('orchestration.getThreadFamily', onA('ws-getThreadFamily-shell-running'))
       .answer('t3_thread_read', onA('mcp-thread_read-completed'));
     const result = await seam(r).start(SANDBOX.workspaceRoot, 'Do it.', { title: 'A job', ...CLAUDE });
     expect(result.exit_code).toBe(0);
@@ -97,11 +114,8 @@ describe('StartTest', () => {
     expect(r.argsOf('t3_thread_read')[0].view).toBe('activity');
   });
 
-  // T3's MCP read counts a secret card as no pending request (the note, section 1): the shell is
-  // read instead, which shows an approval and a secret card alike
   test.each(['secret-pending', 'approval-pending'])('a run waiting for an answer is exit 2 (%s)', async (state) => {
-    const r = t3().answer('t3_thread_wait', onA(`mcp-thread_wait-${state}`))
-      .answerWs('orchestration.getThreadFamily', onA(`ws-getThreadFamily-shell-${state}`));
+    const r = t3().answer('t3_thread_wait', onA(`mcp-thread_wait-${state}`)).answer('t3_thread_read', byView(WAITING[state]));
     const result = await seam(r).start(SANDBOX.workspaceRoot, 'Do it.', { title: 'A job', ...CLAUDE });
     expect([result.exit_code, result.status, result.reply, result.error]).toStrictEqual([2, 'waiting', null, null]);
     expect(r.argsOf('t3_thread_wait').map((a) => a.timeoutMs)).toStrictEqual([15000, 1]);
@@ -109,10 +123,22 @@ describe('StartTest', () => {
 
   test('a pending request that just ended is the runs end', async () => {
     const r = t3().answer('t3_thread_wait', onA('mcp-thread_wait-secret-pending'), onA('mcp-thread_wait-completed'))
-      .answerWs('orchestration.getThreadFamily', onA('ws-getThreadFamily-shell-secret-pending'))
-      .answer('t3_thread_read', onA('mcp-thread_read-completed'));
+      .answer('t3_thread_read', byView({ ...WAITING['secret-pending'], messages: onA('mcp-thread_read-completed') }));
     const result = await seam(r).start(SANDBOX.workspaceRoot, 'Do it.', { title: 'A job', ...CLAUDE });
     expect([result.exit_code, result.reply]).toStrictEqual([0, 'ok']);
+  });
+
+  test('a card of an earlier run is not the new runs question', async () => {
+    // T3's shell shows a link card after its run ended (the note: `waitsOnUser`), and Python's read
+    // counts no card: thread A's run 1 still has D's waiting card while the sent run 2 works
+    const run2 = RUN_A.replace(/:1$/, ':2');
+    const onRun2 = (rec: any) => withContent(rec, (c) => ({ ...c, runId: run2 }));
+    const r = new RecordedT3().answer('t3_thread_send', onRun2(onA('mcp-thread_send-unknown-model')))
+      .answer('t3_thread_wait', onRun2(onA('mcp-thread_wait-secret-pending')), onRun2(onA('mcp-thread_wait-completed')))
+      .answer('t3_thread_read', byView({ ...WAITING['secret-pending'], messages: reads([item('assistant_message', 'Done.', run2)]) }));
+    const result = await seam(r).send(A, 'Go on.');
+    expect([result.exit_code, result.run_id, result.status, result.reply]).toStrictEqual([0, run2, 'completed', 'Done.']);
+    expect(r.argsOf('t3_thread_wait').map((a) => a.timeoutMs)).toStrictEqual([15000, 15000]);
   });
 
   test('a folder with no t3 project raises', async () => {
@@ -147,8 +173,7 @@ describe('ShowAndListTest', () => {
   test('show gives the thread and its latest messages', async () => {
     const read = recording('mcp-thread_read-approval-interrupted');
     const thread_id = recordedThread(read);
-    const r = new RecordedT3().answer('t3_thread_read', read)
-      .answerWs('orchestration.getThreadFamily', recording('ws-getThreadFamily-shell-approval-interrupted'));
+    const r = new RecordedT3().answer('t3_thread_read', read);
     const [thread, messages] = await seam(r).show(thread_id, 2);
     expect(r.argsOf('t3_thread_read')[0]).toStrictEqual({ threadId: thread_id, limit: 1, runLimit: 1 });
     expect(thread.status).toBe('interrupted');
@@ -162,18 +187,57 @@ describe('ShowAndListTest', () => {
   });
 
   test('list gives a projects threads', async () => {
-    const first = recording('mcp-thread_list-sandbox');      // 5 of the project's threads, from 5 on next
-    const rest = recording('mcp-thread_list-titleContains'); // a last page
-    const r = new RecordedT3().answer('t3_project_list', PROJECTS).answer('t3_thread_list', first, rest);
+    // No recording has a project with more than 100 threads, or a running one: the two pages of
+    // T3's answer to the CLI's 100-row request are built from the recorded rows, the first running
+    const sandbox = recording('mcp-thread_list-sandbox');
+    const rows = content(sandbox).threads;
+    const row = (i: number) => ({ ...rows[i % rows.length], threadId: `mcp:row-${i}`, title: `Thread ${i}` });
+    const page = (from: number, to: number, nextCursor: number | null) => withContent(sandbox,
+      (c) => ({ ...c, threads: Array.from({ length: to - from }, (_, k) => row(from + k)), nextCursor, total: 103 }));
+    const first = withContent(page(0, 100, 100), (c) => ({ ...c, threads: [{ ...c.threads[0], status: 'running' }, ...c.threads.slice(1)] }));
+    const r = new RecordedT3().answer('t3_project_list', PROJECTS).answer('t3_thread_list', first, page(100, 103, null));
     const threads = await seam(r).list(SANDBOX.workspaceRoot);
     expect(r.argsOf('t3_thread_list')).toStrictEqual([
-      { projectId: SANDBOX.id, limit: 100 }, { projectId: SANDBOX.id, limit: 100, cursor: 5 }]);
-    expect(threads.map((t) => t.title)).toStrictEqual([...content(first).threads, ...content(rest).threads].map((t: any) => t.title));
-    expect(threads[0]!.title).toBe('Queue runner build: queue-runner sandbox#295597');
-    expect(threads[0]!.created_at).toBe('2026-11-20T04:34:55.951Z');
+      { projectId: SANDBOX.id, includeSubagents: false, limit: 100, cursor: 0 },
+      { projectId: SANDBOX.id, includeSubagents: false, limit: 100, cursor: 100 }]);
+    expect(threads.map((t) => t.title)).toStrictEqual(Array.from({ length: 103 }, (_, i) => `Thread ${i}`));
+    expect(threads[0]!.active).toBe(true);
+    expect(threads[1]!.active).toBe(false);
+    expect(threads[0]!.created_at).toBe(rows[0].createdAt);
     expect(threads[0]!.settled).toBe(true);
-    const c2 = threads.find((t) => t.title.startsWith('t3-api-facts C2'))!;
-    expect([c2.status, c2.active, c2.settled]).toStrictEqual(['interrupted', false, false]);
+  });
+
+  describe('list names its project as t3 thread list --project does', () => {
+    let dir: string | null = null;
+    afterEach(async () => {
+      if (dir !== null) await rm(dir, { recursive: true, force: true });
+      dir = null;
+    });
+
+    /** The sandbox and a project nested in its folder, at `root` and `root/inner`. */
+    const projects = (root: string) => withContent(PROJECTS, (c) => ({ ...c, nextCursor: null, projects: [
+      { ...SANDBOX, workspaceRoot: root }, { ...SANDBOX, id: 'proj-inner', workspaceRoot: join(root, 'inner') }] }));
+    const listed = async (r: RecordedT3, project: string) => {
+      await seam(r.answer('t3_thread_list', recording('mcp-thread_list-titleContains'))).list(project);
+      return r.argsOf('t3_thread_list')[0].projectId;
+    };
+
+    test('by its id', async () => {
+      expect(await listed(new RecordedT3().answer('t3_project_list', PROJECTS), SANDBOX.id)).toBe(SANDBOX.id);
+    });
+
+    test('by a path inside its folder, the deepest project when they nest, links resolved', async () => {
+      dir = await mkdtemp(join(tmpdir(), 'qr-t3-seam-'));
+      const root = join(dir, 'repo');
+      await mkdir(join(root, 'inner', 'src'), { recursive: true });
+      await mkdir(join(root, 'docs'));
+      await symlink(root, join(dir, 'link'), 'junction');
+      const r = () => new RecordedT3().answer('t3_project_list', projects(root));
+      expect(await listed(r(), join(root, 'docs'))).toBe(SANDBOX.id);
+      expect(await listed(r(), join(root, 'inner', 'src'))).toBe('proj-inner');
+      expect(await listed(r(), join(dir, 'link', 'docs'))).toBe(SANDBOX.id);
+      await expect(seam(r()).list(dir)).rejects.toBeInstanceOf(T3Error);
+    });
   });
 
   test('send waits for the reply', async () => {
@@ -196,7 +260,7 @@ describe('ShowAndListTest', () => {
   test('send waiting for an answer is exit 2', async () => {
     const r = new RecordedT3().answer('t3_thread_send', onA('mcp-thread_send-unknown-model'))
       .answer('t3_thread_wait', onA('mcp-thread_wait-secret-pending'))
-      .answerWs('orchestration.getThreadFamily', onA('ws-getThreadFamily-shell-secret-pending'));
+      .answer('t3_thread_read', byView(WAITING['secret-pending']));
     const result = await seam(r).send(A, 'Go on.');
     expect([result.exit_code, result.status]).toStrictEqual([2, 'waiting']);
   });
@@ -206,16 +270,23 @@ describe('the port: what replaces the CLI and the database', () => {
   test('show counts a secret card as a pending request, which the MCP read leaves out', async () => {
     const read = recording('mcp-thread_read-secret-pending');
     expect(content(read).thread.pendingRequestCount).toBe(0);
-    const r = new RecordedT3().answer('t3_thread_read', read)
-      .answerWs('orchestration.getThreadFamily', recording('ws-getThreadFamily-shell-secret-pending'));
+    const r = new RecordedT3().answer('t3_thread_read', byView({ thread: read, activity: recording('mcp-thread_read-activity-secret-pending') }));
     const [thread] = await seam(r).show(recordedThread(read));
     expect([thread.status, thread.active, thread.pending_requests]).toStrictEqual(['running', true, 1]);
   });
 
+  test('show counts no card of a run that is not the live one', async () => {
+    // D's card is on run 1; with run 2 live, it is not the thread's question
+    const read = withContent(recording('mcp-thread_read-secret-pending'), (c) => ({
+      ...c, thread: { ...c.thread, activeRunId: c.thread.activeRunId.replace(/:1$/, ':2') } }));
+    const r = new RecordedT3().answer('t3_thread_read', byView({ thread: read, activity: recording('mcp-thread_read-activity-secret-pending') }));
+    const [thread] = await seam(r).show(recordedThread(read));
+    expect(thread.pending_requests).toBe(0);
+  });
+
   test('show gives each of the last messages in full', async () => {
     const said = [item('user_message', 'Do it.'), item('assistant_message', 'Red or blue?', RUN_A, { textTruncated: true, nextTextOffset: 12 })];
-    const r = new RecordedT3().answer('t3_thread_read', reads(said))
-      .answerWs('orchestration.getThreadFamily', onA('ws-getThreadFamily-shell-settled'));
+    const r = new RecordedT3().answer('t3_thread_read', reads(said));
     const [, messages] = await seam(r).show(A, 1);
     expect(messages.map((m) => [m.role, m.text, m.run_id])).toStrictEqual([['assistant', 'Red or blue? and the rest.', RUN_A]]);
   });
@@ -245,7 +316,7 @@ describe('the port: what replaces the CLI and the database', () => {
     }));
     const read = recording('mcp-thread_read-completed');
     const r = new RecordedT3().answer('t3_project_list', PROJECTS).answer('t3_thread_list', list)
-      .answer('t3_thread_read', read).answerWs('orchestration.getThreadFamily', recording('ws-getThreadFamily-shell-settled'));
+      .answer('t3_thread_read', read);
     const job = { thread_id: null, started_at: '2026-11-20T17:04:00+00:00', title: 'A job' };
     expect((await find_job_thread(seam(r), job, SANDBOX.workspaceRoot))!.thread_id).toBe(A);
     // C2 is the newest of those created since 17:03:55 (B2, C, D, E, C2): the one read
@@ -306,6 +377,31 @@ describe('T3Store: the thread facts Python read from the database and transcript
     const s = store(snap);
     expect(await s.cache_expires_at(recordedThread(snap))).toStrictEqual(new Date('2026-11-20T18:03:00.903Z'));
     expect((await s.last_call(recordedThread(snap))).tokens).toBe(55447);
+  });
+
+  test('a call that only read the cache starts when t3 recorded it', async () => {
+    // T3 writes no cache TTL or expiry on a call that wrote no cache (claudeProviderTurnTokenUsage,
+    // source); no recording has one, so the recorded call is made one
+    const snap = withValue(recording('ws-subscribeThread-snapshot-completed'), (v) => ({ ...v, projection: { ...v.projection,
+      providerTurns: v.projection.providerTurns.map((t: any) => {
+        const { promptCacheTtlMs: _ttl, promptCacheExpiresAt: _expires, ...usage } = t.tokenUsage;
+        return { ...t, tokenUsage: { ...usage, cachedInputTokens: usage.inputTokens - 2 } };
+      }) } }));
+    expect(await store(snap).last_call(recordedThread(snap))).toStrictEqual(
+      new LastCall(new Date('2026-11-20T17:02:07.564Z'), 47888, new Date('2026-11-20T17:02:07.564Z')));
+  });
+
+  test('a compaction is not a call: the call before it is the last', async () => {
+    // a compaction writes only a count on its turn (emitContextUsage, source): the second turn's,
+    // after the first turn's call
+    const snap = withValue(recording('ws-subscribeThread-snapshot-deleted'), (v) => ({ ...v, projection: { ...v.projection,
+      providerTurns: v.projection.providerTurns.map((t: any) => (t.ordinal === 2
+        ? { ...t, tokenUsage: { usedTokens: 9000, maxTokens: t.tokenUsage.maxTokens, updatedAt: '2026-11-20T17:10:00.000Z' } } : t)) } }));
+    const call = value(snap).projection.providerTurns.find((t: any) => t.ordinal === 1).tokenUsage;
+    const last = await store(snap).last_call(recordedThread(snap));
+    expect(last.tokens).toBe(call.inputTokens + call.outputTokens);
+    expect(last.at).toStrictEqual(new Date(call.updatedAt));
+    expect(last.started).toStrictEqual(new Date(new Date(call.promptCacheExpiresAt).getTime() - call.promptCacheTtlMs));
   });
 
   test('a run that failed before claude answered has no last call', async () => {

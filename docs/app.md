@@ -755,17 +755,21 @@ Claude's files.
 
 - **The CLI's calls** are T3's MCP tools: `show` is `t3_thread_read` (the thread, then its
   `messages` view paged to the end, each of the last messages read on in full), `list` is
-  `t3_thread_list` on the folder's project, every page, and `send` is `t3_thread_send` (`mode:
-  queue`) and then the wait `start` uses.
-- **Waiting on the user** is read from T3's shell (`orchestration.getThreadFamily`'s
-  `pendingRuntimeRequest`), not the MCP read's `pendingRequestCount`, which leaves a secret card
-  out. `start` and `send` take a timed-out wait slice with one as a run waiting for an answer
-  (exit 2), and `show` counts it as a pending request.
+  `t3_thread_list` as T3's CLI sends it (`includeSubagents: false`, every page) on the project
+  the CLI's `--project` names (an id, or a path inside its folder, links resolved), and `send` is
+  `t3_thread_send` (`mode: queue`) and then the wait `start` uses.
+- **Waiting on the user** is the MCP read's `pendingRequestCount`, as Python reads it, plus the
+  run's own secret cards still `waiting` (its `secret_request` items on the activity view), which
+  that count leaves out. `start` and `send` take a timed-out wait slice with either as a run
+  waiting for an answer (exit 2), and `show` counts them for its live run. A card of another run
+  doesn't count, so T3's shell, which also shows a link card after its run ended, isn't read.
 - **The database and transcripts** are the thread's projection, the first value of
   `orchestration.subscribeThread` (the whole projection, where `getThreadProjection` is cut to
   its last items). A run's failure is its `error` turn items; its last call is the newest provider
-  turn's `tokenUsage` (`usedTokens`, which is the call's whole prompt plus its reply,
-  and the cache start, `promptCacheExpiresAt` less `promptCacheTtlMs`); its effort is the run's
+  turn `tokenUsage` a call wrote (`inputTokens` plus `outputTokens`, the call's whole prompt plus
+  its reply; a compaction writes only a count and is skipped), started at `promptCacheExpiresAt`
+  less `promptCacheTtlMs`, or at its `updatedAt` on a call that wrote no cache, where T3 keeps no
+  start; its effort is the run's
   model selection, since T3 reports no effort a call used. T3's resume-after-limits setting is
   `subscribeServerConfig`'s `settings.autoResumeLimitedThreads`.
 - **A model's effort option** comes from T3's catalog (each model's `effortOption`), which the
