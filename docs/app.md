@@ -94,7 +94,9 @@ the real clock or runs on a real timer that no `vi.useFakeTimers()` around it fa
   names (`sol-review` status, `sol-findings` ledger, `<!-- sol-finding -->` marks) stay as they
   are, because open PRs in served repos read them across the cutover. So does the job branch
   prefix (`JOB_BRANCH_PREFIX`, `src/picker.ts`; `_JOB_BRANCH_PREFIX` in the ported picker), since a branch today's runner left counts as in
-  flight, and a repo's own `CLAUDE.md` is looked for by name: the test allows those two literals.
+  flight, a repo's own `CLAUDE.md` is looked for by name, and the review comment's two bylines
+  are Python's text (`SOL_BYLINE` and `FALLBACK_BYLINE`, `src/review-ledger.ts`): the test allows
+  those four literals.
 - **The briefs stay self-contained:** no skill names, no slash commands, nothing outside the repo
   (today's `tests/test_templates.py` rule, ported with the templates).
 - **Live checks** are scripts under `app/live/` that refuse any project but the sandboxes, like
@@ -466,37 +468,11 @@ every open PR in a served repo without a review on its newest commit gets one, w
   that fails (a git, GitHub or T3 step, a launch T3 refused, or the repo no longer served when it's
   asked again right before the launch) launched nothing: `not-started`, which doesn't count
   against H, and the PR rests 5 minutes.
-- **Decide and post** (`src/review/ledger.ts`, `src/review/post.ts`, today's `ledger.py` and
-  `post.py`): the verdict from the reply's last `sol-findings` block; clean means no Important
-  finding open. **What blocks** (#155): an Important finding needs its file and line and how it
-  comes up in real use (its `scenario`), or, for a problem that isn't a bug, a cost and the rule
-  it breaks; one without is read as a nit. The brief tells the reviewer a bug that needs a made-up
-  situation is a nit. A missing or thin screenshot is a nit: the reviewer marks that finding
-  `"missing_screenshot": true`, and only the mark counts, never its wording (F16); a shot that shows the screen
-  wrong is Important, and text-only output needs none. Then each new Pre-existing finding filed once as a `needs-triage` issue, the
-  comment (its visible ledger and hidden marker), `sol-review` on H only, and a row in the app's
-  Review table in the PR body, on every repo (#36): Step (the comment's link), Reviewer, Time,
-  Commit, Verdict. The comment and the Reviewer cell name who reviewed: the model and effort as T3 labels
-  them, and on the fallback `, fallback while <provider> is out of usage` (`reviewerName`). gh writes send their JSON on stdin (`--input -`). A comment
-  that fails to post is posted again after a wait, unless the PR's comments show it got there
-  after all. Once the comment is on the PR, the status and the row are tried again after each
-  wait until both land, the job left open meanwhile: a stop or a restart carries on there, finds
-  the comment posted, and sets them (F14). The run folder keeps `brief.md`, `reply.md`, `comment.md`, `decision.json`.
-- **It starts clean** (#155): the app reads only what it posted itself. Its review comments carry
-  their own marker (`<!-- queue-runner-app review round=N verdict=V sha=H findings=<base64> -->`);
-  the Python runner's and the old script's (`<!-- sol-pr-review`) and hand-posted ones
-  (`<!-- sol-review`) are never read, so a PR one of them reviewed gets a fresh review 1 (they
-  still count as the runner's posts, not something a person said). Its Review table sits between
-  `<!-- queue-runner-app review-table -->` and `<!-- /queue-runner-app review-table -->`, and only
-  that table is ever changed: a body without it gets one at the end of its `## Review` section
-  (below the Python runner's table, which is left as it is), or a new section after `## Evidence`.
-  Markers and headings inside a fenced block are only text. A follow-up issue is known as the
-  app's by its own mark (`<!-- queue-runner-app finding <repo>#<n> <id> -->`) or the same title,
-  never by another runner's footer, whose finding IDs are its own reviews'.
-  Each is filed before the comment, and a filing that fails (or open issues that can't be read)
-  holds the comment back: the post is tried again after the wait, as a comment that fails to post
-  is, and on a restart, so a review never finishes with a follow-up unfiled (#155 F24). The
-  ledger's `unfiled` is the Python runner's and older comments' only.
+- **Decide and post:** the rules are Python's, ported in The review ledger, below. The lane still
+  decides and posts through `src/review/ledger.ts` and `src/review/post.ts` until the reviews port
+  (#222) moves it to the ported ones, and those two go when their last user moves. Until then it
+  reads and writes only the app's own `queue-runner-app` markers and Review table, so a PR the
+  Python runner reviewed gets a fresh review 1 from it.
 - **The job log:** kind `review`, `issue` the PR, with `sha`, `round`, `reviewer`, the `cost` it
   was let in at, its `runDir`, its `checkout` and the repo's `folder`; its end `clean`, `blocking`,
   `stop`, `approach-note` (with `verdict`, `signals`, `link`), `failed`, `out-of-usage`,
@@ -773,6 +749,32 @@ out Python's classes, and `int`, `splitlines` and the sort of references follow 
 Nothing calls it yet: builds pick through `src/picker.ts`, and the fix, conflict and review lanes
 read `closedIssues` and `JOB_BRANCH_PREFIX` there, until the run loop, review and fix ports
 (#219, #222, #223) move them.
+
+## The review ledger
+
+Ported from `queue_runner/ledger.py` and `queue_runner/post.py` (#220), in `src/review-ledger.ts`
+and `src/review-post.ts`, with `tests/test_ledger.py` ported case for case in
+`test/review-ledger.test.ts`. `post.py`'s cases are in `tests/test_review.py`, which the reviews
+port (#222) ports. It reads and writes Python's markers and text byte for byte: the
+`<!-- sol-pr-review round=N verdict=V sha=H findings=<base64> -->` marker, the hand-posted
+`<!-- sol-review round=N head=H -->` with its `## Sol review N · V` heading, the visible
+`sol-findings` ledger, the comment, the `<!-- sol-finding <repo>#<n> <id> -->` mark on a
+follow-up issue and the PR body's `## Review` table, so it carries on the ledgers of PRs the
+Python runner reviewed. It keeps Python's names: `read_review`, `read_reviews`, `newest_on`,
+`runner_post`, `said_since`, `next_round`, `state`, `escalation`, `norm`, `parse_findings`,
+`parse_earlier`, `decide`, `with_issues`, `SolFailed`, and `GitHubPoster`, `review_row`,
+`with_review_row`, `filed_already`, `issue_body` and `PostFailed`. What each decides is the
+module's own comment, as in Python.
+
+The differences are TypeScript's only. Python's regex classes, its `^` and `$` under `re.M`, its
+`==`, hashing, `str()` and `strip()` are spelled out in `src/python.ts`, so the patterns match
+what Python's do and the text comes out as Python's; a finding is a plain object whose keys keep
+Python's order. JSON is JavaScript's: a number past 2^53 loses digits, a float like `10.0` reads
+as the int 10, `NaN` and `Infinity` don't parse, and an invalid block's error names JavaScript's
+reason. The seam's calls are async, so `GitHubPoster.post` is.
+
+Nothing calls it yet: the review, fix, conflict and merge lanes use `src/review/ledger.ts` and
+`src/review/post.ts` until the reviews, fix and merge ports (#222, #223, #224) move them.
 
 ## Setup
 
