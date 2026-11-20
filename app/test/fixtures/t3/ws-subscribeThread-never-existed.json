@@ -1,0 +1,42 @@
+{
+  "why": "exit",
+  "frames": [
+    {
+      "t": 19,
+      "raw": {
+        "_tag": "Exit",
+        "requestId": "8",
+        "exit": {
+          "_tag": "Failure",
+          "cause": [
+            {
+              "_tag": "Fail",
+              "error": {
+                "_tag": "OrchestrationV2GetThreadProjectionError",
+                "threadId": "mcp:00000000-0000-0000-0000-000000000000",
+                "message": "Failed to load orchestration V2 thread mcp:00000000-0000-0000-0000-000000000000",
+                "cause": {
+                  "name": "OrchestratorProjectionError",
+                  "message": "Failed to load orchestration projection for thread mcp:00000000-0000-0000-0000-000000000000.",
+                  "cause": {
+                    "name": "ProjectionStoreThreadNotFoundError",
+                    "message": "No orchestration projection exists for thread mcp:00000000-0000-0000-0000-000000000000."
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "request": {
+    "_tag": "Request",
+    "id": "8",
+    "tag": "orchestration.subscribeThread",
+    "payload": {
+      "threadId": "mcp:00000000-0000-0000-0000-000000000000"
+    },
+    "headers": []
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "init": {
+    "status": 200
+  },
+  "call": {
+    "status": 200,
+    "contentType": "application/json",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": 2,
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"threadId\":\"mcp:launch:0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b\",\"runId\":\"run:thread:mcp%3Alaunch%3A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b:ordinal:1\",\"status\":\"completed\",\"timedOut\":false}"
+          }
+        ],
+        "structuredContent": {
+          "threadId": "mcp:launch:0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b",
+          "runId": "run:thread:mcp%3Alaunch%3A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b:ordinal:1",
+          "status": "completed",
+          "timedOut": false
+        },
+        "isError": false
+      }
+    }
+  },
+  "request": {
+    "name": "t3_thread_wait",
+    "arguments": {
+      "threadId": "mcp:launch:0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b",
+      "timeoutMs": 1
+    }
+  }
+}

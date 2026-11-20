@@ -1,0 +1,116 @@
+{
+  "init": {
+    "status": 200
+  },
+  "call": {
+    "status": 200,
+    "contentType": "application/json",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": 2,
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"thread\":{\"threadId\":\"mcp:launch:0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b\",\"projectId\":\"6e52c9c4-c256-48e6-8566-b32e425ae094\",\"title\":\"t3-api-facts A (research, safe to delete)\",\"link\":\"https://app.t3.codes/threads/264b77bb-5ec7-4453-8ee5-7d0162886008/mcp%3Alaunch%3A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b\",\"createdBy\":\"agent\",\"creationSource\":\"mcp\",\"status\":\"completed\",\"latestRunId\":\"run:thread:mcp%3Alaunch%3A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b:ordinal:1\",\"activeRunId\":null,\"providerInstanceId\":\"claudeAgent\",\"model\":\"claude-haiku-5-5\",\"runtimeMode\":\"full-access\",\"interactionMode\":\"default\",\"linkedPullRequest\":null,\"pullRequests\":[],\"titleRegeneration\":null,\"branch\":null,\"worktreePath\":null,\"parentThreadId\":null,\"relationshipToParent\":null,\"runCount\":1,\"itemCount\":4,\"pendingRequestCount\":0,\"archived\":false,\"settled\":false,\"settledAt\":null,\"snoozed\":false,\"snoozedUntil\":null,\"createdAt\":\"2026-11-20T17:02:03.669Z\",\"updatedAt\":\"2026-11-20T17:02:07.628Z\"},\"recentRuns\":[{\"runId\":\"run:thread:mcp%3Alaunch%3A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b:ordinal:1\",\"ordinal\":1,\"status\":\"completed\",\"providerInstanceId\":\"claudeAgent\",\"model\":\"claude-haiku-5-5\",\"executedModel\":\"claude-haiku-5-5\",\"requestedAt\":\"2026-11-20T17:02:03.683Z\",\"startedAt\":\"2026-11-20T17:02:03.727Z\",\"completedAt\":\"2026-11-20T17:02:07.628Z\"}],\"items\":[{\"position\":0,\"visibility\":\"local\",\"sourceThreadId\":\"mcp:launch:0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b\",\"itemId\":\"turn-item:message:mcp%3Alaunch%3A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b\",\"runId\":\"run:thread:mcp%3Alaunch%3A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b:ordinal:1\",\"messageId\":\"mcp:launch:0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b\",\"createdBy\":\"agent\",\"creationSource\":\"mcp\",\"type\":\"user_message\",\"status\":\"completed\",\"title\":null,\"text\":\"Reply with exactly: ok\",\"textTruncated\":false,\"nextTextOffset\":null,\"updatedAt\":\"2026-11-20T17:02:03.683Z\"},{\"position\":2,\"visibility\":\"local\",\"sourceThreadId\":\"mcp:launch:0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b\",\"itemId\":\"turn-item:provider:claudeAgent:native-item:dbccf12a-f346-4934-814c-e3557cf41c38\",\"runId\":\"run:thread:mcp%3Alaunch%3A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b:ordinal:1\",\"messageId\":\"message:provider:claudeAgent:native-item:dbccf12a-f346-4934-814c-e3557cf41c38\",\"createdBy\":\"agent\",\"creationSource\":\"provider\",\"type\":\"assistant_message\",\"status\":\"completed\",\"title\":null,\"text\":\"ok\",\"textTruncated\":false,\"nextTextOffset\":null,\"updatedAt\":\"2026-11-20T17:02:07.561Z\"}],\"nextPosition\":2,\"hasMore\":false}"
+          }
+        ],
+        "structuredContent": {
+          "thread": {
+            "threadId": "mcp:launch:0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b",
+            "projectId": "6e52c9c4-c256-48e6-8566-b32e425ae094",
+            "title": "t3-api-facts A (research, safe to delete)",
+            "link": "https://app.t3.codes/threads/264b77bb-5ec7-4453-8ee5-7d0162886008/mcp%3Alaunch%3A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b",
+            "createdBy": "agent",
+            "creationSource": "mcp",
+            "status": "completed",
+            "latestRunId": "run:thread:mcp%3Alaunch%3A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b:ordinal:1",
+            "activeRunId": null,
+            "providerInstanceId": "claudeAgent",
+            "model": "claude-haiku-5-5",
+            "runtimeMode": "full-access",
+            "interactionMode": "default",
+            "linkedPullRequest": null,
+            "pullRequests": [],
+            "titleRegeneration": null,
+            "branch": null,
+            "worktreePath": null,
+            "parentThreadId": null,
+            "relationshipToParent": null,
+            "runCount": 1,
+            "itemCount": 4,
+            "pendingRequestCount": 0,
+            "archived": false,
+            "settled": false,
+            "settledAt": null,
+            "snoozed": false,
+            "snoozedUntil": null,
+            "createdAt": "2026-11-20T17:02:03.669Z",
+            "updatedAt": "2026-11-20T17:02:07.628Z"
+          },
+          "recentRuns": [
+            {
+              "runId": "run:thread:mcp%3Alaunch%3A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b:ordinal:1",
+              "ordinal": 1,
+              "status": "completed",
+              "providerInstanceId": "claudeAgent",
+              "model": "claude-haiku-5-5",
+              "executedModel": "claude-haiku-5-5",
+              "requestedAt": "2026-11-20T17:02:03.683Z",
+              "startedAt": "2026-11-20T17:02:03.727Z",
+              "completedAt": "2026-11-20T17:02:07.628Z"
+            }
+          ],
+          "items": [
+            {
+              "position": 0,
+              "visibility": "local",
+              "sourceThreadId": "mcp:launch:0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b",
+              "itemId": "turn-item:message:mcp%3Alaunch%3A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b",
+              "runId": "run:thread:mcp%3Alaunch%3A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b:ordinal:1",
+              "messageId": "mcp:launch:0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b",
+              "createdBy": "agent",
+              "creationSource": "mcp",
+              "type": "user_message",
+              "status": "completed",
+              "title": null,
+              "text": "Reply with exactly: ok",
+              "textTruncated": false,
+              "nextTextOffset": null,
+              "updatedAt": "2026-11-20T17:02:03.683Z"
+            },
+            {
+              "position": 2,
+              "visibility": "local",
+              "sourceThreadId": "mcp:launch:0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b",
+              "itemId": "turn-item:provider:claudeAgent:native-item:dbccf12a-f346-4934-814c-e3557cf41c38",
+              "runId": "run:thread:mcp%3Alaunch%3A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b:ordinal:1",
+              "messageId": "message:provider:claudeAgent:native-item:dbccf12a-f346-4934-814c-e3557cf41c38",
+              "createdBy": "agent",
+              "creationSource": "provider",
+              "type": "assistant_message",
+              "status": "completed",
+              "title": null,
+              "text": "ok",
+              "textTruncated": false,
+              "nextTextOffset": null,
+              "updatedAt": "2026-11-20T17:02:07.561Z"
+            }
+          ],
+          "nextPosition": 2,
+          "hasMore": false
+        },
+        "isError": false
+      }
+    }
+  },
+  "request": {
+    "name": "t3_thread_read",
+    "arguments": {
+      "threadId": "mcp:launch:0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b",
+      "limit": 20,
+      "runLimit": 10,
+      "maxCharsPerItem": 2000
+    }
+  }
+}

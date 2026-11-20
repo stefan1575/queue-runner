@@ -74,7 +74,8 @@ the real clock or runs on a real timer that no `vi.useFakeTimers()` around it fa
   clock). The app reads that one setting, never writes the file, and watches it. The exception
   goes once T3's server serves client settings.
 - **Seams, faked in tests:** T3 (MCP and WebSocket; `src/t3/seams.ts`: HTTP, the socket, the
-  CLI, the address), GitHub (`src/github-seam.ts`, ported from Python, with its fakes in `test/fakes.ts`; the
+  CLI, the address; `src/t3-seam.ts`, ported from Python, with `test/recorded-t3.ts` answering
+  from T3's recorded responses and its fakes in `test/fakes-t3.ts`), GitHub (`src/github-seam.ts`, ported from Python, with its fakes in `test/fakes.ts`; the
   lanes still use `src/github.ts` and `test/fake-github.ts` until their ports move them),
   local git in a served repo's folder (`src/git.ts`: the fetch and leftover-branch check a build
   needs, since T3 does neither), and the platform (Windows: tray, notifications,
@@ -736,6 +737,48 @@ Nothing calls it yet: the lanes still read and write GitHub through `src/github.
 loop, review, fix and merge ports (#219, #222, #223, #224) move them. `src/github.ts` keeps the
 remote read (`gh repo view`) and gh's failure shape that Repositories and Setup use (GitHub,
 below).
+
+## The T3 seam
+
+Ported from `queue_runner/t3.py` (#217), in `src/t3-seam.ts`, with `tests/test_t3.py` ported case
+for case in `test/t3-seam.test.ts` and `tests/fakes_t3.py`'s `FakeT3` and `tests/fakes.py`'s
+`FakeLimits` in `test/fakes-t3.ts`. It has Python's names: `Thread`, `Launched`, `RunResult`,
+`Message`, `T3Error`, the calls `start`, `launch`, `send`, `show`, `list`, `settle` and `rename`
+(on `T3Server`, Python's `T3Cli`), and `find_job_thread` and `settle_quietly`. The thread facts
+Python read from T3's database and Claude Code's transcripts are on `T3Store`: `run_failure`,
+`limit_reset`, `last_call`, `context_tokens`, `cache_expires_at` and `run_effort`, with
+`auto_resume_warning` beside it. The limits and effort ports (#227, #228) build on them.
+
+**Where its facts come from** is the one change: T3's local server, as
+`.scratch/queue-runner/research/t3-api-facts.md` found T3 0.1.9, never its CLI, database or
+Claude's files.
+
+- **The CLI's calls** are T3's MCP tools: `show` is `t3_thread_read` (the thread, then its
+  `messages` view paged to the end, each of the last messages read on in full), `list` is
+  `t3_thread_list` on the folder's project, every page, and `send` is `t3_thread_send` (`mode:
+  queue`) and then the wait `start` uses.
+- **Waiting on the user** is read from T3's shell (`orchestration.getThreadFamily`'s
+  `pendingRuntimeRequest`), not the MCP read's `pendingRequestCount`, which leaves a secret card
+  out. `start` and `send` take a timed-out wait slice with one as a run waiting for an answer
+  (exit 2), and `show` counts it as a pending request.
+- **The database and transcripts** are the thread's projection, the first value of
+  `orchestration.subscribeThread` (the whole projection, where `getThreadProjection` is cut to
+  its last items). A run's failure is its `error` turn items; its last call is the newest provider
+  turn's `tokenUsage` (`usedTokens`, which is the call's whole prompt plus its reply,
+  and the cache start, `promptCacheExpiresAt` less `promptCacheTtlMs`); its effort is the run's
+  model selection, since T3 reports no effort a call used. T3's resume-after-limits setting is
+  `subscribeServerConfig`'s `settings.autoResumeLimitedThreads`.
+- **A model's effort option** comes from T3's catalog (each model's `effortOption`), which the
+  caller passes in, where Python named the one driver that reads another: the app's code names no
+  provider (Rules, above). A model the catalog doesn't list gets Python's `effort`.
+
+The fake for its tests is T3's server answering from responses recorded off the running T3
+(`test/fixtures/t3/`, copied from the note's fixtures with their names): the app's own MCP and
+WebSocket clients read them, as they read T3.
+
+Nothing calls it yet: the lanes still launch, wait and settle through `src/launch.ts`,
+`src/t3/thread-end.ts`, `src/t3/thread-reply.ts` and `src/settle.ts` until the run loop, review,
+fix and merge ports (#219, #222, #223, #224) move them.
 
 ## Setup
 

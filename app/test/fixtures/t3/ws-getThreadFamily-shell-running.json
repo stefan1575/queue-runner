@@ -1,0 +1,103 @@
+{
+  "why": "exit",
+  "frames": [
+    {
+      "t": 26,
+      "raw": {
+        "_tag": "Exit",
+        "requestId": "3",
+        "exit": {
+          "_tag": "Success",
+          "value": {
+            "snapshotSequence": 359675,
+            "threads": [
+              {
+                "createdBy": "agent",
+                "creationSource": "mcp",
+                "id": "mcp:cf049cfa-18d0-4a0a-8cff-d31e71985294",
+                "projectId": "6e52c9c4-c256-48e6-8566-b32e425ae094",
+                "title": "t3-api-facts B2 (research, safe to delete)",
+                "providerInstanceId": "claudeAgent",
+                "modelSelection": {
+                  "instanceId": "claudeAgent",
+                  "model": "claude-haiku-5-5",
+                  "options": [
+                    {
+                      "id": "effort",
+                      "value": "low"
+                    }
+                  ]
+                },
+                "runtimeMode": "full-access",
+                "interactionMode": "default",
+                "branch": null,
+                "worktreePath": null,
+                "pullRequests": [],
+                "lineage": {
+                  "parentThreadId": null,
+                  "relationshipToParent": null,
+                  "rootThreadId": "mcp:cf049cfa-18d0-4a0a-8cff-d31e71985294"
+                },
+                "forkedFrom": null,
+                "activeProviderThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Amcp%253Acf049cfa-18d0-4a0a-8cff-d31e71985294%3Aordinal%3A1",
+                "latestRunId": "run:thread:mcp%3Acf049cfa-18d0-4a0a-8cff-d31e71985294:ordinal:1",
+                "latestRunRequestedAt": "2026-11-20T17:04:02.958Z",
+                "latestRunStartedAt": "2026-11-20T17:04:03.046Z",
+                "latestRunCompletedAt": null,
+                "latestRunStopRequested": false,
+                "latestRunBackgroundWake": false,
+                "activeRunId": "run:thread:mcp%3Acf049cfa-18d0-4a0a-8cff-d31e71985294:ordinal:1",
+                "activityRunStartedAt": "2026-11-20T17:04:03.046Z",
+                "activityRunStatus": "running",
+                "blockedOnThreadWait": false,
+                "status": "running",
+                "lastError": null,
+                "lastErrorClass": null,
+                "lastErrorCode": null,
+                "usageLimitResetAt": null,
+                "pendingRuntimeRequest": null,
+                "pendingGuestMessageCount": 0,
+                "latestVisibleMessage": null,
+                "latestUserMessageAt": "2026-11-20T17:04:02.958Z",
+                "latestUserAuthoredMessageAt": null,
+                "hasActionableProposedPlan": false,
+                "pendingBackgroundTasks": [],
+                "providerInstanceHistory": [
+                  "claudeAgent"
+                ],
+                "goal": null,
+                "itemCount": 3,
+                "visibleItemCount": 3,
+                "createdAt": "2026-11-20T17:04:02.918Z",
+                "updatedAt": "2026-11-20T17:04:07.129Z",
+                "archivedAt": null,
+                "settledOverride": null,
+                "settledAt": null,
+                "unsettledAt": null,
+                "snoozedUntil": null,
+                "snoozedAt": null,
+                "limitRecovery": null,
+                "pinnedAt": null,
+                "autoSettleDisabledAt": null,
+                "pinOrderKey": null,
+                "lastVisitedAt": "2026-11-20T17:04:02.957Z",
+                "opens": null,
+                "titleRegeneration": null,
+                "deletedAt": null
+              }
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "request": {
+    "_tag": "Request",
+    "id": "3",
+    "tag": "orchestration.getThreadFamily",
+    "payload": {
+      "threadId": "mcp:cf049cfa-18d0-4a0a-8cff-d31e71985294"
+    },
+    "headers": []
+  }
+}

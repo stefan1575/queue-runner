@@ -1,0 +1,30 @@
+{
+  "init": {
+    "status": 200
+  },
+  "call": {
+    "status": 200,
+    "contentType": "application/json",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": 2,
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"_tag\":\"OrchestratorMcpFailure\",\"code\":\"thread_not_sendable\",\"message\":\"Thread mcp:launch:0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b is archived and cannot receive messages.\"}"
+          }
+        ],
+        "isError": true
+      }
+    }
+  },
+  "request": {
+    "name": "t3_thread_send",
+    "arguments": {
+      "threadId": "mcp:launch:0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b",
+      "message": "hi",
+      "mode": "queue"
+    }
+  }
+}

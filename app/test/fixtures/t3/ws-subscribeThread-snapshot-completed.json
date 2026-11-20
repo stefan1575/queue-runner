@@ -1,0 +1,625 @@
+{
+  "why": "timeout",
+  "frames": [
+    {
+      "t": 13,
+      "raw": {
+        "_tag": "Chunk",
+        "requestId": "2",
+        "values": [
+          {
+            "kind": "snapshot",
+            "snapshotSequence": 359465,
+            "projection": {
+              "thread": {
+                "createdBy": "agent",
+                "creationSource": "mcp",
+                "id": "mcp:launch:0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b",
+                "projectId": "6e52c9c4-c256-48e6-8566-b32e425ae094",
+                "title": "t3-api-facts A (research, safe to delete)",
+                "providerInstanceId": "claudeAgent",
+                "modelSelection": {
+                  "instanceId": "claudeAgent",
+                  "model": "claude-haiku-5-5",
+                  "options": [
+                    {
+                      "id": "effort",
+                      "value": "low"
+                    }
+                  ]
+                },
+                "runtimeMode": "full-access",
+                "interactionMode": "default",
+                "branch": null,
+                "worktreePath": null,
+                "pullRequests": [],
+                "activeProviderThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Amcp%253Alaunch%253A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b%3Aordinal%3A1",
+                "lineage": {
+                  "parentThreadId": null,
+                  "relationshipToParent": null,
+                  "rootThreadId": "mcp:launch:0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b"
+                },
+                "forkedFrom": null,
+                "createdAt": "2026-11-20T17:02:03.669Z",
+                "updatedAt": "2026-11-20T17:02:07.628Z",
+                "archivedAt": null,
+                "settledOverride": null,
+                "settledAt": null,
+                "snoozedUntil": null,
+                "snoozedAt": null,
+                "lastVisitedAt": "2026-11-20T17:02:03.682Z",
+                "deletedAt": null
+              },
+              "runs": [
+                {
+                  "id": "run:thread:mcp%3Alaunch%3A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b:ordinal:1",
+                  "threadId": "mcp:launch:0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b",
+                  "ordinal": 1,
+                  "providerInstanceId": "claudeAgent",
+                  "modelSelection": {
+                    "instanceId": "claudeAgent",
+                    "model": "claude-haiku-5-5",
+                    "options": [
+                      {
+                        "id": "effort",
+                        "value": "low"
+                      }
+                    ]
+                  },
+                  "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Amcp%253Alaunch%253A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b%3Aordinal%3A1",
+                  "userMessageId": "mcp:launch:0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b",
+                  "rootNodeId": "node:run:run%3Athread%3Amcp%253Alaunch%253A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b%3Aordinal%3A1:root",
+                  "activeAttemptId": "run-attempt:run:run%3Athread%3Amcp%253Alaunch%253A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b%3Aordinal%3A1:attempt:1",
+                  "status": "completed",
+                  "queuePosition": null,
+                  "requestedAt": "2026-11-20T17:02:03.683Z",
+                  "startedAt": "2026-11-20T17:02:03.727Z",
+                  "completedAt": "2026-11-20T17:02:07.628Z",
+                  "checkpointId": "checkpoint:scope:checkpoint-scope%3Athread%3Amcp%253Alaunch%253A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b%3Aname%3Aroot:name:1",
+                  "contextHandoffId": null,
+                  "workspacePreparation": {
+                    "type": "root"
+                  }
+                }
+              ],
+              "attempts": [
+                {
+                  "id": "run-attempt:run:run%3Athread%3Amcp%253Alaunch%253A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b%3Aordinal%3A1:attempt:1",
+                  "nativeThreadId": "73983c5e-c5bb-4e95-befa-67b786dd3f92",
+                  "runId": "run:thread:mcp%3Alaunch%3A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b:ordinal:1",
+                  "attemptOrdinal": 1,
+                  "rootNodeId": "node:run:run%3Athread%3Amcp%253Alaunch%253A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b%3Aordinal%3A1:root",
+                  "providerInstanceId": "claudeAgent",
+                  "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Amcp%253Alaunch%253A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b%3Aordinal%3A1",
+                  "providerTurnId": null,
+                  "reason": "initial",
+                  "status": "completed",
+                  "startedAt": "2026-11-20T17:02:03.727Z",
+                  "completedAt": "2026-11-20T17:02:07.617Z"
+                }
+              ],
+              "nodes": [
+                {
+                  "id": "node:run:run%3Athread%3Amcp%253Alaunch%253A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b%3Aordinal%3A1:root",
+                  "threadId": "mcp:launch:0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b",
+                  "runId": "run:thread:mcp%3Alaunch%3A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b:ordinal:1",
+                  "parentNodeId": null,
+                  "rootNodeId": "node:run:run%3Athread%3Amcp%253Alaunch%253A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b%3Aordinal%3A1:root",
+                  "kind": "root_turn",
+                  "status": "completed",
+                  "countsForRun": true,
+                  "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Amcp%253Alaunch%253A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b%3Aordinal%3A1",
+                  "providerTurnId": null,
+                  "nativeItemRef": null,
+                  "runtimeRequestId": null,
+                  "checkpointScopeId": "checkpoint-scope:thread:mcp%3Alaunch%3A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b:name:root",
+                  "startedAt": "2026-11-20T17:02:03.727Z",
+                  "completedAt": "2026-11-20T17:02:07.628Z"
+                },
+                {
+                  "id": "node:provider:claudeAgent:native-item:dbccf12a-f346-4934-814c-e3557cf41c38",
+                  "threadId": "mcp:launch:0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b",
+                  "runId": "run:thread:mcp%3Alaunch%3A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b:ordinal:1",
+                  "parentNodeId": "node:run:run%3Athread%3Amcp%253Alaunch%253A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b%3Aordinal%3A1:root",
+                  "rootNodeId": "node:run:run%3Athread%3Amcp%253Alaunch%253A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b%3Aordinal%3A1:root",
+                  "kind": "assistant_message",
+                  "status": "completed",
+                  "countsForRun": false,
+                  "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Amcp%253Alaunch%253A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b%3Aordinal%3A1",
+                  "providerTurnId": "provider-turn:provider:claudeAgent:native-turn:turn%3Arun-attempt%3Arun%3Arun%253Athread%253Amcp%25253Alaunch%25253A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b%253Aordinal%253A1%3Aattempt%3A1",
+                  "nativeItemRef": {
+                    "driver": "claudeAgent",
+                    "nativeId": "dbccf12a-f346-4934-814c-e3557cf41c38",
+                    "strength": "strong"
+                  },
+                  "runtimeRequestId": null,
+                  "checkpointScopeId": null,
+                  "startedAt": "2026-11-20T17:02:07.561Z",
+                  "completedAt": "2026-11-20T17:02:07.561Z"
+                }
+              ],
+              "subagents": [],
+              "providerSessions": [
+                {
+                  "id": "provider-session:provider-instance:claudeAgent:thread:mcp%3Alaunch%3A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b:6452c798-16ae-4a67-a3d9-aae6aaa40f28",
+                  "driver": "claudeAgent",
+                  "providerInstanceId": "claudeAgent",
+                  "status": "ready",
+                  "cwd": "C:\\Users\\Anon\\.queue-runner\\sandbox\\repo",
+                  "model": "claude-haiku-5-5",
+                  "capabilities": {
+                    "sessions": {
+                      "supportsMultipleProviderThreadsPerSession": false,
+                      "supportsModelSwitchInSession": true,
+                      "supportsProviderSwitchingViaHandoff": true,
+                      "supportsRuntimeModeSwitchInSession": false,
+                      "pendingRequestsSurviveRestart": false
+                    },
+                    "threads": {
+                      "canCreateEmptyThread": true,
+                      "canReadThreadSnapshot": false,
+                      "canRollbackThread": true,
+                      "canForkThread": true,
+                      "canForkFromTurn": true,
+                      "canForkFromSubagentThread": false,
+                      "exposesNativeThreadId": true
+                    },
+                    "turns": {
+                      "exposesNativeTurnId": false,
+                      "emitsTurnStarted": true,
+                      "emitsTurnCompleted": true,
+                      "supportsInterrupt": true,
+                      "supportsActiveSteering": true,
+                      "activeSteeringInterruptsTools": true,
+                      "supportsSteeringByInterruptRestart": false,
+                      "supportsQueuedMessages": true,
+                      "terminalStatusQuality": "strong"
+                    },
+                    "streaming": {
+                      "streamsAssistantText": true,
+                      "streamsReasoning": true,
+                      "streamsToolOutput": false,
+                      "streamsPlanText": false,
+                      "emitsMessageCompleted": true
+                    },
+                    "tools": {
+                      "exposesToolItemIds": true,
+                      "emitsToolStarted": true,
+                      "emitsToolCompleted": true,
+                      "emitsToolOutput": true,
+                      "supportsMcpTools": true,
+                      "supportsDynamicToolCallbacks": true
+                    },
+                    "approvals": {
+                      "supportsCommandApproval": true,
+                      "supportsFileReadApproval": true,
+                      "supportsFileChangeApproval": true,
+                      "supportsApplyPatchApproval": false,
+                      "approvalsHaveNativeRequestIds": true,
+                      "approvalCallbacksAreLiveOnly": true,
+                      "approvalsCanOriginateFromSubagents": false
+                    },
+                    "planning": {
+                      "emitsPlanUpdated": true,
+                      "emitsTodoList": true,
+                      "emitsProposedPlan": true,
+                      "supportsStructuredQuestions": true,
+                      "planDeltasHaveItemIds": false
+                    },
+                    "subagents": {
+                      "supportsSubagents": true,
+                      "exposesSubagentThreadIds": false,
+                      "emitsSubagentLifecycle": true,
+                      "canWaitForSubagents": false,
+                      "canCloseSubagents": false,
+                      "canForkSubagentThread": false
+                    },
+                    "context": {
+                      "acceptsSystemContext": true,
+                      "acceptsDeveloperContext": true,
+                      "acceptsSyntheticUserContext": true,
+                      "canGenerateSummaries": true,
+                      "canConsumeHandoffSummaries": true,
+                      "supportsDeltaHandoff": true,
+                      "supportsFullThreadHandoff": true,
+                      "maxRecommendedHandoffChars": null
+                    },
+                    "checkpointing": {
+                      "appCanCheckpointFilesystem": true,
+                      "supportsNestedCheckpointScopes": true,
+                      "providerCanRollbackConversation": true,
+                      "providerRollbackReturnsSnapshot": true,
+                      "providerCanReadConversationSnapshot": false
+                    },
+                    "identity": {
+                      "nativeThreadIds": "strong",
+                      "nativeTurnIds": "weak",
+                      "nativeItemIds": "strong",
+                      "nativeRequestIds": "strong"
+                    },
+                    "runtimePolicy": {
+                      "enforcement": "native"
+                    }
+                  },
+                  "extensionStatuses": [],
+                  "createdAt": "2026-11-20T17:02:03.722Z",
+                  "updatedAt": "2026-11-20T17:02:03.722Z",
+                  "lastError": null
+                }
+              ],
+              "providerThreads": [
+                {
+                  "id": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Amcp%253Alaunch%253A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b%3Aordinal%3A1",
+                  "driver": "claudeAgent",
+                  "providerInstanceId": "claudeAgent",
+                  "providerSessionId": "provider-session:provider-instance:claudeAgent:thread:mcp%3Alaunch%3A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b:6452c798-16ae-4a67-a3d9-aae6aaa40f28",
+                  "appThreadId": "mcp:launch:0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b",
+                  "ownerNodeId": null,
+                  "nativeThreadRef": {
+                    "driver": "claudeAgent",
+                    "nativeId": "73983c5e-c5bb-4e95-befa-67b786dd3f92",
+                    "strength": "strong"
+                  },
+                  "nativeConversationHeadRef": null,
+                  "status": "idle",
+                  "firstRunOrdinal": 1,
+                  "lastRunOrdinal": 1,
+                  "handoffIds": [],
+                  "forkedFrom": null,
+                  "pendingBackgroundTasks": [],
+                  "contextUsage": null,
+                  "nativeMetadata": {
+                    "claudeAttachmentBudget": {
+                      "bytesUsed": 24,
+                      "pagesUsed": 0
+                    }
+                  },
+                  "goal": null,
+                  "createdAt": "2026-11-20T17:02:03.683Z",
+                  "updatedAt": "2026-11-20T17:02:07.617Z"
+                }
+              ],
+              "providerTurns": [
+                {
+                  "id": "provider-turn:provider:claudeAgent:native-turn:turn%3Arun-attempt%3Arun%3Arun%253Athread%253Amcp%25253Alaunch%25253A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b%253Aordinal%253A1%3Aattempt%3A1",
+                  "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Amcp%253Alaunch%253A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b%3Aordinal%3A1",
+                  "nodeId": "node:run:run%3Athread%3Amcp%253Alaunch%253A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b%3Aordinal%3A1:root",
+                  "runAttemptId": "run-attempt:run:run%3Athread%3Amcp%253Alaunch%253A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b%3Aordinal%3A1:attempt:1",
+                  "nativeTurnRef": {
+                    "driver": "claudeAgent",
+                    "nativeId": "dbccf12a-f346-4934-814c-e3557cf41c38",
+                    "strength": "weak"
+                  },
+                  "ordinal": 1,
+                  "status": "completed",
+                  "startedAt": "2026-11-20T17:02:04.240Z",
+                  "completedAt": "2026-11-20T17:02:07.609Z",
+                  "tokenUsage": {
+                    "usedTokens": 47888,
+                    "maxTokens": 1000000,
+                    "inputTokens": 47884,
+                    "cachedInputTokens": 0,
+                    "outputTokens": 4,
+                    "reasoningOutputTokens": 0,
+                    "promptCacheTtlMs": 3600000,
+                    "promptCacheExpiresAt": "2026-11-20T18:02:07.553Z",
+                    "updatedAt": "2026-11-20T17:02:07.564Z"
+                  },
+                  "turnTokenUsage": {
+                    "usageScope": "main_agent",
+                    "cachedInputTokens": 0,
+                    "cacheCreationTokens": 47882,
+                    "reasoningTokens": 0,
+                    "hasSubagents": false,
+                    "models": [
+                      "claude-haiku-5-5"
+                    ],
+                    "otherUsage": {
+                      "inputTokens": 0,
+                      "outputTokens": 0
+                    },
+                    "usageStatus": "complete",
+                    "inputTokens": 47884,
+                    "outputTokens": 4
+                  },
+                  "model": "claude-haiku-5-5"
+                }
+              ],
+              "runtimeRequests": [],
+              "messages": [
+                {
+                  "createdBy": "agent",
+                  "creationSource": "mcp",
+                  "id": "mcp:launch:0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b",
+                  "threadId": "mcp:launch:0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b",
+                  "runId": "run:thread:mcp%3Alaunch%3A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b:ordinal:1",
+                  "nodeId": "node:run:run%3Athread%3Amcp%253Alaunch%253A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b%3Aordinal%3A1:root",
+                  "role": "user",
+                  "text": "Reply with exactly: ok",
+                  "attachments": [],
+                  "streaming": false,
+                  "createdAt": "2026-11-20T17:02:03.683Z",
+                  "updatedAt": "2026-11-20T17:02:03.683Z"
+                },
+                {
+                  "createdBy": "agent",
+                  "creationSource": "provider",
+                  "id": "message:provider:claudeAgent:native-item:dbccf12a-f346-4934-814c-e3557cf41c38",
+                  "threadId": "mcp:launch:0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b",
+                  "runId": "run:thread:mcp%3Alaunch%3A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b:ordinal:1",
+                  "nodeId": "node:provider:claudeAgent:native-item:dbccf12a-f346-4934-814c-e3557cf41c38",
+                  "role": "assistant",
+                  "text": "ok",
+                  "attachments": [],
+                  "streaming": false,
+                  "createdAt": "2026-11-20T17:02:07.561Z",
+                  "updatedAt": "2026-11-20T17:02:07.561Z"
+                }
+              ],
+              "plans": [],
+              "turnItems": [
+                {
+                  "id": "turn-item:message:mcp%3Alaunch%3A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b",
+                  "threadId": "mcp:launch:0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b",
+                  "runId": "run:thread:mcp%3Alaunch%3A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b:ordinal:1",
+                  "nodeId": "node:run:run%3Athread%3Amcp%253Alaunch%253A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b%3Aordinal%3A1:root",
+                  "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Amcp%253Alaunch%253A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b%3Aordinal%3A1",
+                  "providerTurnId": null,
+                  "nativeItemRef": null,
+                  "parentItemId": null,
+                  "ordinal": 1000001,
+                  "status": "completed",
+                  "title": null,
+                  "startedAt": "2026-11-20T17:02:03.683Z",
+                  "completedAt": "2026-11-20T17:02:03.683Z",
+                  "updatedAt": "2026-11-20T17:02:03.683Z",
+                  "createdBy": "agent",
+                  "creationSource": "mcp",
+                  "type": "user_message",
+                  "messageId": "mcp:launch:0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b",
+                  "inputIntent": "turn_start",
+                  "text": "Reply with exactly: ok",
+                  "attachments": []
+                },
+                {
+                  "id": "turn-item:provider:claudeAgent:native-item:workspace-preparation%3Arun%3Athread%3Amcp%253Alaunch%253A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b%3Aordinal%3A1",
+                  "threadId": "mcp:launch:0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b",
+                  "runId": "run:thread:mcp%3Alaunch%3A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b:ordinal:1",
+                  "nodeId": "node:run:run%3Athread%3Amcp%253Alaunch%253A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b%3Aordinal%3A1:root",
+                  "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Amcp%253Alaunch%253A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b%3Aordinal%3A1",
+                  "providerTurnId": null,
+                  "nativeItemRef": null,
+                  "parentItemId": null,
+                  "ordinal": 1000002,
+                  "status": "completed",
+                  "title": "Workspace ready",
+                  "startedAt": "2026-11-20T17:02:03.683Z",
+                  "completedAt": "2026-11-20T17:02:03.709Z",
+                  "updatedAt": "2026-11-20T17:02:03.709Z",
+                  "type": "command_execution",
+                  "input": "Preparing workspace",
+                  "outputOmitted": true,
+                  "exitCode": 0
+                },
+                {
+                  "id": "turn-item:provider:claudeAgent:native-item:dbccf12a-f346-4934-814c-e3557cf41c38",
+                  "threadId": "mcp:launch:0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b",
+                  "runId": "run:thread:mcp%3Alaunch%3A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b:ordinal:1",
+                  "nodeId": "node:provider:claudeAgent:native-item:dbccf12a-f346-4934-814c-e3557cf41c38",
+                  "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Amcp%253Alaunch%253A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b%3Aordinal%3A1",
+                  "providerTurnId": "provider-turn:provider:claudeAgent:native-turn:turn%3Arun-attempt%3Arun%3Arun%253Athread%253Amcp%25253Alaunch%25253A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b%253Aordinal%253A1%3Aattempt%3A1",
+                  "nativeItemRef": {
+                    "driver": "claudeAgent",
+                    "nativeId": "dbccf12a-f346-4934-814c-e3557cf41c38",
+                    "strength": "strong"
+                  },
+                  "parentItemId": null,
+                  "ordinal": 1000003,
+                  "status": "completed",
+                  "title": null,
+                  "startedAt": "2026-11-20T17:02:07.561Z",
+                  "completedAt": "2026-11-20T17:02:07.561Z",
+                  "updatedAt": "2026-11-20T17:02:07.561Z",
+                  "type": "assistant_message",
+                  "messageId": "message:provider:claudeAgent:native-item:dbccf12a-f346-4934-814c-e3557cf41c38",
+                  "text": "ok",
+                  "streaming": false
+                },
+                {
+                  "id": "turn-item:provider:claudeAgent:native-item:checkpoint%3Acheckpoint%3Ascope%3Acheckpoint-scope%253Athread%253Amcp%25253Alaunch%25253A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b%253Aname%253Aroot%3Aname%3A1",
+                  "threadId": "mcp:launch:0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b",
+                  "runId": "run:thread:mcp%3Alaunch%3A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b:ordinal:1",
+                  "nodeId": "node:run:run%3Athread%3Amcp%253Alaunch%253A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b%3Aordinal%3A1:root",
+                  "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Amcp%253Alaunch%253A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b%3Aordinal%3A1",
+                  "providerTurnId": null,
+                  "nativeItemRef": null,
+                  "parentItemId": null,
+                  "ordinal": 1000004,
+                  "status": "completed",
+                  "title": null,
+                  "startedAt": "2026-11-20T17:02:07.628Z",
+                  "completedAt": "2026-11-20T17:02:07.628Z",
+                  "updatedAt": "2026-11-20T17:02:07.628Z",
+                  "type": "checkpoint",
+                  "checkpointId": "checkpoint:scope:checkpoint-scope%3Athread%3Amcp%253Alaunch%253A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b%3Aname%3Aroot:name:1",
+                  "scopeId": "checkpoint-scope:thread:mcp%3Alaunch%3A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b:name:root",
+                  "files": []
+                }
+              ],
+              "checkpointScopes": [
+                {
+                  "id": "checkpoint-scope:thread:mcp%3Alaunch%3A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b:name:root",
+                  "threadId": "mcp:launch:0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b",
+                  "runId": "run:thread:mcp%3Alaunch%3A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b:ordinal:1",
+                  "nodeId": "node:run:run%3Athread%3Amcp%253Alaunch%253A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b%3Aordinal%3A1:root",
+                  "parentScopeId": null,
+                  "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Amcp%253Alaunch%253A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b%3Aordinal%3A1",
+                  "kind": "root_run",
+                  "ordinalWithinParent": 0,
+                  "advancesAppRunCount": true,
+                  "cwd": "C:\\Users\\Anon\\.queue-runner\\sandbox\\repo",
+                  "createdAt": "2026-11-20T17:02:03.709Z"
+                }
+              ],
+              "checkpoints": [
+                {
+                  "id": "checkpoint:scope:checkpoint-scope%3Athread%3Amcp%253Alaunch%253A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b%3Aname%3Aroot:name:0",
+                  "threadId": "mcp:launch:0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b",
+                  "scopeId": "checkpoint-scope:thread:mcp%3Alaunch%3A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b:name:root",
+                  "runId": null,
+                  "nodeId": "node:run:run%3Athread%3Amcp%253Alaunch%253A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b%3Aordinal%3A1:root",
+                  "parentCheckpointId": null,
+                  "ordinalWithinScope": 0,
+                  "appRunOrdinal": null,
+                  "ref": "refs/t3/orchestration-v2/checkpoints/YjRhZGQ1YzYxZDkzMDVhNzFmZjgwOGJkMmM1ZDVhNjQ/ordinal/0",
+                  "status": "ready",
+                  "files": [],
+                  "capturedAt": "2026-11-20T17:02:03.683Z"
+                },
+                {
+                  "id": "checkpoint:scope:checkpoint-scope%3Athread%3Amcp%253Alaunch%253A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b%3Aname%3Aroot:name:1",
+                  "threadId": "mcp:launch:0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b",
+                  "scopeId": "checkpoint-scope:thread:mcp%3Alaunch%3A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b:name:root",
+                  "runId": "run:thread:mcp%3Alaunch%3A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b:ordinal:1",
+                  "nodeId": "node:run:run%3Athread%3Amcp%253Alaunch%253A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b%3Aordinal%3A1:root",
+                  "parentCheckpointId": "checkpoint:scope:checkpoint-scope%3Athread%3Amcp%253Alaunch%253A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b%3Aname%3Aroot:name:0",
+                  "ordinalWithinScope": 1,
+                  "appRunOrdinal": 1,
+                  "ref": "refs/t3/orchestration-v2/checkpoints/YjRhZGQ1YzYxZDkzMDVhNzFmZjgwOGJkMmM1ZDVhNjQ/ordinal/1",
+                  "status": "ready",
+                  "files": [],
+                  "capturedAt": "2026-11-20T17:02:07.628Z"
+                }
+              ],
+              "contextHandoffs": [],
+              "contextTransfers": [],
+              "visibleTurnItems": [
+                {
+                  "position": 0,
+                  "visibility": "local",
+                  "sourceThreadId": "mcp:launch:0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b",
+                  "sourceItemId": "turn-item:message:mcp%3Alaunch%3A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b",
+                  "item": {
+                    "id": "turn-item:message:mcp%3Alaunch%3A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b",
+                    "threadId": "mcp:launch:0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b",
+                    "runId": "run:thread:mcp%3Alaunch%3A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b:ordinal:1",
+                    "nodeId": "node:run:run%3Athread%3Amcp%253Alaunch%253A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b%3Aordinal%3A1:root",
+                    "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Amcp%253Alaunch%253A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b%3Aordinal%3A1",
+                    "providerTurnId": null,
+                    "nativeItemRef": null,
+                    "parentItemId": null,
+                    "ordinal": 1000001,
+                    "status": "completed",
+                    "title": null,
+                    "startedAt": "2026-11-20T17:02:03.683Z",
+                    "completedAt": "2026-11-20T17:02:03.683Z",
+                    "updatedAt": "2026-11-20T17:02:03.683Z",
+                    "createdBy": "agent",
+                    "creationSource": "mcp",
+                    "type": "user_message",
+                    "messageId": "mcp:launch:0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b",
+                    "inputIntent": "turn_start",
+                    "text": "Reply with exactly: ok",
+                    "attachments": []
+                  }
+                },
+                {
+                  "position": 1,
+                  "visibility": "local",
+                  "sourceThreadId": "mcp:launch:0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b",
+                  "sourceItemId": "turn-item:provider:claudeAgent:native-item:workspace-preparation%3Arun%3Athread%3Amcp%253Alaunch%253A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b%3Aordinal%3A1",
+                  "item": {
+                    "id": "turn-item:provider:claudeAgent:native-item:workspace-preparation%3Arun%3Athread%3Amcp%253Alaunch%253A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b%3Aordinal%3A1",
+                    "threadId": "mcp:launch:0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b",
+                    "runId": "run:thread:mcp%3Alaunch%3A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b:ordinal:1",
+                    "nodeId": "node:run:run%3Athread%3Amcp%253Alaunch%253A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b%3Aordinal%3A1:root",
+                    "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Amcp%253Alaunch%253A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b%3Aordinal%3A1",
+                    "providerTurnId": null,
+                    "nativeItemRef": null,
+                    "parentItemId": null,
+                    "ordinal": 1000002,
+                    "status": "completed",
+                    "title": "Workspace ready",
+                    "startedAt": "2026-11-20T17:02:03.683Z",
+                    "completedAt": "2026-11-20T17:02:03.709Z",
+                    "updatedAt": "2026-11-20T17:02:03.709Z",
+                    "type": "command_execution",
+                    "input": "Preparing workspace",
+                    "outputOmitted": true,
+                    "exitCode": 0
+                  }
+                },
+                {
+                  "position": 2,
+                  "visibility": "local",
+                  "sourceThreadId": "mcp:launch:0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b",
+                  "sourceItemId": "turn-item:provider:claudeAgent:native-item:dbccf12a-f346-4934-814c-e3557cf41c38",
+                  "item": {
+                    "id": "turn-item:provider:claudeAgent:native-item:dbccf12a-f346-4934-814c-e3557cf41c38",
+                    "threadId": "mcp:launch:0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b",
+                    "runId": "run:thread:mcp%3Alaunch%3A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b:ordinal:1",
+                    "nodeId": "node:provider:claudeAgent:native-item:dbccf12a-f346-4934-814c-e3557cf41c38",
+                    "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Amcp%253Alaunch%253A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b%3Aordinal%3A1",
+                    "providerTurnId": "provider-turn:provider:claudeAgent:native-turn:turn%3Arun-attempt%3Arun%3Arun%253Athread%253Amcp%25253Alaunch%25253A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b%253Aordinal%253A1%3Aattempt%3A1",
+                    "nativeItemRef": {
+                      "driver": "claudeAgent",
+                      "nativeId": "dbccf12a-f346-4934-814c-e3557cf41c38",
+                      "strength": "strong"
+                    },
+                    "parentItemId": null,
+                    "ordinal": 1000003,
+                    "status": "completed",
+                    "title": null,
+                    "startedAt": "2026-11-20T17:02:07.561Z",
+                    "completedAt": "2026-11-20T17:02:07.561Z",
+                    "updatedAt": "2026-11-20T17:02:07.561Z",
+                    "type": "assistant_message",
+                    "messageId": "message:provider:claudeAgent:native-item:dbccf12a-f346-4934-814c-e3557cf41c38",
+                    "text": "ok",
+                    "streaming": false
+                  }
+                },
+                {
+                  "position": 3,
+                  "visibility": "local",
+                  "sourceThreadId": "mcp:launch:0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b",
+                  "sourceItemId": "turn-item:provider:claudeAgent:native-item:checkpoint%3Acheckpoint%3Ascope%3Acheckpoint-scope%253Athread%253Amcp%25253Alaunch%25253A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b%253Aname%253Aroot%3Aname%3A1",
+                  "item": {
+                    "id": "turn-item:provider:claudeAgent:native-item:checkpoint%3Acheckpoint%3Ascope%3Acheckpoint-scope%253Athread%253Amcp%25253Alaunch%25253A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b%253Aname%253Aroot%3Aname%3A1",
+                    "threadId": "mcp:launch:0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b",
+                    "runId": "run:thread:mcp%3Alaunch%3A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b:ordinal:1",
+                    "nodeId": "node:run:run%3Athread%3Amcp%253Alaunch%253A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b%3Aordinal%3A1:root",
+                    "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Amcp%253Alaunch%253A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b%3Aordinal%3A1",
+                    "providerTurnId": null,
+                    "nativeItemRef": null,
+                    "parentItemId": null,
+                    "ordinal": 1000004,
+                    "status": "completed",
+                    "title": null,
+                    "startedAt": "2026-11-20T17:02:07.628Z",
+                    "completedAt": "2026-11-20T17:02:07.628Z",
+                    "updatedAt": "2026-11-20T17:02:07.628Z",
+                    "type": "checkpoint",
+                    "checkpointId": "checkpoint:scope:checkpoint-scope%3Athread%3Amcp%253Alaunch%253A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b%3Aname%3Aroot:name:1",
+                    "scopeId": "checkpoint-scope:thread:mcp%3Alaunch%3A0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b:name:root",
+                    "files": []
+                  }
+                }
+              ],
+              "updatedAt": "2026-11-20T17:02:07.628Z"
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "request": {
+    "_tag": "Request",
+    "id": "2",
+    "tag": "orchestration.subscribeThread",
+    "payload": {
+      "threadId": "mcp:launch:0d7900ad97d8462b43316b117ab441ddd686816bfe964887d77f5b87902d1e7b"
+    },
+    "headers": []
+  }
+}

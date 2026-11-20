@@ -1,0 +1,1096 @@
+{
+  "why": "timeout",
+  "frames": [
+    {
+      "t": 17,
+      "raw": {
+        "_tag": "Chunk",
+        "requestId": "2",
+        "values": [
+          {
+            "kind": "snapshot",
+            "snapshotSequence": 360113,
+            "projection": {
+              "thread": {
+                "createdBy": "agent",
+                "creationSource": "mcp",
+                "id": "mcp:ffa069f1-1080-4525-a24d-241aa4823970",
+                "projectId": "6e52c9c4-c256-48e6-8566-b32e425ae094",
+                "title": "t3-api-facts B (research, safe to delete)",
+                "providerInstanceId": "claudeAgent",
+                "modelSelection": {
+                  "instanceId": "claudeAgent",
+                  "model": "claude-haiku-5-5",
+                  "options": [
+                    {
+                      "id": "effort",
+                      "value": "low"
+                    }
+                  ]
+                },
+                "runtimeMode": "full-access",
+                "interactionMode": "default",
+                "branch": null,
+                "worktreePath": null,
+                "pullRequests": [],
+                "activeProviderThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A1",
+                "lineage": {
+                  "parentThreadId": null,
+                  "relationshipToParent": null,
+                  "rootThreadId": "mcp:ffa069f1-1080-4525-a24d-241aa4823970"
+                },
+                "forkedFrom": null,
+                "createdAt": "2026-11-20T17:02:45.508Z",
+                "updatedAt": "2026-11-20T17:07:24.283Z",
+                "archivedAt": null,
+                "settledOverride": "settled",
+                "settledAt": "2026-11-20T17:03:13.306Z",
+                "unsettledAt": null,
+                "snoozedUntil": null,
+                "snoozedAt": null,
+                "pinnedAt": null,
+                "pinOrderKey": null,
+                "activeOrderKey": null,
+                "lastVisitedAt": "2026-11-20T17:03:04.993Z",
+                "opens": {
+                  "openedAt": 1795194189783,
+                  "score": 1,
+                  "picks": []
+                },
+                "titleRegeneration": null,
+                "deletedAt": "2026-11-20T17:07:24.205Z"
+              },
+              "runs": [
+                {
+                  "id": "run:thread:mcp%3Affa069f1-1080-4525-a24d-241aa4823970:ordinal:1",
+                  "threadId": "mcp:ffa069f1-1080-4525-a24d-241aa4823970",
+                  "ordinal": 1,
+                  "providerInstanceId": "claudeAgent",
+                  "modelSelection": {
+                    "instanceId": "claudeAgent",
+                    "model": "claude-haiku-5-5",
+                    "options": [
+                      {
+                        "id": "effort",
+                        "value": "low"
+                      }
+                    ]
+                  },
+                  "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A1",
+                  "userMessageId": "mcp:ffa069f1-1080-4525-a24d-241aa4823970",
+                  "rootNodeId": "node:run:run%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A1:root",
+                  "activeAttemptId": "run-attempt:run:run%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A1:attempt:1",
+                  "status": "completed",
+                  "queuePosition": null,
+                  "requestedAt": "2026-11-20T17:02:45.521Z",
+                  "startedAt": "2026-11-20T17:02:45.570Z",
+                  "completedAt": "2026-11-20T17:02:57.667Z",
+                  "checkpointId": "checkpoint:scope:checkpoint-scope%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aname%3Aroot:name:1",
+                  "contextHandoffId": null,
+                  "workspacePreparation": {
+                    "type": "root"
+                  }
+                },
+                {
+                  "id": "run:thread:mcp%3Affa069f1-1080-4525-a24d-241aa4823970:ordinal:2",
+                  "threadId": "mcp:ffa069f1-1080-4525-a24d-241aa4823970",
+                  "ordinal": 2,
+                  "providerInstanceId": "claudeAgent",
+                  "modelSelection": {
+                    "instanceId": "claudeAgent",
+                    "model": "claude-haiku-5-5",
+                    "options": [
+                      {
+                        "id": "effort",
+                        "value": "low"
+                      }
+                    ]
+                  },
+                  "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A1",
+                  "userMessageId": "message:mcp:client%3A912c899e-212f-44cf-8a53-4201b11fdae2:thread-send:2f7ac32b-4aab-4786-97ce-1e7e4d2d0509",
+                  "rootNodeId": "node:run:run%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A2:root",
+                  "activeAttemptId": "run-attempt:run:run%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A2:attempt:1",
+                  "status": "completed",
+                  "queuePosition": null,
+                  "requestedAt": "2026-11-20T17:02:59.591Z",
+                  "startedAt": "2026-11-20T17:02:59.611Z",
+                  "completedAt": "2026-11-20T17:03:00.937Z",
+                  "checkpointId": "checkpoint:scope:checkpoint-scope%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aname%3Aroot:name:2",
+                  "contextHandoffId": null
+                }
+              ],
+              "attempts": [
+                {
+                  "id": "run-attempt:run:run%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A1:attempt:1",
+                  "nativeThreadId": "acc80d5b-3f90-4ab7-b9ff-e4594fc35430",
+                  "runId": "run:thread:mcp%3Affa069f1-1080-4525-a24d-241aa4823970:ordinal:1",
+                  "attemptOrdinal": 1,
+                  "rootNodeId": "node:run:run%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A1:root",
+                  "providerInstanceId": "claudeAgent",
+                  "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A1",
+                  "providerTurnId": null,
+                  "reason": "initial",
+                  "status": "completed",
+                  "startedAt": "2026-11-20T17:02:45.570Z",
+                  "completedAt": "2026-11-20T17:02:57.625Z"
+                },
+                {
+                  "id": "run-attempt:run:run%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A2:attempt:1",
+                  "nativeThreadId": "acc80d5b-3f90-4ab7-b9ff-e4594fc35430",
+                  "runId": "run:thread:mcp%3Affa069f1-1080-4525-a24d-241aa4823970:ordinal:2",
+                  "attemptOrdinal": 1,
+                  "rootNodeId": "node:run:run%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A2:root",
+                  "providerInstanceId": "claudeAgent",
+                  "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A1",
+                  "providerTurnId": null,
+                  "reason": "initial",
+                  "status": "completed",
+                  "startedAt": "2026-11-20T17:02:59.611Z",
+                  "completedAt": "2026-11-20T17:03:00.928Z"
+                }
+              ],
+              "nodes": [
+                {
+                  "id": "node:run:run%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A1:root",
+                  "threadId": "mcp:ffa069f1-1080-4525-a24d-241aa4823970",
+                  "runId": "run:thread:mcp%3Affa069f1-1080-4525-a24d-241aa4823970:ordinal:1",
+                  "parentNodeId": null,
+                  "rootNodeId": "node:run:run%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A1:root",
+                  "kind": "root_turn",
+                  "status": "completed",
+                  "countsForRun": true,
+                  "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A1",
+                  "providerTurnId": null,
+                  "nativeItemRef": null,
+                  "runtimeRequestId": null,
+                  "checkpointScopeId": "checkpoint-scope:thread:mcp%3Affa069f1-1080-4525-a24d-241aa4823970:name:root",
+                  "startedAt": "2026-11-20T17:02:45.570Z",
+                  "completedAt": "2026-11-20T17:02:57.667Z"
+                },
+                {
+                  "id": "node:provider:claudeAgent:native-item:toolu_01JhYiwA6QWqvbbuRrMwgZqk",
+                  "threadId": "mcp:ffa069f1-1080-4525-a24d-241aa4823970",
+                  "runId": "run:thread:mcp%3Affa069f1-1080-4525-a24d-241aa4823970:ordinal:1",
+                  "parentNodeId": "node:run:run%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A1:root",
+                  "rootNodeId": "node:run:run%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A1:root",
+                  "kind": "tool_call",
+                  "status": "failed",
+                  "countsForRun": false,
+                  "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A1",
+                  "providerTurnId": "provider-turn:provider:claudeAgent:native-turn:turn%3Arun-attempt%3Arun%3Arun%253Athread%253Amcp%25253Affa069f1-1080-4525-a24d-241aa4823970%253Aordinal%253A1%3Aattempt%3A1",
+                  "nativeItemRef": {
+                    "driver": "claudeAgent",
+                    "nativeId": "toolu_01JhYiwA6QWqvbbuRrMwgZqk",
+                    "strength": "strong"
+                  },
+                  "runtimeRequestId": null,
+                  "checkpointScopeId": null,
+                  "startedAt": "2026-11-20T17:02:49.470Z",
+                  "completedAt": "2026-11-20T17:02:49.477Z"
+                },
+                {
+                  "id": "node:provider:claudeAgent:native-item:toolu_0131t2tjnGzUtim5r19WB7sK",
+                  "threadId": "mcp:ffa069f1-1080-4525-a24d-241aa4823970",
+                  "runId": "run:thread:mcp%3Affa069f1-1080-4525-a24d-241aa4823970:ordinal:1",
+                  "parentNodeId": "node:run:run%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A1:root",
+                  "rootNodeId": "node:run:run%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A1:root",
+                  "kind": "tool_call",
+                  "status": "completed",
+                  "countsForRun": false,
+                  "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A1",
+                  "providerTurnId": "provider-turn:provider:claudeAgent:native-turn:turn%3Arun-attempt%3Arun%3Arun%253Athread%253Amcp%25253Affa069f1-1080-4525-a24d-241aa4823970%253Aordinal%253A1%3Aattempt%3A1",
+                  "nativeItemRef": {
+                    "driver": "claudeAgent",
+                    "nativeId": "toolu_0131t2tjnGzUtim5r19WB7sK",
+                    "strength": "strong"
+                  },
+                  "runtimeRequestId": null,
+                  "checkpointScopeId": null,
+                  "startedAt": "2026-11-20T17:02:52.939Z",
+                  "completedAt": "2026-11-20T17:02:56.512Z"
+                },
+                {
+                  "id": "node:provider:claudeAgent:native-item:e5f59e4e-df6b-4418-be95-e1d1a3616e6c",
+                  "threadId": "mcp:ffa069f1-1080-4525-a24d-241aa4823970",
+                  "runId": "run:thread:mcp%3Affa069f1-1080-4525-a24d-241aa4823970:ordinal:1",
+                  "parentNodeId": "node:run:run%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A1:root",
+                  "rootNodeId": "node:run:run%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A1:root",
+                  "kind": "assistant_message",
+                  "status": "completed",
+                  "countsForRun": false,
+                  "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A1",
+                  "providerTurnId": "provider-turn:provider:claudeAgent:native-turn:turn%3Arun-attempt%3Arun%3Arun%253Athread%253Amcp%25253Affa069f1-1080-4525-a24d-241aa4823970%253Aordinal%253A1%3Aattempt%3A1",
+                  "nativeItemRef": {
+                    "driver": "claudeAgent",
+                    "nativeId": "e5f59e4e-df6b-4418-be95-e1d1a3616e6c",
+                    "strength": "strong"
+                  },
+                  "runtimeRequestId": null,
+                  "checkpointScopeId": null,
+                  "startedAt": "2026-11-20T17:02:57.546Z",
+                  "completedAt": "2026-11-20T17:02:57.546Z"
+                },
+                {
+                  "id": "node:run:run%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A2:root",
+                  "threadId": "mcp:ffa069f1-1080-4525-a24d-241aa4823970",
+                  "runId": "run:thread:mcp%3Affa069f1-1080-4525-a24d-241aa4823970:ordinal:2",
+                  "parentNodeId": null,
+                  "rootNodeId": "node:run:run%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A2:root",
+                  "kind": "root_turn",
+                  "status": "completed",
+                  "countsForRun": true,
+                  "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A1",
+                  "providerTurnId": null,
+                  "nativeItemRef": null,
+                  "runtimeRequestId": null,
+                  "checkpointScopeId": "checkpoint-scope:thread:mcp%3Affa069f1-1080-4525-a24d-241aa4823970:name:root",
+                  "startedAt": "2026-11-20T17:02:59.611Z",
+                  "completedAt": "2026-11-20T17:03:00.937Z"
+                },
+                {
+                  "id": "node:provider:claudeAgent:native-item:a56640a1-3a29-467d-81a2-4d02873dfc69",
+                  "threadId": "mcp:ffa069f1-1080-4525-a24d-241aa4823970",
+                  "runId": "run:thread:mcp%3Affa069f1-1080-4525-a24d-241aa4823970:ordinal:2",
+                  "parentNodeId": "node:run:run%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A2:root",
+                  "rootNodeId": "node:run:run%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A2:root",
+                  "kind": "assistant_message",
+                  "status": "completed",
+                  "countsForRun": false,
+                  "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A1",
+                  "providerTurnId": "provider-turn:provider:claudeAgent:native-turn:turn%3Arun-attempt%3Arun%3Arun%253Athread%253Amcp%25253Affa069f1-1080-4525-a24d-241aa4823970%253Aordinal%253A2%3Aattempt%3A1",
+                  "nativeItemRef": {
+                    "driver": "claudeAgent",
+                    "nativeId": "a56640a1-3a29-467d-81a2-4d02873dfc69",
+                    "strength": "strong"
+                  },
+                  "runtimeRequestId": null,
+                  "checkpointScopeId": null,
+                  "startedAt": "2026-11-20T17:03:00.906Z",
+                  "completedAt": "2026-11-20T17:03:00.906Z"
+                }
+              ],
+              "subagents": [],
+              "providerSessions": [],
+              "providerThreads": [
+                {
+                  "id": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A1",
+                  "driver": "claudeAgent",
+                  "providerInstanceId": "claudeAgent",
+                  "providerSessionId": "provider-session:provider-instance:claudeAgent:thread:mcp%3Affa069f1-1080-4525-a24d-241aa4823970:9fc7a874-24d4-48ec-bdf7-ad729e13fb63",
+                  "appThreadId": "mcp:ffa069f1-1080-4525-a24d-241aa4823970",
+                  "ownerNodeId": null,
+                  "nativeThreadRef": {
+                    "driver": "claudeAgent",
+                    "nativeId": "acc80d5b-3f90-4ab7-b9ff-e4594fc35430",
+                    "strength": "strong"
+                  },
+                  "nativeConversationHeadRef": null,
+                  "status": "idle",
+                  "firstRunOrdinal": 1,
+                  "lastRunOrdinal": 2,
+                  "handoffIds": [],
+                  "forkedFrom": null,
+                  "pendingBackgroundTasks": [],
+                  "contextUsage": {
+                    "usedTokens": 55408,
+                    "maxTokens": 1000000
+                  },
+                  "nativeMetadata": {
+                    "claudeAttachmentBudget": {
+                      "bytesUsed": 96,
+                      "pagesUsed": 0
+                    }
+                  },
+                  "goal": null,
+                  "createdAt": "2026-11-20T17:02:45.521Z",
+                  "updatedAt": "2026-11-20T17:03:04.991Z"
+                }
+              ],
+              "providerTurns": [
+                {
+                  "id": "provider-turn:provider:claudeAgent:native-turn:turn%3Arun-attempt%3Arun%3Arun%253Athread%253Amcp%25253Affa069f1-1080-4525-a24d-241aa4823970%253Aordinal%253A1%3Aattempt%3A1",
+                  "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A1",
+                  "nodeId": "node:run:run%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A1:root",
+                  "runAttemptId": "run-attempt:run:run%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A1:attempt:1",
+                  "nativeTurnRef": {
+                    "driver": "claudeAgent",
+                    "nativeId": "e5f59e4e-df6b-4418-be95-e1d1a3616e6c",
+                    "strength": "weak"
+                  },
+                  "ordinal": 1,
+                  "status": "completed",
+                  "startedAt": "2026-11-20T17:02:46.103Z",
+                  "completedAt": "2026-11-20T17:02:57.560Z",
+                  "tokenUsage": {
+                    "usedTokens": 55408,
+                    "maxTokens": 1000000,
+                    "inputTokens": 55385,
+                    "cachedInputTokens": 54922,
+                    "outputTokens": 23,
+                    "reasoningOutputTokens": 0,
+                    "promptCacheTtlMs": 3600000,
+                    "promptCacheExpiresAt": "2026-11-20T18:02:57.411Z",
+                    "updatedAt": "2026-11-20T17:02:57.546Z"
+                  },
+                  "turnTokenUsage": {
+                    "usageScope": "main_agent",
+                    "cachedInputTokens": 135964,
+                    "cacheCreationTokens": 22238,
+                    "reasoningTokens": 201,
+                    "hasSubagents": false,
+                    "models": [
+                      "claude-haiku-5-5"
+                    ],
+                    "otherUsage": {
+                      "inputTokens": 0,
+                      "outputTokens": 0
+                    },
+                    "usageStatus": "complete",
+                    "inputTokens": 158208,
+                    "outputTokens": 416
+                  },
+                  "model": "claude-haiku-5-5"
+                },
+                {
+                  "id": "provider-turn:provider:claudeAgent:native-turn:turn%3Arun-attempt%3Arun%3Arun%253Athread%253Amcp%25253Affa069f1-1080-4525-a24d-241aa4823970%253Aordinal%253A2%3Aattempt%3A1",
+                  "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A1",
+                  "nodeId": "node:run:run%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A2:root",
+                  "runAttemptId": "run-attempt:run:run%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A2:attempt:1",
+                  "nativeTurnRef": {
+                    "driver": "claudeAgent",
+                    "nativeId": "a56640a1-3a29-467d-81a2-4d02873dfc69",
+                    "strength": "weak"
+                  },
+                  "ordinal": 2,
+                  "status": "completed",
+                  "startedAt": "2026-11-20T17:02:59.663Z",
+                  "completedAt": "2026-11-20T17:03:00.920Z",
+                  "tokenUsage": {
+                    "usedTokens": 55447,
+                    "maxTokens": 1000000,
+                    "inputTokens": 55444,
+                    "cachedInputTokens": 55383,
+                    "outputTokens": 3,
+                    "reasoningOutputTokens": 0,
+                    "promptCacheTtlMs": 3600000,
+                    "promptCacheExpiresAt": "2026-11-20T18:03:00.903Z",
+                    "updatedAt": "2026-11-20T17:03:00.906Z"
+                  },
+                  "turnTokenUsage": {
+                    "usageScope": "main_agent",
+                    "cachedInputTokens": 55383,
+                    "cacheCreationTokens": 59,
+                    "reasoningTokens": 0,
+                    "hasSubagents": false,
+                    "models": [
+                      "claude-haiku-5-5"
+                    ],
+                    "otherUsage": {
+                      "inputTokens": 0,
+                      "outputTokens": 0
+                    },
+                    "usageStatus": "complete",
+                    "inputTokens": 55444,
+                    "outputTokens": 3
+                  },
+                  "model": "claude-haiku-5-5"
+                }
+              ],
+              "runtimeRequests": [],
+              "messages": [
+                {
+                  "createdBy": "agent",
+                  "creationSource": "mcp",
+                  "id": "mcp:ffa069f1-1080-4525-a24d-241aa4823970",
+                  "threadId": "mcp:ffa069f1-1080-4525-a24d-241aa4823970",
+                  "runId": "run:thread:mcp%3Affa069f1-1080-4525-a24d-241aa4823970:ordinal:1",
+                  "nodeId": "node:run:run%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A1:root",
+                  "role": "user",
+                  "text": "Run the shell command `sleep 45` and then reply with exactly: done",
+                  "attachments": [],
+                  "streaming": false,
+                  "createdAt": "2026-11-20T17:02:45.521Z",
+                  "updatedAt": "2026-11-20T17:02:45.521Z"
+                },
+                {
+                  "createdBy": "agent",
+                  "creationSource": "provider",
+                  "id": "message:provider:claudeAgent:native-item:e5f59e4e-df6b-4418-be95-e1d1a3616e6c",
+                  "threadId": "mcp:ffa069f1-1080-4525-a24d-241aa4823970",
+                  "runId": "run:thread:mcp%3Affa069f1-1080-4525-a24d-241aa4823970:ordinal:1",
+                  "nodeId": "node:provider:claudeAgent:native-item:e5f59e4e-df6b-4418-be95-e1d1a3616e6c",
+                  "role": "assistant",
+                  "text": "The sleep is running in the background. I'll reply once it finishes.",
+                  "attachments": [],
+                  "streaming": false,
+                  "createdAt": "2026-11-20T17:02:57.546Z",
+                  "updatedAt": "2026-11-20T17:02:57.546Z"
+                },
+                {
+                  "createdBy": "agent",
+                  "creationSource": "mcp",
+                  "id": "message:mcp:client%3A912c899e-212f-44cf-8a53-4201b11fdae2:thread-send:2f7ac32b-4aab-4786-97ce-1e7e4d2d0509",
+                  "threadId": "mcp:ffa069f1-1080-4525-a24d-241aa4823970",
+                  "runId": "run:thread:mcp%3Affa069f1-1080-4525-a24d-241aa4823970:ordinal:2",
+                  "nodeId": "node:run:run%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A2:root",
+                  "role": "user",
+                  "text": "Reply with exactly: second",
+                  "attachments": [],
+                  "streaming": false,
+                  "createdAt": "2026-11-20T17:02:59.591Z",
+                  "updatedAt": "2026-11-20T17:02:59.591Z"
+                },
+                {
+                  "createdBy": "agent",
+                  "creationSource": "provider",
+                  "id": "message:provider:claudeAgent:native-item:a56640a1-3a29-467d-81a2-4d02873dfc69",
+                  "threadId": "mcp:ffa069f1-1080-4525-a24d-241aa4823970",
+                  "runId": "run:thread:mcp%3Affa069f1-1080-4525-a24d-241aa4823970:ordinal:2",
+                  "nodeId": "node:provider:claudeAgent:native-item:a56640a1-3a29-467d-81a2-4d02873dfc69",
+                  "role": "assistant",
+                  "text": "second",
+                  "attachments": [],
+                  "streaming": false,
+                  "createdAt": "2026-11-20T17:03:00.906Z",
+                  "updatedAt": "2026-11-20T17:03:00.906Z"
+                }
+              ],
+              "plans": [],
+              "turnItems": [
+                {
+                  "id": "turn-item:message:mcp%3Affa069f1-1080-4525-a24d-241aa4823970",
+                  "threadId": "mcp:ffa069f1-1080-4525-a24d-241aa4823970",
+                  "runId": "run:thread:mcp%3Affa069f1-1080-4525-a24d-241aa4823970:ordinal:1",
+                  "nodeId": "node:run:run%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A1:root",
+                  "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A1",
+                  "providerTurnId": null,
+                  "nativeItemRef": null,
+                  "parentItemId": null,
+                  "ordinal": 1000001,
+                  "status": "completed",
+                  "title": null,
+                  "startedAt": "2026-11-20T17:02:45.521Z",
+                  "completedAt": "2026-11-20T17:02:45.521Z",
+                  "updatedAt": "2026-11-20T17:02:45.521Z",
+                  "createdBy": "agent",
+                  "creationSource": "mcp",
+                  "type": "user_message",
+                  "messageId": "mcp:ffa069f1-1080-4525-a24d-241aa4823970",
+                  "inputIntent": "turn_start",
+                  "text": "Run the shell command `sleep 45` and then reply with exactly: done",
+                  "attachments": []
+                },
+                {
+                  "id": "turn-item:provider:claudeAgent:native-item:workspace-preparation%3Arun%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A1",
+                  "threadId": "mcp:ffa069f1-1080-4525-a24d-241aa4823970",
+                  "runId": "run:thread:mcp%3Affa069f1-1080-4525-a24d-241aa4823970:ordinal:1",
+                  "nodeId": "node:run:run%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A1:root",
+                  "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A1",
+                  "providerTurnId": null,
+                  "nativeItemRef": null,
+                  "parentItemId": null,
+                  "ordinal": 1000002,
+                  "status": "completed",
+                  "title": "Workspace ready",
+                  "startedAt": "2026-11-20T17:02:45.521Z",
+                  "completedAt": "2026-11-20T17:02:45.549Z",
+                  "updatedAt": "2026-11-20T17:02:45.549Z",
+                  "type": "command_execution",
+                  "input": "Preparing workspace",
+                  "outputOmitted": true,
+                  "exitCode": 0
+                },
+                {
+                  "id": "turn-item:provider:claudeAgent:native-item:toolu_01JhYiwA6QWqvbbuRrMwgZqk",
+                  "threadId": "mcp:ffa069f1-1080-4525-a24d-241aa4823970",
+                  "runId": "run:thread:mcp%3Affa069f1-1080-4525-a24d-241aa4823970:ordinal:1",
+                  "nodeId": "node:provider:claudeAgent:native-item:toolu_01JhYiwA6QWqvbbuRrMwgZqk",
+                  "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A1",
+                  "providerTurnId": "provider-turn:provider:claudeAgent:native-turn:turn%3Arun-attempt%3Arun%3Arun%253Athread%253Amcp%25253Affa069f1-1080-4525-a24d-241aa4823970%253Aordinal%253A1%3Aattempt%3A1",
+                  "nativeItemRef": {
+                    "driver": "claudeAgent",
+                    "nativeId": "toolu_01JhYiwA6QWqvbbuRrMwgZqk",
+                    "strength": "strong"
+                  },
+                  "parentItemId": null,
+                  "ordinal": 1000003,
+                  "status": "failed",
+                  "title": null,
+                  "startedAt": "2026-11-20T17:02:49.470Z",
+                  "completedAt": "2026-11-20T17:02:49.477Z",
+                  "updatedAt": "2026-11-20T17:02:49.477Z",
+                  "type": "dynamic_tool",
+                  "toolName": "PowerShell",
+                  "input": {
+                    "command": "sleep 45",
+                    "description": "Sleep for 45 seconds"
+                  },
+                  "outputOmitted": true
+                },
+                {
+                  "id": "turn-item:provider:claudeAgent:native-item:msg_011ChEYKjNtwnZ7XPt6hE72q%3Athinking%3A0",
+                  "threadId": "mcp:ffa069f1-1080-4525-a24d-241aa4823970",
+                  "runId": "run:thread:mcp%3Affa069f1-1080-4525-a24d-241aa4823970:ordinal:1",
+                  "nodeId": "node:run:run%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A1:root",
+                  "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A1",
+                  "providerTurnId": "provider-turn:provider:claudeAgent:native-turn:turn%3Arun-attempt%3Arun%3Arun%253Athread%253Amcp%25253Affa069f1-1080-4525-a24d-241aa4823970%253Aordinal%253A1%3Aattempt%3A1",
+                  "nativeItemRef": {
+                    "driver": "claudeAgent",
+                    "nativeId": "msg_011ChEYKjNtwnZ7XPt6hE72q:thinking:0",
+                    "strength": "strong"
+                  },
+                  "parentItemId": null,
+                  "ordinal": 1000004,
+                  "status": "completed",
+                  "title": "Thinking",
+                  "startedAt": "2026-11-20T17:02:50.610Z",
+                  "completedAt": "2026-11-20T17:02:52.932Z",
+                  "updatedAt": "2026-11-20T17:02:52.932Z",
+                  "type": "reasoning",
+                  "text": "The shell sleep got blocked by the harness, and the guidance says to use Monitor or run the command in the background instead. The user wants `sleep 45` run, so I could try it through the Bash tool with `run_in_background` set to true.\n\nI'm going with the background Bash route, since that's the sanctioned way to wait here. It will notify me when the sleep finishes, and then I'll reply that it's done.\n\n",
+                  "streaming": false
+                },
+                {
+                  "id": "turn-item:provider:claudeAgent:native-item:toolu_0131t2tjnGzUtim5r19WB7sK",
+                  "threadId": "mcp:ffa069f1-1080-4525-a24d-241aa4823970",
+                  "runId": "run:thread:mcp%3Affa069f1-1080-4525-a24d-241aa4823970:ordinal:1",
+                  "nodeId": "node:provider:claudeAgent:native-item:toolu_0131t2tjnGzUtim5r19WB7sK",
+                  "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A1",
+                  "providerTurnId": "provider-turn:provider:claudeAgent:native-turn:turn%3Arun-attempt%3Arun%3Arun%253Athread%253Amcp%25253Affa069f1-1080-4525-a24d-241aa4823970%253Aordinal%253A1%3Aattempt%3A1",
+                  "nativeItemRef": {
+                    "driver": "claudeAgent",
+                    "nativeId": "toolu_0131t2tjnGzUtim5r19WB7sK",
+                    "strength": "strong"
+                  },
+                  "parentItemId": null,
+                  "ordinal": 1000005,
+                  "status": "completed",
+                  "title": null,
+                  "startedAt": "2026-11-20T17:02:52.939Z",
+                  "completedAt": "2026-11-20T17:02:56.512Z",
+                  "updatedAt": "2026-11-20T17:02:56.512Z",
+                  "type": "command_execution",
+                  "input": "sleep 45",
+                  "outputOmitted": true
+                },
+                {
+                  "id": "turn-item:provider:claudeAgent:native-item:e5f59e4e-df6b-4418-be95-e1d1a3616e6c",
+                  "threadId": "mcp:ffa069f1-1080-4525-a24d-241aa4823970",
+                  "runId": "run:thread:mcp%3Affa069f1-1080-4525-a24d-241aa4823970:ordinal:1",
+                  "nodeId": "node:provider:claudeAgent:native-item:e5f59e4e-df6b-4418-be95-e1d1a3616e6c",
+                  "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A1",
+                  "providerTurnId": "provider-turn:provider:claudeAgent:native-turn:turn%3Arun-attempt%3Arun%3Arun%253Athread%253Amcp%25253Affa069f1-1080-4525-a24d-241aa4823970%253Aordinal%253A1%3Aattempt%3A1",
+                  "nativeItemRef": {
+                    "driver": "claudeAgent",
+                    "nativeId": "e5f59e4e-df6b-4418-be95-e1d1a3616e6c",
+                    "strength": "strong"
+                  },
+                  "parentItemId": null,
+                  "ordinal": 1000006,
+                  "status": "completed",
+                  "title": null,
+                  "startedAt": "2026-11-20T17:02:57.546Z",
+                  "completedAt": "2026-11-20T17:02:57.546Z",
+                  "updatedAt": "2026-11-20T17:02:57.546Z",
+                  "type": "assistant_message",
+                  "messageId": "message:provider:claudeAgent:native-item:e5f59e4e-df6b-4418-be95-e1d1a3616e6c",
+                  "text": "The sleep is running in the background. I'll reply once it finishes.",
+                  "streaming": false
+                },
+                {
+                  "id": "turn-item:provider:claudeAgent:native-item:checkpoint%3Acheckpoint%3Ascope%3Acheckpoint-scope%253Athread%253Amcp%25253Affa069f1-1080-4525-a24d-241aa4823970%253Aname%253Aroot%3Aname%3A1",
+                  "threadId": "mcp:ffa069f1-1080-4525-a24d-241aa4823970",
+                  "runId": "run:thread:mcp%3Affa069f1-1080-4525-a24d-241aa4823970:ordinal:1",
+                  "nodeId": "node:run:run%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A1:root",
+                  "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A1",
+                  "providerTurnId": null,
+                  "nativeItemRef": null,
+                  "parentItemId": null,
+                  "ordinal": 1000007,
+                  "status": "completed",
+                  "title": null,
+                  "startedAt": "2026-11-20T17:02:57.667Z",
+                  "completedAt": "2026-11-20T17:02:57.667Z",
+                  "updatedAt": "2026-11-20T17:02:57.667Z",
+                  "type": "checkpoint",
+                  "checkpointId": "checkpoint:scope:checkpoint-scope%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aname%3Aroot:name:1",
+                  "scopeId": "checkpoint-scope:thread:mcp%3Affa069f1-1080-4525-a24d-241aa4823970:name:root",
+                  "files": []
+                },
+                {
+                  "id": "turn-item:message:message%3Amcp%3Aclient%253A912c899e-212f-44cf-8a53-4201b11fdae2%3Athread-send%3A2f7ac32b-4aab-4786-97ce-1e7e4d2d0509",
+                  "threadId": "mcp:ffa069f1-1080-4525-a24d-241aa4823970",
+                  "runId": "run:thread:mcp%3Affa069f1-1080-4525-a24d-241aa4823970:ordinal:2",
+                  "nodeId": "node:run:run%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A2:root",
+                  "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A1",
+                  "providerTurnId": null,
+                  "nativeItemRef": null,
+                  "parentItemId": null,
+                  "ordinal": 2000001,
+                  "status": "completed",
+                  "title": null,
+                  "startedAt": "2026-11-20T17:02:59.591Z",
+                  "completedAt": "2026-11-20T17:02:59.591Z",
+                  "updatedAt": "2026-11-20T17:02:59.591Z",
+                  "createdBy": "agent",
+                  "creationSource": "mcp",
+                  "type": "user_message",
+                  "messageId": "message:mcp:client%3A912c899e-212f-44cf-8a53-4201b11fdae2:thread-send:2f7ac32b-4aab-4786-97ce-1e7e4d2d0509",
+                  "inputIntent": "turn_start",
+                  "text": "Reply with exactly: second",
+                  "attachments": []
+                },
+                {
+                  "id": "turn-item:provider:claudeAgent:native-item:a56640a1-3a29-467d-81a2-4d02873dfc69",
+                  "threadId": "mcp:ffa069f1-1080-4525-a24d-241aa4823970",
+                  "runId": "run:thread:mcp%3Affa069f1-1080-4525-a24d-241aa4823970:ordinal:2",
+                  "nodeId": "node:provider:claudeAgent:native-item:a56640a1-3a29-467d-81a2-4d02873dfc69",
+                  "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A1",
+                  "providerTurnId": "provider-turn:provider:claudeAgent:native-turn:turn%3Arun-attempt%3Arun%3Arun%253Athread%253Amcp%25253Affa069f1-1080-4525-a24d-241aa4823970%253Aordinal%253A2%3Aattempt%3A1",
+                  "nativeItemRef": {
+                    "driver": "claudeAgent",
+                    "nativeId": "a56640a1-3a29-467d-81a2-4d02873dfc69",
+                    "strength": "strong"
+                  },
+                  "parentItemId": null,
+                  "ordinal": 2000002,
+                  "status": "completed",
+                  "title": null,
+                  "startedAt": "2026-11-20T17:03:00.906Z",
+                  "completedAt": "2026-11-20T17:03:00.906Z",
+                  "updatedAt": "2026-11-20T17:03:00.906Z",
+                  "type": "assistant_message",
+                  "messageId": "message:provider:claudeAgent:native-item:a56640a1-3a29-467d-81a2-4d02873dfc69",
+                  "text": "second",
+                  "streaming": false
+                },
+                {
+                  "id": "turn-item:provider:claudeAgent:native-item:checkpoint%3Acheckpoint%3Ascope%3Acheckpoint-scope%253Athread%253Amcp%25253Affa069f1-1080-4525-a24d-241aa4823970%253Aname%253Aroot%3Aname%3A2",
+                  "threadId": "mcp:ffa069f1-1080-4525-a24d-241aa4823970",
+                  "runId": "run:thread:mcp%3Affa069f1-1080-4525-a24d-241aa4823970:ordinal:2",
+                  "nodeId": "node:run:run%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A2:root",
+                  "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A1",
+                  "providerTurnId": null,
+                  "nativeItemRef": null,
+                  "parentItemId": null,
+                  "ordinal": 2000003,
+                  "status": "completed",
+                  "title": null,
+                  "startedAt": "2026-11-20T17:03:00.937Z",
+                  "completedAt": "2026-11-20T17:03:00.937Z",
+                  "updatedAt": "2026-11-20T17:03:00.937Z",
+                  "type": "checkpoint",
+                  "checkpointId": "checkpoint:scope:checkpoint-scope%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aname%3Aroot:name:2",
+                  "scopeId": "checkpoint-scope:thread:mcp%3Affa069f1-1080-4525-a24d-241aa4823970:name:root",
+                  "files": []
+                },
+                {
+                  "id": "turn-item:run:run%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A2:signal:interrupt-request",
+                  "threadId": "mcp:ffa069f1-1080-4525-a24d-241aa4823970",
+                  "runId": "run:thread:mcp%3Affa069f1-1080-4525-a24d-241aa4823970:ordinal:2",
+                  "nodeId": "node:run:run%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A2:root",
+                  "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A1",
+                  "providerTurnId": "provider-turn:provider:claudeAgent:native-turn:turn%3Arun-attempt%3Arun%3Arun%253Athread%253Amcp%25253Affa069f1-1080-4525-a24d-241aa4823970%253Aordinal%253A2%3Aattempt%3A1",
+                  "nativeItemRef": null,
+                  "parentItemId": null,
+                  "ordinal": 2000004,
+                  "status": "completed",
+                  "title": "Interrupt requested",
+                  "startedAt": "2026-11-20T17:03:02.980Z",
+                  "completedAt": "2026-11-20T17:03:02.980Z",
+                  "updatedAt": "2026-11-20T17:03:02.980Z",
+                  "type": "run_interrupt_request",
+                  "message": "t3-api-facts probe"
+                }
+              ],
+              "checkpointScopes": [
+                {
+                  "id": "checkpoint-scope:thread:mcp%3Affa069f1-1080-4525-a24d-241aa4823970:name:root",
+                  "threadId": "mcp:ffa069f1-1080-4525-a24d-241aa4823970",
+                  "runId": "run:thread:mcp%3Affa069f1-1080-4525-a24d-241aa4823970:ordinal:2",
+                  "nodeId": "node:run:run%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A2:root",
+                  "parentScopeId": null,
+                  "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A1",
+                  "kind": "root_run",
+                  "ordinalWithinParent": 0,
+                  "advancesAppRunCount": true,
+                  "cwd": "C:\\Users\\Anon\\.queue-runner\\sandbox\\repo",
+                  "createdAt": "2026-11-20T17:02:59.591Z"
+                }
+              ],
+              "checkpoints": [
+                {
+                  "id": "checkpoint:scope:checkpoint-scope%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aname%3Aroot:name:0",
+                  "threadId": "mcp:ffa069f1-1080-4525-a24d-241aa4823970",
+                  "scopeId": "checkpoint-scope:thread:mcp%3Affa069f1-1080-4525-a24d-241aa4823970:name:root",
+                  "runId": null,
+                  "nodeId": "node:run:run%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A1:root",
+                  "parentCheckpointId": null,
+                  "ordinalWithinScope": 0,
+                  "appRunOrdinal": null,
+                  "ref": "refs/t3/orchestration-v2/checkpoints/MjQ0ZWVkOGQ1Y2UzZjEyMTA1YzcwNjIzYTQzMzgzNjc/ordinal/0",
+                  "status": "ready",
+                  "files": [],
+                  "capturedAt": "2026-11-20T17:02:45.521Z"
+                },
+                {
+                  "id": "checkpoint:scope:checkpoint-scope%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aname%3Aroot:name:1",
+                  "threadId": "mcp:ffa069f1-1080-4525-a24d-241aa4823970",
+                  "scopeId": "checkpoint-scope:thread:mcp%3Affa069f1-1080-4525-a24d-241aa4823970:name:root",
+                  "runId": "run:thread:mcp%3Affa069f1-1080-4525-a24d-241aa4823970:ordinal:1",
+                  "nodeId": "node:run:run%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A1:root",
+                  "parentCheckpointId": "checkpoint:scope:checkpoint-scope%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aname%3Aroot:name:0",
+                  "ordinalWithinScope": 1,
+                  "appRunOrdinal": 1,
+                  "ref": "refs/t3/orchestration-v2/checkpoints/MjQ0ZWVkOGQ1Y2UzZjEyMTA1YzcwNjIzYTQzMzgzNjc/ordinal/1",
+                  "status": "ready",
+                  "files": [],
+                  "capturedAt": "2026-11-20T17:02:57.667Z"
+                },
+                {
+                  "id": "checkpoint:scope:checkpoint-scope%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aname%3Aroot:name:2",
+                  "threadId": "mcp:ffa069f1-1080-4525-a24d-241aa4823970",
+                  "scopeId": "checkpoint-scope:thread:mcp%3Affa069f1-1080-4525-a24d-241aa4823970:name:root",
+                  "runId": "run:thread:mcp%3Affa069f1-1080-4525-a24d-241aa4823970:ordinal:2",
+                  "nodeId": "node:run:run%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A2:root",
+                  "parentCheckpointId": "checkpoint:scope:checkpoint-scope%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aname%3Aroot:name:1",
+                  "ordinalWithinScope": 2,
+                  "appRunOrdinal": 2,
+                  "ref": "refs/t3/orchestration-v2/checkpoints/MjQ0ZWVkOGQ1Y2UzZjEyMTA1YzcwNjIzYTQzMzgzNjc/ordinal/2",
+                  "status": "ready",
+                  "files": [],
+                  "capturedAt": "2026-11-20T17:03:00.937Z"
+                }
+              ],
+              "contextHandoffs": [],
+              "contextTransfers": [],
+              "visibleTurnItems": [
+                {
+                  "position": 0,
+                  "visibility": "local",
+                  "sourceThreadId": "mcp:ffa069f1-1080-4525-a24d-241aa4823970",
+                  "sourceItemId": "turn-item:message:mcp%3Affa069f1-1080-4525-a24d-241aa4823970",
+                  "item": {
+                    "id": "turn-item:message:mcp%3Affa069f1-1080-4525-a24d-241aa4823970",
+                    "threadId": "mcp:ffa069f1-1080-4525-a24d-241aa4823970",
+                    "runId": "run:thread:mcp%3Affa069f1-1080-4525-a24d-241aa4823970:ordinal:1",
+                    "nodeId": "node:run:run%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A1:root",
+                    "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A1",
+                    "providerTurnId": null,
+                    "nativeItemRef": null,
+                    "parentItemId": null,
+                    "ordinal": 1000001,
+                    "status": "completed",
+                    "title": null,
+                    "startedAt": "2026-11-20T17:02:45.521Z",
+                    "completedAt": "2026-11-20T17:02:45.521Z",
+                    "updatedAt": "2026-11-20T17:02:45.521Z",
+                    "createdBy": "agent",
+                    "creationSource": "mcp",
+                    "type": "user_message",
+                    "messageId": "mcp:ffa069f1-1080-4525-a24d-241aa4823970",
+                    "inputIntent": "turn_start",
+                    "text": "Run the shell command `sleep 45` and then reply with exactly: done",
+                    "attachments": []
+                  }
+                },
+                {
+                  "position": 1,
+                  "visibility": "local",
+                  "sourceThreadId": "mcp:ffa069f1-1080-4525-a24d-241aa4823970",
+                  "sourceItemId": "turn-item:provider:claudeAgent:native-item:workspace-preparation%3Arun%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A1",
+                  "item": {
+                    "id": "turn-item:provider:claudeAgent:native-item:workspace-preparation%3Arun%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A1",
+                    "threadId": "mcp:ffa069f1-1080-4525-a24d-241aa4823970",
+                    "runId": "run:thread:mcp%3Affa069f1-1080-4525-a24d-241aa4823970:ordinal:1",
+                    "nodeId": "node:run:run%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A1:root",
+                    "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A1",
+                    "providerTurnId": null,
+                    "nativeItemRef": null,
+                    "parentItemId": null,
+                    "ordinal": 1000002,
+                    "status": "completed",
+                    "title": "Workspace ready",
+                    "startedAt": "2026-11-20T17:02:45.521Z",
+                    "completedAt": "2026-11-20T17:02:45.549Z",
+                    "updatedAt": "2026-11-20T17:02:45.549Z",
+                    "type": "command_execution",
+                    "input": "Preparing workspace",
+                    "outputOmitted": true,
+                    "exitCode": 0
+                  }
+                },
+                {
+                  "position": 2,
+                  "visibility": "local",
+                  "sourceThreadId": "mcp:ffa069f1-1080-4525-a24d-241aa4823970",
+                  "sourceItemId": "turn-item:provider:claudeAgent:native-item:toolu_01JhYiwA6QWqvbbuRrMwgZqk",
+                  "item": {
+                    "id": "turn-item:provider:claudeAgent:native-item:toolu_01JhYiwA6QWqvbbuRrMwgZqk",
+                    "threadId": "mcp:ffa069f1-1080-4525-a24d-241aa4823970",
+                    "runId": "run:thread:mcp%3Affa069f1-1080-4525-a24d-241aa4823970:ordinal:1",
+                    "nodeId": "node:provider:claudeAgent:native-item:toolu_01JhYiwA6QWqvbbuRrMwgZqk",
+                    "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A1",
+                    "providerTurnId": "provider-turn:provider:claudeAgent:native-turn:turn%3Arun-attempt%3Arun%3Arun%253Athread%253Amcp%25253Affa069f1-1080-4525-a24d-241aa4823970%253Aordinal%253A1%3Aattempt%3A1",
+                    "nativeItemRef": {
+                      "driver": "claudeAgent",
+                      "nativeId": "toolu_01JhYiwA6QWqvbbuRrMwgZqk",
+                      "strength": "strong"
+                    },
+                    "parentItemId": null,
+                    "ordinal": 1000003,
+                    "status": "failed",
+                    "title": null,
+                    "startedAt": "2026-11-20T17:02:49.470Z",
+                    "completedAt": "2026-11-20T17:02:49.477Z",
+                    "updatedAt": "2026-11-20T17:02:49.477Z",
+                    "type": "dynamic_tool",
+                    "toolName": "PowerShell",
+                    "input": {
+                      "command": "sleep 45",
+                      "description": "Sleep for 45 seconds"
+                    },
+                    "outputOmitted": true
+                  }
+                },
+                {
+                  "position": 3,
+                  "visibility": "local",
+                  "sourceThreadId": "mcp:ffa069f1-1080-4525-a24d-241aa4823970",
+                  "sourceItemId": "turn-item:provider:claudeAgent:native-item:msg_011ChEYKjNtwnZ7XPt6hE72q%3Athinking%3A0",
+                  "item": {
+                    "id": "turn-item:provider:claudeAgent:native-item:msg_011ChEYKjNtwnZ7XPt6hE72q%3Athinking%3A0",
+                    "threadId": "mcp:ffa069f1-1080-4525-a24d-241aa4823970",
+                    "runId": "run:thread:mcp%3Affa069f1-1080-4525-a24d-241aa4823970:ordinal:1",
+                    "nodeId": "node:run:run%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A1:root",
+                    "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A1",
+                    "providerTurnId": "provider-turn:provider:claudeAgent:native-turn:turn%3Arun-attempt%3Arun%3Arun%253Athread%253Amcp%25253Affa069f1-1080-4525-a24d-241aa4823970%253Aordinal%253A1%3Aattempt%3A1",
+                    "nativeItemRef": {
+                      "driver": "claudeAgent",
+                      "nativeId": "msg_011ChEYKjNtwnZ7XPt6hE72q:thinking:0",
+                      "strength": "strong"
+                    },
+                    "parentItemId": null,
+                    "ordinal": 1000004,
+                    "status": "completed",
+                    "title": "Thinking",
+                    "startedAt": "2026-11-20T17:02:50.610Z",
+                    "completedAt": "2026-11-20T17:02:52.932Z",
+                    "updatedAt": "2026-11-20T17:02:52.932Z",
+                    "type": "reasoning",
+                    "text": "The shell sleep got blocked by the harness, and the guidance says to use Monitor or run the command in the background instead. The user wants `sleep 45` run, so I could try it through the Bash tool with `run_in_background` set to true.\n\nI'm going with the background Bash route, since that's the sanctioned way to wait here. It will notify me when the sleep finishes, and then I'll reply that it's done.\n\n",
+                    "streaming": false
+                  }
+                },
+                {
+                  "position": 4,
+                  "visibility": "local",
+                  "sourceThreadId": "mcp:ffa069f1-1080-4525-a24d-241aa4823970",
+                  "sourceItemId": "turn-item:provider:claudeAgent:native-item:toolu_0131t2tjnGzUtim5r19WB7sK",
+                  "item": {
+                    "id": "turn-item:provider:claudeAgent:native-item:toolu_0131t2tjnGzUtim5r19WB7sK",
+                    "threadId": "mcp:ffa069f1-1080-4525-a24d-241aa4823970",
+                    "runId": "run:thread:mcp%3Affa069f1-1080-4525-a24d-241aa4823970:ordinal:1",
+                    "nodeId": "node:provider:claudeAgent:native-item:toolu_0131t2tjnGzUtim5r19WB7sK",
+                    "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A1",
+                    "providerTurnId": "provider-turn:provider:claudeAgent:native-turn:turn%3Arun-attempt%3Arun%3Arun%253Athread%253Amcp%25253Affa069f1-1080-4525-a24d-241aa4823970%253Aordinal%253A1%3Aattempt%3A1",
+                    "nativeItemRef": {
+                      "driver": "claudeAgent",
+                      "nativeId": "toolu_0131t2tjnGzUtim5r19WB7sK",
+                      "strength": "strong"
+                    },
+                    "parentItemId": null,
+                    "ordinal": 1000005,
+                    "status": "completed",
+                    "title": null,
+                    "startedAt": "2026-11-20T17:02:52.939Z",
+                    "completedAt": "2026-11-20T17:02:56.512Z",
+                    "updatedAt": "2026-11-20T17:02:56.512Z",
+                    "type": "command_execution",
+                    "input": "sleep 45",
+                    "outputOmitted": true
+                  }
+                },
+                {
+                  "position": 5,
+                  "visibility": "local",
+                  "sourceThreadId": "mcp:ffa069f1-1080-4525-a24d-241aa4823970",
+                  "sourceItemId": "turn-item:provider:claudeAgent:native-item:e5f59e4e-df6b-4418-be95-e1d1a3616e6c",
+                  "item": {
+                    "id": "turn-item:provider:claudeAgent:native-item:e5f59e4e-df6b-4418-be95-e1d1a3616e6c",
+                    "threadId": "mcp:ffa069f1-1080-4525-a24d-241aa4823970",
+                    "runId": "run:thread:mcp%3Affa069f1-1080-4525-a24d-241aa4823970:ordinal:1",
+                    "nodeId": "node:provider:claudeAgent:native-item:e5f59e4e-df6b-4418-be95-e1d1a3616e6c",
+                    "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A1",
+                    "providerTurnId": "provider-turn:provider:claudeAgent:native-turn:turn%3Arun-attempt%3Arun%3Arun%253Athread%253Amcp%25253Affa069f1-1080-4525-a24d-241aa4823970%253Aordinal%253A1%3Aattempt%3A1",
+                    "nativeItemRef": {
+                      "driver": "claudeAgent",
+                      "nativeId": "e5f59e4e-df6b-4418-be95-e1d1a3616e6c",
+                      "strength": "strong"
+                    },
+                    "parentItemId": null,
+                    "ordinal": 1000006,
+                    "status": "completed",
+                    "title": null,
+                    "startedAt": "2026-11-20T17:02:57.546Z",
+                    "completedAt": "2026-11-20T17:02:57.546Z",
+                    "updatedAt": "2026-11-20T17:02:57.546Z",
+                    "type": "assistant_message",
+                    "messageId": "message:provider:claudeAgent:native-item:e5f59e4e-df6b-4418-be95-e1d1a3616e6c",
+                    "text": "The sleep is running in the background. I'll reply once it finishes.",
+                    "streaming": false
+                  }
+                },
+                {
+                  "position": 6,
+                  "visibility": "local",
+                  "sourceThreadId": "mcp:ffa069f1-1080-4525-a24d-241aa4823970",
+                  "sourceItemId": "turn-item:provider:claudeAgent:native-item:checkpoint%3Acheckpoint%3Ascope%3Acheckpoint-scope%253Athread%253Amcp%25253Affa069f1-1080-4525-a24d-241aa4823970%253Aname%253Aroot%3Aname%3A1",
+                  "item": {
+                    "id": "turn-item:provider:claudeAgent:native-item:checkpoint%3Acheckpoint%3Ascope%3Acheckpoint-scope%253Athread%253Amcp%25253Affa069f1-1080-4525-a24d-241aa4823970%253Aname%253Aroot%3Aname%3A1",
+                    "threadId": "mcp:ffa069f1-1080-4525-a24d-241aa4823970",
+                    "runId": "run:thread:mcp%3Affa069f1-1080-4525-a24d-241aa4823970:ordinal:1",
+                    "nodeId": "node:run:run%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A1:root",
+                    "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A1",
+                    "providerTurnId": null,
+                    "nativeItemRef": null,
+                    "parentItemId": null,
+                    "ordinal": 1000007,
+                    "status": "completed",
+                    "title": null,
+                    "startedAt": "2026-11-20T17:02:57.667Z",
+                    "completedAt": "2026-11-20T17:02:57.667Z",
+                    "updatedAt": "2026-11-20T17:02:57.667Z",
+                    "type": "checkpoint",
+                    "checkpointId": "checkpoint:scope:checkpoint-scope%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aname%3Aroot:name:1",
+                    "scopeId": "checkpoint-scope:thread:mcp%3Affa069f1-1080-4525-a24d-241aa4823970:name:root",
+                    "files": []
+                  }
+                },
+                {
+                  "position": 7,
+                  "visibility": "local",
+                  "sourceThreadId": "mcp:ffa069f1-1080-4525-a24d-241aa4823970",
+                  "sourceItemId": "turn-item:message:message%3Amcp%3Aclient%253A912c899e-212f-44cf-8a53-4201b11fdae2%3Athread-send%3A2f7ac32b-4aab-4786-97ce-1e7e4d2d0509",
+                  "item": {
+                    "id": "turn-item:message:message%3Amcp%3Aclient%253A912c899e-212f-44cf-8a53-4201b11fdae2%3Athread-send%3A2f7ac32b-4aab-4786-97ce-1e7e4d2d0509",
+                    "threadId": "mcp:ffa069f1-1080-4525-a24d-241aa4823970",
+                    "runId": "run:thread:mcp%3Affa069f1-1080-4525-a24d-241aa4823970:ordinal:2",
+                    "nodeId": "node:run:run%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A2:root",
+                    "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A1",
+                    "providerTurnId": null,
+                    "nativeItemRef": null,
+                    "parentItemId": null,
+                    "ordinal": 2000001,
+                    "status": "completed",
+                    "title": null,
+                    "startedAt": "2026-11-20T17:02:59.591Z",
+                    "completedAt": "2026-11-20T17:02:59.591Z",
+                    "updatedAt": "2026-11-20T17:02:59.591Z",
+                    "createdBy": "agent",
+                    "creationSource": "mcp",
+                    "type": "user_message",
+                    "messageId": "message:mcp:client%3A912c899e-212f-44cf-8a53-4201b11fdae2:thread-send:2f7ac32b-4aab-4786-97ce-1e7e4d2d0509",
+                    "inputIntent": "turn_start",
+                    "text": "Reply with exactly: second",
+                    "attachments": []
+                  }
+                },
+                {
+                  "position": 8,
+                  "visibility": "local",
+                  "sourceThreadId": "mcp:ffa069f1-1080-4525-a24d-241aa4823970",
+                  "sourceItemId": "turn-item:provider:claudeAgent:native-item:a56640a1-3a29-467d-81a2-4d02873dfc69",
+                  "item": {
+                    "id": "turn-item:provider:claudeAgent:native-item:a56640a1-3a29-467d-81a2-4d02873dfc69",
+                    "threadId": "mcp:ffa069f1-1080-4525-a24d-241aa4823970",
+                    "runId": "run:thread:mcp%3Affa069f1-1080-4525-a24d-241aa4823970:ordinal:2",
+                    "nodeId": "node:provider:claudeAgent:native-item:a56640a1-3a29-467d-81a2-4d02873dfc69",
+                    "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A1",
+                    "providerTurnId": "provider-turn:provider:claudeAgent:native-turn:turn%3Arun-attempt%3Arun%3Arun%253Athread%253Amcp%25253Affa069f1-1080-4525-a24d-241aa4823970%253Aordinal%253A2%3Aattempt%3A1",
+                    "nativeItemRef": {
+                      "driver": "claudeAgent",
+                      "nativeId": "a56640a1-3a29-467d-81a2-4d02873dfc69",
+                      "strength": "strong"
+                    },
+                    "parentItemId": null,
+                    "ordinal": 2000002,
+                    "status": "completed",
+                    "title": null,
+                    "startedAt": "2026-11-20T17:03:00.906Z",
+                    "completedAt": "2026-11-20T17:03:00.906Z",
+                    "updatedAt": "2026-11-20T17:03:00.906Z",
+                    "type": "assistant_message",
+                    "messageId": "message:provider:claudeAgent:native-item:a56640a1-3a29-467d-81a2-4d02873dfc69",
+                    "text": "second",
+                    "streaming": false
+                  }
+                },
+                {
+                  "position": 9,
+                  "visibility": "local",
+                  "sourceThreadId": "mcp:ffa069f1-1080-4525-a24d-241aa4823970",
+                  "sourceItemId": "turn-item:provider:claudeAgent:native-item:checkpoint%3Acheckpoint%3Ascope%3Acheckpoint-scope%253Athread%253Amcp%25253Affa069f1-1080-4525-a24d-241aa4823970%253Aname%253Aroot%3Aname%3A2",
+                  "item": {
+                    "id": "turn-item:provider:claudeAgent:native-item:checkpoint%3Acheckpoint%3Ascope%3Acheckpoint-scope%253Athread%253Amcp%25253Affa069f1-1080-4525-a24d-241aa4823970%253Aname%253Aroot%3Aname%3A2",
+                    "threadId": "mcp:ffa069f1-1080-4525-a24d-241aa4823970",
+                    "runId": "run:thread:mcp%3Affa069f1-1080-4525-a24d-241aa4823970:ordinal:2",
+                    "nodeId": "node:run:run%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A2:root",
+                    "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A1",
+                    "providerTurnId": null,
+                    "nativeItemRef": null,
+                    "parentItemId": null,
+                    "ordinal": 2000003,
+                    "status": "completed",
+                    "title": null,
+                    "startedAt": "2026-11-20T17:03:00.937Z",
+                    "completedAt": "2026-11-20T17:03:00.937Z",
+                    "updatedAt": "2026-11-20T17:03:00.937Z",
+                    "type": "checkpoint",
+                    "checkpointId": "checkpoint:scope:checkpoint-scope%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aname%3Aroot:name:2",
+                    "scopeId": "checkpoint-scope:thread:mcp%3Affa069f1-1080-4525-a24d-241aa4823970:name:root",
+                    "files": []
+                  }
+                },
+                {
+                  "position": 10,
+                  "visibility": "local",
+                  "sourceThreadId": "mcp:ffa069f1-1080-4525-a24d-241aa4823970",
+                  "sourceItemId": "turn-item:run:run%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A2:signal:interrupt-request",
+                  "item": {
+                    "id": "turn-item:run:run%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A2:signal:interrupt-request",
+                    "threadId": "mcp:ffa069f1-1080-4525-a24d-241aa4823970",
+                    "runId": "run:thread:mcp%3Affa069f1-1080-4525-a24d-241aa4823970:ordinal:2",
+                    "nodeId": "node:run:run%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A2:root",
+                    "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Amcp%253Affa069f1-1080-4525-a24d-241aa4823970%3Aordinal%3A1",
+                    "providerTurnId": "provider-turn:provider:claudeAgent:native-turn:turn%3Arun-attempt%3Arun%3Arun%253Athread%253Amcp%25253Affa069f1-1080-4525-a24d-241aa4823970%253Aordinal%253A2%3Aattempt%3A1",
+                    "nativeItemRef": null,
+                    "parentItemId": null,
+                    "ordinal": 2000004,
+                    "status": "completed",
+                    "title": "Interrupt requested",
+                    "startedAt": "2026-11-20T17:03:02.980Z",
+                    "completedAt": "2026-11-20T17:03:02.980Z",
+                    "updatedAt": "2026-11-20T17:03:02.980Z",
+                    "type": "run_interrupt_request",
+                    "message": "t3-api-facts probe"
+                  }
+                }
+              ],
+              "updatedAt": "2026-11-20T17:07:24.283Z"
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "request": {
+    "_tag": "Request",
+    "id": "2",
+    "tag": "orchestration.subscribeThread",
+    "payload": {
+      "threadId": "mcp:ffa069f1-1080-4525-a24d-241aa4823970"
+    },
+    "headers": []
+  }
+}

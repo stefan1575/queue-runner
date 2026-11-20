@@ -1,0 +1,35 @@
+{
+  "init": {
+    "status": 200
+  },
+  "call": {
+    "status": 200,
+    "contentType": "application/json",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": 2,
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"threadId\":\"mcp:cf049cfa-18d0-4a0a-8cff-d31e71985294\",\"runId\":\"run:thread:mcp%3Acf049cfa-18d0-4a0a-8cff-d31e71985294:ordinal:1\",\"status\":\"running\",\"timedOut\":true}"
+          }
+        ],
+        "structuredContent": {
+          "threadId": "mcp:cf049cfa-18d0-4a0a-8cff-d31e71985294",
+          "runId": "run:thread:mcp%3Acf049cfa-18d0-4a0a-8cff-d31e71985294:ordinal:1",
+          "status": "running",
+          "timedOut": true
+        },
+        "isError": false
+      }
+    }
+  },
+  "request": {
+    "name": "t3_thread_wait",
+    "arguments": {
+      "threadId": "mcp:cf049cfa-18d0-4a0a-8cff-d31e71985294",
+      "timeoutMs": 1
+    }
+  }
+}
