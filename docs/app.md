@@ -1007,7 +1007,8 @@ is killed is code -1 with Node's reason in stderr, never a gh exit code (so is t
   5.5 at low: all ok, in about 20 seconds. **Run again 2026-11-20** with #210's chooser in, on
   T3's default (Opus 5.5) at low: all ok, in about 30 seconds. **Run again 2026-11-20** with a
   job's thread read as T3 pushes its changes (#210 review 3), same model: all ok, in about 20
-  seconds.
+  seconds. **Run again 2026-11-20** with the thread read as T3 0.1.9 has it (#211 fix round 4),
+  same model: all ok, in about 20 seconds.
 - `app/live/review.ts` (`pnpm --dir app live:review -- (--pr N | --open-pr) --run
   <instance>:<model> [--state <folder>]`): today's `scripts/live_review.py` for the app, dry run. One real review of
   one open PR in `stefan1575/queue-runner-sandbox` only (it refuses another clone), through
@@ -1054,7 +1055,8 @@ is killed is code -1 with Node's reason in stderr, never a gh exit code (so is t
   gone). **Run again 2026-11-20** with #210's chooser in: all ok, sandbox PR #12 (H1 1b11a36
   refused with 409; merged at dc3393b, merge commit 85e8873). **Run again 2026-11-20** after #210
   review 3: all ok, sandbox PR #18 (H1 c25020f refused with 409; merged at 73e774e, merge commit
-  1002b78).
+  1002b78). **Run again 2026-11-20** after #211 fix round 4: all ok, sandbox PR #20 (H1 6bf8445
+  refused with 409; merged at 7ebb559, merge commit e458e2b).
 - `app/live/conflict.ts` (`pnpm --dir app live:conflict [-- --run <instance>:<model>]`): a conflict
   round against `stefan1575/queue-runner-sandbox` only, in the T3 project cloned from it (found by
   its remote, as the review check's), on T3's default model at its lowest effort unless `--run`
@@ -1070,7 +1072,10 @@ is killed is code -1 with Node's reason in stderr, never a gh exit code (so is t
   low: all ok, sandbox PR #13 (H 5313301 against main at eb4522a; the round pushed 2d255cf).
   **Run again 2026-11-20** after #210 review 3, the round's thread read as T3 pushed its changes,
   same model: all ok, sandbox PR #19 (H bf89a50 against main at 568e0d2; the round pushed
-  2bae5dc).
+  2bae5dc). **Run again 2026-11-20** after #211 fix round 4, same model: the first run failed,
+  sandbox PR #21, no round started: the check's stubbed gate had no `reading`, which a conflict
+  round now saves (F24); with it, all ok, sandbox PR #22 (H 7fb62ad against main at 0a29fea; the
+  round pushed 657272e).
 - `app/live/usage.ts` (`pnpm --dir app live:usage [-- --minutes N]`): acts on no project. It
   subscribes to T3's server config and prints each connected provider's windows as the app reads
   them, then each `providerStatuses` event that changes one, for N minutes (5 by default). **Run

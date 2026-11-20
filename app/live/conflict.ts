@@ -117,7 +117,7 @@ try {
       reviewReplies: (r, k) => github.reviewReplies(r, k), openThreads: (r, k) => github.openThreads(r, k),
     },
     git, mcp, ws, catalog: () => catalog, user: async () => 'the live check', log, exists: existsSync, say,
-    gate: { pick: () => ({ fits: true, choice, onFallback: false, cost: {} }), started() {}, finished() {}, dropped() {}, forget() {} } as any,
+    gate: { pick: () => ({ fits: true, choice, onFallback: false, cost: {} }), reading: () => ({ checkedAt: null, windows: {} }), started() {}, finished() {}, dropped() {}, forget() {} } as any,
   });
   const chooser = new Chooser({ repos: () => [repo], lanes: [lane], log, say });
   await chooser.pass();
