@@ -1,0 +1,29 @@
+{
+  "init": {
+    "status": 200
+  },
+  "call": {
+    "status": 200,
+    "contentType": "application/json",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": 2,
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"_tag\":\"OrchestratorMcpFailure\",\"code\":\"thread_not_found\",\"message\":\"The thread was not found.\"}"
+          }
+        ],
+        "isError": true
+      }
+    }
+  },
+  "request": {
+    "name": "t3_thread_organize",
+    "arguments": {
+      "threadId": "mcp:ffa069f1-1080-4525-a24d-241aa4823970",
+      "action": "settle"
+    }
+  }
+}

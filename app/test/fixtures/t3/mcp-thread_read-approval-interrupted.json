@@ -1,0 +1,99 @@
+{
+  "init": {
+    "status": 200
+  },
+  "call": {
+    "status": 200,
+    "contentType": "application/json",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": 2,
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"thread\":{\"threadId\":\"mcp:65701381-5d70-4791-8d0d-9e603994dd23\",\"projectId\":\"6e52c9c4-c256-48e6-8566-b32e425ae094\",\"title\":\"t3-api-facts C2 (research, safe to delete)\",\"link\":\"https://app.t3.codes/threads/264b77bb-5ec7-4453-8ee5-7d0162886008/mcp%3A65701381-5d70-4791-8d0d-9e603994dd23\",\"createdBy\":\"agent\",\"creationSource\":\"mcp\",\"status\":\"interrupted\",\"latestRunId\":\"run:thread:mcp%3A65701381-5d70-4791-8d0d-9e603994dd23:ordinal:1\",\"activeRunId\":null,\"providerInstanceId\":\"claudeAgent\",\"model\":\"claude-haiku-5-5\",\"runtimeMode\":\"approval-required\",\"interactionMode\":\"default\",\"linkedPullRequest\":null,\"pullRequests\":[],\"titleRegeneration\":null,\"branch\":null,\"worktreePath\":null,\"parentThreadId\":null,\"relationshipToParent\":null,\"runCount\":1,\"itemCount\":7,\"pendingRequestCount\":0,\"archived\":false,\"settled\":false,\"settledAt\":null,\"snoozed\":false,\"snoozedUntil\":null,\"createdAt\":\"2026-11-20T17:05:45.006Z\",\"updatedAt\":\"2026-11-20T17:06:38.630Z\"},\"recentRuns\":[{\"runId\":\"run:thread:mcp%3A65701381-5d70-4791-8d0d-9e603994dd23:ordinal:1\",\"ordinal\":1,\"status\":\"interrupted\",\"providerInstanceId\":\"claudeAgent\",\"model\":\"claude-haiku-5-5\",\"executedModel\":\"claude-haiku-5-5\",\"requestedAt\":\"2026-11-20T17:05:45.031Z\",\"startedAt\":\"2026-11-20T17:05:45.088Z\",\"completedAt\":\"2026-11-20T17:06:38.613Z\"}],\"items\":[{\"position\":0,\"visibility\":\"local\",\"sourceThreadId\":\"mcp:65701381-5d70-4791-8d0d-9e603994dd23\",\"itemId\":\"turn-item:message:mcp%3A65701381-5d70-4791-8d0d-9e603994dd23\",\"runId\":\"run:thread:mcp%3A65701381-5d70-4791-8d0d-9e603994dd23:ordinal:1\",\"messageId\":\"mcp:65701381-5d70-4791-8d0d-9e603994dd23\",\"createdBy\":\"agent\",\"creationSource\":\"mcp\",\"type\":\"user_message\",\"status\":\"completed\",\"title\":null,\"text\":\"Use your PowerShell tool to run exactly: New-Item -ItemType File -Name approval-probe.txt. Then reply with exactly: done\",\"textTruncated\":false,\"nextTextOffset\":null,\"updatedAt\":\"2026-11-20T17:05:45.031Z\"}],\"nextPosition\":0,\"hasMore\":false}"
+          }
+        ],
+        "structuredContent": {
+          "thread": {
+            "threadId": "mcp:65701381-5d70-4791-8d0d-9e603994dd23",
+            "projectId": "6e52c9c4-c256-48e6-8566-b32e425ae094",
+            "title": "t3-api-facts C2 (research, safe to delete)",
+            "link": "https://app.t3.codes/threads/264b77bb-5ec7-4453-8ee5-7d0162886008/mcp%3A65701381-5d70-4791-8d0d-9e603994dd23",
+            "createdBy": "agent",
+            "creationSource": "mcp",
+            "status": "interrupted",
+            "latestRunId": "run:thread:mcp%3A65701381-5d70-4791-8d0d-9e603994dd23:ordinal:1",
+            "activeRunId": null,
+            "providerInstanceId": "claudeAgent",
+            "model": "claude-haiku-5-5",
+            "runtimeMode": "approval-required",
+            "interactionMode": "default",
+            "linkedPullRequest": null,
+            "pullRequests": [],
+            "titleRegeneration": null,
+            "branch": null,
+            "worktreePath": null,
+            "parentThreadId": null,
+            "relationshipToParent": null,
+            "runCount": 1,
+            "itemCount": 7,
+            "pendingRequestCount": 0,
+            "archived": false,
+            "settled": false,
+            "settledAt": null,
+            "snoozed": false,
+            "snoozedUntil": null,
+            "createdAt": "2026-11-20T17:05:45.006Z",
+            "updatedAt": "2026-11-20T17:06:38.630Z"
+          },
+          "recentRuns": [
+            {
+              "runId": "run:thread:mcp%3A65701381-5d70-4791-8d0d-9e603994dd23:ordinal:1",
+              "ordinal": 1,
+              "status": "interrupted",
+              "providerInstanceId": "claudeAgent",
+              "model": "claude-haiku-5-5",
+              "executedModel": "claude-haiku-5-5",
+              "requestedAt": "2026-11-20T17:05:45.031Z",
+              "startedAt": "2026-11-20T17:05:45.088Z",
+              "completedAt": "2026-11-20T17:06:38.613Z"
+            }
+          ],
+          "items": [
+            {
+              "position": 0,
+              "visibility": "local",
+              "sourceThreadId": "mcp:65701381-5d70-4791-8d0d-9e603994dd23",
+              "itemId": "turn-item:message:mcp%3A65701381-5d70-4791-8d0d-9e603994dd23",
+              "runId": "run:thread:mcp%3A65701381-5d70-4791-8d0d-9e603994dd23:ordinal:1",
+              "messageId": "mcp:65701381-5d70-4791-8d0d-9e603994dd23",
+              "createdBy": "agent",
+              "creationSource": "mcp",
+              "type": "user_message",
+              "status": "completed",
+              "title": null,
+              "text": "Use your PowerShell tool to run exactly: New-Item -ItemType File -Name approval-probe.txt. Then reply with exactly: done",
+              "textTruncated": false,
+              "nextTextOffset": null,
+              "updatedAt": "2026-11-20T17:05:45.031Z"
+            }
+          ],
+          "nextPosition": 0,
+          "hasMore": false
+        },
+        "isError": false
+      }
+    }
+  },
+  "request": {
+    "name": "t3_thread_read",
+    "arguments": {
+      "threadId": "mcp:65701381-5d70-4791-8d0d-9e603994dd23",
+      "limit": 20,
+      "runLimit": 10,
+      "maxCharsPerItem": 2000
+    }
+  }
+}
