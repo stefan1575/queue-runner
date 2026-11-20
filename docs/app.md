@@ -332,14 +332,10 @@ The first job end to end (#154): a served repo's next ticket becomes a PR, as to
 builds (`docs/flow.md`, `docs/claude-lane.md`). `src/build-lane.ts`, `src/picker.ts`,
 `src/briefs/build.ts`, `src/briefs/rules.ts`, `src/t3/thread-end.ts`, `src/job-log.ts`, `src/git.ts`.
 
-- **Picking** (`src/picker.ts`, the lanes' picker until the run loop's port (#219) moves builds to
-  the ported one, The picker, below): an open issue labelled
-  `ready-for-agent`, every blocker closed (GitHub's native blocked-by count, and `#N`,
-  `owner/name#N` or issue URLs on a `Blocked by:` line or under a `## Blocked by` heading), not
-  in flight (a `claude/*-<issue>` branch, an open PR on one or closing it, or one GitHub links to
-  it), not a spec with open sub-issues, not held by the job log; lowest number first. Only repos
-  switched to Served with a GitHub remote are read (`servedRepos`). The base is GitHub's default
-  branch.
+- **Picking:** the rules are Python's, ported in The picker, below. Builds still call the old
+  `src/picker.ts` until the run loop's port (#219) moves them to the ported one, and
+  `src/picker.ts` goes when its last user moves. Only repos switched to Served with a GitHub
+  remote are read (`servedRepos`). The base is GitHub's default branch.
 - **The brief** (`src/briefs/build.ts`): `templates/build.md` ported, with the user's name
   (Settings, Name; else the gh account's name, else its login) in place of "Stefan". It names no
   skill, no slash command and no path outside the repo (`test/brief.test.ts`): where today's brief
