@@ -364,7 +364,8 @@ whose branch a job of the repo's writes to (Reviews; Fix rounds and merges).
   not. A thread that can't be read holds it too: its stream is opened again until T3 answers.
   Once the run has ended, its real end (`done`, `failed`...) is recorded in the question's place
   and the thread is settled as that end says. After a restart each lane watches its jobs left
-  `waiting` the same way. The gate measured the job at its question; the run on the answer isn't
+  `waiting` the same way, every one, even beside another job open in the repo (an older app's
+  build left waiting beside the build it started next; #210 F12). The gate measured the job at its question; the run on the answer isn't
   let in again.
 - **Settle first:** on start each lane recovers every job of its kind the log shows open (`recover`:
   each lane's After a restart, don't guess, below) before the first choice, and the repo is held

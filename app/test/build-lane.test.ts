@@ -422,6 +422,32 @@ describe('the end', () => {
     expect(t3.launches[0].title).toBe('Queue runner build: app#6');
   });
 
+  test("after a restart a repo with a build left waiting and another build open watches both: the waiting one isn't left holding the repo once the other ends (#210 F12)", async () => {
+    gh.ready['owner/app'] = [issue(7)];
+    // an older app left build A waiting on a question and started build B beside it in the repo
+    const a = await log.started({ kind: 'build', repo: 'p-app', github: 'owner/app', issue: 5, branch: 'claude/x-5', base: 'main', title: 'Queue runner build: app#5', choice: BUILD, onFallback: false });
+    await log.thread(a.id, { threadId: 'thread-a', runId: 'run-a', link: 't3://thread/thread-a' });
+    await log.ended(a.id, { outcome: 'waiting', request: 'user_input' });
+    const b = await log.started({ kind: 'build', repo: 'p-app', github: 'owner/app', issue: 6, branch: 'claude/x-6', base: 'main', title: 'Queue runner build: app#6', choice: BUILD, onFallback: false });
+    await log.thread(b.id, { threadId: 'thread-b', runId: 'run-b', link: 't3://thread/thread-b' });
+    for (const [id, run] of [['thread-a', 'run-a'], ['thread-b', 'run-b']] as const) {
+      t3.threadState[id] = { id, projectId: 'p-app', runtimeRequests: [], turnItems: [], runs: [{ id: run, threadId: id, ordinal: 1, rootNodeId: 'n', status: 'running' }] };
+    }
+    t3.askUser('thread-a');
+    void makeLane().start();
+    await watching('thread-b');
+    await watching('thread-a');
+    t3.endRun('thread-b', 'completed');
+    await until(() => log.get(b.id)!.end?.outcome === 'done-no-pr');
+    await chooser.pass();
+    expect(t3.launches).toEqual([]); // A still waits on its question: held
+    t3.answerInT3('thread-a');
+    t3.endRun('thread-a', 'completed');
+    await until(() => t3.launches.length === 1);
+    expect(log.get(a.id)!.end).toMatchObject({ outcome: 'done-no-pr' });
+    expect(t3.launches[0].title).toBe('Queue runner build: app#7');
+  });
+
   test("a leftover branch of the job's name holds the job and says so; T3 is never asked", async () => {
     gh.ready['owner/app'] = [issue(5)];
     git.leftover.add('claude/ticket-number-5-5');

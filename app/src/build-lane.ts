@@ -96,7 +96,10 @@ export const TICKETS_MS = 5 * 60_000;
 
 export class BuildLane implements RepoJobLane {
   private d: BuildLaneDoors;
-  private building = new Map<string, Promise<Job>>();
+  /** Each build under way, and its repo: a repo may have more than one after a restart (an
+   *  older app's build left waiting beside the one it started next), and each is watched to its
+   *  end (#210 F12). */
+  private building = new Map<Promise<Job>, string>();
   private watches = new Set<{ stop(): void }>();
   private settler: ThreadSettler;
   /** PR lookups owed after one failed, under way, by job id. */
@@ -120,13 +123,12 @@ export class BuildLane implements RepoJobLane {
    *  waiting on a question until its thread has finished again; the chooser's first pass settles
    *  each one it shows ended and not settled (`owed`). */
   recover(): void {
+    // every one, even two in a repo: one left out would hold its repo for good (#210 F12)
     for (const job of this.d.log.open()) {
-      if (job.kind !== 'build' || this.building.has(job.repo)) continue;
-      this.track(job.repo, this.resume(job));
+      if (job.kind === 'build') this.track(job.repo, this.resume(job));
     }
     for (const job of this.d.log.waiting()) {
-      if (job.kind !== 'build' || !job.threadId || this.building.has(job.repo)) continue;
-      this.track(job.repo, this.untilFinished(job));
+      if (job.kind === 'build' && job.threadId) this.track(job.repo, this.untilFinished(job));
     }
   }
 
@@ -150,18 +152,18 @@ export class BuildLane implements RepoJobLane {
   }
 
   busy(repo: BuildRepo): boolean {
-    return this.building.has(repo.id);
+    return [...this.building.values()].includes(repo.id);
   }
 
   /** The repos with a build running, by T3 project id. */
   running(): string[] {
-    return [...this.building.keys()];
+    return [...new Set(this.building.values())];
   }
 
   /** Settles once every build under way has ended and been recorded (the tests wait on it). */
   async idle(): Promise<void> {
     while (this.building.size || this.settler.pending().length || this.lookingUp.size) {
-      await Promise.allSettled([...this.building.values(), ...this.settler.pending(), ...this.lookingUp.values()]);
+      await Promise.allSettled([...this.building.keys(), ...this.settler.pending(), ...this.lookingUp.values()]);
     }
   }
 
@@ -178,7 +180,7 @@ export class BuildLane implements RepoJobLane {
    *  throws, and they're read again on the next pass. */
   async next(repo: BuildRepo): Promise<Next> {
     const now = this.now().getTime();
-    if (this.stopped || !repo.github || this.building.has(repo.id) || (this.resting.get(repo.id) ?? 0) > now) return null;
+    if (this.stopped || !repo.github || this.busy(repo) || (this.resting.get(repo.id) ?? 0) > now) return null;
     const read = this.readAt.get(repo.id);
     if (read !== undefined && now - read < TICKETS_MS) return null;
     let base: string;
@@ -222,9 +224,9 @@ export class BuildLane implements RepoJobLane {
   }
 
   private track(repo: string, build: Promise<Job>) {
-    this.building.set(repo, build);
+    this.building.set(build, repo);
     build.then(() => {}, (e) => this.d.say(`a build in ${repo} stopped: ${(e as Error).message}`)).finally(() => {
-      this.building.delete(repo);
+      this.building.delete(build);
       // a build that ended may have opened its PR or freed its ticket: read again on the next pass
       this.readAt.delete(repo);
       if (!this.stopped) this.d.freed?.();
