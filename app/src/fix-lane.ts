@@ -27,7 +27,8 @@
 // thread had before by `knownRuns`). A send whose answer was lost, or that the app stopped before T3
 // answered, is decided by reading the thread: until a read succeeds it stays open, its repo held,
 // and is read again on later passes; a read that leaves doubt, and a launch whose answer was lost
-// (`NoAnswer`), need the user: its repo starts nothing until they answer.
+// (`NoAnswer`), need the user: its repo starts nothing until they answer. A thread is gone only
+// when T3's thread list reads fine without it, never on an error's text (#210 F15).
 import { fixBrief, type FixWhere } from './briefs/fix.ts';
 import type { BuildRepo } from './build-lane.ts';
 import { holdText } from './gate.ts';
@@ -43,7 +44,7 @@ import { ThreadSettler } from './settle.ts';
 import { ToolFailed, type T3Mcp } from './t3/mcp.ts';
 import type { Retry } from './t3/project-feed.ts';
 import { NoAnswer } from './t3/seams.ts';
-import { watchJobThread, type ThreadEnd } from './t3/thread-end.ts';
+import { readThread, watchJobThread, type ThreadEnd } from './t3/thread-end.ts';
 import type { T3Ws } from './t3/ws.ts';
 import type { UsageGate } from './usage-gate.ts';
 
@@ -82,8 +83,6 @@ const GONE_MARK = "can't take another turn";
  *  off. The thread can't take a turn, and nothing ran (F9). Any other failure (`orchestration_error`
  *  can come after the turn was dispatched) leaves the outcome unknown (F4). */
 const NOT_SENDABLE = new Set(['thread_not_found', 'thread_not_sendable', 'invalid_request']);
-/** How T3 says a thread isn't there, on MCP (`not_found`) or in a WebSocket failure. */
-const GONE = /not[_ ]?found|no such thread|does not exist|was deleted/i;
 const goneText = (threadId: string, why: string) => `the PR's writer thread ${threadId} is gone in T3, so it ${GONE_MARK} (${why})`;
 const refusedText = (threadId: string, why: string) => `the PR's writer thread ${threadId} ${GONE_MARK}: T3 refused the send (${why})`;
 
@@ -408,29 +407,13 @@ export class FixLane implements RepoJobLane {
     await this.needsUser(job, `PR #${pr.number}'s head is in ${pr.headRepo ?? 'a fork GitHub no longer has'}, not ${repo.github}: no fixer pushes to a fork's branch`);
   }
 
-  /** The thread's run ids, oldest first, or `gone` when T3 says it isn't there. The projection
-   *  failing otherwise is asked of T3's MCP, which says whether the thread is there; a thread
-   *  that's there but couldn't be read throws, for the round to rest and try again. */
+  /** The thread's run ids, oldest first, or `gone` when T3's thread list reads fine without it
+   *  (`readThread`); a thread that couldn't be read throws, for the round to rest and try again. */
   private async threadRuns(threadId: string): Promise<string[] | 'gone'> {
-    let why: string;
-    try {
-      const p = await this.d.ws.request('orchestration.getThreadProjection', { threadId });
-      if (Array.isArray(p?.runs)) {
-        return [...p.runs].sort((a: any, b: any) => (a?.ordinal ?? 0) - (b?.ordinal ?? 0))
-          .map((r: any) => r?.id).filter((x: unknown): x is string => typeof x === 'string');
-      }
-      why = `T3 gave thread ${threadId} no runs`;
-    } catch (e) {
-      if (GONE.test((e as Error).message)) return 'gone';
-      why = (e as Error).message;
-    }
-    try {
-      await this.d.mcp.call('t3_thread_read', { threadId, limit: 1 });
-    } catch (e) {
-      if (e instanceof ToolFailed && GONE.test(e.message)) return 'gone';
-      throw e;
-    }
-    throw new Error(`thread ${threadId}'s runs couldn't be read: ${why}`);
+    const read = await readThread(this.d.ws, threadId);
+    if ('gone' in read) return 'gone';
+    if ('unreadable' in read) throw new Error(`thread ${threadId}'s runs couldn't be read: ${read.unreadable}`);
+    return runIds(read.projection);
   }
 
   /** A send T3 may have taken: the thread read again. Gone, nothing ran and the next pass sends a
@@ -554,3 +537,8 @@ export class FixLane implements RepoJobLane {
     return ended;
   }
 }
+
+/** A projection's run ids, oldest first. */
+const runIds = (projection: any): string[] => [...projection.runs]
+  .sort((a: any, b: any) => (a?.ordinal ?? 0) - (b?.ordinal ?? 0))
+  .map((r: any) => r?.id).filter((x: unknown): x is string => typeof x === 'string');

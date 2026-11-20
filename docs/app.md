@@ -628,18 +628,17 @@ merge half of `src/github.ts` and `src/git.ts`.
   its new run's: the run id T3's answer names, else the newest run not among them, so a restart
   finds it too.
 - **A fresh fixer instead,** a new thread on the fix kind's settings (`UsageGate.pick`, kind `fix`,
-  its fallback while its provider has no room), titled `Queue runner fix: <project>#<n>`, when
-  the review marks an earlier Important finding still open (`raised` before this round: the
-  writer has shown it's stuck there), when no thread of the app's wrote the PR (a person opened
-  it, or the build needs the user), or when T3 says the writer thread is gone (#156 F3), however it
-  says so: the runs read before the send failing with "not found", or, when that read fails
-  otherwise, T3's MCP answering `t3_thread_read` with `not_found`; or when T3 refuses the send
-  because the thread can't take a turn (#156 F9). The installed T3's `sendToThread` (read
-  2026-11-19 in its `server.asar`) answers, before it dispatches anything, `thread_not_found` for
-  a deleted thread, `thread_not_sendable` for an archived one and `invalid_request` for a provider
-  instance that's switched off; each sends a fresh fixer. A *settled* thread isn't checked there,
-  so the builder's thread, which the app settles at its end, still takes the round. T3's answer to
-  a send is `{delivery}` only, with no run id.
+  its fallback while its provider has no room), titled `Queue runner fix: <project>#<n>`, when the
+  review marks an earlier Important finding still open (`raised` before this round: the writer has
+  shown it's stuck there), when no thread of the app's wrote the PR (a person opened it, or the
+  build needs the user), or when the writer thread is gone (#156 F3): the read of its runs before
+  the send failed and T3's thread list reads fine without it, never an error's text (#210 F15); or
+  when T3 refuses the send because the thread can't take a turn (#156 F9). The installed T3's
+  `sendToThread` (read 2026-11-19 in its `server.asar`) answers, before it dispatches anything,
+  `thread_not_found` for a deleted thread, `thread_not_sendable` for an archived one and
+  `invalid_request` for a provider instance that's switched off; each sends a fresh fixer. A
+  *settled* thread isn't checked there, so the builder's thread, which the app settles at its end,
+  still takes the round. T3's answer to a send is `{delivery}` only, with no run id.
   A thread that's there but couldn't be read rests the PR and is tried again. It works in the PR's own worktree when `git worktree list` shows one on the
   PR's branch (T3's `existing_worktree`), else in a new worktree at H on
   `claude/fix-pr<n>-<sha7>` that pushes `HEAD` to the PR's branch, as today's runner does. A

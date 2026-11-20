@@ -401,6 +401,21 @@ describe('a send whose outcome is not known (F4)', () => {
     await chooser.idle();
     expect(log.get(job.id)!.end).toMatchObject({ outcome: 'done' });
   });
+  test("a send answered with an error whose text says not found, on a thread T3 still lists, is no gone thread: no fresh fixer, and the round stays open (#210 F15)", async () => {
+    await builder();
+    await blocking(1, H, [finding({})]);
+    t3.sendFailure = { code: 'orchestration_error', message: 'Thread thread-b was not found.' };
+    t3.sendTaken = true;
+    t3.beforeSend = () => { t3.wsMethods['orchestration.getThreadProjection'] = () => { throw new Error('orchestration_error: thread thread-b not found'); }; };
+    makeLane();
+    await chooser.pass();
+    const job = fixes()[0]!;
+    await until(() => lines.some((l) => l.includes("the thread can't be read now")));
+    await chooser.pass();
+    expect(log.get(job.id)!.end).toBeUndefined();
+    expect(t3.launches).toEqual([]);
+    expect(t3.toolCalls.filter((c) => c.tool === 't3_thread_read')).toEqual([]); // MCP decides nothing
+  });
 });
 
 describe('a round whose run waits on the user in T3 (#210)', () => {
