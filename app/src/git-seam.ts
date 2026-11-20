@@ -89,27 +89,50 @@ const exists = (p: string) => stat(p).then(() => true, () => false);
 /** `os.path.isdir`. */
 const isdir = (p: string) => stat(p).then((s) => s.isDirectory(), () => false);
 
+/** Windows' read-only attribute, which Node shows as a mode with no write bits. Python's
+ *  `os.rmdir` and `os.unlink` fail with `PermissionError` on an entry that has it, where Node's
+ *  `rmdir` and `unlink` clear it first and delete; so the port checks it before deleting. Only
+ *  Windows: elsewhere the mode's write bits don't stop a delete. */
+const read_only = (st: { mode: number }) => process.platform === 'win32' && (st.mode & 0o200) === 0;
+
+/** The `PermissionError` Python's delete raises on a read-only entry, as Node words its own. */
+function permission_error(syscall: string, path: string): NodeJS.ErrnoException {
+  return Object.assign(new Error(`EPERM: operation not permitted, ${syscall} '${path}'`),
+    { errno: -4048, code: 'EPERM', syscall, path });
+}
+
 /** `deps.py`'s `Deps.unlink`, which `remove_checkout` calls: removes the checkout's node_modules
  *  link (a junction or a symlink: Node's `lstat` sees both as a link), never what it points to.
- *  #221 ports the rest of `deps.py`. */
+ *  A read-only link raises, as Python's `os.rmdir` does, before git runs. #221 ports the rest
+ *  of `deps.py`. */
 async function _unlink_modules(worktree: string): Promise<void> {
   const link = join(worktree, 'node_modules');
   const st = await lstat(link).catch(() => null);
-  if (st?.isSymbolicLink()) await unlink(link);
+  if (!st?.isSymbolicLink()) return;
+  if (read_only(st)) throw permission_error('rmdir', link);
+  await unlink(link);
 }
 
-/** `shutil.rmtree(folder, ignore_errors=True)`: deletes what it can, links without following
- *  them, and carries on past what it can't. */
+/** `shutil.rmtree(folder, ignore_errors=True)`: refuses a folder that is itself a link (a
+ *  junction too), deletes what it can, links inside without following them, and carries on
+ *  past what it can't, a read-only entry included (`read_only`). */
 async function _rmtree(folder: string): Promise<void> {
   const st = await lstat(folder).catch(() => null);
-  if (!st) return;
-  if (st.isDirectory() && !st.isSymbolicLink()) {
-    const names = await readdir(folder).catch(() => [] as string[]);
-    for (const name of names) await _rmtree(join(folder, name));
-    await rmdir(folder).catch(() => {});
-  } else {
-    await unlink(folder).catch(() => {});
+  if (!st || st.isSymbolicLink()) return;   // "Cannot call rmtree on a symbolic link"
+  if (st.isDirectory()) await _rmtree_inside(folder, st);
+  else if (!read_only(st)) await unlink(folder).catch(() => {});
+}
+
+async function _rmtree_inside(folder: string, st: { mode: number }): Promise<void> {
+  const names = await readdir(folder).catch(() => [] as string[]);
+  for (const name of names) {
+    const entry = join(folder, name);
+    const inner = await lstat(entry).catch(() => null);
+    if (!inner) continue;
+    if (inner.isDirectory() && !inner.isSymbolicLink()) await _rmtree_inside(entry, inner);
+    else if (!read_only(inner)) await unlink(entry).catch(() => {});
   }
+  if (!read_only(st)) await rmdir(folder).catch(() => {});
 }
 
 /** `datetime.now():%Y%m%d-%H%M%S`, this PC's local time. */

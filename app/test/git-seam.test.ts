@@ -30,6 +30,13 @@ async function deny_delete(folder: string): Promise<void> {
   addCleanup(() => spawnSync('icacls', [folder, '/remove:d', '*S-1-1-0'], { stdio: 'pipe' }));
 }
 
+/** Sets Windows' read-only attribute on `path` (on a link itself, not what it points to);
+ *  cleared at the test's end so the temp folder can go. */
+function read_only(path: string): void {
+  execFileSync('attrib', ['+R', path, '/L'], { stdio: 'pipe' });
+  addCleanup(() => spawnSync('attrib', ['-R', path, '/L'], { stdio: 'pipe' }));
+}
+
 describe('GitCliTest', () => {
   let repo: string, base: string, wt: string, head: string, cli: GitCli;
 
@@ -88,6 +95,22 @@ describe('GitCliTest', () => {
     await symlink(cache, join(checkout, 'node_modules'), 'junction');
     await cli.remove_checkout(repo, checkout);
     expect(existsSync(checkout)).toBe(false);
+    expect(statSync(join(cache, 'react')).isDirectory()).toBe(true);
+  });
+
+  test('a read-only node_modules link fails the removal before git runs', async () => {
+    // Python's `Deps.unlink` calls `os.rmdir`, which raises PermissionError on a read-only
+    // junction: the checkout stays, still registered, and the cache behind it is untouched.
+    const cache = join(dirname(repo), 'cache', 'node_modules');
+    await mkdir(join(cache, 'react'), { recursive: true });
+    const checkout = join(dirname(repo), 'checkout');
+    await cli.checkout(repo, head, checkout);
+    const link = join(checkout, 'node_modules');
+    await symlink(cache, link, 'junction');
+    read_only(link);
+    await expect(cli.remove_checkout(repo, checkout)).rejects.toMatchObject({ code: 'EPERM', path: link });
+    expect(statSync(join(checkout, 'b.txt')).isFile()).toBe(true);
+    expect(git(repo, 'worktree', 'list')).toContain('checkout');
     expect(statSync(join(cache, 'react')).isDirectory()).toBe(true);
   });
 
@@ -158,6 +181,25 @@ describe('GitCliTest', () => {
     expect(await GitCli.sweep_stale(checkouts)).toStrictEqual([held]);
     expect(readdirSync(checkouts).sort()).toStrictEqual(['repo-pr6.stale-20261116-010203', 'repo-pr7']);
     expect(await GitCli.sweep_stale(join(checkouts, 'none'))).toStrictEqual([]);
+  });
+
+  test('a stale checkout with a read-only file, or that is a junction, is swept as Python leaves it', async () => {
+    // `shutil.rmtree(ignore_errors=True)` on Windows can't delete a read-only file, so its folder
+    // stays (the rest goes), and refuses a folder that is itself a link, which it leaves whole.
+    const checkouts = join(dirname(repo), 'checkouts');
+    const held = join(checkouts, 'repo-pr4.stale-20261116-010203');
+    const linked = join(checkouts, 'repo-pr5.stale-20261116-010203');
+    const target = join(dirname(repo), 'elsewhere');
+    await mkdir(join(held, 'x'), { recursive: true });
+    await writeFile(join(held, 'x', 'locked.txt'), 'x');
+    await writeFile(join(held, 'x', 'free.txt'), 'x');
+    read_only(join(held, 'x', 'locked.txt'));
+    await mkdir(target, { recursive: true });
+    await writeFile(join(target, 'keep.txt'), 'x');
+    await symlink(target, linked, 'junction');
+    expect(await GitCli.sweep_stale(checkouts)).toStrictEqual([held, linked]);
+    expect(readdirSync(join(held, 'x'))).toStrictEqual(['locked.txt']);
+    expect(readdirSync(linked)).toStrictEqual(['keep.txt']);
   });
 
   // --- a PR's screenshots, on the repo's `evidence` branch (PR #114) ---------------------------

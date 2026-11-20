@@ -747,7 +747,10 @@ commands and reads their answers the same way, with Python's names: `GitError`, 
 `checkout`, `remove_checkout`, `sweep_stale`, `remove_worktree`, `log`, `first_parent`,
 `name_status` and the rest). What each call does is the module's own comment, as in Python.
 `remove_checkout` unlinks the checkout's `node_modules` as `deps.py`'s `Deps.unlink` does; the
-rest of `deps.py` is #221's.
+rest of `deps.py` is #221's. Deleting goes by Python's calls on Windows: Node's `unlink` and
+`rmdir` clear the read-only attribute and delete, where Python's fail, so the port leaves a
+read-only entry in place (`sweep_stale`) or raises `EPERM` (`remove_checkout`'s `node_modules`),
+and `sweep_stale` leaves a stale entry that is itself a junction, as `shutil.rmtree` refuses it.
 
 Two differences are TypeScript's only. `run_git` and every call are async, where Python's lanes
 block on their own threads. Python's tuples are arrays and its `None` is `null`. A git that
