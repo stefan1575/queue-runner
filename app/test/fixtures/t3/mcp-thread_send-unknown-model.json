@@ -1,0 +1,37 @@
+{
+  "init": {
+    "status": 200
+  },
+  "call": {
+    "status": 200,
+    "contentType": "application/json",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": 2,
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"threadId\":\"mcp:ec70795b-3a7f-4e02-b08f-5de82f78072d\",\"link\":\"https://app.t3.codes/threads/264b77bb-5ec7-4453-8ee5-7d0162886008/mcp%3Aec70795b-3a7f-4e02-b08f-5de82f78072d\",\"messageId\":\"message:mcp:client%3A912c899e-212f-44cf-8a53-4201b11fdae2:thread-send:9ad60a0e-31c4-4b3e-82ba-684d46e81702\",\"runId\":\"run:thread:mcp%3Aec70795b-3a7f-4e02-b08f-5de82f78072d:ordinal:1\",\"status\":\"starting\",\"delivery\":\"started\"}"
+          }
+        ],
+        "structuredContent": {
+          "threadId": "mcp:ec70795b-3a7f-4e02-b08f-5de82f78072d",
+          "link": "https://app.t3.codes/threads/264b77bb-5ec7-4453-8ee5-7d0162886008/mcp%3Aec70795b-3a7f-4e02-b08f-5de82f78072d",
+          "messageId": "message:mcp:client%3A912c899e-212f-44cf-8a53-4201b11fdae2:thread-send:9ad60a0e-31c4-4b3e-82ba-684d46e81702",
+          "runId": "run:thread:mcp%3Aec70795b-3a7f-4e02-b08f-5de82f78072d:ordinal:1",
+          "status": "starting",
+          "delivery": "started"
+        },
+        "isError": false
+      }
+    }
+  },
+  "request": {
+    "name": "t3_thread_send",
+    "arguments": {
+      "threadId": "mcp:ec70795b-3a7f-4e02-b08f-5de82f78072d",
+      "message": "Reply with exactly: ok"
+    }
+  }
+}

@@ -1,0 +1,162 @@
+{
+  "init": {
+    "status": 200
+  },
+  "call": {
+    "status": 200,
+    "contentType": "application/json",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": 2,
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"projectId\":\"6e52c9c4-c256-48e6-8566-b32e425ae094\",\"currentThreadId\":null,\"threads\":[{\"threadId\":\"mcp:8bfeb388-4eb0-4835-90de-f9546c8ae5bc\",\"projectId\":\"6e52c9c4-c256-48e6-8566-b32e425ae094\",\"title\":\"Queue runner build: queue-runner sandbox#295597\",\"link\":\"https://app.t3.codes/threads/264b77bb-5ec7-4453-8ee5-7d0162886008/mcp%3A8bfeb388-4eb0-4835-90de-f9546c8ae5bc\",\"createdBy\":\"agent\",\"creationSource\":\"mcp\",\"status\":\"completed\",\"latestRunId\":\"run:thread:mcp%3A8bfeb388-4eb0-4835-90de-f9546c8ae5bc:ordinal:1\",\"providerInstanceId\":\"claudeAgent\",\"model\":\"claude-opus-5-5\",\"runtimeMode\":\"full-access\",\"interactionMode\":\"default\",\"linkedPullRequest\":null,\"pullRequests\":[],\"settled\":true,\"settledAt\":\"2026-11-20T04:35:13.596Z\",\"snoozed\":false,\"snoozedUntil\":null,\"parentThreadId\":null,\"relationshipToParent\":null,\"itemCount\":6,\"createdAt\":\"2026-11-20T04:34:55.951Z\",\"updatedAt\":\"2026-11-20T04:35:13.596Z\"},{\"threadId\":\"mcp:e42137e9-8886-4c73-bc01-864edb035b56\",\"projectId\":\"6e52c9c4-c256-48e6-8566-b32e425ae094\",\"title\":\"Queue runner build: queue-runner sandbox#621459\",\"link\":\"https://app.t3.codes/threads/264b77bb-5ec7-4453-8ee5-7d0162886008/mcp%3Ae42137e9-8886-4c73-bc01-864edb035b56\",\"createdBy\":\"agent\",\"creationSource\":\"mcp\",\"status\":\"completed\",\"latestRunId\":\"run:thread:mcp%3Ae42137e9-8886-4c73-bc01-864edb035b56:ordinal:1\",\"providerInstanceId\":\"claudeAgent\",\"model\":\"claude-opus-5-5\",\"runtimeMode\":\"full-access\",\"interactionMode\":\"default\",\"linkedPullRequest\":null,\"pullRequests\":[],\"settled\":true,\"settledAt\":\"2026-11-20T03:34:00.981Z\",\"snoozed\":false,\"snoozedUntil\":null,\"parentThreadId\":null,\"relationshipToParent\":null,\"itemCount\":6,\"createdAt\":\"2026-11-20T03:33:41.863Z\",\"updatedAt\":\"2026-11-20T03:34:00.981Z\"},{\"threadId\":\"mcp:fc793c91-7171-4aaf-8259-6c997d452e06\",\"projectId\":\"6e52c9c4-c256-48e6-8566-b32e425ae094\",\"title\":\"Queue runner build: queue-runner sandbox#22931\",\"link\":\"https://app.t3.codes/threads/264b77bb-5ec7-4453-8ee5-7d0162886008/mcp%3Afc793c91-7171-4aaf-8259-6c997d452e06\",\"createdBy\":\"agent\",\"creationSource\":\"mcp\",\"status\":\"completed\",\"latestRunId\":\"run:thread:mcp%3Afc793c91-7171-4aaf-8259-6c997d452e06:ordinal:1\",\"providerInstanceId\":\"claudeAgent\",\"model\":\"claude-opus-5-5\",\"runtimeMode\":\"full-access\",\"interactionMode\":\"default\",\"linkedPullRequest\":null,\"pullRequests\":[],\"settled\":true,\"settledAt\":\"2026-11-20T00:20:44.852Z\",\"snoozed\":false,\"snoozedUntil\":null,\"parentThreadId\":null,\"relationshipToParent\":null,\"itemCount\":6,\"createdAt\":\"2026-11-20T00:20:23.321Z\",\"updatedAt\":\"2026-11-20T00:20:44.852Z\"},{\"threadId\":\"mcp:1d5a21c7-ddf9-4a4c-a6e0-db7f39362844\",\"projectId\":\"6e52c9c4-c256-48e6-8566-b32e425ae094\",\"title\":\"Queue runner build: queue-runner sandbox#449072\",\"link\":\"https://app.t3.codes/threads/264b77bb-5ec7-4453-8ee5-7d0162886008/mcp%3A1d5a21c7-ddf9-4a4c-a6e0-db7f39362844\",\"createdBy\":\"agent\",\"creationSource\":\"mcp\",\"status\":\"completed\",\"latestRunId\":\"run:thread:mcp%3A1d5a21c7-ddf9-4a4c-a6e0-db7f39362844:ordinal:1\",\"providerInstanceId\":\"claudeAgent\",\"model\":\"claude-opus-5-5\",\"runtimeMode\":\"full-access\",\"interactionMode\":\"default\",\"linkedPullRequest\":null,\"pullRequests\":[],\"settled\":true,\"settledAt\":\"2026-11-19T23:37:53.559Z\",\"snoozed\":false,\"snoozedUntil\":null,\"parentThreadId\":null,\"relationshipToParent\":null,\"itemCount\":6,\"createdAt\":\"2026-11-19T23:37:29.611Z\",\"updatedAt\":\"2026-11-19T23:37:53.559Z\"},{\"threadId\":\"mcp:1f9ebd54-36d6-44a1-b2bf-997fa192557e\",\"projectId\":\"6e52c9c4-c256-48e6-8566-b32e425ae094\",\"title\":\"Queue runner build: queue-runner sandbox#57641\",\"link\":\"https://app.t3.codes/threads/264b77bb-5ec7-4453-8ee5-7d0162886008/mcp%3A1f9ebd54-36d6-44a1-b2bf-997fa192557e\",\"createdBy\":\"agent\",\"creationSource\":\"mcp\",\"status\":\"completed\",\"latestRunId\":\"run:thread:mcp%3A1f9ebd54-36d6-44a1-b2bf-997fa192557e:ordinal:1\",\"providerInstanceId\":\"claudeAgent\",\"model\":\"claude-opus-5-5\",\"runtimeMode\":\"full-access\",\"interactionMode\":\"default\",\"linkedPullRequest\":null,\"pullRequests\":[],\"settled\":true,\"settledAt\":\"2026-11-19T18:31:28.944Z\",\"snoozed\":false,\"snoozedUntil\":null,\"parentThreadId\":null,\"relationshipToParent\":null,\"itemCount\":9,\"createdAt\":\"2026-11-19T18:30:58.210Z\",\"updatedAt\":\"2026-11-19T18:31:28.944Z\"}],\"nextCursor\":5,\"total\":22}"
+          }
+        ],
+        "structuredContent": {
+          "projectId": "6e52c9c4-c256-48e6-8566-b32e425ae094",
+          "currentThreadId": null,
+          "threads": [
+            {
+              "threadId": "mcp:8bfeb388-4eb0-4835-90de-f9546c8ae5bc",
+              "projectId": "6e52c9c4-c256-48e6-8566-b32e425ae094",
+              "title": "Queue runner build: queue-runner sandbox#295597",
+              "link": "https://app.t3.codes/threads/264b77bb-5ec7-4453-8ee5-7d0162886008/mcp%3A8bfeb388-4eb0-4835-90de-f9546c8ae5bc",
+              "createdBy": "agent",
+              "creationSource": "mcp",
+              "status": "completed",
+              "latestRunId": "run:thread:mcp%3A8bfeb388-4eb0-4835-90de-f9546c8ae5bc:ordinal:1",
+              "providerInstanceId": "claudeAgent",
+              "model": "claude-opus-5-5",
+              "runtimeMode": "full-access",
+              "interactionMode": "default",
+              "linkedPullRequest": null,
+              "pullRequests": [],
+              "settled": true,
+              "settledAt": "2026-11-20T04:35:13.596Z",
+              "snoozed": false,
+              "snoozedUntil": null,
+              "parentThreadId": null,
+              "relationshipToParent": null,
+              "itemCount": 6,
+              "createdAt": "2026-11-20T04:34:55.951Z",
+              "updatedAt": "2026-11-20T04:35:13.596Z"
+            },
+            {
+              "threadId": "mcp:e42137e9-8886-4c73-bc01-864edb035b56",
+              "projectId": "6e52c9c4-c256-48e6-8566-b32e425ae094",
+              "title": "Queue runner build: queue-runner sandbox#621459",
+              "link": "https://app.t3.codes/threads/264b77bb-5ec7-4453-8ee5-7d0162886008/mcp%3Ae42137e9-8886-4c73-bc01-864edb035b56",
+              "createdBy": "agent",
+              "creationSource": "mcp",
+              "status": "completed",
+              "latestRunId": "run:thread:mcp%3Ae42137e9-8886-4c73-bc01-864edb035b56:ordinal:1",
+              "providerInstanceId": "claudeAgent",
+              "model": "claude-opus-5-5",
+              "runtimeMode": "full-access",
+              "interactionMode": "default",
+              "linkedPullRequest": null,
+              "pullRequests": [],
+              "settled": true,
+              "settledAt": "2026-11-20T03:34:00.981Z",
+              "snoozed": false,
+              "snoozedUntil": null,
+              "parentThreadId": null,
+              "relationshipToParent": null,
+              "itemCount": 6,
+              "createdAt": "2026-11-20T03:33:41.863Z",
+              "updatedAt": "2026-11-20T03:34:00.981Z"
+            },
+            {
+              "threadId": "mcp:fc793c91-7171-4aaf-8259-6c997d452e06",
+              "projectId": "6e52c9c4-c256-48e6-8566-b32e425ae094",
+              "title": "Queue runner build: queue-runner sandbox#22931",
+              "link": "https://app.t3.codes/threads/264b77bb-5ec7-4453-8ee5-7d0162886008/mcp%3Afc793c91-7171-4aaf-8259-6c997d452e06",
+              "createdBy": "agent",
+              "creationSource": "mcp",
+              "status": "completed",
+              "latestRunId": "run:thread:mcp%3Afc793c91-7171-4aaf-8259-6c997d452e06:ordinal:1",
+              "providerInstanceId": "claudeAgent",
+              "model": "claude-opus-5-5",
+              "runtimeMode": "full-access",
+              "interactionMode": "default",
+              "linkedPullRequest": null,
+              "pullRequests": [],
+              "settled": true,
+              "settledAt": "2026-11-20T00:20:44.852Z",
+              "snoozed": false,
+              "snoozedUntil": null,
+              "parentThreadId": null,
+              "relationshipToParent": null,
+              "itemCount": 6,
+              "createdAt": "2026-11-20T00:20:23.321Z",
+              "updatedAt": "2026-11-20T00:20:44.852Z"
+            },
+            {
+              "threadId": "mcp:1d5a21c7-ddf9-4a4c-a6e0-db7f39362844",
+              "projectId": "6e52c9c4-c256-48e6-8566-b32e425ae094",
+              "title": "Queue runner build: queue-runner sandbox#449072",
+              "link": "https://app.t3.codes/threads/264b77bb-5ec7-4453-8ee5-7d0162886008/mcp%3A1d5a21c7-ddf9-4a4c-a6e0-db7f39362844",
+              "createdBy": "agent",
+              "creationSource": "mcp",
+              "status": "completed",
+              "latestRunId": "run:thread:mcp%3A1d5a21c7-ddf9-4a4c-a6e0-db7f39362844:ordinal:1",
+              "providerInstanceId": "claudeAgent",
+              "model": "claude-opus-5-5",
+              "runtimeMode": "full-access",
+              "interactionMode": "default",
+              "linkedPullRequest": null,
+              "pullRequests": [],
+              "settled": true,
+              "settledAt": "2026-11-19T23:37:53.559Z",
+              "snoozed": false,
+              "snoozedUntil": null,
+              "parentThreadId": null,
+              "relationshipToParent": null,
+              "itemCount": 6,
+              "createdAt": "2026-11-19T23:37:29.611Z",
+              "updatedAt": "2026-11-19T23:37:53.559Z"
+            },
+            {
+              "threadId": "mcp:1f9ebd54-36d6-44a1-b2bf-997fa192557e",
+              "projectId": "6e52c9c4-c256-48e6-8566-b32e425ae094",
+              "title": "Queue runner build: queue-runner sandbox#57641",
+              "link": "https://app.t3.codes/threads/264b77bb-5ec7-4453-8ee5-7d0162886008/mcp%3A1f9ebd54-36d6-44a1-b2bf-997fa192557e",
+              "createdBy": "agent",
+              "creationSource": "mcp",
+              "status": "completed",
+              "latestRunId": "run:thread:mcp%3A1f9ebd54-36d6-44a1-b2bf-997fa192557e:ordinal:1",
+              "providerInstanceId": "claudeAgent",
+              "model": "claude-opus-5-5",
+              "runtimeMode": "full-access",
+              "interactionMode": "default",
+              "linkedPullRequest": null,
+              "pullRequests": [],
+              "settled": true,
+              "settledAt": "2026-11-19T18:31:28.944Z",
+              "snoozed": false,
+              "snoozedUntil": null,
+              "parentThreadId": null,
+              "relationshipToParent": null,
+              "itemCount": 9,
+              "createdAt": "2026-11-19T18:30:58.210Z",
+              "updatedAt": "2026-11-19T18:31:28.944Z"
+            }
+          ],
+          "nextCursor": 5,
+          "total": 22
+        },
+        "isError": false
+      }
+    }
+  },
+  "request": {
+    "name": "t3_thread_list",
+    "arguments": {
+      "projectId": "6e52c9c4-c256-48e6-8566-b32e425ae094",
+      "limit": 5
+    }
+  }
+}

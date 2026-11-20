@@ -1,0 +1,46 @@
+{
+  "init": {
+    "status": 200
+  },
+  "call": {
+    "status": 200,
+    "contentType": "application/json",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": 2,
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"_tag\":\"OrchestratorMcpFailure\",\"code\":\"invalid_request\",\"message\":\"Base ref \\\"no-such-branch-xyz\\\" does not resolve to a commit in project \\\"queue-runner sandbox\\\" (C:\\\\Users\\\\Anon\\\\.queue-runner\\\\sandbox\\\\repo). No thread was created. Pass a branch, tag, or commit that exists there, or set startFromOrigin:true if it exists only on a remote.\"}"
+          }
+        ],
+        "isError": true
+      }
+    }
+  },
+  "request": {
+    "name": "t3_thread_launch",
+    "arguments": {
+      "title": "t3-api-facts idle (research, safe to delete)",
+      "runtimeMode": "full-access",
+      "modelSelection": {
+        "instanceId": "claudeAgent",
+        "model": "claude-haiku-5-5",
+        "options": [
+          {
+            "id": "effort",
+            "value": "low"
+          }
+        ]
+      },
+      "projectId": "6e52c9c4-c256-48e6-8566-b32e425ae094",
+      "workspaceStrategy": {
+        "type": "worktree",
+        "baseRef": "no-such-branch-xyz",
+        "branch": "t3-api-facts/probe",
+        "startFromOrigin": false
+      }
+    }
+  }
+}

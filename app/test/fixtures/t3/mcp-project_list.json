@@ -1,0 +1,110 @@
+{
+  "init": {
+    "status": 200
+  },
+  "call": {
+    "status": 200,
+    "contentType": "application/json",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": 2,
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"projects\": [{\"id\": \"133a4652-5750-4019-b702-6fd43666a6b4\", \"title\": \"No project\", \"workspaceRoot\": \"C:\\\\Users\\\\Anon\\\\.t3\\\\scratch\", \"repositoryIdentity\": null, \"faviconPath\": null, \"projectIcon\": {\"kind\": \"lucide\", \"name\": \"message-square-dashed\", \"color\": \"gray\"}, \"defaultModelSelection\": null, \"defaultThreadEnvMode\": null, \"autoPull\": false, \"scripts\": [], \"pinnedAt\": null, \"archivedAt\": null, \"createdAt\": \"2026-10-23T13:32:50.887Z\", \"updatedAt\": \"2026-10-23T13:32:50.900Z\", \"deletedAt\": null}, {\"id\": \"6e52c9c4-c256-48e6-8566-b32e425ae094\", \"title\": \"queue-runner sandbox\", \"workspaceRoot\": \"C:\\\\Users\\\\Anon\\\\.queue-runner\\\\sandbox\\\\repo\", \"repositoryIdentity\": null, \"faviconPath\": null, \"projectIcon\": null, \"defaultModelSelection\": {\"instanceId\": \"claudeAgent\", \"model\": \"claude-haiku-5-5\", \"options\": [{\"id\": \"effort\", \"value\": \"high\"}]}, \"defaultThreadEnvMode\": null, \"autoPull\": false, \"scripts\": [], \"pinnedAt\": null, \"archivedAt\": null, \"createdAt\": \"2026-11-06T21:12:16.149Z\", \"updatedAt\": \"2026-11-15T15:39:33.228Z\", \"deletedAt\": null}, {\"id\": \"mcp:fdd5f075-9977-4012-ae38-e1beefe9308d\", \"title\": \"queue-runner sandbox GitHub\", \"workspaceRoot\": \"C:\\\\Users\\\\Anon\\\\.queue-runner\\\\gh-sandbox\\\\repo\", \"repositoryIdentity\": {\"canonicalKey\": \"github.com/stefan1575/queue-runner-sandbox\", \"locator\": {\"source\": \"git-remote\", \"remoteName\": \"origin\", \"remoteUrl\": \"https://github.com/stefan1575/queue-runner-sandbox.git\"}, \"rootPath\": \"C:/Users/Anon/.queue-runner/gh-sandbox/repo\", \"displayName\": \"stefan1575/queue-runner-sandbox\", \"provider\": \"github\", \"owner\": \"stefan1575\", \"name\": \"queue-runner-sandbox\"}, \"faviconPath\": null, \"projectIcon\": null, \"defaultModelSelection\": null, \"defaultThreadEnvMode\": null, \"autoPull\": false, \"scripts\": [], \"pinnedAt\": null, \"archivedAt\": null, \"createdAt\": \"2026-11-19T12:19:14.329Z\", \"updatedAt\": \"2026-11-19T12:19:14.329Z\", \"deletedAt\": null}], \"nextCursor\": null}"
+          }
+        ],
+        "structuredContent": {
+          "projects": [
+            {
+              "id": "133a4652-5750-4019-b702-6fd43666a6b4",
+              "title": "No project",
+              "workspaceRoot": "C:\\Users\\Anon\\.t3\\scratch",
+              "repositoryIdentity": null,
+              "faviconPath": null,
+              "projectIcon": {
+                "kind": "lucide",
+                "name": "message-square-dashed",
+                "color": "gray"
+              },
+              "defaultModelSelection": null,
+              "defaultThreadEnvMode": null,
+              "autoPull": false,
+              "scripts": [],
+              "pinnedAt": null,
+              "archivedAt": null,
+              "createdAt": "2026-10-23T13:32:50.887Z",
+              "updatedAt": "2026-10-23T13:32:50.900Z",
+              "deletedAt": null
+            },
+            {
+              "id": "6e52c9c4-c256-48e6-8566-b32e425ae094",
+              "title": "queue-runner sandbox",
+              "workspaceRoot": "C:\\Users\\Anon\\.queue-runner\\sandbox\\repo",
+              "repositoryIdentity": null,
+              "faviconPath": null,
+              "projectIcon": null,
+              "defaultModelSelection": {
+                "instanceId": "claudeAgent",
+                "model": "claude-haiku-5-5",
+                "options": [
+                  {
+                    "id": "effort",
+                    "value": "high"
+                  }
+                ]
+              },
+              "defaultThreadEnvMode": null,
+              "autoPull": false,
+              "scripts": [],
+              "pinnedAt": null,
+              "archivedAt": null,
+              "createdAt": "2026-11-06T21:12:16.149Z",
+              "updatedAt": "2026-11-15T15:39:33.228Z",
+              "deletedAt": null
+            },
+            {
+              "id": "mcp:fdd5f075-9977-4012-ae38-e1beefe9308d",
+              "title": "queue-runner sandbox GitHub",
+              "workspaceRoot": "C:\\Users\\Anon\\.queue-runner\\gh-sandbox\\repo",
+              "repositoryIdentity": {
+                "canonicalKey": "github.com/stefan1575/queue-runner-sandbox",
+                "locator": {
+                  "source": "git-remote",
+                  "remoteName": "origin",
+                  "remoteUrl": "https://github.com/stefan1575/queue-runner-sandbox.git"
+                },
+                "rootPath": "C:/Users/Anon/.queue-runner/gh-sandbox/repo",
+                "displayName": "stefan1575/queue-runner-sandbox",
+                "provider": "github",
+                "owner": "stefan1575",
+                "name": "queue-runner-sandbox"
+              },
+              "faviconPath": null,
+              "projectIcon": null,
+              "defaultModelSelection": null,
+              "defaultThreadEnvMode": null,
+              "autoPull": false,
+              "scripts": [],
+              "pinnedAt": null,
+              "archivedAt": null,
+              "createdAt": "2026-11-19T12:19:14.329Z",
+              "updatedAt": "2026-11-19T12:19:14.329Z",
+              "deletedAt": null
+            }
+          ],
+          "nextCursor": null
+        },
+        "isError": false
+      }
+    }
+  },
+  "request": {
+    "name": "t3_project_list",
+    "arguments": {
+      "limit": 100
+    }
+  },
+  "_note": "Trimmed: only the two sandbox projects and the scratch project are kept; the other projects were removed (other repos, client work)."
+}

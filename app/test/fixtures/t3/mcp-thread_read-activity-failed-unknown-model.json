@@ -1,0 +1,134 @@
+{
+  "init": {
+    "status": 200
+  },
+  "call": {
+    "status": 200,
+    "contentType": "application/json",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": 2,
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"thread\":{\"threadId\":\"mcp:ec70795b-3a7f-4e02-b08f-5de82f78072d\",\"projectId\":\"6e52c9c4-c256-48e6-8566-b32e425ae094\",\"title\":\"t3-api-facts idle (research, safe to delete)\",\"link\":\"https://app.t3.codes/threads/264b77bb-5ec7-4453-8ee5-7d0162886008/mcp%3Aec70795b-3a7f-4e02-b08f-5de82f78072d\",\"createdBy\":\"agent\",\"creationSource\":\"mcp\",\"status\":\"failed\",\"latestRunId\":\"run:thread:mcp%3Aec70795b-3a7f-4e02-b08f-5de82f78072d:ordinal:1\",\"activeRunId\":null,\"providerInstanceId\":\"claudeAgent\",\"model\":\"claude-nope-1\",\"runtimeMode\":\"full-access\",\"interactionMode\":\"default\",\"linkedPullRequest\":null,\"pullRequests\":[],\"titleRegeneration\":null,\"branch\":null,\"worktreePath\":null,\"parentThreadId\":null,\"relationshipToParent\":null,\"runCount\":1,\"itemCount\":3,\"pendingRequestCount\":0,\"archived\":false,\"settled\":false,\"settledAt\":null,\"snoozed\":false,\"snoozedUntil\":null,\"createdAt\":\"2026-11-20T17:08:50.868Z\",\"updatedAt\":\"2026-11-20T17:10:57.713Z\"},\"recentRuns\":[{\"runId\":\"run:thread:mcp%3Aec70795b-3a7f-4e02-b08f-5de82f78072d:ordinal:1\",\"ordinal\":1,\"status\":\"failed\",\"providerInstanceId\":\"claudeAgent\",\"model\":\"claude-nope-1\",\"executedModel\":null,\"requestedAt\":\"2026-11-20T17:10:54.339Z\",\"startedAt\":\"2026-11-20T17:10:54.364Z\",\"completedAt\":\"2026-11-20T17:10:57.713Z\"}],\"items\":[{\"position\":0,\"visibility\":\"local\",\"sourceThreadId\":\"mcp:ec70795b-3a7f-4e02-b08f-5de82f78072d\",\"itemId\":\"turn-item:message:message%3Amcp%3Aclient%253A912c899e-212f-44cf-8a53-4201b11fdae2%3Athread-send%3A9ad60a0e-31c4-4b3e-82ba-684d46e81702\",\"runId\":\"run:thread:mcp%3Aec70795b-3a7f-4e02-b08f-5de82f78072d:ordinal:1\",\"messageId\":\"message:mcp:client%3A912c899e-212f-44cf-8a53-4201b11fdae2:thread-send:9ad60a0e-31c4-4b3e-82ba-684d46e81702\",\"createdBy\":\"agent\",\"creationSource\":\"mcp\",\"type\":\"user_message\",\"status\":\"completed\",\"title\":null,\"text\":\"Reply with exactly: ok\",\"textTruncated\":false,\"nextTextOffset\":null,\"updatedAt\":\"2026-11-20T17:10:54.339Z\"},{\"position\":1,\"visibility\":\"local\",\"sourceThreadId\":\"mcp:ec70795b-3a7f-4e02-b08f-5de82f78072d\",\"itemId\":\"turn-item:provider:claudeAgent:native-item:66a6ce69-95d8-49e0-9f9e-c811eb8234b5\",\"runId\":\"run:thread:mcp%3Aec70795b-3a7f-4e02-b08f-5de82f78072d:ordinal:1\",\"messageId\":\"message:provider:claudeAgent:native-item:66a6ce69-95d8-49e0-9f9e-c811eb8234b5\",\"createdBy\":\"agent\",\"creationSource\":\"provider\",\"type\":\"assistant_message\",\"status\":\"completed\",\"title\":null,\"text\":\"There's an issue with the selected model (claude-nope-1). It may not exist or you may not have access to it.\",\"textTruncated\":false,\"nextTextOffset\":null,\"updatedAt\":\"2026-11-20T17:10:57.691Z\"},{\"position\":2,\"visibility\":\"local\",\"sourceThreadId\":\"mcp:ec70795b-3a7f-4e02-b08f-5de82f78072d\",\"itemId\":\"turn-item:provider:claudeAgent:native-item:terminal-failure%3Aprovider-turn%3Aprovider%3AclaudeAgent%3Anative-turn%3Aturn%253Arun-attempt%253Arun%253Arun%25253Athread%25253Amcp%2525253Aec70795b-3a7f-4e02-b08f-5de82f78072d%25253Aordinal%25253A1%253Aattempt%253A1\",\"runId\":\"run:thread:mcp%3Aec70795b-3a7f-4e02-b08f-5de82f78072d:ordinal:1\",\"messageId\":null,\"createdBy\":null,\"creationSource\":null,\"type\":\"error\",\"status\":\"failed\",\"title\":\"Provider error\",\"text\":\"Claude gave up after repeated API errors.\",\"textTruncated\":false,\"nextTextOffset\":null,\"updatedAt\":\"2026-11-20T17:10:57.710Z\"}],\"nextPosition\":2,\"hasMore\":false}"
+          }
+        ],
+        "structuredContent": {
+          "thread": {
+            "threadId": "mcp:ec70795b-3a7f-4e02-b08f-5de82f78072d",
+            "projectId": "6e52c9c4-c256-48e6-8566-b32e425ae094",
+            "title": "t3-api-facts idle (research, safe to delete)",
+            "link": "https://app.t3.codes/threads/264b77bb-5ec7-4453-8ee5-7d0162886008/mcp%3Aec70795b-3a7f-4e02-b08f-5de82f78072d",
+            "createdBy": "agent",
+            "creationSource": "mcp",
+            "status": "failed",
+            "latestRunId": "run:thread:mcp%3Aec70795b-3a7f-4e02-b08f-5de82f78072d:ordinal:1",
+            "activeRunId": null,
+            "providerInstanceId": "claudeAgent",
+            "model": "claude-nope-1",
+            "runtimeMode": "full-access",
+            "interactionMode": "default",
+            "linkedPullRequest": null,
+            "pullRequests": [],
+            "titleRegeneration": null,
+            "branch": null,
+            "worktreePath": null,
+            "parentThreadId": null,
+            "relationshipToParent": null,
+            "runCount": 1,
+            "itemCount": 3,
+            "pendingRequestCount": 0,
+            "archived": false,
+            "settled": false,
+            "settledAt": null,
+            "snoozed": false,
+            "snoozedUntil": null,
+            "createdAt": "2026-11-20T17:08:50.868Z",
+            "updatedAt": "2026-11-20T17:10:57.713Z"
+          },
+          "recentRuns": [
+            {
+              "runId": "run:thread:mcp%3Aec70795b-3a7f-4e02-b08f-5de82f78072d:ordinal:1",
+              "ordinal": 1,
+              "status": "failed",
+              "providerInstanceId": "claudeAgent",
+              "model": "claude-nope-1",
+              "executedModel": null,
+              "requestedAt": "2026-11-20T17:10:54.339Z",
+              "startedAt": "2026-11-20T17:10:54.364Z",
+              "completedAt": "2026-11-20T17:10:57.713Z"
+            }
+          ],
+          "items": [
+            {
+              "position": 0,
+              "visibility": "local",
+              "sourceThreadId": "mcp:ec70795b-3a7f-4e02-b08f-5de82f78072d",
+              "itemId": "turn-item:message:message%3Amcp%3Aclient%253A912c899e-212f-44cf-8a53-4201b11fdae2%3Athread-send%3A9ad60a0e-31c4-4b3e-82ba-684d46e81702",
+              "runId": "run:thread:mcp%3Aec70795b-3a7f-4e02-b08f-5de82f78072d:ordinal:1",
+              "messageId": "message:mcp:client%3A912c899e-212f-44cf-8a53-4201b11fdae2:thread-send:9ad60a0e-31c4-4b3e-82ba-684d46e81702",
+              "createdBy": "agent",
+              "creationSource": "mcp",
+              "type": "user_message",
+              "status": "completed",
+              "title": null,
+              "text": "Reply with exactly: ok",
+              "textTruncated": false,
+              "nextTextOffset": null,
+              "updatedAt": "2026-11-20T17:10:54.339Z"
+            },
+            {
+              "position": 1,
+              "visibility": "local",
+              "sourceThreadId": "mcp:ec70795b-3a7f-4e02-b08f-5de82f78072d",
+              "itemId": "turn-item:provider:claudeAgent:native-item:66a6ce69-95d8-49e0-9f9e-c811eb8234b5",
+              "runId": "run:thread:mcp%3Aec70795b-3a7f-4e02-b08f-5de82f78072d:ordinal:1",
+              "messageId": "message:provider:claudeAgent:native-item:66a6ce69-95d8-49e0-9f9e-c811eb8234b5",
+              "createdBy": "agent",
+              "creationSource": "provider",
+              "type": "assistant_message",
+              "status": "completed",
+              "title": null,
+              "text": "There's an issue with the selected model (claude-nope-1). It may not exist or you may not have access to it.",
+              "textTruncated": false,
+              "nextTextOffset": null,
+              "updatedAt": "2026-11-20T17:10:57.691Z"
+            },
+            {
+              "position": 2,
+              "visibility": "local",
+              "sourceThreadId": "mcp:ec70795b-3a7f-4e02-b08f-5de82f78072d",
+              "itemId": "turn-item:provider:claudeAgent:native-item:terminal-failure%3Aprovider-turn%3Aprovider%3AclaudeAgent%3Anative-turn%3Aturn%253Arun-attempt%253Arun%253Arun%25253Athread%25253Amcp%2525253Aec70795b-3a7f-4e02-b08f-5de82f78072d%25253Aordinal%25253A1%253Aattempt%253A1",
+              "runId": "run:thread:mcp%3Aec70795b-3a7f-4e02-b08f-5de82f78072d:ordinal:1",
+              "messageId": null,
+              "createdBy": null,
+              "creationSource": null,
+              "type": "error",
+              "status": "failed",
+              "title": "Provider error",
+              "text": "Claude gave up after repeated API errors.",
+              "textTruncated": false,
+              "nextTextOffset": null,
+              "updatedAt": "2026-11-20T17:10:57.710Z"
+            }
+          ],
+          "nextPosition": 2,
+          "hasMore": false
+        },
+        "isError": false
+      }
+    }
+  },
+  "request": {
+    "name": "t3_thread_read",
+    "arguments": {
+      "threadId": "mcp:ec70795b-3a7f-4e02-b08f-5de82f78072d",
+      "view": "activity",
+      "limit": 50,
+      "runLimit": 10,
+      "maxCharsPerItem": 500
+    }
+  }
+}

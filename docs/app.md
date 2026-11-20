@@ -74,7 +74,8 @@ the real clock or runs on a real timer that no `vi.useFakeTimers()` around it fa
   clock). The app reads that one setting, never writes the file, and watches it. The exception
   goes once T3's server serves client settings.
 - **Seams, faked in tests:** T3 (MCP and WebSocket; `src/t3/seams.ts`: HTTP, the socket, the
-  CLI, the address), GitHub (`src/github-seam.ts`, ported from Python, with its fakes in `test/fakes.ts`; the
+  CLI, the address; `src/t3-seam.ts`, ported from Python, with `test/recorded-t3.ts` answering
+  from T3's recorded responses and its fakes in `test/fakes-t3.ts`), GitHub (`src/github-seam.ts`, ported from Python, with its fakes in `test/fakes.ts`; the
   lanes still use `src/github.ts` and `test/fake-github.ts` until their ports move them),
   local git in a served repo's folder (`src/git-seam.ts`, ported from Python, with its fakes in
   `test/fakes.ts`; the lanes still use `src/git.ts` until their ports move them), and the platform (Windows: tray, notifications,
@@ -795,6 +796,41 @@ reason. The seam's calls are async, so `GitHubPoster.post` is.
 
 Nothing calls it yet: the review, fix, conflict and merge lanes use `src/review/ledger.ts` and
 `src/review/post.ts` until the reviews, fix and merge ports (#222, #223, #224) move them.
+
+## The T3 seam
+
+Ported from `queue_runner/t3.py` (#217), in `src/t3-seam.ts`, with `tests/test_t3.py` ported case
+for case in `test/t3-seam.test.ts` and `tests/fakes_t3.py`'s `FakeT3` in `test/fakes-t3.ts`. It
+has Python's names: `Thread`, `Launched`, `RunResult`, `Message`, `T3Error`, the calls `start`,
+`launch`, `send`, `show`, `list`, `settle` and `rename` (on `T3Server`, Python's `T3Cli`), and
+`find_job_thread` and `settle_quietly`. The thread facts Python reads from T3's database and
+the agent's files (a run's failure and limit reset, `context_tokens`, `last_call`,
+`cache_expires_at`, `run_effort`, `auto_resume_warning`) port with their users, #227 and #228.
+
+**Where its facts come from** is the one change: T3's local server, as
+`.scratch/queue-runner/research/t3-api-facts.md` found T3 0.1.9, never its CLI or database.
+
+- **The CLI's calls** are T3's MCP tools: `show` is `t3_thread_read` (the thread, then its
+  `messages` view paged to the end, each of the last messages read on in full), `list` is
+  `t3_thread_list` as T3's CLI sends it (`includeSubagents: false`, every page) on the project
+  the CLI's `--project` names (an id, or a path inside its folder, links resolved), and `send` is
+  `t3_thread_send` (`mode: queue`) and then the wait `start` uses.
+- **Waiting on the user** is the MCP read's `pendingRequestCount`, as Python reads it, plus the
+  run's own secret cards still `waiting` (its `secret_request` items on the activity view), which
+  that count leaves out. `start` and `send` take a timed-out wait slice with either as a run
+  waiting for an answer (exit 2), and `show` counts them for its live run. A card of another run
+  doesn't count, so T3's shell, which also shows a link card after its run ended, isn't read.
+- **A model's effort option** comes from T3's catalog (each model's `effortOption`), which the
+  caller passes in, where Python named the one driver that reads another: the app's code names no
+  provider (Rules, above). A model the catalog doesn't list gets Python's `effort`.
+
+The fake for its tests is T3's server answering from responses recorded off the running T3
+(`test/fixtures/t3/`, copied from the note's fixtures with their names): the app's own MCP client
+reads them, as it reads T3.
+
+Nothing calls it yet: the lanes still launch, wait and settle through `src/launch.ts`,
+`src/t3/thread-end.ts`, `src/t3/thread-reply.ts` and `src/settle.ts` until the run loop, review,
+fix and merge ports (#219, #222, #223, #224) move them.
 
 ## Setup
 
