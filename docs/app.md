@@ -358,41 +358,60 @@ whose branch a job of the repo's writes to (Reviews; Fix rounds and merges).
   past that it goes on to the other repos, and the repo stays held while its job is under way.
   Why a repo got nothing is said once, until it changes.
 - **A job waiting on the user holds its repo until its run has finished** (#210). It waits on one of two things: a decision it posted on GitHub, or a
-  card in T3 (a question, a login or a secret: a pending runtime request). The app keeps no copy
-  of the second: T3 has it. A build, fix or conflict round whose run waits on a card hasn't ended:
+  card in T3 (a question or an approval, a pending runtime request; a secret or link card, a
+  waiting turn item). The app keeps no copy of either: GitHub and T3 have them. A build, fix or
+  conflict round whose run waits on a card hasn't ended:
   it stays open in the job log, so its repo starts nothing, `answered` or not, until the run has
   finished, answered in T3 itself or anywhere else; its thread isn't settled meanwhile. A
   `waiting` end an older app wrote for one is read as no end, so after a restart it's watched as
   any open job (every one, even beside another job open in the repo: an older app's build left
-  waiting beside the build it started next; #210 F12). Holding the repo while a decision the job
-  posted on GitHub is open isn't built yet; sending a GitHub answer on to the thread is #159's.
+  waiting beside the build it started next; #210 F12). **A build whose issue has `needs-info`**
+  (the build brief has the builder swap `ready-for-agent` for it when it asks) when its runs end
+  hasn't ended either (`src/github-hold.ts`): GitHub is read then and again each pass, never T3,
+  and the build ends once the issue is closed or the label is off and its runs have finished, its
+  thread settled then. A GitHub read that fails holds, said once. A thread deleted in T3 ends it
+  whatever GitHub says. Fix and conflict rounds aren't held on GitHub yet: what an open question
+  on a PR is waits on a decision. Sending a GitHub answer on to the thread is #159's.
 - **A job's thread is read, as T3 pushes its changes** (`watchJobThread`, `src/t3/thread-end.ts`):
-  the thread's stream (`orchestration.subscribeThread`) only says when; on each change to a run, a
-  request, an error item or the thread, when the stream opens and each time it opens again after
-  a drop, the app reads the thread's current state (`orchestration.getThreadProjection`) and
-  decides from that read alone, never from the order events came in, and never on a timer
-  (`threadNow`). One read at a time; changes during it are read once after it. A request pending
-  anywhere in the thread waits on the user, whatever its runs say: T3 restarting while a run waits
-  on a card can cancel the run and keep the card, and the answer starts a new turn (F16). Else a
-  run executing (any status but an end or `queued`) is running; with none, a queued one goes
-  next, unless the run that ran last ended on a usage limit, which is then the end (the queued
-  run waits behind it); with every run ended, the end is the one that ran last, so a follow-up
-  queued after it never hides it (F17). A fix round's runs are the thread's new ones since its
-  send (`knownRuns`).
-- **A deleted thread frees its repo only on T3's thread list** (#210 F11, F15): a read that fails
-  is followed by T3's thread list, the whole snapshot `orchestration.subscribeShell` sends first
-  (its `threads` and `archivedThreads`). Read fine without the thread, the job ends `failed`,
-  status `gone`, and frees the repo; it has nothing left to settle, so it's recorded settled. Any
-  other failure, whatever its text (an `orchestration_error` saying a run was "not found"
-  included), and a list that can't be read, leave the thread unreadable: the repo stays held and
-  the thread is read again on its next change or when its stream opens again. MCP is never asked.
+  the thread's stream (`orchestration.subscribeThread`) only says when. When it sends its
+  snapshot (at the start, and each time it opens again) and on each change to a run
+  (`run.created` too), a request, a card, question, interrupt or error item, the provider session
+  or the thread, the app reads the thread's whole current state (`subscribeThread`'s first value;
+  `getThreadProjection` is windowed, so an old card or run can be missing from it) and decides
+  from that read alone, never from the order events came in, and never on a timer (`threadNow`,
+  modelled on T3's own `threadShellFromProjection`). One read at a time; a read a change came
+  during is read again before anything is decided on it (F20). A stream that drops, or a read that
+  fails while its stream stays up (F21), opens the stream again 5 seconds later, and only its
+  snapshot reads: a stream that never opens reads nothing (F23). The thread waits on the user
+  when T3 would show it so: a pending runtime request (a question T3 restarted under, answerable
+  as a message, included), a secret card while its run is live, or a link card after its run
+  ended until the user writes in the thread after it (F16). Else a run live (`preparing` to
+  `waiting`) is running; an unheld queued run in a thread not archived goes next, unless the run
+  that ran last failed on a usage limit, which T3's queue waits behind, and is then the end; a
+  held queue (`queueHeld`, left by a stop or a provider failure) never starts on its own and isn't
+  running (F17). Otherwise the end is the run that ran last as T3 takes it (`latestExecutedRun`:
+  queued runs and runs cancelled before they started skipped, then the latest `completedAt`; T3
+  renumbers a held run's ordinal when it starts), so a follow-up never hides it. A job whose runs
+  never ran ends `failed`. A fix round's runs are the thread's new ones since its send
+  (`knownRuns`).
+- **A deleted thread frees its repo only on T3's word** (#210 F11, F15): T3 deletes softly, so a
+  deleted thread still reads, with `thread.deletedAt` set; or a read fails and
+  `orchestration.getThreadTitles {threadIds}` answers without the thread (it leaves out deleted
+  and unknown ids, and lists archived ones). Either way the job ends `failed`, status `gone`, and
+  frees the repo; it has nothing left to settle, so it's recorded settled. An archived thread is
+  never gone. A stream T3 fails with its typed "no such thread" (`T3Error.codes` holding
+  `ProjectionStoreThreadNotFoundError`) is read on that code. Any other failure, whatever its text
+  (an `orchestration_error` saying a run was "not found" included), and titles that can't be
+  read, leave the thread unreadable: the repo stays held and its stream is opened again, read
+  when it sends its snapshot. MCP is never asked.
 - **A job counts in the gate once, from its let-in to its end** (#210 F18, F19): a job waiting on
   the user keeps the cost it was let in at reserved while it waits and after it's answered, and
   is measured once, at its end, from the reading it was let in on; nothing is split around a
   question, so nothing is counted twice. Its end reaches the gate as any job's does, a usage
   limit holding the provider. After a restart each open job is reserved at its logged cost as its
   lane recovers it, before the first pass lets any job in, whether or not its thread has been
-  read yet.
+  read yet, and measured from the reading its start line saved: a build's, a fix round's and a
+  conflict round's alike (F24).
 - **Settle first:** on start each lane recovers every job of its kind the log shows open (`recover`:
   each lane's After a restart, don't guess, below) before the first choice, and the repo is held
   meanwhile. A recovery that can't tell yet (a thread that can't be read) keeps its job open, read
@@ -624,15 +643,15 @@ merge half of `src/github.ts` and `src/git.ts`.
   (`queue` starts a new turn and never steers one), so it starts with that thread's context. The
   gate is asked about the model that thread runs on (`UsageGate.check`, kind `fix`), since that's
   what the turn spends; held, it waits and says why once. The start line keeps the thread's runs
-  before the send (`knownRuns`, from `orchestration.getThreadProjection`), and the round's end is
-  its new run's: the run id T3's answer names, else the newest run not among them, so a restart
-  finds it too.
+  before the send (`knownRuns`, from the thread's whole snapshot), and the round's end is its new
+  runs': those not among them, so a restart finds them too. T3 queues the send behind a live run
+  (`run.created` only, until it starts) or starts it at once.
 - **A fresh fixer instead,** a new thread on the fix kind's settings (`UsageGate.pick`, kind `fix`,
   its fallback while its provider has no room), titled `Queue runner fix: <project>#<n>`, when the
   review marks an earlier Important finding still open (`raised` before this round: the writer has
   shown it's stuck there), when no thread of the app's wrote the PR (a person opened it, or the
   build needs the user), or when the writer thread is gone (#156 F3): the read of its runs before
-  the send failed and T3's thread list reads fine without it, never an error's text (#210 F15); or
+  the send shows it deleted in T3 (as above), never an error's text (#210 F15); or
   when T3 refuses the send because the thread can't take a turn (#156 F9). The installed T3's
   `sendToThread` (read 2026-11-19 in its `server.asar`) answers, before it dispatches anything,
   `thread_not_found` for a deleted thread, `thread_not_sendable` for an archived one and
@@ -658,11 +677,10 @@ merge half of `src/github.ts` and `src/git.ts`.
   (`NoAnswer`), T3 answering a failure after it may have taken it (`ToolFailed`: T3 answers
   `orchestration_error` when it takes a send and can't read the run back), or the app stopped
   before T3 answered (found on restart). The thread is read: a run it didn't have before the send
-  is the round's, watched to its end; the thread gone (T3's thread list read fine without it)
-  means nothing ran, and a fresh fixer follows; no new run ends `needs-user`. A thread that can't
-  be read (T3's connection still down) says nothing yet: the round stays open, its repo held, and
-  the thread is read again on its next change or when its stream opens again, never on a timer,
-  until a read answers (#210 F6). Only a
+  is the round's, watched to its end; the thread deleted in T3 means nothing ran, and a fresh fixer
+  follows; no new run ends `needs-user`. A thread that can't be read (T3's connection still down)
+  says nothing yet: the round stays open, its repo held, and the thread is read again when its
+  stream opens again, never on a timer, until a read answers (#210 F6, F21). Only a
   refusal before the tool ran (a 4xx, a refused token) or a call never sent is `not-started`.
 - **After a restart, don't guess** (as Builds): a round the log shows open with its thread line is
   watched again; a send without one is read as above; a fresh fixer's launch without one, or one
@@ -868,10 +886,18 @@ is a T3Error with its `code: message`. Projects: `t3_project_list {cursor, limit
   client uses a ticket instead (`POST /api/auth/websocket-ticket/rpc` with the bearer token,
   answering `{ticket, expiresAt}` five minutes ahead, then `/ws?orchestrationProtocol=2&wsTicket=`);
   that worked live too, but the header needs no extra request, so the app sends the header.
-- **T3's thread list:** the first value of `orchestration.subscribeShell` is the whole snapshot,
-  `threads` and `archivedThreads` among it (below). A repo job's thread is gone only when that
-  snapshot reads fine without it (How jobs are chosen, above); the app reads it with `first`, once
-  per failed read of a thread.
+- **Whether T3 still has a thread:** `orchestration.getThreadTitles {threadIds}` (scope
+  `orchestration:read`) answers a record of thread id to title for the ids that exist, archived
+  ones included; deleted and unknown ids are left out (its SQL is `deleted_at IS NULL`, T3 0.1.9's
+  `server.asar`). A repo job's thread is gone only on it, or on `thread.deletedAt` (How jobs are
+  chosen, above); the app asks once per failed read of a thread. `subscribeShell`'s
+  `archivedThreads` is always empty in T3 0.1.9, and its `threads` are the active ones only, so
+  it says nothing about an archived thread; `orchestration.getArchivedShellSnapshot {}` lists
+  those.
+- **T3's failures keep their codes:** an Exit `Failure` becomes a `T3Error` whose `codes` are the
+  `_tag`s and `name`s down its cause chain, outermost first. T3 0.1.9 fails a read of a thread it
+  never had with `OrchestrationV2GetThreadProjectionError` > `OrchestratorProjectionError` >
+  `ProjectionStoreThreadNotFoundError` (seen live); the app decides on codes, never on text.
 - **The protocol** is Effect RPC with JSON text frames. The app sends
   `{"_tag":"Request","id":"1","tag":"subscribeServerConfig","payload":{},"headers":[]}`. A
   stream answers `{"_tag":"Chunk","requestId":"1","values":[...]}`, which the client acks with
@@ -901,9 +927,15 @@ is a T3Error with its `code: message`. Projects: `t3_project_list {cursor, limit
   `runtime-request.updated`. A run's `status` is one of `preparing`, `queued`, `starting`,
   `running`, `waiting`, `completed`, `interrupted`, `failed`, `cancelled`, `rolled_back`; the
   live run went `running`, then `waiting` for half a second, then `completed`. A runtime request
-  is `pending`, `resolved`, `expired` or `cancelled`. A usage limit is a failed run whose root
+  is `pending`, `resolved`, `expired` or `cancelled`, has no `runId`, and sits on a child node
+  of the run (`kind: user_input_request`). A secret or link card is a turn item (`secret_request`,
+  `link_request`, `status: waiting`), never a runtime request (seen live 2026-11-20). A run has
+  `queueHeld`, `queuePosition`, `requestedAt`, `startedAt` and `completedAt`; a queued follow-up
+  sends only `run.created` until it starts. A deleted thread still streams, `thread.deletedAt`
+  set; one T3 never had fails with the typed error above. A usage limit is a failed run whose root
   node's latest failed `error` turn item has `failure.class: usage_limit` and `failure.resetAt`
-  (T3's own `latestRootProviderFailure` in `server.asar`).
+  (T3's own `latestRootProviderFailure` in `server.asar`). The snapshot is the whole projection
+  unless the request asks for `acceptBoundedSnapshot`.
 - **`subscribeServerConfig`** (scope `orchestration:read`). Its payload's flags are all optional
   (`environmentThemes`, `usageLimitSources`, `usageLimitsCommand`, `workspaceSnapshotsOnDemand`,
   `providerCatalogsOnDemand`). With `{}` T3 sent one Chunk of 726,605 bytes with one value,
@@ -923,8 +955,11 @@ is a T3Error with its `code: message`. Projects: `t3_project_list {cursor, limit
   1, type, payload}`.
 - **A method that answers once** (not a stream) sends no Chunk: its answer is the Exit's
   `exit.value` (`T3Ws.request`). `orchestration.getThreadProjection {threadId}` (scope
-  `orchestration:read`) answers `{thread, runs, ...}`; each run keeps its `modelSelection`, effort
-  included, which MCP's `t3_thread_read` doesn't show (checked live 2026-11-19).
+  `orchestration:read`) answers `{thread, runs, ...}`, windowed: its newest 77 turn items, and
+  only the runs that are live or queued, own a kept item or are the one presented (T3 0.1.9's
+  `getThreadSnapshotWindow`), so the app reads job threads from `subscribeThread` instead. Each
+  run keeps its `modelSelection`, effort included, which MCP's `t3_thread_read` doesn't show
+  (checked live 2026-11-19).
 
 ## GitHub
 
