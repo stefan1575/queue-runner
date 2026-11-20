@@ -93,7 +93,7 @@ the real clock or runs on a real timer that no `vi.useFakeTimers()` around it fa
   included (tests and their fixtures may name them). The GitHub-facing
   names (`sol-review` status, `sol-findings` ledger, `<!-- sol-finding -->` marks) stay as they
   are, because open PRs in served repos read them across the cutover. So does the job branch
-  prefix (`JOB_BRANCH_PREFIX`, `src/picker.ts`), since a branch today's runner left counts as in
+  prefix (`JOB_BRANCH_PREFIX`, `src/picker.ts`; `_JOB_BRANCH_PREFIX` in the ported picker), since a branch today's runner left counts as in
   flight, and a repo's own `CLAUDE.md` is looked for by name: the test allows those two literals.
 - **The briefs stay self-contained:** no skill names, no slash commands, nothing outside the repo
   (today's `tests/test_templates.py` rule, ported with the templates).
@@ -332,13 +332,10 @@ The first job end to end (#154): a served repo's next ticket becomes a PR, as to
 builds (`docs/flow.md`, `docs/claude-lane.md`). `src/build-lane.ts`, `src/picker.ts`,
 `src/briefs/build.ts`, `src/briefs/rules.ts`, `src/t3/thread-end.ts`, `src/job-log.ts`, `src/git.ts`.
 
-- **Picking** (`src/picker.ts`, today's picker ported, `docs/layout.md`): an open issue labelled
-  `ready-for-agent`, every blocker closed (GitHub's native blocked-by count, and `#N`,
-  `owner/name#N` or issue URLs on a `Blocked by:` line or under a `## Blocked by` heading), not
-  in flight (a `claude/*-<issue>` branch, an open PR on one or closing it, or one GitHub links to
-  it), not a spec with open sub-issues, not held by the job log; lowest number first. Only repos
-  switched to Served with a GitHub remote are read (`servedRepos`). The base is GitHub's default
-  branch.
+- **Picking:** the rules are Python's, ported in The picker, below. Builds still call the old
+  `src/picker.ts` until the run loop's port (#219) moves them to the ported one, and
+  `src/picker.ts` goes when its last user moves. Only repos switched to Served with a GitHub
+  remote are read (`servedRepos`). The base is GitHub's default branch.
 - **The brief** (`src/briefs/build.ts`): `templates/build.md` ported, with the user's name
   (Settings, Name; else the gh account's name, else its login) in place of "Stefan". It names no
   skill, no slash command and no path outside the repo (`test/brief.test.ts`): where today's brief
@@ -759,6 +756,23 @@ non-zero exit is an answer.
 
 Nothing calls it yet: the lanes still use `src/git.ts` until the run loop, review, fix and merge
 ports (#219, #222, #223, #224) move them.
+
+## The picker
+
+Ported from `queue_runner/picker.py` (#218), in `src/build-picker.ts`, with `tests/test_picker.py`
+ported case for case in `test/build-picker.test.ts` on the ported GitHub fake (`test/fakes.ts`).
+It reads GitHub through the ported seam (The GitHub seam, above) and keeps Python's names:
+`pick`, `pickable`, `in_flight`, `blockers`, `closed_issues`, `slug` and `BuildJob`. What each
+decides is the module's own comment, as in Python.
+
+Two differences are TypeScript's only. The seam's calls are async, so `pick` is async and
+`pickable` an async generator, which still reads no further than `pick` takes. Python's `re`
+reads `\w`, `\d`, `\s` and `\b` as Unicode, where JavaScript's read ASCII, so the patterns spell
+out Python's classes, and `int`, `splitlines` and the sort of references follow Python's.
+
+Nothing calls it yet: builds pick through `src/picker.ts`, and the fix, conflict and review lanes
+read `closedIssues` and `JOB_BRANCH_PREFIX` there, until the run loop, review and fix ports
+(#219, #222, #223) move them.
 
 ## Setup
 
