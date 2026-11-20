@@ -4,9 +4,9 @@
 // ported onto the MCP calls that replace the CLI; the one on Python's missing MCP client is left
 // out (the seam always has one). The cases after `ShowAndListTest` are the port's own: what
 // replaces the CLI, and the calls test_t3.py doesn't cover.
-import { mkdir, mkdtemp, rm, symlink } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { isAbsolute, join, relative } from 'node:path';
 import { afterEach, describe, expect, test } from 'vitest';
 import { T3Error, T3Server, find_job_thread, settle_quietly } from '../src/t3-seam.ts';
 import { model } from '../src/jobs.ts';
@@ -30,7 +30,14 @@ function t3(): RecordedT3 {
 // Each model's effort option, from T3's recorded catalog: Claude's `effort`, Codex's `reasoningEffort`
 const CATALOG = catalogFromConfig(value(recording('ws-subscribeServerConfig-snapshot')).config);
 const effortOption = (provider: string, m: string) => model(CATALOG, { provider, model: m })?.effortOption ?? null;
-const seam = (r: RecordedT3) => new T3Server(r.mcp, effortOption);
+// Links are resolved only under the test's own temp folder; a recorded project folder is taken as
+// it is, so no test reads this machine's sandbox folders (docs/app.md, tests touch only temp folders).
+const underTemp = (p: string) => {
+  const rel = relative(tmpdir().toLowerCase(), p.toLowerCase());
+  return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel);
+};
+const tempLinksOnly = (p: string) => (underTemp(p) ? realpath(p).catch(() => p) : Promise.resolve(p));
+const seam = (r: RecordedT3) => new T3Server(r.mcp, effortOption, tempLinksOnly);
 const onA = (name: string) => about(recording(name), A);
 
 /** A timeline item shaped as the recorded reply of thread A. */
@@ -227,6 +234,14 @@ describe('ShowAndListTest', () => {
       await seam(r.answer('t3_thread_list', recording('mcp-thread_list-titleContains'))).list(project);
       return r.argsOf('t3_thread_list')[0].projectId;
     };
+
+    test('folders are resolved through the resolver the seam was given, never read from disk here', async () => {
+      const asked: string[] = [];
+      const resolver = async (p: string) => { asked.push(p); return p; };
+      const r = new RecordedT3().answer('t3_project_list', PROJECTS).answer('t3_thread_list', recording('mcp-thread_list-titleContains'));
+      await new T3Server(r.mcp, effortOption, resolver).list(SANDBOX.workspaceRoot);
+      expect(asked).toContain(SANDBOX.workspaceRoot);
+    });
 
     test('by its id', async () => {
       expect(await listed(new RecordedT3().answer('t3_project_list', PROJECTS), SANDBOX.id)).toBe(SANDBOX.id);

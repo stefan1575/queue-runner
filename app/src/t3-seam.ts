@@ -177,10 +177,14 @@ const ROLES: Readonly<Record<string, string>> = { user_message: 'user', assistan
 export class T3Server {
   readonly mcp: Pick<T3Mcp, 'call'>;
   readonly effort_option: EffortOption;
+  /** Resolves a path's links, or gives it back as it is when that fails. Tests pass their own, so
+   *  a recorded project folder isn't looked up on this machine's disk. */
+  readonly real_path: (p: string) => Promise<string>;
 
-  constructor(mcp: Pick<T3Mcp, 'call'>, effort_option: EffortOption) {
+  constructor(mcp: Pick<T3Mcp, 'call'>, effort_option: EffortOption, real_path: (p: string) => Promise<string> = _real) {
     this.mcp = mcp;
     this.effort_option = effort_option;
+    this.real_path = real_path;
   }
 
   /** Every T3 project: each page of `t3_project_list`. */
@@ -210,10 +214,10 @@ export class T3Server {
     const projects = await this._projects();
     const byId = projects.find((p) => get(p, 'id') === identifier);
     if (byId !== undefined) return byId.id;
-    const target = await _real(resolve(_expand_home(identifier)));
+    const target = await this.real_path(resolve(_expand_home(identifier)));
     let deepest: { id: string; root: string } | null = null;
     for (const p of projects) {
-      const root = await _real(need(p, 'workspaceRoot'));
+      const root = await this.real_path(need(p, 'workspaceRoot'));
       const rel = relative(root, target);
       const inside = rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
       if (inside && (deepest === null || root.length > deepest.root.length)) deepest = { id: p.id, root };
