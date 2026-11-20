@@ -179,6 +179,22 @@ describe('StartTest', () => {
   });
 });
 
+describe('the port: a model with no effort, and the first project that matches', () => {
+  test('a model with no effort to choose launches with no option', async () => {
+    const r = t3();
+    await seam(r).launch(SANDBOX.workspaceRoot, 'Ask.', { title: 'Decide: x', ...CLAUDE, effort: null });
+    expect(r.argsOf('t3_thread_launch')[0].modelSelection).toStrictEqual({ instanceId: 'claudeAgent', model: 'claude-opus-5-5', options: [] });
+  });
+
+  test('a launch reads no project page past the one that matches, as Python returns at its first match', async () => {
+    // #254's nit: every page was read before matching
+    const first = withContent(PROJECTS, (c) => ({ ...c, projects: [SANDBOX], nextCursor: 100 }));
+    const r = t3().answer('t3_project_list', first);
+    await seam(r).launch(SANDBOX.workspaceRoot, 'Ask.', { title: 'Decide: x', ...CLAUDE });
+    expect(r.argsOf('t3_project_list')).toStrictEqual([{ cursor: 0, limit: 100 }]);
+  });
+});
+
 describe('ShowAndListTest', () => {
   test('show gives the thread and its latest messages', async () => {
     // Python's check that the CLI was asked for 2 messages: the thread says more than 2, and
@@ -239,7 +255,10 @@ describe('ShowAndListTest', () => {
       const asked: string[] = [];
       const resolver = async (p: string) => { asked.push(p); return p; };
       const r = new RecordedT3().answer('t3_project_list', PROJECTS).answer('t3_thread_list', recording('mcp-thread_list-titleContains'));
-      await new T3Server(r.mcp, effortOption, resolver).list(SANDBOX.workspaceRoot);
+      // a folder inside the project's, so each lookup (the path asked for, the project's root) shows (#254's nit)
+      const inside = join(SANDBOX.workspaceRoot, 'docs');
+      await new T3Server(r.mcp, effortOption, resolver).list(inside);
+      expect(asked).toContain(inside);
       expect(asked).toContain(SANDBOX.workspaceRoot);
     });
 

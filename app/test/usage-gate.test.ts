@@ -154,11 +154,11 @@ describe('every job waits for room in its own provider', () => {
     }
   }
 
-  test('a fresher reading with no room holds on its own window; a hold restored from the log ends on a reading with room (F25)', async () => {
+  test('a fresher reading with no room holds on its own window; a limit hold ends on a reading with room (F25)', async () => {
     await t3Reads('2026-11-18T19:06:00Z', () => { window('claudeAgent', 'five_hour').usedPercent = 100; });
     now = new Date('2026-11-18T19:06:30Z');
     jobs({ build: { own: OPUS, fallback: null } });
-    gate.limitsFrom([{ id: 'j0', kind: 'build', choice: OPUS, startedAt: '2026-11-18T19:00:00.000Z', end: { outcome: 'usage-limit', at: '2026-11-18T19:05:00.000Z', resetAt: '2026-11-19T23:00:00.000Z' } } as any]);
+    gate.outOfUsage('claudeAgent', '2026-11-19T23:00:00.000Z', new Date('2026-11-18T19:05:00.000Z'));
     expect(gate.pick('build a#1', 'build')).toMatchObject({ fits: false, hold: { why: 'window' } }); // read at 19:06, after the hold began
     await t3Reads('2026-11-18T19:20:00Z', () => { window('claudeAgent', 'five_hour').usedPercent = 5; });
     now = new Date('2026-11-18T19:20:30Z');
@@ -177,14 +177,13 @@ describe('every job waits for room in its own provider', () => {
     expect(gate.pick('review a#1', 'review')).toMatchObject({ fits: false, hold: { why: 'limit' } });
   });
 
-  test('a start holds what the job log says ran out of usage; with no reset time, for an hour', async () => {
+  test('a provider out of usage with no reset time is held for an hour', async () => {
     await t3Reads('2026-11-18T19:06:00Z', () => {
       providers.find((p) => p.instanceId === 'codex').usageLimits = { checkedAt: null, windows: [], unavailable: { reason: 'unsupported' } };
     });
     now = new Date('2026-11-18T19:06:30Z');
     jobs({ review: { own: SOL, fallback: null } });
-    const job = (outcome: string, at: string, resetAt: string | null) => ({ id: at, kind: 'review', choice: SOL, startedAt: at, end: { outcome, at, resetAt } }) as any;
-    gate.limitsFrom([job('clean', '2026-11-18T18:00:00.000Z', null), job('out-of-usage', '2026-11-18T18:30:00.000Z', null)]);
+    gate.outOfUsage('codex', null, new Date('2026-11-18T18:30:00.000Z'));
     const held = gate.pick('review a#1', 'review');
     expect(held).toMatchObject({ fits: false, hold: { why: 'limit', at: null } });
     if (!held.fits) expect(held.until?.toISOString()).toBe('2026-11-18T19:30:00.000Z');
@@ -207,6 +206,31 @@ describe('every job waits for room in its own provider', () => {
     expect(lines).toHaveLength(1);
     expect(lines[0]).toMatchObject({ provider: 'claudeAgent', model: 'claude-opus-5-5', effort: 'medium', kind: 'build', job: 'build a#1', spent: { five_hour: 4, seven_day: 1, seven_day_fable: 0 } });
     expect(gate.check({ ...job, id: 'build a#2' }).fits).toBe(true);
+  });
+});
+
+describe("jobs the gate did not let in (#219: Python's `job_ended` and `check(running=...)`)", () => {
+  test('a job seen to end elsewhere holds the next check on its login for a reading after it, told once per key', async () => {
+    await t3Reads('2026-11-18T19:06:00Z', () => { window('claudeAgent', 'five_hour').usedPercent = 10; });
+    jobs({ build: { own: OPUS, fallback: null } });
+    now = new Date('2026-11-18T19:07:00Z');
+    gate.job_ended('build', 'run:1');
+    expect(gate.pick('build a#1', 'build')).toMatchObject({ fits: false, hold: { why: 'reading', stale: 'before-end' } });
+    await t3Reads('2026-11-18T19:08:00Z', () => {});
+    now = new Date('2026-11-18T19:09:00Z');
+    gate.job_ended('build', 'run:1');   // the same run: not told again
+    expect(gate.pick('build a#1', 'build')).toMatchObject({ fits: true });
+    gate.job_ended('build');
+    expect(gate.pick('build a#1', 'build')).toMatchObject({ fits: false, hold: { why: 'reading', stale: 'before-end' } });
+  });
+
+  test("a job running elsewhere counts at its kind's expected cost beside the one asked about", async () => {
+    await t3Reads('2026-11-18T19:06:00Z', () => { window('claudeAgent', 'five_hour').usedPercent = 30; });
+    now = new Date('2026-11-18T19:06:30Z');
+    jobs({ build: { own: OPUS, fallback: null } });
+    expect(gate.pick('build a#2', 'build')).toMatchObject({ fits: true });
+    const held = gate.pick('build a#2', 'build', [{ id: 'build a#1', kind: 'build' }]);
+    expect(held).toMatchObject({ fits: false, hold: { why: 'running', running: 60, jobs: ['build a#1'] } });
   });
 });
 

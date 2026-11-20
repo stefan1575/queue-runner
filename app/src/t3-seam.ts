@@ -62,9 +62,10 @@ export const WAIT_SLICE_MS = 15_000;
 /** The effort option T3's catalog names for `provider`'s `model`, or null when it names none. */
 export type EffortOption = (provider: string, model: string) => string | null;
 
-/** T3's model selection for `provider`'s `model` at `effort`, the effort under `option`. */
-export function selection(provider: string, model: string, effort: string, option: string | null = null) {
-  return { instanceId: provider, model, options: [{ id: option ?? EFFORT_OPTION, value: effort }] };
+/** T3's model selection for `provider`'s `model` at `effort`, the effort under `option`. A model
+ *  with no effort to choose (the app's Models page names none for it: null) sends no option. */
+export function selection(provider: string, model: string, effort: string | null, option: string | null = null) {
+  return { instanceId: provider, model, options: effort === null ? [] : [{ id: option ?? EFFORT_OPTION, value: effort }] };
 }
 
 /** `os.path.normcase(os.path.abspath(p))`: absolute from the working directory; on Windows, lower
@@ -187,21 +188,27 @@ export class T3Server {
     this.real_path = real_path;
   }
 
-  /** Every T3 project: each page of `t3_project_list`. */
-  private async _projects(): Promise<Json[]> {
-    const projects: Json[] = [];
+  /** Every T3 project, page by page of `t3_project_list`, read no further than the caller takes. */
+  private async *_pages(): AsyncGenerator<Json> {
     let cursor: Json = 0;
     while (cursor !== null && cursor !== undefined) {
       const page = obj(await this.mcp.call('t3_project_list', { cursor, limit: 100 }));
-      projects.push(...list(page.projects));
+      yield* list(page.projects);
       cursor = get(page, 'nextCursor');
     }
+  }
+
+  /** Every T3 project: each page of `t3_project_list`. */
+  private async _projects(): Promise<Json[]> {
+    const projects: Json[] = [];
+    for await (const p of this._pages()) projects.push(p);
     return projects;
   }
 
-  /** The id of the T3 project whose folder is `folder`. */
+  /** The id of the T3 project whose folder is `folder`: the first that matches, as Python returns
+   *  at its first match, reading no page past it. */
   private async _project(folder: string): Promise<string> {
-    for (const p of await this._projects()) {
+    for await (const p of this._pages()) {
       if (get(p, 'workspaceRoot') && _same_folder(p.workspaceRoot, folder)) return p.id;
     }
     throw new T3Error(`No T3 Code project matches '${folder}'`);
@@ -228,7 +235,7 @@ export class T3Server {
 
   /** `t3_thread_launch` with the model and its effort named: `{threadId, runId, ...}`. */
   private async _launch(project: string, message: string, title: string, provider: string, model: string,
-                        effort: string, worktree: string | null, branch: string | null): Promise<Json> {
+                        effort: string | null, worktree: string | null, branch: string | null): Promise<Json> {
     if (branch && !worktree) throw new Error('ValueError: a branch needs a worktree base');
     const args: Record<string, unknown> = {
       projectId: await this._project(project), title, message, runtimeMode: 'full-access',
@@ -247,7 +254,7 @@ export class T3Server {
   /** Starts a thread on `provider`'s `model` at `effort` and waits until its run ends.
    *  `worktree` is the base ref of a new T3 worktree, `branch` the branch T3 makes there. */
   async start(project: string, message: string, { title, provider, model, effort, worktree = null, branch = null }:
-    { title: string; provider: string; model: string; effort: string; worktree?: string | null; branch?: string | null }): Promise<RunResult> {
+    { title: string; provider: string; model: string; effort: string | null; worktree?: string | null; branch?: string | null }): Promise<RunResult> {
     const launched = await this._launch(project, message, title, provider, model, effort, worktree, branch);
     const thread_id: string = launched.threadId;
     const run_id: string | null = get(launched, 'runId');
@@ -257,7 +264,7 @@ export class T3Server {
 
   /** Starts a thread in the project folder on `provider`'s `model` at `effort` and returns at once. */
   async launch(project: string, message: string, { title, provider, model, effort }:
-    { title: string; provider: string; model: string; effort: string }): Promise<Launched> {
+    { title: string; provider: string; model: string; effort: string | null }): Promise<Launched> {
     const launched = await this._launch(project, message, title, provider, model, effort, null, null);
     return new Launched({ thread_id: launched.threadId, run_id: get(launched, 'runId') });
   }
