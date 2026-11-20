@@ -315,7 +315,7 @@ describe('a fresh fixer', () => {
   test('a thread T3 reads fine but whose projection fails for a moment is no fresh fixer: the PR rests and tries the send again', async () => {
     await builder();
     await blocking(1, H, [finding({})]);
-    t3.wsMethods['orchestration.getThreadProjection'] = () => { throw new Error('busy'); };
+    t3.failReads = 1;
     makeLane();
     await chooser.pass();
     await chooser.idle();
@@ -327,7 +327,7 @@ describe('a fresh fixer', () => {
   test("the thread deleted as the send arrives (T3 says not found): nothing counts, and the next pass sends a fresh fixer", async () => {
     await builder();
     await blocking(1, H, [finding({})]);
-    t3.beforeSend = () => { delete t3.threadState['thread-b']; };
+    t3.beforeSend = () => { t3.deleteThread('thread-b'); };
     makeLane();
     await chooser.pass();
     await until(() => t3.launches.length === 1);
@@ -406,7 +406,8 @@ describe('a send whose outcome is not known (F4)', () => {
     await blocking(1, H, [finding({})]);
     t3.sendFailure = { code: 'orchestration_error', message: 'Thread thread-b was not found.' };
     t3.sendTaken = true;
-    t3.beforeSend = () => { t3.wsMethods['orchestration.getThreadProjection'] = () => { throw new Error('orchestration_error: thread thread-b not found'); }; };
+    t3.readFailure = { _tag: 'Failure', cause: { _tag: 'Fail', error: { message: 'orchestration_error: thread thread-b not found' } } };
+    t3.beforeSend = () => { t3.failReadsBeside = 1; };
     makeLane();
     await chooser.pass();
     const job = fixes()[0]!;
@@ -448,25 +449,23 @@ describe("after a restart, don't guess", () => {
     await builder();
     await blocking(1, H, [finding({})]);
     t3.sendAnswerLost = true;
-    t3.beforeSend = () => { t3.wsMethods['orchestration.getThreadProjection'] = () => { throw new Error('busy'); }; };
+    t3.beforeSend = () => { t3.failReadsBeside = 1; };
     const retries = new Set<() => void>();
     makeLane({ retry: (again) => { retries.add(again); return () => { retries.delete(again); }; } });
     await chooser.pass();
     const job = fixes()[0]!;
-    await until(() => lines.some((l) => l.includes("the thread can't be read now") && l.includes('read again on its next change or when its stream opens again')));
+    await until(() => lines.some((l) => l.includes("the thread can't be read now") && l.includes('read again when its stream opens again')));
     expect(log.get(job.id)!.end).toBeUndefined();
     expect(log.needingUser(APP.id)).toEqual([]);
     t3.sendAnswerLost = false;
-    // T3 reads fine again, and nothing has changed in the thread: passes read nothing
-    delete t3.wsMethods['orchestration.getThreadProjection'];
+    // the failed read opened its stream again, later (F21); passes read nothing meanwhile
     const reads = t3.projectionReads;
     await chooser.pass();
     await chooser.pass();
     expect(t3.projectionReads).toBe(reads);
     expect(log.get(job.id)!.threadId).toBeUndefined();
     expect(t3.sends).toHaveLength(1); // the lost one T3 got; no other
-    // its stream opens again (T3 restarted): read then, and the new run is the round's
-    t3.endThreadStreams();
+    // its stream opens again: read then, and the new run is the round's
     await until(() => retries.size > 0);
     for (const f of [...retries]) { retries.delete(f); f(); }
     await until(() => log.get(job.id)!.threadId !== undefined);
@@ -478,20 +477,21 @@ describe("after a restart, don't guess", () => {
     expect(t3.sends).toHaveLength(1);
   });
 
-  test("a round the app stopped before T3 answered, whose thread can't be read at start, stays open until a read says; read on the thread's next change, no new run then needs the user (#210 F6)", async () => {
+  test("a round the app stopped before T3 answered, whose thread can't be read at start, stays open until a read says; read when its stream opens again, no new run then needs the user (#210 F6, F21)", async () => {
     await builder();
     await blocking(1, H, [finding({})]);
     const open = await log.started({ kind: 'fix', repo: APP.id, github: 'owner/app', issue: 4, branch: BRANCH, base: 'main', title: 'Queue runner fix: app#4', choice: BUILD, onFallback: false, sha: H, round: 1, to: 'thread-b', knownRuns: ['run-b'] });
-    t3.wsMethods['orchestration.getThreadProjection'] = () => { throw new Error('busy'); };
-    makeLane();
+    t3.failReadsBeside = 1;
+    const retries = new Set<() => void>();
+    makeLane({ retry: (again) => { retries.add(again); return () => { retries.delete(again); }; } });
     await chooser.start();
     await until(() => lines.some((l) => l.includes("the thread can't be read now")));
     await chooser.pass();
     expect(log.get(open.id)!.end).toBeUndefined();
     expect(log.needingUser(APP.id)).toEqual([]);
-    delete t3.wsMethods['orchestration.getThreadProjection'];
-    // T3 pushes a change to the thread: it's read then
-    t3.threadEvent('thread-b', 'run', { ...t3.threadState['thread-b']!.runs[0] });
+    // the failed read opened its stream again (F21): its snapshot is read then
+    await until(() => retries.size > 0);
+    for (const f of [...retries]) { retries.delete(f); f(); }
     await until(() => log.get(open.id)!.end !== undefined);
     expect(log.get(open.id)!.end).toMatchObject({ outcome: 'needs-user', error: expect.stringContaining('shows no new run') });
     expect(t3.sends).toEqual([]);

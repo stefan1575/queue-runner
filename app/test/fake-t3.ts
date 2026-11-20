@@ -105,6 +105,9 @@ export class FakeT3 {
   projectionReads = 0;
   /** How many `subscribeThread` requests fail at once with `readFailure` (T3 failing the read). */
   failReads = 0;
+  /** The same, counting only requests made while a stream on the thread is open: a read that
+   *  fails while the stream it was started from stays up. */
+  failReadsBeside = 0;
   readFailure: unknown = { _tag: 'Failure', cause: [{ _tag: 'Fail', error: { _tag: 'OrchestrationV2SubscribeThreadError', message: 'the thread could not be read', cause: { name: 'SqlError', message: 'database is locked' } } }] };
   /** WebSocket methods that answer once, by tag: the value T3's Exit carries. Any other
    *  method but subscribeServerConfig ends in a Failure. */
@@ -580,8 +583,9 @@ export class FakeT3 {
       // a message to a thread in `queue` mode: a new run, queued behind a live one or started
       // at once (`newRun`, seen live), answered as T3's MCP does (`status`, `delivery`)
       this.beforeSend();
+      // a deleted or unknown thread: what T3 answers before it dispatches anything (its sendToThread)
       const t = this.kept(args.threadId);
-      if (!t) return { failure: { code: 'not_found', message: 'The thread was not found.' } };
+      if (!t) return { failure: { code: 'thread_not_found', message: `Thread ${args.threadId} was not found.` } };
       if (this.sendFailure && !this.sendTaken) return { failure: this.sendFailure };
       this.sends.push(args);
       const run = this.newRun(t.id, 'agent');
@@ -748,7 +752,8 @@ export class FakeT3 {
           // tagged error; a deleted one still streams (seen live)
           const t = this.threadState[msg.payload?.threadId];
           const failed = !t ? threadNotFound(msg.payload?.threadId, 'OrchestrationV2SubscribeThreadError')
-            : this.failReads > 0 ? (this.failReads--, this.readFailure) : null;
+            : this.failReads > 0 ? (this.failReads--, this.readFailure)
+              : this.failReadsBeside > 0 && (this.threadStreams.get(t.id)?.size ?? 0) > 0 ? (this.failReadsBeside--, this.readFailure) : null;
           if (failed) {
             queueMicrotask(() => open && on.message(JSON.stringify({ _tag: 'Exit', requestId: msg.id, exit: failed })));
             return;

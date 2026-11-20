@@ -313,11 +313,11 @@ describe('a T3 that stalls (F4)', () => {
     const l = await log.started({ kind: 'build', repo: LIB.id, github: 'owner/lib', issue: 8, branch: 'claude/x-8', base: 'main', title: 'Queue runner build: lib#8', choice: BUILD, onFallback: false });
     await log.ended(l.id, { outcome: 'done-no-pr' });
     gh.ready['owner/lib'] = [issue(2)];
-    // T3 takes the projection read and never answers it, its socket left open
+    // T3 takes the thread read and never answers it, its socket left open
     const connect = t3.connect;
     const stalling: typeof t3.connect = (url, h, on) => connect(url, h, { ...on, message: (text) => {
       const m = JSON.parse(text);
-      if (m._tag !== 'Exit' || !t3.frames.some((f) => f.id === m.requestId && f.tag === 'orchestration.getThreadProjection')) on.message(text);
+      if (m._tag !== 'Chunk' || !t3.frames.some((f) => f.id === m.requestId && f.tag === 'orchestration.subscribeThread')) on.message(text);
     } });
     let late: (() => void) | null = null;
     ws = new T3Ws(t3.address, t3.cli, t3.http, stalling, (f) => { late = f; return () => { late = null; }; });
@@ -329,7 +329,7 @@ describe('a T3 that stalls (F4)', () => {
     await pass;
     expect(t3.launches.map((x) => x.title)).toEqual(['Queue runner build: lib#2']);
     expect(t3.sends).toHaveLength(0);
-    expect(lines.some((x) => x.startsWith('fix app#4 not started:') && x.includes('sent no answer to orchestration.getThreadProjection in time'))).toBe(true);
+    expect(lines.some((x) => x.startsWith('fix app#4 not started:') && x.includes('sent no answer to orchestration.subscribeThread in time'))).toBe(true);
   });
 
   test("a launch that doesn't return holds the pass no longer than its wait; its repo stays held while its job is under way", async () => {

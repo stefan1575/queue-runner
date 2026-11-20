@@ -26,10 +26,10 @@
 // with its thread line is watched again (a sent round on its new run, told apart from the runs the
 // thread had before by `knownRuns`). A send whose answer was lost, or that the app stopped before T3
 // answered, is decided by reading the thread: until a read succeeds it stays open, its repo held,
-// and is read again when T3 pushes a change to the thread or its stream opens again, never on a
-// timer (#210 F6); a read that leaves doubt, and a launch whose answer was lost (`NoAnswer`), need
-// the user: its repo starts nothing until they answer. A thread is gone only when T3's thread list
-// reads fine without it, never on an error's text (#210 F15).
+// and is read again when T3 pushes a change to the thread or its stream opens again (a failed
+// read opens it again), never on a timer (#210 F6, F21); a read that leaves doubt, and a launch whose answer was lost (`NoAnswer`), need
+// the user: its repo starts nothing until they answer. A thread is gone only when T3 deleted it
+// (its `deletedAt`, or T3's thread titles read fine without it), never on an error's text (#210 F15).
 import { fixBrief, type FixWhere } from './briefs/fix.ts';
 import type { BuildRepo } from './build-lane.ts';
 import { holdText } from './gate.ts';
@@ -392,8 +392,7 @@ export class FixLane implements RepoJobLane {
     await this.needsUser(job, `PR #${pr.number}'s head is in ${pr.headRepo ?? 'a fork GitHub no longer has'}, not ${repo.github}: no fixer pushes to a fork's branch`);
   }
 
-  /** The thread's run ids, oldest first, or `gone` when T3's thread list reads fine without it
-   *  (`readThread`); a thread that couldn't be read throws, for the round to rest and try again. */
+  /** The thread's run ids, oldest first, or `gone` when T3 deleted it (`readThread`); a thread that couldn't be read throws, for the round to rest and try again. */
   private async threadRuns(threadId: string): Promise<string[] | 'gone'> {
     const read = await readThread(this.d.ws, threadId);
     if ('gone' in read) return 'gone';
@@ -402,7 +401,7 @@ export class FixLane implements RepoJobLane {
   }
 
   /** A send T3 may have taken: the thread read, as T3 pushes its changes, until a read answers
-   *  (`followThread`). Gone (its thread list reads fine without it), nothing ran and the next pass
+   *  (`followThread`). Gone (deleted in T3), nothing ran and the next pass
    *  sends a fresh fixer; showing a run it didn't have before, that run is the round's, watched;
    *  showing none, the round needs the user (#154's rule). A thread that can't be read says
    *  nothing yet: the round stays open, its repo held, and it's read again on the thread's next
@@ -411,11 +410,11 @@ export class FixLane implements RepoJobLane {
     let said = false;
     const w = followThread<Answered>(this.d.ws, threadId, (read) => {
       if (!('unreadable' in read)) return read;
-      if (!said) this.d.say(`${job.title}: the round sent to thread ${threadId} got no clear answer (${e.message}), and the thread can't be read now (${read.unreadable}): read again on its next change or when its stream opens again; nothing else starts in ${job.github ?? job.repo} meanwhile`);
+      if (!said) this.d.say(`${job.title}: the round sent to thread ${threadId} got no clear answer (${e.message}), and the thread can't be read now (${read.unreadable}): read again when its stream opens again; nothing else starts in ${job.github ?? job.repo} meanwhile`);
       said = true;
       onLaunched(); // the pass goes on; the round stays open, holding its repo
       return null;
-    }, this.d.retry, (why) => this.d.say(`${job.title}: T3's thread stream dropped (${why}); opening it again`));
+    }, this.d.retry, (why) => this.d.say(`${job.title}: T3's thread stream opened again (${why})`));
     this.watches.add(w);
     let read: Answered;
     try {
@@ -426,7 +425,7 @@ export class FixLane implements RepoJobLane {
     if ('gone' in read) {
       this.gone.add(threadId);
       onLaunched();
-      return this.notStarted(job, goneText(threadId, `${e.message}; T3's thread list doesn't have it`), false);
+      return this.notStarted(job, goneText(threadId, `${e.message}; ${read.why}`), false);
     }
     const fresh = runIds(read.projection).filter((r) => !knownRuns.includes(r)).at(-1);
     if (!fresh) return this.needsUser(job, `the round sent to thread ${threadId} got no clear answer (${e.message}), and the thread shows no new run`);
@@ -531,7 +530,8 @@ export class FixLane implements RepoJobLane {
 /** A thread read that answered: its projection, or gone. */
 type Answered = Exclude<ThreadRead, { unreadable: string }>;
 
-/** A projection's run ids, oldest first. */
+/** A projection's run ids, oldest first: by when each was asked for, since T3 renumbers a held
+ *  run's ordinal when it starts (the whole projection, `readThread`, so no old run is left out). */
 const runIds = (projection: any): string[] => [...projection.runs]
-  .sort((a: any, b: any) => (a?.ordinal ?? 0) - (b?.ordinal ?? 0))
+  .sort((a: any, b: any) => String(a?.requestedAt ?? '').localeCompare(String(b?.requestedAt ?? '')) || (a?.ordinal ?? 0) - (b?.ordinal ?? 0))
   .map((r: any) => r?.id).filter((x: unknown): x is string => typeof x === 'string');

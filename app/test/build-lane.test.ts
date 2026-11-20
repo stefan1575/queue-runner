@@ -396,31 +396,47 @@ describe('the end', () => {
     expect(gate.calls.filter((c) => c.includes(id))).toEqual([`started ${id}`, `finished ${id}`]);
   });
 
-  test('T3 restarting while the run waits on a card cancels the run and keeps the request: the read sees it pending and the repo stays held; the answer starts a new turn, followed to its end (#210 F16)', async () => {
+  test('T3 restarting while the run waits on a question cancels the run and keeps the question, answerable as a message: still waiting on the user, the repo held; the answer is a new turn, followed to its end (#210 F16)', async () => {
     gh.ready['owner/app'] = [issue(5), issue(6)];
     await makeLane().pass();
     await watching('thread-1');
     const id = log.jobs()[0]!.id;
     t3.askUser('thread-1');
     await until(() => lines.some((l) => l.startsWith('Queue runner build: app#5 waits on you in T3')));
-    t3.restartCancelling('thread-1');
-    await until(() => lines.some((l) => l.startsWith("Queue runner build: app#5: T3's thread stream dropped")));
+    t3.restart();
+    await until(() => lines.some((l) => l.startsWith("Queue runner build: app#5: T3's thread stream opened again")));
     const reads = t3.projectionReads;
     retryNow();
     await watching('thread-1');
-    await until(() => t3.projectionReads > reads);
+    await until(() => t3.projectionReads > reads + 1);
     await chooser.pass();
-    // its run reads cancelled, but the request is still pending: it waits on the user, not ended
+    // its run reads cancelled, but the question is still pending: it waits on the user, not ended
     expect(log.get(id)!.end).toBeUndefined();
     expect(t3.launches).toHaveLength(1);
     expect(organized()).toEqual([]);
-    t3.answerInNewTurn('thread-1');
+    t3.answerInT3('thread-1'); // answered as a message: a new turn
     await chooser.pass();
     expect(log.get(id)!.end).toBeUndefined();
     t3.endRun('thread-1', 'completed');
     await until(() => organized().length === 1);
     expect(log.get(id)!.end).toMatchObject({ outcome: 'done-no-pr', status: 'completed' });
     await until(() => t3.launches.length === 2);
+  });
+
+  test("a secret card holds the build while its run is live; T3 restarting cancels both, and the build has ended (map item 12)", async () => {
+    gh.ready['owner/app'] = [issue(5), issue(6)];
+    await makeLane().pass();
+    await watching('thread-1');
+    const id = log.jobs()[0]!.id;
+    t3.secretCard('thread-1');
+    await until(() => lines.some((l) => l.startsWith('Queue runner build: app#5 waits on you in T3 (a secret card)')));
+    await chooser.pass();
+    expect(t3.launches).toHaveLength(1);
+    t3.restart();
+    await until(() => retries.size > 0);
+    retryNow();
+    await until(() => log.get(id)!.end !== undefined);
+    expect(log.get(id)!.end).toMatchObject({ outcome: 'failed', status: 'cancelled' });
   });
 
   test("a follow-up queued in the thread doesn't hide the run's end: its usage limit ends the build and reaches the gate (#210 F17)", async () => {
@@ -454,7 +470,8 @@ describe('the end', () => {
     await makeLane().start();
     await chooser.pass();
     expect(t3.launches).toEqual([]);
-    await until(() => lines.some((l) => l.startsWith("Queue runner build: app#5: its thread t3://thread/thread-w can't be read now")));
+    // a stream that never opens reads nothing (F23): it's only opened again
+    await until(() => lines.some((l) => l.startsWith("Queue runner build: app#5: T3's thread stream opened again")));
     // the user answers through the app: the repo is still held, its run hasn't finished
     await chooser.answered(waiting.id);
     expect(t3.launches).toEqual([]);
@@ -467,42 +484,44 @@ describe('the end', () => {
     expect(t3.launches[0].title).toBe('Queue runner build: app#6');
   });
 
-  test("an error whose text says not found never frees the repo: only T3's thread list read fine without the thread does, and then the build ends failed, gone (#210 F11, F15)", async () => {
+  test("an error whose text says not found never frees the repo: only T3's thread titles read fine without the thread do, and then the build ends failed, gone (#210 F11, F15)", async () => {
     gh.ready['owner/app'] = [issue(5), issue(6)];
     await makeLane().pass();
     await watching('thread-1');
     const id = log.jobs()[0]!.id;
     t3.askUser('thread-1');
     await until(() => lines.some((l) => l.startsWith('Queue runner build: app#5 waits on you in T3')));
-    const drops = () => lines.filter((l) => l.startsWith("Queue runner build: app#5: T3's thread stream dropped")).length;
-    // the stream drops, and T3 answers the read with an error that says a run was not found
-    t3.wsMethods['orchestration.getThreadProjection'] = () => { throw new Error('orchestration_error: run run-1 not found'); };
-    t3.endThreadStreams();
-    await until(() => drops() === 1);
-    retryNow();
+    const reopened = () => lines.filter((l) => l.startsWith("Queue runner build: app#5: T3's thread stream opened again")).length;
+    const run = () => t3.threadState['thread-1']!.runs[0];
+    // a read on the thread's next change fails, with an error that says a run was not found
+    t3.readFailure = { _tag: 'Failure', cause: { _tag: 'Fail', error: { message: 'orchestration_error: run run-1 not found' } } };
+    t3.failReadsBeside = 1;
+    t3.threadEvent('thread-1', 'run', { ...run() });
     await until(() => lines.some((l) => l.startsWith("Queue runner build: app#5: its thread t3://thread/thread-1 can't be read now (") && l.includes('not found')));
+    await until(() => reopened() === 1);
     await chooser.pass();
     expect(log.get(id)!.end).toBeUndefined();
     expect(t3.launches).toHaveLength(1);
-    // T3's thread list can't be read either: nothing says it's gone, still held
-    t3.shellDown = true;
-    t3.endThreadStreams();
-    await until(() => drops() === 2);
-    const reads = t3.toolCalls.length;
+    // T3's thread titles can't be read either: nothing says it's gone, still held
+    t3.wsMethods['orchestration.getThreadTitles'] = () => { throw new Error('busy'); };
     retryNow();
     await watching('thread-1');
+    t3.failReadsBeside = 1;
+    t3.threadEvent('thread-1', 'run', { ...run() });
+    await until(() => reopened() === 2);
+    const reads = t3.toolCalls.length;
     await chooser.pass();
     expect(log.get(id)!.end).toBeUndefined();
     expect(t3.launches).toHaveLength(1);
     expect(t3.toolCalls.length).toBe(reads); // MCP is never asked whether it's there
-    // deleted in T3: its thread list reads fine without it, and the build has ended
-    t3.shellDown = false;
-    delete t3.wsMethods['orchestration.getThreadProjection'];
-    t3.deleteThread('thread-1');
-    await until(() => drops() === 3);
+    // deleted in T3, as the read fails: T3's titles read fine without it, and the build has ended
+    delete t3.wsMethods['orchestration.getThreadTitles'];
     retryNow();
+    await watching('thread-1');
+    t3.failReadsBeside = 1;
+    t3.deleteThread('thread-1');
     await until(() => log.get(id)!.end !== undefined);
-    expect(log.get(id)!.end).toMatchObject({ outcome: 'failed', status: 'gone', error: expect.stringContaining("thread thread-1 is gone in T3 (its thread list doesn't have it)") });
+    expect(log.get(id)!.end).toMatchObject({ outcome: 'failed', status: 'gone', error: expect.stringContaining('thread thread-1 is deleted in T3 (') });
     // nothing left to settle: recorded as settled, never tried
     expect(log.get(id)!.settledAt).toEqual(expect.any(String));
     await until(() => t3.launches.length === 2);
@@ -640,7 +659,7 @@ describe('the end', () => {
     await makeLane().pass();
     await watching('thread-1');
     t3.endThreadStreams();
-    await until(() => lines.some((l) => /stream dropped/.test(l)) && retries.size > 0);
+    await until(() => lines.some((l) => /stream opened again/.test(l)) && retries.size > 0);
     retryNow();
     await watching('thread-1');
     t3.endRun('thread-1', 'completed');
