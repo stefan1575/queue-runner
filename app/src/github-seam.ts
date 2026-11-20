@@ -186,7 +186,12 @@ function _actions_run(check_run: Json): number | null {
   return m ? Number(m[1]) : null;
 }
 
-export class GhError extends Error {}
+export class GhError extends Error {
+  constructor(message?: string) {
+    super(message);
+    this.name = 'GhError';
+  }
+}
 
 function _pull(p: Json): PullRequest {
   const h = need(p, 'head');
