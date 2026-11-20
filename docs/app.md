@@ -362,6 +362,10 @@ whose branch a job of the repo's writes to (Reviews; Fix rounds and merges).
   answers it, in T3 itself as much as through the app, so its lane watches the thread on (its
   newest run, past any further question) and its repo starts nothing meanwhile, `answered` or
   not. A thread that can't be read holds it too: its stream is opened again until T3 answers.
+  One T3 confirms is gone (deleted in T3: its MCP answers `t3_thread_read` with "not found"; a
+  stream failure or T3 down or busy confirms nothing) ends `failed`, status `gone`, and frees the
+  repo; it has nothing left to settle, so it's recorded settled (#210 F11). Any watch of a
+  build, fix or conflict round's thread ends so, not only one after a question.
   Once the run has ended, its real end (`done`, `failed`...) is recorded in the question's place
   and the thread is settled as that end says. After a restart each lane watches its jobs left
   `waiting` the same way, every one, even beside another job open in the repo (an older app's

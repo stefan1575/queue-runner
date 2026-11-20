@@ -208,6 +208,12 @@ export class FakeT3 {
     this.endRun(threadId, 'failed');
   }
 
+  /** The thread is deleted in T3: it's gone from T3's state, and its open streams end. */
+  deleteThread(threadId: string) {
+    delete this.threadState[threadId];
+    for (const s of [...(this.threadStreams.get(threadId) ?? [])]) s.end();
+  }
+
   /** T3 ends every thread stream (a restart, say). */
   endThreadStreams() {
     for (const set of this.threadStreams.values()) for (const s of [...set]) s.end();

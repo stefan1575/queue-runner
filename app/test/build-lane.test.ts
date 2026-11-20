@@ -405,7 +405,8 @@ describe('the end', () => {
     const waiting = await log.started({ kind: 'build', repo: 'p-app', github: 'owner/app', issue: 5, branch: 'claude/x-5', base: 'main', title: 'Queue runner build: app#5', choice: BUILD, onFallback: false });
     await log.thread(waiting.id, { threadId: 'thread-w', runId: 'run-w', link: 't3://thread/thread-w' });
     await log.ended(waiting.id, { outcome: 'waiting', request: 'user_input' });
-    // T3 can't read the thread yet
+    // T3 can't read the thread yet: it's down, so nothing says the thread is gone
+    t3.running = false;
     await makeLane().start();
     await chooser.pass();
     expect(t3.launches).toEqual([]);
@@ -416,10 +417,39 @@ describe('the end', () => {
     expect(t3.launches).toEqual([]);
     // T3 reads it again: its run ran on the answer and has finished
     t3.threadState['thread-w'] = { id: 'thread-w', projectId: 'p-app', runtimeRequests: [], turnItems: [], runs: [{ id: 'run-w', threadId: 'thread-w', ordinal: 1, rootNodeId: 'n', status: 'completed' }] };
+    t3.running = true;
     retryNow();
     await until(() => t3.launches.length === 1);
     expect(log.get(waiting.id)!.end).toMatchObject({ outcome: 'done-no-pr' });
     expect(t3.launches[0].title).toBe('Queue runner build: app#6');
+  });
+
+  test("a build waiting on a question whose thread is deleted in T3 ends failed, gone, and frees its repo; a thread T3 can't read for now keeps it held (#210 F11)", async () => {
+    gh.ready['owner/app'] = [issue(5), issue(6)];
+    await makeLane().pass();
+    await watching('thread-1');
+    t3.askUser('thread-1');
+    await until(() => log.jobs()[0]!.end?.outcome === 'waiting');
+    // T3 goes down: its stream drops and T3 can't say the thread is gone, so the repo stays held
+    t3.running = false;
+    t3.endThreadStreams();
+    await until(() => lines.some((l) => l.startsWith("Queue runner build: app#5: T3's thread stream dropped")));
+    retryNow();
+    await chooser.pass();
+    expect(log.jobs()[0]!.end?.outcome).toBe('waiting');
+    expect(t3.launches).toHaveLength(1);
+    // back up, the thread deleted in T3 meanwhile: T3 confirms it isn't there, and the watch ends
+    t3.running = true;
+    t3.deleteThread('thread-1');
+    retryNow();
+    await until(() => log.jobs()[0]!.end?.outcome === 'failed');
+    expect(log.jobs()[0]!.end).toMatchObject({ outcome: 'failed', status: 'gone', error: expect.stringContaining('thread thread-1 is gone in T3') });
+    // nothing left to settle: recorded as settled, never tried
+    expect(log.jobs()[0]!.settledAt).toEqual(expect.any(String));
+    await until(() => t3.launches.length === 2);
+    expect(t3.launches[1].title).toBe('Queue runner build: app#6');
+    expect(organized()).toEqual([]);
+    expect(retries.size).toBe(0);
   });
 
   test("after a restart a repo with a build left waiting and another build open watches both: the waiting one isn't left holding the repo once the other ends (#210 F12)", async () => {

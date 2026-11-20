@@ -12,6 +12,11 @@
 // - **Usage limit:** the run `failed` and its root node's latest failed `error` item has the
 //   failure class `usage_limit` (T3's own `latestRootProviderFailure`), with `resetAt` when T3 has it.
 // - **Failed:** any other end (`failed`, `interrupted`, `cancelled`, `rolled_back`).
+// - **Gone:** a stream that drops on a thread T3 confirms isn't there (deleted in T3) is a failed
+//   end with status `gone`, never opened again (#210 F11). Only T3's MCP answering `t3_thread_read`
+//   for the thread with "not found" confirms it; a stream failure, or T3 down or busy, says nothing
+//   about the thread, and the stream is opened again.
+import { ToolFailed, type T3Mcp } from './mcp.ts';
 import { retryAfter, type Retry } from './project-feed.ts';
 import type { T3Ws } from './ws.ts';
 
@@ -19,7 +24,7 @@ export type ThreadEnd =
   | { outcome: 'done'; status: string }
   | { outcome: 'waiting'; status: string; request: string }
   | { outcome: 'usage-limit'; status: string; resetAt: string | null; error: string | null }
-  | { outcome: 'failed'; status: string; error: string | null };
+  | { outcome: 'failed'; status: string; error: string | null; gone?: true };
 
 const ENDED = new Set(['completed', 'failed', 'interrupted', 'cancelled', 'rolled_back']);
 
@@ -57,13 +62,30 @@ export type Watch = {
   stop(): void;
 };
 
+/** How T3's MCP says a thread isn't there: its `not_found` (or `thread_not_found`) failure. */
+const NOT_THERE = /not[_ ]?found|no such thread|does not exist|was deleted/i;
+
+/** Whether T3 confirms the thread isn't there: its MCP answers `t3_thread_read` with "not found".
+ *  Any other answer, a read that works or one that fails otherwise (T3 down, busy, a timeout),
+ *  confirms nothing: false. Never throws. */
+export async function threadGone(mcp: Pick<T3Mcp, 'call'>, threadId: string): Promise<boolean> {
+  try {
+    await mcp.call('t3_thread_read', { threadId, limit: 1 });
+    return false;
+  } catch (e) {
+    return e instanceof ToolFailed && (NOT_THERE.test(e.code ?? '') || NOT_THERE.test(e.message));
+  }
+}
+
 /** Watches one thread until `runId` ends or stops on a question (with no `runId`, its newest run
  *  not in `known`). `onDown` hears why a stream dropped, before it's opened again. With
  *  `questions: 'wait'` a question isn't an end: the watch goes on until the run has ended (a job
- *  left waiting, which runs again once the user answers it in T3; #210 F5). */
+ *  left waiting, which runs again once the user answers it in T3; #210 F5). With `gone`, a stream
+ *  that drops is opened again only once `gone` says T3 hasn't confirmed the thread missing; one it
+ *  has ends the watch, failed with status `gone` (#210 F11). */
 export function watchThreadEnd(ws: Pick<T3Ws, 'subscribe'>, threadId: string, runId: string | null,
   retry: Retry = retryAfter(5_000), onDown: (why: string) => void = () => {}, known: ReadonlySet<string> = new Set(),
-  questions: 'end' | 'wait' = 'end'): Watch {
+  questions: 'end' | 'wait' = 'end', gone?: () => Promise<boolean>): Watch {
   let stopped = false;
   let close = () => {};
   let rejectStop: (e: Error) => void = () => {};
@@ -95,10 +117,22 @@ export function watchThreadEnd(ws: Pick<T3Ws, 'subscribe'>, threadId: string, ru
         resolve(got);
       });
       close = () => sub.close();
-      const down = (why: string) => {
-        if (found || stopped) return;
+      const again = (why: string) => {
         onDown(why);
         close = retry(open);
+      };
+      const down = (why: string) => {
+        if (found || stopped) return;
+        if (!gone) return again(why);
+        // a thread T3 confirms isn't there never comes back: its watch ends (#210 F11)
+        let cancelled = false;
+        close = () => { cancelled = true; };
+        void gone().then((missing) => {
+          if (found || stopped || cancelled) return;
+          if (!missing) return again(why);
+          found = true;
+          resolve({ outcome: 'failed', status: 'gone', error: `thread ${threadId} is gone in T3 (its stream: ${why})`, gone: true });
+        }, () => { if (!found && !stopped && !cancelled) again(why); });
       };
       sub.done.then(() => down(`T3 ended the stream of thread ${threadId}`), (e: Error) => down(e.message));
     };

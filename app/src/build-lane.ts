@@ -44,7 +44,7 @@ import type { Merger } from './settings.ts';
 import type { Retry } from './t3/project-feed.ts';
 import type { T3Mcp } from './t3/mcp.ts';
 import { NoAnswer } from './t3/seams.ts';
-import { watchThreadEnd, type ThreadEnd } from './t3/thread-end.ts';
+import { threadGone, watchThreadEnd, type ThreadEnd } from './t3/thread-end.ts';
 import type { T3Ws } from './t3/ws.ts';
 import type { UsageGate } from './usage-gate.ts';
 
@@ -330,7 +330,8 @@ export class BuildLane implements RepoJobLane {
   private async watch(job: Job, github: string | null, asked = false): Promise<Job> {
     // after a question, the thread's newest run: an answer may go on in its run or start a new one
     const w = watchThreadEnd(this.d.ws, job.threadId!, asked ? null : job.runId ?? null, this.d.retry,
-      (why) => this.d.say(`${job.title}: T3's thread stream dropped (${why}); opening it again`), new Set(), asked ? 'wait' : 'end');
+      (why) => this.d.say(`${job.title}: T3's thread stream dropped (${why}); opening it again`), new Set(), asked ? 'wait' : 'end',
+      () => threadGone(this.d.mcp, job.threadId!));
     this.watches.add(w);
     let end: ThreadEnd;
     try {
@@ -359,7 +360,9 @@ export class BuildLane implements RepoJobLane {
     if (record.outcome === 'waiting') return this.untilFinished(ended);
     // recorded first, then settled (story 5); a usage limit is a later ticket's. Stopped between
     // the two, the next start settles it (the log has no settled line)
-    if (settles(record.outcome)) await this.settler.settle(job);
+    // a thread T3 says is gone has nothing left to settle (#210 F11)
+    if (end.outcome === 'failed' && end.gone) await this.d.log.settled(job.id);
+    else if (settles(record.outcome)) await this.settler.settle(job);
     return ended;
   }
 
