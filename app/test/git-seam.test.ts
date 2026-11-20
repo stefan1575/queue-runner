@@ -37,7 +37,8 @@ function read_only(path: string): void {
   addCleanup(() => spawnSync('attrib', ['-R', path, '/L'], { stdio: 'pipe' }));
 }
 
-describe('GitCliTest', () => {
+// Each case runs real git commands in a temp repo; on a loaded Windows runner one case took 9.7s, past Vitest's 5s default.
+describe('GitCliTest', { timeout: 30_000 }, () => {
   let repo: string, base: string, wt: string, head: string, cli: GitCli;
 
   async function commit(name: string, text: string, subject: string, cwd = repo) {
