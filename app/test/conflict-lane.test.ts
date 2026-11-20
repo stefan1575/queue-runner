@@ -325,16 +325,13 @@ describe('one conflicted PR at a time, oldest first', () => {
       await goes5();
     });
 
-    test('a question to the user on its branch holds nothing; the repo waits only while that job may run again on its answer (#210 F5)', async () => {
+    test("a job on its branch waiting on the user in T3 is open: the repo starts nothing until its run has finished, then #5's round goes (#210)", async () => {
       await afterRound4();
       const fix = await log.started(job({ kind: 'fix', title: 'Queue runner fix: app#4', sha: H2, round: 1 }));
-      await log.ended(fix.id, { outcome: 'waiting', request: 'user_input' });
-      // the conflict lane's own rule holds nothing for #5
-      expect(await lane.next(repoNow)).toMatchObject({ launch: expect.any(Function) });
-      // the question's job runs again once it's answered in T3: no round goes beside it
       await chooser.pass();
       expect(t3.launches).toHaveLength(1);
-      // its lane records the end its thread finished on, waiting on the user: then #5's round
+      expect(lines).toContain('app: no new job now, Queue runner fix: app#4 is its job (one job per repo)');
+      // its lane records the end its run finished on: then #5's round
       await log.ended(fix.id, { outcome: 'done', head: H2 });
       await goes5();
     });
@@ -502,19 +499,17 @@ describe('what waits', () => {
     expect(log.stops()[0]!.why).toContain("its head is in someone/app, not owner/app: no conflict round pushes to a fork's branch");
   });
 
-  test('a job on the branch that waits on a question may write to it again: no round beside it', async () => {
+  test("a job on the branch an older app recorded as waiting on a question is open: no round beside it until its run has finished (#210)", async () => {
     const fix = await log.started(job({ kind: 'fix', title: 'Queue runner fix: app#4', round: 1, sha: H2 }));
     await log.ended(fix.id, { outcome: 'waiting' });
+    expect(log.get(fix.id)!.end).toBeUndefined();
     makeLane();
-    expect(await lane.next(repoNow)).toBeNull();
-    expect(lines.at(-1)).toBe('conflict app#4: no conflict round now, a fix job is writing to claude/thing-3');
-    // and the chooser holds the repo until that job's thread has finished (#210 F5)
     await chooser.pass();
-    expect(lines.at(-1)).toBe("app: no new job now, Queue runner fix: app#4 waits on a question, and runs again once it's answered: held until its thread finishes");
+    expect(lines.at(-1)).toBe('app: no new job now, Queue runner fix: app#4 is its job (one job per repo)');
     expect(t3.launches).toEqual([]);
   });
 
-  test('a round that asks a question: its run on an answer given in T3 is reserved in the gate while it runs (#210 F13)', async () => {
+  test('a round whose run waits on the user in T3 stays open, its cost held in the gate once, until its run has finished (#210 F18)', async () => {
     git.trees.push({ path: 'C:/t3/worktrees/app/thing-3', branch: 'claude/thing-3' });
     makeLane();
     await chooser.pass();
@@ -522,16 +517,15 @@ describe('what waits', () => {
     const round = rounds()[0]!;
     await until(() => t3.threadStreamCount(round.threadId!) > 0);
     t3.askUser(round.threadId!);
-    await until(() => log.get(round.id)!.end?.outcome === 'waiting');
+    await until(() => lines.some((l) => l.startsWith('Queue runner conflict: app#4 waits on you in T3 (user_input)')));
+    expect(log.get(round.id)!.end).toBeUndefined();
     const mine = () => gate.calls.filter((c) => c.startsWith('started') || c === `finished ${round.id}`);
-    expect(mine()).toEqual(['started conflict claude-haiku-5-5', `finished ${round.id}`]);
+    expect(mine()).toEqual(['started conflict claude-haiku-5-5']);
     t3.answerInT3(round.threadId!);
-    await until(() => mine().length === 3);
-    expect(mine()[2]).toBe('started conflict claude-haiku-5-5');
     gh.push(4, H2, false);
     t3.endRun(round.threadId!, 'completed');
     await chooser.idle();
-    expect(mine()).toEqual(['started conflict claude-haiku-5-5', `finished ${round.id}`, 'started conflict claude-haiku-5-5', `finished ${round.id}`]);
+    expect(mine()).toEqual(['started conflict claude-haiku-5-5', `finished ${round.id}`]);
     expect(log.get(round.id)!.end).toMatchObject({ outcome: 'done', head: H2 });
   });
 

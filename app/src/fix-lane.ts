@@ -16,10 +16,10 @@
 //   ->  the end recorded and the thread settled, then the review lane passes (`ended`)
 //
 // **When a round starts is the chooser's** (src/chooser.ts, #210): one job per repo, so no
-// round starts while another job of the repo's runs. A build or fix on the branch that waits on a
-// question or was cut off by a usage limit may write again: no round beside it; the review lane
-// waits on a fix round too. One round per head: a round on H that ended without a push leaves the
-// PR at H, which was reviewed already, so it waits for the user.
+// round starts while another job of the repo's runs, one waiting on the user in T3 included. A
+// build or fix on the branch that was cut off by a usage limit may write again: no round beside
+// it; the review lane waits on a fix round too. One round per head: a round on H that ended
+// without a push leaves the PR at H, which was reviewed already, so it waits for the user.
 //
 // **After a restart, don't guess** (#154, #155): a round is tied to a thread only by the id T3 gave
 // the app's own launch, or the id it sent to, saved before the send. A round the log shows open
@@ -43,16 +43,16 @@ import { ThreadSettler } from './settle.ts';
 import { ToolFailed, type T3Mcp } from './t3/mcp.ts';
 import type { Retry } from './t3/project-feed.ts';
 import { NoAnswer } from './t3/seams.ts';
-import { threadGone, watchThreadEnd, type ThreadEnd } from './t3/thread-end.ts';
+import { watchJobThread, type ThreadEnd } from './t3/thread-end.ts';
 import type { T3Ws } from './t3/ws.ts';
-import { afterQuestion, type UsageGate } from './usage-gate.ts';
+import type { UsageGate } from './usage-gate.ts';
 
 export type FixLaneDoors = {
   repos: () => BuildRepo[];
   github: Pick<GitHubReview, 'pullsToReview' | 'issueComments'> & Pick<GitHubMerge, 'pull'>;
   git: Pick<FixGit, 'fetchPr' | 'log' | 'diffstat' | 'worktrees'> & { hasBranch(folder: string, branch: string): Promise<boolean> };
   mcp: Pick<T3Mcp, 'call'>;
-  ws: Pick<T3Ws, 'subscribe' | 'request'>;
+  ws: Pick<T3Ws, 'subscribe' | 'request' | 'first'>;
   gate: Pick<UsageGate, 'pick' | 'check' | 'started' | 'finished' | 'dropped' | 'forget'>;
   catalog: () => Catalog | null;
   jobs: () => Jobs;
@@ -157,16 +157,12 @@ export class FixLane implements RepoJobLane {
     this.settler = new ThreadSettler(doors.mcp, doors.log, doors.say);
   }
 
-  /** Each round the log shows open is watched again (or needs the user). */
+  /** Each round the log shows open (one waiting on the user among them) is watched again, or
+   *  needs the user; each is reserved in the gate before the chooser's first choice (#210 F19). */
   recover(): void {
     for (const job of this.d.log.open()) {
       if (job.kind !== 'fix') continue;
       this.track(`${job.github}#${job.issue}`, this.resume(job));
-    }
-    // one waiting on a question: watched until its thread has finished again (#210 F5)
-    for (const job of this.d.log.waiting()) {
-      if (job.kind !== 'fix' || !job.threadId) continue;
-      this.track(`${job.github}#${job.issue}`, this.untilFinished(job));
     }
   }
 
@@ -524,24 +520,12 @@ export class FixLane implements RepoJobLane {
     return this.watch(job);
   }
 
-  /** A round waiting on a question: watched until its thread has finished again (the user may
-   *  answer it in T3, not only through the app), its repo held meanwhile, and that end recorded
-   *  in the question's place (#210 F5). A thread that can't be read holds it too: the watch opens
-   *  its stream again until T3 answers. */
-  private untilFinished(job: Job): Promise<Job> {
-    if (this.stopped) return Promise.resolve(job);
-    this.d.say(`${job.title} waits on a question: nothing else starts in ${job.github ?? job.repo} until its thread ${job.link ?? job.threadId} has finished, answered in T3 or here`);
-    return this.watch(job, true);
-  }
-
-  private async watch(job: Job, asked = false): Promise<Job> {
-    // after a question, the thread's newest run since the send: an answer may go on in its run or
-    // start a new one
-    // after a question: the run on its answer is reserved in the gate while it runs (#210 F13)
-    const resumed = afterQuestion(this.d.gate, job);
-    const w = watchThreadEnd(this.d.ws, job.threadId!, asked ? null : job.runId ?? null, this.d.retry,
-      (why) => this.d.say(`${job.title}: T3's thread stream dropped (${why}); opening it again`), new Set(job.knownRuns ?? []),
-      { questions: asked ? 'wait' : 'end', phase: (p) => resumed.phase(p), gone: () => threadGone(this.d.mcp, job.threadId!) });
+  /** The round's thread followed to its end (`watchJobThread`), its new runs told apart from the
+   *  ones the thread had before the send: a run waiting on the user in T3 hasn't ended, and the
+   *  round stays open, its repo held and its cost in the gate, until it has. The gate measures it
+   *  once, at that end (#210 F18). */
+  private async watch(job: Job): Promise<Job> {
+    const w = watchJobThread(this.d.ws, { ...job, threadId: job.threadId! }, this.d.say, this.d.retry);
     this.watches.add(w);
     let end: ThreadEnd;
     try {
@@ -549,13 +533,10 @@ export class FixLane implements RepoJobLane {
     } finally {
       this.watches.delete(w);
     }
-    // a first run's end reaches the gate here; a run on an answer's as `resumed` has it
-    if (!asked) this.d.gate.finished(job.id, end.outcome === 'usage-limit' ? { resetAt: end.resetAt } : undefined);
-    else resumed.ended(end);
+    this.d.gate.finished(job.id, end.outcome === 'usage-limit' ? { resetAt: end.resetAt } : undefined);
     const record: JobEnd = { outcome: end.outcome as JobEnd['outcome'], status: end.status };
     if (end.outcome === 'failed') record.error = end.error;
     if (end.outcome === 'usage-limit') Object.assign(record, { resetAt: end.resetAt, error: end.error });
-    if (end.outcome === 'waiting') record.request = end.request;
     if (end.outcome === 'done') {
       try {
         record.head = (await this.d.github.pull(job.github!, job.issue)).headSha;
@@ -567,8 +548,7 @@ export class FixLane implements RepoJobLane {
     const pushed = record.head && record.head !== job.sha ? `, pushed ${record.head.slice(0, 7)}: reviewed next`
       : record.head === job.sha ? `, without a push: the PR waits for you` : '';
     this.d.say(`${job.title} ended: ${record.outcome}${pushed} ${job.link ?? job.threadId}`);
-    if (record.outcome === 'waiting') return this.untilFinished(ended);
-    // a thread T3 says is gone has nothing left to settle (#210 F11)
+    // a thread T3's list no longer has has nothing left to settle (#210 F11)
     if (end.outcome === 'failed' && end.gone) await this.d.log.settled(job.id);
     else if (settles(record.outcome)) await this.settler.settle(job);
     return ended;

@@ -1,10 +1,11 @@
-// A run's end learned from T3's thread events (#154): `orchestration.subscribeThread` on fake T3.
+// A run's end learned from T3's thread events (#154): `orchestration.subscribeThread` on fake T3;
+// a repo job's thread followed by reads of its current state on each change T3 pushes (#210).
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { runtimeAddress } from '../src/t3/real.ts';
-import { watchThreadEnd } from '../src/t3/thread-end.ts';
+import { followThread, readThread, threadListed, threadNow, watchJobThread, watchThreadEnd } from '../src/t3/thread-end.ts';
 import { T3Ws } from '../src/t3/ws.ts';
 import { FakeT3 } from './fake-t3.ts';
 
@@ -105,5 +106,111 @@ describe('watchThreadEnd', () => {
     w.stop();
     await expect(w.end).rejects.toThrow(/stopped watching/);
     await until(() => t3.threadStreamCount('t') === 0);
+  });
+});
+
+describe('threadNow: where a job is, from one read of its thread (#210)', () => {
+  const run = (id: string, ordinal: number, status: string) => ({ id, ordinal, rootNodeId: `n-${id}`, status });
+  const limit = (runId: string) => ({ id: `e-${runId}`, type: 'error', status: 'failed', runId, nodeId: `n-${runId}`, failure: { class: 'usage_limit', message: 'limit', resetAt: '2026-11-19T15:00:00.000Z' } });
+
+  test('a pending request is asking, whatever the runs say: T3 cancels a run on a restart and keeps its card (F16)', () => {
+    expect(threadNow({ runs: [run('r1', 1, 'cancelled')], runtimeRequests: [{ id: 'q', kind: 'secret', status: 'pending' }] })).toEqual({ state: 'asking', request: 'secret' });
+    expect(threadNow({ runs: [run('r1', 1, 'waiting')], runtimeRequests: [{ id: 'q', kind: 'user_input', status: 'resolved' }] })).toEqual({ state: 'running' });
+  });
+
+  test("a run queued after the one that ran last never hides that one's end (F17)", () => {
+    // the executing run's limit ends the job; the queued one waits behind it
+    expect(threadNow({ runs: [run('r1', 1, 'failed'), run('r2', 2, 'queued')], turnItems: [limit('r1')] }))
+      .toEqual({ state: 'ended', end: { outcome: 'usage-limit', status: 'failed', resetAt: '2026-11-19T15:00:00.000Z', error: 'limit' } });
+    // while it runs, or once it completed with the follow-up still to go, the job goes on
+    expect(threadNow({ runs: [run('r1', 1, 'running'), run('r2', 2, 'queued')] })).toEqual({ state: 'running' });
+    expect(threadNow({ runs: [run('r1', 1, 'completed'), run('r2', 2, 'queued')] })).toEqual({ state: 'running' });
+    // every run ended: the one with the highest ordinal among them
+    expect(threadNow({ runs: [run('r2', 2, 'completed'), run('r1', 1, 'failed')], turnItems: [limit('r1')] })).toEqual({ state: 'ended', end: { outcome: 'done', status: 'completed' } });
+  });
+
+  test("the runs a thread had before the job's send are left out; none of its own yet is none", () => {
+    const known = new Set(['r1']);
+    expect(threadNow({ runs: [run('r1', 1, 'completed')] }, known)).toEqual({ state: 'none' });
+    expect(threadNow({ runs: [run('r1', 1, 'completed'), run('r2', 2, 'interrupted')] }, known)).toEqual({ state: 'ended', end: { outcome: 'failed', status: 'interrupted', error: null } });
+  });
+});
+
+describe('readThread: a thread is gone only on its thread list (#210 F15)', () => {
+  test("a projection read that fails, whatever its text, is unreadable while T3's list has the thread, or can't be read", async () => {
+    t3.wsMethods['orchestration.getThreadProjection'] = () => { throw new Error('orchestration_error: run r2 not found'); };
+    expect(await readThread(ws, 't')).toEqual({ unreadable: expect.stringContaining('not found') });
+    t3.shellDown = true;
+    expect(await readThread(ws, 't')).toEqual({ unreadable: expect.stringContaining("T3's thread list couldn't be read either") });
+  });
+
+  test('a thread the list reads fine without is gone; one T3 reads is its projection', async () => {
+    expect(await readThread(ws, 't')).toEqual({ projection: expect.objectContaining({ runs: expect.any(Array) }) });
+    delete t3.threadState.t;
+    expect(await readThread(ws, 't')).toEqual({ gone: true });
+  });
+
+  test("a list without both of its thread lists answers nothing", async () => {
+    const fake = { first: async () => ({ kind: 'snapshot', snapshot: { threads: [] } }) };
+    await expect(threadListed(fake as any, 't')).rejects.toThrow(/without its threads/);
+    const partial = { first: async () => ({ kind: 'snapshot', resolvedRepositoryIdentityRoots: [], snapshot: { threads: [], archivedThreads: [] } }) };
+    await expect(threadListed(partial as any, 't')).rejects.toThrow(/without its threads/);
+  });
+});
+
+describe('followThread: read on what T3 pushes, never on a timer (#210)', () => {
+  test('reads when its stream opens and on each change pushed, and on nothing else', async () => {
+    const seen: string[] = [];
+    const f = followThread(ws, 't', (read) => {
+      if (!('projection' in read)) return null;
+      seen.push(read.projection.runs.map((r: any) => r.status).join());
+      return read.projection.runs.every((r: any) => r.status === 'completed') ? 'done' : null;
+    }, () => () => {});
+    await streaming();
+    await until(() => seen.length >= 1);
+    const reads = t3.projectionReads;
+    await flush();
+    expect(t3.projectionReads).toBe(reads); // nothing pushed, nothing read
+    t3.say('t', 'a message as it streams'); // no event the decision hangs on
+    await flush();
+    expect(t3.projectionReads).toBe(reads);
+    t3.endRun('t', 'completed');
+    expect(await f.end).toBe('done');
+    expect(seen.at(-1)).toBe('completed,completed');
+  });
+
+  test('a stream that drops is read again when it opens again, which decides from what T3 has then', async () => {
+    let again: (() => void) | null = null;
+    const w = watchJobThread(ws, { title: 'job', threadId: 't', repo: 'p', knownRuns: ['r1'] }, () => {}, (f) => { again = f; return () => {}; });
+    await streaming();
+    t3.endThreadStreams();
+    await until(() => again !== null);
+    t3.threadState.t!.runs[1]!.status = 'completed'; // while no stream is open: no event
+    expect(await settled(w.end)).toBe('pending');
+    again!();
+    expect(await w.end).toEqual({ outcome: 'done', status: 'completed' });
+  });
+
+  test('changes that come during a read are read once after it, and the decision is on that later read', async () => {
+    let block: () => void = () => {};
+    const gate = new Promise<void>((r) => { block = r; });
+    const request = ws.request.bind(ws);
+    let n = 0;
+    const slow = { subscribe: ws.subscribe.bind(ws), first: ws.first.bind(ws), request: async (tag: string, p: object) => { if (n++ === 0) await gate; return request(tag, p); } };
+    const reads: string[] = [];
+    const f = followThread(slow as any, 't', (read) => {
+      if (!('projection' in read)) return null;
+      const now = threadNow(read.projection, new Set(['r1']));
+      reads.push(now.state);
+      return now.state === 'ended' ? now.end : null;
+    }, () => () => {});
+    await streaming();
+    t3.askUser('t');
+    t3.answerInT3('t');
+    t3.endRun('t', 'completed');
+    block();
+    expect(await f.end).toEqual({ outcome: 'done', status: 'completed' });
+    // the first read was held across every change; one read after it saw them all
+    expect(reads.length).toBeLessThanOrEqual(2);
   });
 });

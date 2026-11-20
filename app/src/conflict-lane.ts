@@ -54,16 +54,16 @@ import { ThreadSettler } from './settle.ts';
 import type { T3Mcp } from './t3/mcp.ts';
 import type { Retry } from './t3/project-feed.ts';
 import { NoAnswer } from './t3/seams.ts';
-import { threadGone, watchThreadEnd, type ThreadEnd } from './t3/thread-end.ts';
+import { watchJobThread, type ThreadEnd } from './t3/thread-end.ts';
 import type { T3Ws } from './t3/ws.ts';
-import { afterQuestion, type UsageGate } from './usage-gate.ts';
+import type { UsageGate } from './usage-gate.ts';
 
 export type ConflictLaneDoors = {
   repos: () => BuildRepo[];
   github: Pick<GitHubReview, 'pullsToReview' | 'checks' | 'issueComments' | 'reviewReplies'> & Pick<GitHubMerge, 'pull' | 'branchHead' | 'openThreads'>;
   git: Pick<FixGit, 'fetchPr' | 'log' | 'diffstat' | 'worktrees'> & { hasBranch(folder: string, branch: string): Promise<boolean> };
   mcp: Pick<T3Mcp, 'call'>;
-  ws: Pick<T3Ws, 'subscribe'>;
+  ws: Pick<T3Ws, 'subscribe' | 'request' | 'first'>;
   gate: Pick<UsageGate, 'pick' | 'started' | 'finished' | 'dropped' | 'forget'>;
   catalog: () => Catalog | null;
   user: () => Promise<string>;
@@ -116,16 +116,12 @@ export class ConflictLane implements RepoJobLane {
     this.settler = new ThreadSettler(doors.mcp, doors.log, doors.say);
   }
 
-  /** Each round the log shows open is watched again (or needs the user). */
+  /** Each round the log shows open (one waiting on the user among them) is watched again, or
+   *  needs the user; each is reserved in the gate before the chooser's first choice (#210 F19). */
   recover(): void {
     for (const job of this.d.log.open()) {
       if (job.kind !== 'conflict') continue;
       this.track(`${job.github}#${job.issue}`, this.resume(job));
-    }
-    // one waiting on a question: watched until its thread has finished again (#210 F5)
-    for (const job of this.d.log.waiting()) {
-      if (job.kind !== 'conflict' || !job.threadId) continue;
-      this.track(`${job.github}#${job.issue}`, this.untilFinished(job));
     }
   }
 
@@ -464,23 +460,11 @@ export class ConflictLane implements RepoJobLane {
     return this.watch(job);
   }
 
-  /** A round waiting on a question: watched until its thread has finished again (the user may
-   *  answer it in T3, not only through the app), its repo held meanwhile, and that end recorded
-   *  in the question's place (#210 F5). A thread that can't be read holds it too: the watch opens
-   *  its stream again until T3 answers. */
-  private untilFinished(job: Job): Promise<Job> {
-    if (this.stopped) return Promise.resolve(job);
-    this.d.say(`${job.title} waits on a question: nothing else starts in ${job.github ?? job.repo} until its thread ${job.link ?? job.threadId} has finished, answered in T3 or here`);
-    return this.watch(job, true);
-  }
-
-  private async watch(job: Job, asked = false): Promise<Job> {
-    // after a question, the thread's newest run: an answer may go on in its run or start a new one
-    // after a question: the run on its answer is reserved in the gate while it runs (#210 F13)
-    const resumed = afterQuestion(this.d.gate, job);
-    const w = watchThreadEnd(this.d.ws, job.threadId!, asked ? null : job.runId ?? null, this.d.retry,
-      (why) => this.d.say(`${job.title}: T3's thread stream dropped (${why}); opening it again`), new Set(),
-      { questions: asked ? 'wait' : 'end', phase: (p) => resumed.phase(p), gone: () => threadGone(this.d.mcp, job.threadId!) });
+  /** The round's thread followed to its end (`watchJobThread`): a run waiting on the user in T3
+   *  hasn't ended, and the round stays open, its repo held and its cost in the gate, until it has.
+   *  The gate measures it once, at that end (#210 F18). */
+  private async watch(job: Job): Promise<Job> {
+    const w = watchJobThread(this.d.ws, { ...job, threadId: job.threadId! }, this.d.say, this.d.retry);
     this.watches.add(w);
     let end: ThreadEnd;
     try {
@@ -488,13 +472,10 @@ export class ConflictLane implements RepoJobLane {
     } finally {
       this.watches.delete(w);
     }
-    // a first run's end reaches the gate here; a run on an answer's as `resumed` has it
-    if (!asked) this.d.gate.finished(job.id, end.outcome === 'usage-limit' ? { resetAt: end.resetAt } : undefined);
-    else resumed.ended(end);
+    this.d.gate.finished(job.id, end.outcome === 'usage-limit' ? { resetAt: end.resetAt } : undefined);
     const record: JobEnd = { outcome: end.outcome as JobEnd['outcome'], status: end.status };
     if (end.outcome === 'failed') record.error = end.error;
     if (end.outcome === 'usage-limit') Object.assign(record, { resetAt: end.resetAt, error: end.error });
-    if (end.outcome === 'waiting') record.request = end.request;
     // a round that failed may still have pushed: its head is read too
     if (end.outcome === 'done' || end.outcome === 'failed') {
       try {
@@ -514,8 +495,7 @@ export class ConflictLane implements RepoJobLane {
         why: `it conflicts with ${job.base} at ${job.sha!.slice(0, 7)}, and the conflict round on it couldn't resolve it (it ended ${record.outcome} without a push)`,
       });
     }
-    if (record.outcome === 'waiting') return this.untilFinished(ended);
-    // a thread T3 says is gone has nothing left to settle (#210 F11)
+    // a thread T3's list no longer has has nothing left to settle (#210 F11)
     if (end.outcome === 'failed' && end.gone) await this.d.log.settled(job.id);
     else if (settles(record.outcome)) await this.settler.settle(job);
     return ended;

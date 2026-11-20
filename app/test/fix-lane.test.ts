@@ -403,8 +403,8 @@ describe('a send whose outcome is not known (F4)', () => {
   });
 });
 
-describe('a round that asks a question (#210 F5)', () => {
-  test('is watched on through an answer given in T3, its repo held, and the end its thread finishes on recorded in its place', async () => {
+describe('a round whose run waits on the user in T3 (#210)', () => {
+  test('stays open, its repo held and its cost in the gate, until its run has finished; the review lane hears of it then', async () => {
     await builder();
     await blocking(1, H, [finding({})]);
     makeLane();
@@ -412,36 +412,19 @@ describe('a round that asks a question (#210 F5)', () => {
     await until(() => t3.threadStreamCount('thread-b') > 0);
     const job = fixes()[0]!;
     t3.askUser('thread-b');
-    await until(() => log.get(job.id)!.end?.outcome === 'waiting');
+    await until(() => lines.some((l) => l.startsWith('Queue runner fix: app#4 waits on you in T3 (user_input)')));
     await chooser.pass();
-    expect(lines).toContain("app: no new job now, Queue runner fix: app#4 waits on a question, and runs again once it's answered: held until its thread finishes");
-    expect(ended).toEqual([]); // the review lane hears of the round once its thread has finished
+    expect(log.get(job.id)!.end).toBeUndefined();
+    expect(lines).toContain('app: no new job now, Queue runner fix: app#4 is its job (one job per repo)');
+    expect(ended).toEqual([]);
     t3.answerInT3('thread-b');
     gh.heads[4] = H2;
     t3.endRun('thread-b', 'completed');
     await chooser.idle();
     expect(log.get(job.id)!.end).toMatchObject({ outcome: 'done', head: H2 });
     expect(ended.map((j) => j.id)).toEqual([job.id]);
-  });
-
-  test('its run on an answer given in T3 is reserved in the gate while it runs (#210 F13)', async () => {
-    await builder();
-    await blocking(1, H, [finding({})]);
-    makeLane();
-    await chooser.pass();
-    await until(() => t3.threadStreamCount('thread-b') > 0);
-    const job = fixes()[0]!;
-    t3.askUser('thread-b');
-    await until(() => log.get(job.id)!.end?.outcome === 'waiting');
-    const mine = () => gate.calls.filter((c) => c.startsWith('started') || c === `finished ${job.id}`);
-    expect(mine()).toEqual([`started ${job.id} ${job.choice.model}`, `finished ${job.id}`]);
-    t3.answerInT3('thread-b');
-    await until(() => mine().length === 3);
-    expect(mine()[2]).toBe(`started ${job.id} ${job.choice.model}`);
-    t3.endRun('thread-b', 'completed');
-    await chooser.idle();
-    expect(mine()).toHaveLength(4);
-    expect(mine()[3]).toBe(`finished ${job.id}`);
+    // one reservation, from its let-in to its end (F18)
+    expect(gate.calls.filter((c) => c.includes(job.id))).toEqual([`started ${job.id} ${job.choice.model}`, `finished ${job.id}`]);
   });
 });
 

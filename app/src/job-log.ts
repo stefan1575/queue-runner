@@ -8,8 +8,9 @@
 //   holds nothing, so the next pass tries it again.
 // - **Who waited longest:** a repo's last job end, a `not-started` aside (#50).
 // - **Open jobs:** a start with no end, left by an app that stopped mid-job.
-// - **Waiting:** a `waiting` end (a question to the user) is followed by the job's real end, a
-//   second `end` line, once its thread has finished again (#210 F5).
+// - **Waiting on the user:** a build, fix or conflict round whose run waits on the user in T3 has no
+//   end: it's open until its run has finished, T3 being the one that knows it waits (#210). A
+//   `waiting` end an older app wrote for one is read as no end, so it's watched again as open.
 // - **Needing the user:** a `needs-user` end (T3 may have started a thread the app has no id of)
 //   holds its repo until an `answered` line says the user has answered.
 // - **To settle:** a job ended on a thread the app launched, that its end says to settle, with no
@@ -125,6 +126,10 @@ export class JobLogError extends Error {}
  *  are later tickets' to handle, so their threads are left as they are. */
 export const settles = (outcome: Outcome) => outcome !== 'waiting' && outcome !== 'usage-limit';
 
+/** The kinds whose job stays open while its run waits on the user in T3: a repo's one job (the
+ *  chooser's `REPO_JOB_KINDS`). */
+const OPEN_WHILE_WAITING: readonly JobKind[] = ['build', 'fix', 'conflict'];
+
 /** The file calls the log makes: the disk, or a test's own in-memory folder (#202 F2). A missing
  *  file is read as an error with `code` 'ENOENT', as Node's is. */
 export type JobLogFiles = {
@@ -232,6 +237,8 @@ export class JobLog {
       }
       else {
         const { event, job: _, ...end } = e;
+        // a repo job waiting on the user hasn't ended: an older app's `waiting` end is none (#210)
+        if (end.outcome === 'waiting' && OPEN_WHILE_WAITING.includes(job.kind)) return;
         this.all.set(e.job, { ...job, end });
       }
     }
@@ -351,13 +358,6 @@ export class JobLog {
    *  limit aside, which are left for the user (later tickets). */
   toSettle(): Job[] {
     return this.jobs().filter((j) => j.end && j.threadId && !j.settledAt && settles(j.end.outcome));
-  }
-
-  /** Jobs whose end is a question to the user: their thread runs again once the user answers it
-   *  in T3, so each is watched until its thread has finished again, and that end recorded in its
-   *  place (#210 F5). */
-  waiting(): Job[] {
-    return this.jobs().filter((j) => j.end?.outcome === 'waiting');
   }
 
   /** Builds ended `done` in a repo on GitHub whose PR lookup failed: looked up again (F13). */

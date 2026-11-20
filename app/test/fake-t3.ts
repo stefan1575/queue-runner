@@ -61,6 +61,11 @@ export class FakeT3 {
   sendTaken = false;
   /** Runs as a send arrives, before T3 looks at it (a thread deleted meanwhile, say). */
   beforeSend: () => void = () => {};
+  /** `orchestration.subscribeShell` fails at once, its snapshot (projects, the thread list) never
+   *  sent. */
+  shellDown = false;
+  /** How many `orchestration.getThreadProjection` reads of a thread the fake answered. */
+  projectionReads = 0;
   /** WebSocket methods that answer once, by tag: the value T3's Exit carries. Any other
    *  method but subscribeServerConfig ends in a Failure. */
   wsMethods: Record<string, (payload: any) => unknown> = {};
@@ -206,6 +211,26 @@ export class FakeT3 {
       failure: { class: 'usage_limit', message: "You've hit your limit", resetAt },
     });
     this.endRun(threadId, 'failed');
+  }
+
+  /** T3 restarts while the thread's run waits on a card: its streams end, the run is cancelled and
+   *  the request is kept pending, with no event (nothing was listening). */
+  restartCancelling(threadId: string) {
+    const t = this.threadState[threadId]!;
+    for (const s of [...(this.threadStreams.get(threadId) ?? [])]) s.end();
+    const run = this.run(threadId);
+    t.runs[t.runs.indexOf(run)] = { ...run, status: 'cancelled', completedAt: '2026-11-19T12:00:00.000Z' };
+  }
+
+  /** The user answers the thread's pending request in T3, and the answer starts a new turn: the
+   *  request resolved, a new run running. */
+  answerInNewTurn(threadId: string) {
+    const t = this.threadState[threadId]!;
+    for (const r of t.runtimeRequests.filter((x: any) => x.status === 'pending')) {
+      this.threadEvent(threadId, 'runtime-request', { ...r, status: 'resolved' });
+    }
+    const ordinal = Math.max(0, ...t.runs.map((r) => r.ordinal ?? 0)) + 1;
+    this.threadEvent(threadId, 'run', { id: `${t.id}-run-${ordinal}`, threadId: t.id, ordinal, rootNodeId: `${t.id}-node-${ordinal}`, status: 'running', completedAt: null });
   }
 
   /** The thread is deleted in T3: it's gone from T3's state, and its open streams end. */
@@ -447,7 +472,11 @@ export class FakeT3 {
           stream.send({ kind: 'snapshot', snapshotSequence: this.n, projection: structuredClone({ thread: { id: t.id, projectId: t.projectId }, runs: t.runs, runtimeRequests: t.runtimeRequests, turnItems: t.turnItems }) });
         } else if (msg._tag === 'Request' && msg.tag !== 'orchestration.subscribeShell') {
           const own = msg.tag === 'orchestration.getThreadProjection' && this.threadState[msg.payload?.threadId]
-            ? () => structuredClone({ thread: { id: msg.payload.threadId }, runs: this.threadState[msg.payload.threadId]!.runs }) : undefined;
+            ? () => {
+              this.projectionReads++;
+              const t = this.threadState[msg.payload.threadId]!;
+              return structuredClone({ thread: { id: t.id, projectId: t.projectId }, runs: t.runs, runtimeRequests: t.runtimeRequests, turnItems: t.turnItems });
+            } : undefined;
           const method = this.wsMethods[msg.tag] ?? own;
           let exit: unknown;
           try {
@@ -457,7 +486,11 @@ export class FakeT3 {
           }
           queueMicrotask(() => open && on.message(JSON.stringify({ _tag: 'Exit', requestId: msg.id, exit })));
         }
-        if (msg._tag === 'Request' && msg.tag === 'orchestration.subscribeShell') {
+        if (msg._tag === 'Request' && msg.tag === 'orchestration.subscribeShell' && this.shellDown) {
+          // T3 failing the shell stream: no snapshot, so no thread list either
+          const exit = { _tag: 'Failure', cause: { _tag: 'Fail', error: { message: 'orchestration_error: the shell could not be read' } } };
+          queueMicrotask(() => open && on.message(JSON.stringify({ _tag: 'Exit', requestId: msg.id, exit })));
+        } else if (msg._tag === 'Request' && msg.tag === 'orchestration.subscribeShell') {
           // T3's shell stream: a snapshot of every project (and threads, which the app ignores),
           // then each change as it happens (docs/app.md, The WebSocket API).
           const stream: ShellStream = {

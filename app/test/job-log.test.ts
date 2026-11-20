@@ -73,6 +73,21 @@ describe('JobLog', () => {
     expect(again.heldIssues('p1')).toEqual(new Set([1]));
   });
 
+  test("a repo job's `waiting` end, an older app's, is no end: the job is open until its run's end is recorded (#210)", async () => {
+    const log = await JobLog.open(file, () => now);
+    const job = await log.started(start(1));
+    await log.thread(job.id, { threadId: 't1', runId: 'r1', link: null });
+    await log.ended(job.id, { outcome: 'waiting', request: 'user_input' });
+    const review = await log.started({ ...start(2), kind: 'review' });
+    await log.ended(review.id, { outcome: 'waiting' });
+    const again = await JobLog.open(file);
+    expect(again.get(job.id)!.end).toBeUndefined();
+    expect(again.open().map((j) => j.id)).toEqual([job.id]);
+    expect(again.get(review.id)!.end).toMatchObject({ outcome: 'waiting' }); // another kind's is its end
+    await again.ended(job.id, { outcome: 'done' });
+    expect((await JobLog.open(file)).get(job.id)!.end).toMatchObject({ outcome: 'done' });
+  });
+
   test("a repo's last end, a not-started aside", async () => {
     const log = await JobLog.open(file, () => now);
     expect(log.lastEnded('p1')).toBeNull();

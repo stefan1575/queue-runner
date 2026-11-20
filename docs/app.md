@@ -347,8 +347,8 @@ whose branch a job of the repo's writes to (Reviews; Fix rounds and merges).
   ticket's: until then it holds its repo until its reset (T3's `resetAt` and 2 minutes, or an hour
   after its end with none, as the gate holds its provider), and then the repo goes on.
 - **Which repos:** each pass takes every served repo but one with a job open (in the job log, or
-  under way in a lane: recovering, starting or running), one with a job waiting on a question
-  (until its thread has finished again: below), one with a job that needs the user and
+  under way in a lane: recovering, starting or running; one whose run waits on the user in T3 is
+  open: below), one with a job that needs the user and
   no answer (`Chooser.answered` frees it; the Inbox ticket asks), or one with a done build whose
   PR lookup failed and is owed. The repo whose last job ended longest ago goes first (`waited`:
   builds, fix and conflict rounds only, `not-started` ones aside), the served order breaking a
@@ -357,32 +357,46 @@ whose branch a job of the repo's writes to (Reviews; Fix rounds and merges).
   but no longer than 10 minutes (`LAUNCH_WAIT_MS`; every step of a launch has its own timeout):
   past that it goes on to the other repos, and the repo stays held while its job is under way.
   Why a repo got nothing is said once, until it changes.
-- **A question holds its repo until its thread finishes** (#210 F5, porting `run.py`'s
-  `settle`): a build, fix or conflict round that ends `waiting` may run again as soon as the user
-  answers it, in T3 itself as much as through the app, so its lane watches the thread on (its
-  newest run, past any further question) and its repo starts nothing meanwhile, `answered` or
-  not. A thread that can't be read holds it too: its stream is opened again until T3 answers.
-  One T3 confirms is gone (deleted in T3: its MCP answers `t3_thread_read` with "not found"; a
-  stream failure or T3 down or busy confirms nothing) ends `failed`, status `gone`, and frees the
-  repo; it has nothing left to settle, so it's recorded settled (#210 F11). Any watch of a
-  build, fix or conflict round's thread ends so, not only one after a question.
-  Once the run has ended, its real end (`done`, `failed`...) is recorded in the question's place
-  and the thread is settled as that end says. After a restart each lane watches its jobs left
-  `waiting` the same way, every one, even beside another job open in the repo (an older app's
-  build left waiting beside the build it started next; #210 F12).
-- **A run on an answer counts in the gate** (#210 F13; `afterQuestion`, `src/usage-gate.ts`): the
-  gate measured the job's first run at its question. A run on an answer (given in T3 or here) isn't
-  asked into the gate, since it's already going, but it's reserved there while it runs, at the cost
-  the job was let in at, so the gate counts it beside other repos' jobs on the same login. It's
-  measured from T3's reading when it turned to running, never from the job's start, so the part
-  before the question isn't measured twice; one already running when first seen (after a restart)
-  is measured from no reading and teaches nothing. A further question ends its reservation,
-  measured; its end reaches the gate as a first run's does, and a usage limit holds the provider
-  (also one it hit while the app was off).
+- **A job waiting on the user holds its repo until its run has finished** (#210). It waits on one of two things: a decision it posted on GitHub, or a
+  card in T3 (a question, a login or a secret: a pending runtime request). The app keeps no copy
+  of the second: T3 has it. A build, fix or conflict round whose run waits on a card hasn't ended:
+  it stays open in the job log, so its repo starts nothing, `answered` or not, until the run has
+  finished, answered in T3 itself or anywhere else; its thread isn't settled meanwhile. A
+  `waiting` end an older app wrote for one is read as no end, so after a restart it's watched as
+  any open job (every one, even beside another job open in the repo: an older app's build left
+  waiting beside the build it started next; #210 F12). Holding the repo while a decision the job
+  posted on GitHub is open isn't built yet; sending a GitHub answer on to the thread is #159's.
+- **A job's thread is read, as T3 pushes its changes** (`watchJobThread`, `src/t3/thread-end.ts`):
+  the thread's stream (`orchestration.subscribeThread`) only says when; on each change to a run, a
+  request, an error item or the thread, when the stream opens and each time it opens again after
+  a drop, the app reads the thread's current state (`orchestration.getThreadProjection`) and
+  decides from that read alone, never from the order events came in, and never on a timer
+  (`threadNow`). One read at a time; changes during it are read once after it. A request pending
+  anywhere in the thread waits on the user, whatever its runs say: T3 restarting while a run waits
+  on a card can cancel the run and keep the card, and the answer starts a new turn (F16). Else a
+  run executing (any status but an end or `queued`) is running; with none, a queued one goes
+  next, unless the run that ran last ended on a usage limit, which is then the end (the queued
+  run waits behind it); with every run ended, the end is the one that ran last, so a follow-up
+  queued after it never hides it (F17). A fix round's runs are the thread's new ones since its
+  send (`knownRuns`).
+- **A deleted thread frees its repo only on T3's thread list** (#210 F11, F15): a read that fails
+  is followed by T3's thread list, the whole snapshot `orchestration.subscribeShell` sends first
+  (its `threads` and `archivedThreads`). Read fine without the thread, the job ends `failed`,
+  status `gone`, and frees the repo; it has nothing left to settle, so it's recorded settled. Any
+  other failure, whatever its text (an `orchestration_error` saying a run was "not found"
+  included), and a list that can't be read, leave the thread unreadable: the repo stays held and
+  the thread is read again on its next change or when its stream opens again. MCP is never asked.
+- **A job counts in the gate once, from its let-in to its end** (#210 F18, F19): a job waiting on
+  the user keeps the cost it was let in at reserved while it waits and after it's answered, and
+  is measured once, at its end, from the reading it was let in on; nothing is split around a
+  question, so nothing is counted twice. Its end reaches the gate as any job's does, a usage
+  limit holding the provider. After a restart each open job is reserved at its logged cost as its
+  lane recovers it, before the first pass lets any job in, whether or not its thread has been
+  read yet.
 - **Settle first:** on start each lane recovers every job of its kind the log shows open (`recover`:
   each lane's After a restart, don't guess, below) before the first choice, and the repo is held
-  meanwhile. A recovery that can't tell (a T3 or GitHub read failed) leaves a `needs-user` end,
-  which holds the repo too.
+  meanwhile. A recovery that can't tell yet (a thread that can't be read) keeps its job open, read
+  again as above; one whose read leaves doubt leaves a `needs-user` end, which holds the repo too.
 - **A read that fails while choosing** (a lane's GitHub reads, or T3's; a launch that throws too) leaves that repo for the
   next pass, said in the log: it never counts as nothing to do in that repo, so a later lane in the
   order isn't asked, and it never holds back another repo.
@@ -446,13 +460,14 @@ builds (`docs/flow.md`, `docs/claude-lane.md`). `src/build-lane.ts`, `src/picker
 - **The end comes from T3's thread events** (`src/t3/thread-end.ts`; The WebSocket API, below), not
   polling: `done` (the run completed; `done-no-pr` when GitHub answered that no PR came from the
   branch; a lookup that failed is never "none": the end has no `pr`, each pass, a start's
-  included, looks it up again, and a `pr` line records what it found), `waiting` (a
-  pending runtime request: a question to the user), `usage-limit` (with T3's `resetAt`) or
-  `failed` (with the error item's message). A stream that drops opens again after 5 seconds.
+  included, looks it up again, and a `pr` line records what it found), `usage-limit` (with T3's
+  `resetAt`) or `failed` (with the error item's message), read from the thread as T3 pushes its
+  changes (How jobs are chosen, above). A run waiting on the user in T3 isn't an end: the build
+  stays open until the run has finished. A stream that drops opens again after 5 seconds.
 - **The job log** is `jobs.jsonl` in the state folder (`src/job-log.ts`, today's `state.py` cut to
   a build): `start` (the model the gate let it in on, the cost it was let in at and T3's reading it
-  was let in on, `cost` and `before`), `thread` (once T3 names it), `end` (a `waiting` one is
-  followed by a second `end`, the one its thread finished on) and, for a `needs-user`
+  was let in on, `cost` and `before`), `thread` (once T3 names it), `end` (none while its run waits on the user; an older app's
+  `waiting` end is read as none) and, for a `needs-user`
   end, `answered` once the user has answered; `settled` once its thread is settled; `pr` once a
   PR lookup that failed at the end is done.
   Every build that started holds its issue but `not-started` (releasing is a later ticket). The
@@ -461,10 +476,9 @@ builds (`docs/flow.md`, `docs/claude-lane.md`). `src/build-lane.ts`, `src/picker
   that got no thread is dropped from the gate unmeasured.
 - **Settling:** once the end is recorded, the thread is settled (`t3_thread_organize {threadId,
   action: settle}`; #68 story 5). Only threads the app launched are settled (story 13): the id
-  comes from its own launch. One waiting on a question is recorded as such, left unsettled and
-  watched until its thread has finished on the user's answer, then its real end replaces it (How
-  jobs are chosen, above); one stopped by a usage limit is the limits ticket's, recorded as such
-  and left unsettled.
+  comes from its own launch. One whose run waits on the user isn't ended, so it isn't settled
+  until its run has finished (How jobs are chosen, above); one stopped by a usage limit is the
+  limits ticket's, recorded as such and left unsettled.
   A settle is recorded (`settled`); an end with none (the app stopped between the two, or the
   settle failed) is settled on the next pass, a start's included. A log from before `settled`
   lines settles its ended builds' threads once more on the first start, which leaves a settled
@@ -602,7 +616,7 @@ merge half of `src/github.ts` and `src/git.ts`.
   (a `stop` or `approach-note` goes to the user, #158), it's still the PR's newest review comment,
   no round ran on H yet (one per head: a round that ended without a push leaves the PR at H, which
   was reviewed already, so it waits for the user), and no build or fix on the branch ended on a
-  question or a usage limit (it may write to the branch again). When a round starts, and that no
+  usage limit (it may write to the branch again; one waiting on the user is still open). When a round starts, and that no
   other job of the repo's runs beside it, is the chooser's (How jobs are chosen, above); the review
   lane waits on a fix round on the PR's branch.
 - **Back to the builder:** the round goes to the thread that wrote the PR, its build's or the
@@ -639,8 +653,8 @@ merge half of `src/github.ts` and `src/git.ts`.
   what's the user's to decide (on the PR), from `src/briefs/rules.ts`.
 - **Its end** comes from T3's thread events, as a build's; then the PR's head is read again (the
   end's `head`): pushed, the review lane is told (`ended`) and reviews the new head in a new
-  thread; not pushed, it waits for the user. The thread is settled unless it waits on a question
-  or stopped on a usage limit.
+  thread; not pushed, it waits for the user. A run waiting on the user in T3 isn't an end. The
+  thread is settled unless it stopped on a usage limit.
 - **A send whose outcome isn't known is never `not-started`** (#156 F4): its answer lost
   (`NoAnswer`), T3 answering a failure after it may have taken it (`ToolFailed`: T3 answers
   `orchestration_error` when it takes a send and can't read the run back), or the app stopped
@@ -713,8 +727,8 @@ A PR whose head conflicts with its base gets a conflict round (#157; `docs/flow.
   just after the base moves) is not known yet: that PR gets no round, and no newer conflicting PR
   goes ahead of it, until a later pass reads GitHub's answer (#157 F5). A read that fails leaves
   the repo for the next pass, never taken as "no conflict". A conflicting
-  PR waits while a build or fix on its branch ended on a question or a usage limit (it may write
-  again), while a review of it runs (also one started while the round was briefed: the round is
+  PR waits while a build or fix on its branch ended on a usage limit (it may write again; one
+  waiting on the user is still open, and holds the repo), while a review of it runs (also one started while the round was briefed: the round is
   then `not-started`), and while its head's blocking review
   hasn't had its fix round (that comes first). A head left for the user gets none: a stop on it, a
   review on it that ended `stop` or `approach-note`, a fix or conflict round on it that ended
@@ -746,8 +760,8 @@ A PR whose head conflicts with its base gets a conflict round (#157; `docs/flow.
   the shared "push what you have" rule isn't in this brief.
 - **Its end** comes from T3's thread events; the PR's head is read again after a `done` or
   `failed` end (one that failed may have pushed). Pushed, the review lane is told and reviews the
-  new head. Not pushed, it's a stop. The thread is settled unless it waits on a question or stopped
-  on a usage limit.
+  new head. Not pushed, it's a stop. A run waiting on the user in T3 isn't an end. The thread is
+  settled unless it stopped on a usage limit.
 - **Another round, or a stop** (#91), only when another round wouldn't help: the round on H ended
   without a push; the PR conflicts again while the base's tip is still the one its last round
   merged (the start line's `baseSha`); or it had 5 rounds (`MAX_CONFLICT_ROUNDS`) as the base keeps
@@ -854,6 +868,10 @@ is a T3Error with its `code: message`. Projects: `t3_project_list {cursor, limit
   client uses a ticket instead (`POST /api/auth/websocket-ticket/rpc` with the bearer token,
   answering `{ticket, expiresAt}` five minutes ahead, then `/ws?orchestrationProtocol=2&wsTicket=`);
   that worked live too, but the header needs no extra request, so the app sends the header.
+- **T3's thread list:** the first value of `orchestration.subscribeShell` is the whole snapshot,
+  `threads` and `archivedThreads` among it (below). A repo job's thread is gone only when that
+  snapshot reads fine without it (How jobs are chosen, above); the app reads it with `first`, once
+  per failed read of a thread.
 - **The protocol** is Effect RPC with JSON text frames. The app sends
   `{"_tag":"Request","id":"1","tag":"subscribeServerConfig","payload":{},"headers":[]}`. A
   stream answers `{"_tag":"Chunk","requestId":"1","values":[...]}`, which the client acks with

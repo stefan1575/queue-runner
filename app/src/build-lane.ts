@@ -8,12 +8,11 @@
 //   ->  the usage gate lets it in, on the build kind's model or its fallback
 //   ->  fetch origin/<base>  ->  a leftover branch of the job's name holds the job (branch-exists)
 //   ->  the brief (src/briefs/build.ts)  ->  t3_thread_launch in a worktree from origin/<base>
-//   ->  its end from T3's thread events (src/t3/thread-end.ts)  ->  the end recorded in the job log
-//   ->  the thread settled (#68 story 5), unless it waits on a question (the Inbox ticket's) or
-//       stopped on a usage limit (the limits ticket's)  ->  the settle recorded in the job log
-//   ->  one that waits on a question is watched on: the user may answer it in T3, and its thread
-//       runs again. Its repo stays held until the thread has finished again, and that end is
-//       recorded in its place (#210 F5), also after a restart
+//   ->  its end from T3's thread (src/t3/thread-end.ts, `watchJobThread`): a run that waits on the
+//       user in T3 (a question, a login or secret card) hasn't ended, and its repo stays held until
+//       it has (#210)  ->  the end recorded in the job log
+//   ->  the thread settled (#68 story 5), unless it stopped on a usage limit (the limits
+//       ticket's)  ->  the settle recorded in the job log
 //
 // The app settles only threads it launched (story 13): the thread id comes from its own launch,
 // never from a thread's title, branch or project. A job the log shows open, left by an app that
@@ -44,9 +43,9 @@ import type { Merger } from './settings.ts';
 import type { Retry } from './t3/project-feed.ts';
 import type { T3Mcp } from './t3/mcp.ts';
 import { NoAnswer } from './t3/seams.ts';
-import { threadGone, watchThreadEnd, type ThreadEnd } from './t3/thread-end.ts';
+import { watchJobThread, type ThreadEnd } from './t3/thread-end.ts';
 import type { T3Ws } from './t3/ws.ts';
-import { afterQuestion, type UsageGate } from './usage-gate.ts';
+import type { UsageGate } from './usage-gate.ts';
 
 /** A repo the lane builds in: a served T3 project. `github` is null only for the live check's
  *  sandbox, which has no GitHub: no picking, no comments and no PR to look for. `merge` says who
@@ -59,7 +58,7 @@ export type BuildLaneDoors = {
   github: GitHubWork;
   git: Git;
   mcp: Pick<T3Mcp, 'call'>;
-  ws: Pick<T3Ws, 'subscribe'>;
+  ws: Pick<T3Ws, 'subscribe' | 'request' | 'first'>;
   gate: Pick<UsageGate, 'pick' | 'reading' | 'started' | 'finished' | 'dropped' | 'forget'>;
   catalog: () => Catalog | null;
   jobs: () => Jobs;
@@ -97,8 +96,8 @@ export const TICKETS_MS = 5 * 60_000;
 export class BuildLane implements RepoJobLane {
   private d: BuildLaneDoors;
   /** Each build under way, and its repo: a repo may have more than one after a restart (an
-   *  older app's build left waiting beside the one it started next), and each is watched to its
-   *  end (#210 F12). */
+   *  older app left a build waiting on a question and started the next beside it), and each is
+   *  watched to its end (#210 F12). */
   private building = new Map<Promise<Job>, string>();
   private watches = new Set<{ stop(): void }>();
   private settler: ThreadSettler;
@@ -119,16 +118,13 @@ export class BuildLane implements RepoJobLane {
     this.settler = new ThreadSettler(doors.mcp, doors.log, doors.say);
   }
 
-  /** Watches again each build the log shows open (an app that stopped mid-job), and each one
-   *  waiting on a question until its thread has finished again; the chooser's first pass settles
-   *  each one it shows ended and not settled (`owed`). */
+  /** Watches again each build the log shows open (an app that stopped mid-job, one waiting on
+   *  the user among them), reserved in the gate before the chooser's first choice (#210 F19); the
+   *  chooser's first pass settles each one it shows ended and not settled (`owed`). */
   recover(): void {
     // every one, even two in a repo: one left out would hold its repo for good (#210 F12)
     for (const job of this.d.log.open()) {
       if (job.kind === 'build') this.track(job.repo, this.resume(job));
-    }
-    for (const job of this.d.log.waiting()) {
-      if (job.kind === 'build' && job.threadId) this.track(job.repo, this.untilFinished(job));
     }
   }
 
@@ -317,23 +313,11 @@ export class BuildLane implements RepoJobLane {
     return this.watch(job, job.github);
   }
 
-  /** A build waiting on a question: watched until its thread has finished again (the user may
-   *  answer it in T3, not only through the app), its repo held meanwhile, and that end recorded
-   *  in the question's place (#210 F5). A thread that can't be read holds it too: the watch opens
-   *  its stream again until T3 answers. */
-  private untilFinished(job: Job): Promise<Job> {
-    if (this.stopped) return Promise.resolve(job);
-    this.d.say(`${job.title} waits on a question: nothing else starts in ${job.github ?? job.repo} until its thread ${job.link ?? job.threadId} has finished, answered in T3 or here`);
-    return this.watch(job, job.github, true);
-  }
-
-  private async watch(job: Job, github: string | null, asked = false): Promise<Job> {
-    // after a question, the thread's newest run: an answer may go on in its run or start a new one
-    // after a question: the run on its answer is reserved in the gate while it runs (#210 F13)
-    const resumed = afterQuestion(this.d.gate, job);
-    const w = watchThreadEnd(this.d.ws, job.threadId!, asked ? null : job.runId ?? null, this.d.retry,
-      (why) => this.d.say(`${job.title}: T3's thread stream dropped (${why}); opening it again`), new Set(),
-      { questions: asked ? 'wait' : 'end', phase: (p) => resumed.phase(p), gone: () => threadGone(this.d.mcp, job.threadId!) });
+  /** The build's thread followed to its end (`watchJobThread`): a run waiting on the user in T3
+   *  hasn't ended, and the build stays open, its repo held and its cost in the gate, until it has.
+   *  The gate measures it once, at that end, from the reading it was let in on (#210 F18). */
+  private async watch(job: Job, github: string | null): Promise<Job> {
+    const w = watchJobThread(this.d.ws, { ...job, threadId: job.threadId! }, this.d.say, this.d.retry);
     this.watches.add(w);
     let end: ThreadEnd;
     try {
@@ -341,9 +325,7 @@ export class BuildLane implements RepoJobLane {
     } finally {
       this.watches.delete(w);
     }
-    // a first run's end reaches the gate here; a run on an answer's as `resumed` has it
-    if (!asked) this.d.gate.finished(job.id, end.outcome === 'usage-limit' ? { resetAt: end.resetAt } : undefined);
-    else resumed.ended(end);
+    this.d.gate.finished(job.id, end.outcome === 'usage-limit' ? { resetAt: end.resetAt } : undefined);
     const record: JobEnd = { outcome: end.outcome as JobEnd['outcome'], status: end.status };
     if (end.outcome === 'done' && github) {
       // a job may open its PR and stop after; done without one is done-no-pr. A lookup that
@@ -357,13 +339,11 @@ export class BuildLane implements RepoJobLane {
     }
     if (end.outcome === 'failed') record.error = end.error;
     if (end.outcome === 'usage-limit') Object.assign(record, { resetAt: end.resetAt, error: end.error });
-    if (end.outcome === 'waiting') record.request = end.request;
     const ended = await this.d.log.ended(job.id, record);
     this.d.say(`${job.title} ended: ${record.outcome}${record.pr ? `, PR #${record.pr.number}` : ''} ${job.link ?? job.threadId}`);
-    if (record.outcome === 'waiting') return this.untilFinished(ended);
     // recorded first, then settled (story 5); a usage limit is a later ticket's. Stopped between
-    // the two, the next start settles it (the log has no settled line)
-    // a thread T3 says is gone has nothing left to settle (#210 F11)
+    // the two, the next start settles it (the log has no settled line). A thread T3's list no
+    // longer has has nothing left to settle (#210 F11)
     if (end.outcome === 'failed' && end.gone) await this.d.log.settled(job.id);
     else if (settles(record.outcome)) await this.settler.settle(job);
     return ended;
