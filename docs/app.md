@@ -76,8 +76,8 @@ the real clock or runs on a real timer that no `vi.useFakeTimers()` around it fa
 - **Seams, faked in tests:** T3 (MCP and WebSocket; `src/t3/seams.ts`: HTTP, the socket, the
   CLI, the address), GitHub (`src/github-seam.ts`, ported from Python, with its fakes in `test/fakes.ts`; the
   lanes still use `src/github.ts` and `test/fake-github.ts` until their ports move them),
-  local git in a served repo's folder (`src/git.ts`: the fetch and leftover-branch check a build
-  needs, since T3 does neither), and the platform (Windows: tray, notifications,
+  local git in a served repo's folder (`src/git-seam.ts`, ported from Python, with its fakes in
+  `test/fakes.ts`; the lanes still use `src/git.ts` until their ports move them), and the platform (Windows: tray, notifications,
   start at logon, wake). Tests never touch the network, T3, GitHub or the Task Scheduler
   (`test/fake-t3.ts` answers in memory). A temp folder a test makes is removed after it
   (`afterEach` with `rm(..., {recursive: true, force: true})`).
@@ -736,6 +736,29 @@ Nothing calls it yet: the lanes still read and write GitHub through `src/github.
 loop, review, fix and merge ports (#219, #222, #223, #224) move them. `src/github.ts` keeps the
 remote read (`gh repo view`) and gh's failure shape that Repositories and Setup use (GitHub,
 below).
+
+## The git seam
+
+Ported from `queue_runner/git.py` (#216), in `src/git-seam.ts`, with `tests/test_git.py` ported
+case for case in `test/git-seam.test.ts`, against a real git repo in a temp folder, and
+`tests/fakes_t3.py`'s `FakeGit` and `FakeReviewGit` in `test/fakes.ts`. It runs the same git
+commands and reads their answers the same way, with Python's names: `GitError`, `run_git`,
+`GitCli` and its calls (`fetch`, `has_branch`, `free_branch`, `commits`, `fetch_pr`, `evidence`,
+`checkout`, `remove_checkout`, `sweep_stale`, `remove_worktree`, `log`, `first_parent`,
+`name_status` and the rest). What each call does is the module's own comment, as in Python.
+`remove_checkout` unlinks the checkout's `node_modules` as `deps.py`'s `Deps.unlink` does; the
+rest of `deps.py` is #221's. Deleting goes by Python's calls on Windows: Node's `unlink` and
+`rmdir` clear the read-only attribute and delete, where Python's fail, so the port leaves a
+read-only entry in place (`sweep_stale`) or raises `EPERM` (`remove_checkout`'s `node_modules`),
+and `sweep_stale` leaves a stale entry that is itself a junction, as `shutil.rmtree` refuses it.
+
+Two differences are TypeScript's only. `run_git` and every call are async, where Python's lanes
+block on their own threads. Python's tuples are arrays and its `None` is `null`. A git that
+can't start, or runs past the timeout, rejects with Node's own error, as Python raises; only a
+non-zero exit is an answer.
+
+Nothing calls it yet: the lanes still use `src/git.ts` until the run loop, review, fix and merge
+ports (#219, #222, #223, #224) move them.
 
 ## Setup
 

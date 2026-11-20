@@ -1,6 +1,10 @@
-// In-memory GitHub for tests: no network, no gh. Ported from `tests/fakes.py`'s `FakeGitHub`,
-// `FakeGitHubWithPulls` and `FakeGitHubForReviews` (#215), with Python's names and answers. Each
-// call is async, as the seam's are (`src/github-seam.ts`).
+// In-memory GitHub and git for tests: no network, no gh, no git. Ported from `tests/fakes.py`'s
+// `FakeGitHub`, `FakeGitHubWithPulls` and `FakeGitHubForReviews` (#215), and `tests/fakes_t3.py`'s
+// `FakeGit` and `FakeReviewGit` (#216), with Python's names and answers. Each call is async, as
+// the seams' are (`src/github-seam.ts`, `src/git-seam.ts`).
+import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import type { Commit } from '../src/git-seam.ts';
 import { Checks, Comment, GhError, Issue, PullRequest, type PullState, type Repo, replace, type WorkflowRun, type WorkIssue } from '../src/github-seam.ts';
 
 export const MAIN_HEAD = '9'.repeat(40);   // the base branch's head, unless a test says otherwise (issue #98)
@@ -156,9 +160,10 @@ export class FakeGitHubForReviews extends FakeGitHubWithPulls {
   }
 
   /** Re-runs the run's failed jobs: its next attempt is queued, its checks pending. */
-  async rerun_failed(repo: Repo, run_id: number): Promise<void> {
+  async rerun_failed(_repo: Repo, run_id: number): Promise<void> {
     this._write('rerun', run_id);
-    const r = await this.workflow_run(repo, run_id);
+    const r = this.workflow_runs.get(run_id);
+    if (!r) throw new Error(`KeyError: ${run_id}`);
     this.workflow_runs.set(run_id, replace(r, { attempt: r.attempt + 1, status: 'queued', conclusion: null }));
   }
 
@@ -290,4 +295,132 @@ export function full_pr(number: number, branch: string, head_sha: string, body =
   labels: readonly string[] = []): PullRequest {
   return new PullRequest({ number, branch, body, title, head_sha, base, url: `https://github.com/owner/first/pull/${number}`,
     labels: [...labels] });
+}
+
+// --- git (`tests/fakes_t3.py`) ------------------------------------------------------------------
+
+/** A key for a pair, where Python keys a dict or set by the tuple `(a, b)`: `log(a, b)`'s
+ *  `commit_log` entry (`commits` keys it by the branch) and `ancestors`' (older, newer). */
+export const logKey = (a: string, b: string) => `${a}..${b}`;
+
+export type FakeGitOptions = { branches?: Iterable<string>; commits?: Record<string, Commit[]> };
+
+export class FakeGit {
+  local_branches: Set<string>;
+  commit_log: Map<string, Commit[]>;
+  fetches: unknown[][] = [];
+  tips: Map<string, string> | Error = new Map();   // branch -> its tip, for free_branch (an exception: it fails)
+  uncommitted: Map<string, string> = new Map();    // branch -> the commit keeping what its worktree left
+  freed: [string, string | null][] = [];           // (branch, worktree) freed after a usage limit
+  refs: Map<string, string> = new Map();           // ref -> its sha (`sha`; a ref not named: null)
+
+  constructor({ branches = [], commits = {} }: FakeGitOptions = {}) {
+    this.local_branches = new Set(branches);
+    this.commit_log = new Map(Object.entries(commits));
+  }
+
+  async fetch(path: string, branch: string): Promise<void> {
+    this.fetches.push([path, branch]);
+  }
+
+  async has_branch(_path: string, branch: string): Promise<boolean> {
+    return this.local_branches.has(branch);
+  }
+
+  async sha(_path: string, ref: string): Promise<string | null> {
+    return this.refs.get(ref) ?? null;
+  }
+
+  async commits(_path: string, _base: string, branch: string): Promise<Commit[]> {
+    return [...(this.commit_log.get(branch) ?? [])];
+  }
+
+  async free_branch(_path: string, branch: string, worktree: string | null): Promise<[string | null, string | null]> {
+    this.freed.push([branch, worktree]);
+    this.local_branches.delete(branch);
+    if (this.tips instanceof Error) throw this.tips;
+    return [this.tips.get(branch) ?? null, this.uncommitted.get(branch) ?? null];
+  }
+}
+
+export type FakeReviewGitOptions = FakeGitOptions & {
+  heads?: Record<number, string>; files?: Record<string, string>; ancestors?: Iterable<readonly [string, string]>;
+};
+
+/** FakeGit plus a review's checkout: `heads` is what fetching each PR finds (default: the
+ *  sha the test says), `files` what the checkout holds, `ancestors` the (older, newer) pairs
+ *  in history. */
+export class FakeReviewGit extends FakeGit {
+  heads: Map<number, string>;
+  files: Map<string, string>;
+  ancestors: Set<string>;                          // logKey(older, newer)
+  checkouts: [string, string, string][] = [];
+  removed: [string, string | null][] = [];
+  removed_worktrees: [string, string | null][] = [];
+  stuck: Set<string> = new Set();                  // worktrees git can't remove
+  moved_aside: Map<string, string> = new Map();    // a review checkout git can't delete: where it's moved
+  stale: string[] = [];                            // what sweep_stale can't delete
+  shots: Map<number, Record<string, Uint8Array> | Error> = new Map();   // PR number -> {name: bytes} on its evidence branch, or what reading it raises
+
+  constructor({ heads = {}, files = {}, ancestors = [], ...rest }: FakeReviewGitOptions = {}) {
+    super(rest);
+    this.heads = new Map(Object.entries(heads).map(([k, v]) => [Number(k), v]));
+    this.files = new Map(Object.entries(files));
+    this.ancestors = new Set(Array.from(ancestors, ([older, newer]) => logKey(older, newer)));
+  }
+
+  async sweep_stale(_checkouts_dir: string): Promise<string[]> {
+    return [...this.stale];
+  }
+
+  async evidence(_path: string, number: number, dest: string): Promise<string[]> {
+    const shots = this.shots.get(number) ?? {};
+    if (shots instanceof Error) throw shots;   // origin unreadable
+    for (const [name, data] of Object.entries(shots)) {
+      await mkdir(dest, { recursive: true });
+      await writeFile(join(dest, name), data);
+    }
+    return Object.keys(shots).sort();
+  }
+
+  async fetch_pr(path: string, number: number, base: string): Promise<[string, string]> {
+    this.fetches.push([path, `pr${number}`, base]);
+    const head = this.heads.get(number);
+    if (head === undefined) throw new Error(`KeyError: ${number}`);
+    return [`refs/queue-runner/pr${number}`, head];
+  }
+
+  async checkout(path: string, ref: string, worktree: string): Promise<null> {
+    await mkdir(worktree, { recursive: true });
+    for (const [name, text] of this.files) await writeFile(join(worktree, name), text, 'utf8');
+    this.checkouts.push([path, ref, worktree]);
+    return null;
+  }
+
+  async remove_checkout(_path: string, worktree: string, ref: string | null = null): Promise<string | null> {
+    await rm(worktree, { recursive: true, force: true }).catch(() => {});
+    this.removed.push([worktree, ref]);
+    return this.moved_aside.get(worktree) ?? null;
+  }
+
+  async is_ancestor(_path: string, older: string, newer: string): Promise<boolean> {
+    return this.ancestors.has(logKey(older, newer));
+  }
+
+  async diff(_path: string, a: string, b: string, merge_base = false): Promise<string> {
+    return `diff ${a}${merge_base ? '...' : '..'}${b}\n`;
+  }
+
+  async log(_path: string, a: string, b: string): Promise<Commit[]> {
+    return [...(this.commit_log.get(logKey(a, b)) ?? [])];
+  }
+
+  async diffstat(_path: string, a: string, b: string): Promise<string> {
+    return ` src/a.ts | 2 +-\n 1 file changed (${a}...${b})\n`;
+  }
+
+  async remove_worktree(_path: string, worktree: string, branch: string | null = null): Promise<boolean> {
+    this.removed_worktrees.push([worktree, branch]);
+    return !this.stuck.has(worktree);
+  }
 }
