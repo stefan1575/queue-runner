@@ -8,9 +8,11 @@ import { describe, expect, it } from 'vitest';
 const APP = join(import.meta.dirname, '..');
 const CODE = ['src', 'renderer/src', 'live', 'renderer/index.html'];
 // Names that aren't a model choice but what's on GitHub or in a repo, kept as today's runner has
-// them (docs/app.md, Rules): the job branch prefix and a repo's own instructions file. Each
-// literal, quotes included, is allowed; the bare word still isn't.
-const GITHUB_FACING = ["'claude/'", "'CLAUDE.md'"];
+// them (docs/app.md, Rules): the job branch prefix, a repo's own instructions file, and the review
+// comment's two bylines (`src/review-ledger.ts`). Each literal, quotes included, is allowed; the
+// bare word still isn't.
+const GITHUB_FACING = ["'claude/'", "'CLAUDE.md'", "'GPT-6.2 Sol at effort high, read-only'",
+  `"Claude reviewed in Sol's place, in a T3 thread, from the same brief"`];
 const NAMES = /\b(?:claude\w*|codex|opus|sonnet|haiku|fable|gpt[\w.-]*|anthropic|openai|chatgpt|gemini|grok)\b/gi;
 
 export function modelNames(source: string): string[] {
