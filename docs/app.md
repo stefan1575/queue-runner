@@ -719,8 +719,9 @@ commands and reads their answers the same way, with Python's names: `GitError`, 
 `GitCli` and its calls (`fetch`, `has_branch`, `free_branch`, `commits`, `fetch_pr`, `evidence`,
 `checkout`, `remove_checkout`, `sweep_stale`, `remove_worktree`, `log`, `first_parent`,
 `name_status` and the rest). What each call does is the module's own comment, as in Python.
-`remove_checkout` unlinks the checkout's `node_modules` as `deps.py`'s `Deps.unlink` does; the
-rest of `deps.py` is #221's. Deleting goes by Python's calls on Windows: Node's `unlink` and
+`remove_checkout` unlinks the checkout's `node_modules` first, with the ported `Deps.unlink`
+(The dependencies, below). Deleting goes by Python's calls on Windows (`src/python-files.ts`,
+which the dependencies port shares): Node's `unlink` and
 `rmdir` clear the read-only attribute and delete, where Python's fail, so the port leaves a
 read-only entry in place (`sweep_stale`) or raises `EPERM` (`remove_checkout`'s `node_modules`),
 and `sweep_stale` leaves a stale entry that is itself a junction, as `shutil.rmtree` refuses it.
@@ -732,6 +733,25 @@ non-zero exit is an answer.
 
 Nothing calls it yet: the lanes still use `src/git.ts` until the run loop, review, fix and merge
 ports (#219, #222, #223, #224) move them.
+
+## The dependencies
+
+Ported from `queue_runner/deps.py` (#221), in `src/deps.ts`, with `tests/test_deps.py` ported
+case for case in `test/deps.test.ts`, the install faked as in Python. It installs a review
+checkout's dependencies once per key into the same cache folders (`<repo>-<key>/node_modules`,
+the key hashed from the same bytes, so the app finds the caches the Python runner made), with the
+same commands (`bun install --frozen-lockfile`, `npm ci --no-audit --no-fund`), finders
+(`node_dir`, `find_bun`, `find_npm`), notes and names: `Prepared`, `Deps` and its `prepare` and
+`unlink`, `run_install`, `READY`, `KEEP`, `WRITES` and the rest. What each does is the module's
+own comment, as in Python.
+
+The differences are TypeScript's only. `prepare`, `unlink` and an install are async, where
+Python's lanes block on their own threads. A caught error's note names Node's error where
+Python names its own. `package.json` is read by JavaScript's JSON (The review ledger, below, has
+the same limits). Deleting goes by Python's calls on Windows, as in the git seam.
+
+Only the git seam calls it yet (`Deps.unlink`, in `remove_checkout`): the review lane prepares
+checkouts through `src/review/deps.ts` until the reviews port (#222) moves it.
 
 ## The picker
 

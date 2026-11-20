@@ -153,3 +153,46 @@ export function capitalize(s: string): string {
 /** `type(e).__name__` and `str(e)` of a caught error. */
 export const type_name = (e: unknown): string => (e instanceof Error ? e.name : typeof e);
 export const err_str = (e: unknown): string => (e instanceof Error ? e.message : String(e));
+
+const LINE_BREAK = new RegExp(String.raw`\r\n|[\n\r\v\f\x1c\x1d\x1e\x85${String.fromCharCode(0x2028, 0x2029)}]`);
+
+/** Python's `str.splitlines()`: every line boundary it knows, the last line's end dropped. */
+export function splitlines(s: string): string[] {
+  const lines = s.split(LINE_BREAK);
+  if (lines.length && lines[lines.length - 1] === '') lines.pop();
+  return lines;
+}
+
+/** Python's `sorted()` of strings: by code point. */
+export const by_code_point = (a: string, b: string) => {
+  const x = Array.from(a, (c) => c.codePointAt(0)!), y = Array.from(b, (c) => c.codePointAt(0)!);
+  for (let i = 0; i < Math.min(x.length, y.length); i++) if (x[i] !== y[i]) return x[i]! - y[i]!;
+  return x.length - y.length;
+};
+
+/** `json.dumps(x, sort_keys=True)`: `, ` and `: ` between items, every dict's keys in code-point
+ *  order, and everything outside printable ASCII as `\uXXXX` (`ensure_ascii`). A whole number is
+ *  an int, as `py_str` reads one. */
+export function json_dumps(x: Json): string {
+  if (x === null || x === undefined) return 'null';
+  if (x === true) return 'true';
+  if (x === false) return 'false';
+  if (typeof x === 'number') {
+    if (Number.isNaN(x)) return 'NaN';
+    if (!Number.isFinite(x)) return x > 0 ? 'Infinity' : '-Infinity';
+    return Number.isInteger(x) ? BigInt(x).toString() : float_repr(x);
+  }
+  if (typeof x === 'string') {
+    return JSON.stringify(x).replace(/[^\x20-\x7e]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`);
+  }
+  if (Array.isArray(x)) return `[${x.map(json_dumps).join(', ')}]`;
+  const keys = Object.keys(x).sort(by_code_point);
+  return `{${keys.map((k) => `${json_dumps(k)}: ${json_dumps(x[k])}`).join(', ')}}`;
+}
+
+/** `f'{x:.0f}'`: the nearest whole number, a tie to the even one, as Python rounds a float. */
+export function format_0f(x: number): string {
+  const floor = Math.floor(x);
+  const n = x - floor === 0.5 ? (floor % 2 === 0 ? floor : floor + 1) : Math.round(x);
+  return (Object.is(n, -0) || (n === 0 && x < 0) ? '-0' : String(n));
+}

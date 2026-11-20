@@ -12,8 +12,11 @@
 // A git that can't start, or runs past the timeout, rejects with Node's own error, as Python
 // raises `FileNotFoundError` or `TimeoutExpired`; only a non-zero exit is an answer.
 import { execFile } from 'node:child_process';
-import { lstat, mkdir, readdir, rename, rm, rmdir, stat, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, rename, writeFile } from 'node:fs/promises';
 import { join, normalize, parse } from 'node:path';
+import { Deps } from './deps.ts';
+import { by_code_point, splitlines } from './python.ts';
+import { exists, isdir, rmtree } from './python-files.ts';
 
 export class GitError extends Error {
   constructor(message?: string) {
@@ -56,83 +59,15 @@ const cat_file = (path: string, spec: string) => new Promise<[number, Buffer, Bu
   child.stdin?.end();
 });
 
-const LINE_BREAK = new RegExp(String.raw`\r\n|[\n\r\v\f\x1c\x1d\x1e\x85${String.fromCharCode(0x2028, 0x2029)}]`);
-
-/** Python's `str.splitlines()`: every line boundary it knows, the last line's end dropped. */
-function splitlines(s: string): string[] {
-  const lines = s.split(LINE_BREAK);
-  if (lines.length && lines[lines.length - 1] === '') lines.pop();
-  return lines;
-}
-
 /** Python's `str.strip()` with no argument: whitespace, as Python counts it, off both ends. */
 const SPACE = '[\\t\\n\\v\\f\\r\\x1c-\\x1f \\x85\\xa0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000]';
 const STRIP = new RegExp(`^${SPACE}+|${SPACE}+$`, 'g');
 const strip = (s: string) => s.replace(STRIP, '');
 
-/** Python's `sorted()` of strings: by code point. */
-const by_code_point = (a: string, b: string) => {
-  const x = Array.from(a, (c) => c.codePointAt(0)!), y = Array.from(b, (c) => c.codePointAt(0)!);
-  for (let i = 0; i < Math.min(x.length, y.length); i++) if (x[i] !== y[i]) return x[i]! - y[i]!;
-  return x.length - y.length;
-};
-
 /** `str.split('\t', 1)` zipped with ('sha', 'subject'). */
 function commit(line: string): Commit {
   const tab = line.indexOf('\t');
   return tab < 0 ? { sha: line } : { sha: line.slice(0, tab), subject: line.slice(tab + 1) };
-}
-
-/** `os.path.exists`: follows links; false on any error. */
-const exists = (p: string) => stat(p).then(() => true, () => false);
-
-/** `os.path.isdir`. */
-const isdir = (p: string) => stat(p).then((s) => s.isDirectory(), () => false);
-
-/** Windows' read-only attribute, which Node shows as a mode with no write bits. Python's
- *  `os.rmdir` and `os.unlink` fail with `PermissionError` on an entry that has it, where Node's
- *  `rmdir` and `unlink` clear it first and delete; so the port checks it before deleting. Only
- *  Windows: elsewhere the mode's write bits don't stop a delete. */
-const read_only = (st: { mode: number }) => process.platform === 'win32' && (st.mode & 0o200) === 0;
-
-/** The `PermissionError` Python's delete raises on a read-only entry, as Node words its own. */
-function permission_error(syscall: string, path: string): NodeJS.ErrnoException {
-  return Object.assign(new Error(`EPERM: operation not permitted, ${syscall} '${path}'`),
-    { errno: -4048, code: 'EPERM', syscall, path });
-}
-
-/** `deps.py`'s `Deps.unlink`, which `remove_checkout` calls: removes the checkout's node_modules
- *  link (a junction or a symlink: Node's `lstat` sees both as a link), never what it points to.
- *  A read-only link raises, as Python's `os.rmdir` does, before git runs. #221 ports the rest
- *  of `deps.py`. */
-async function _unlink_modules(worktree: string): Promise<void> {
-  const link = join(worktree, 'node_modules');
-  const st = await lstat(link).catch(() => null);
-  if (!st?.isSymbolicLink()) return;
-  if (read_only(st)) throw permission_error('rmdir', link);
-  await unlink(link);
-}
-
-/** `shutil.rmtree(folder, ignore_errors=True)`: refuses a folder that is itself a link (a
- *  junction too), deletes what it can, links inside without following them, and carries on
- *  past what it can't, a read-only entry included (`read_only`). */
-async function _rmtree(folder: string): Promise<void> {
-  const st = await lstat(folder).catch(() => null);
-  if (!st || st.isSymbolicLink()) return;   // "Cannot call rmtree on a symbolic link"
-  if (st.isDirectory()) await _rmtree_inside(folder, st);
-  else if (!read_only(st)) await unlink(folder).catch(() => {});
-}
-
-async function _rmtree_inside(folder: string, st: { mode: number }): Promise<void> {
-  const names = await readdir(folder).catch(() => [] as string[]);
-  for (const name of names) {
-    const entry = join(folder, name);
-    const inner = await lstat(entry).catch(() => null);
-    if (!inner) continue;
-    if (inner.isDirectory() && !inner.isSymbolicLink()) await _rmtree_inside(entry, inner);
-    else if (!read_only(inner)) await unlink(entry).catch(() => {});
-  }
-  if (!read_only(st)) await rmdir(folder).catch(() => {});
 }
 
 /** `datetime.now():%Y%m%d-%H%M%S`, this PC's local time. */
@@ -257,7 +192,7 @@ export class GitCli {
     let moved: string | null = null;
     if (await exists(worktree)) {
       // First: git follows the node_modules junction and empties the dependency cache.
-      await _unlink_modules(worktree);
+      await Deps.unlink(worktree);
       await this._run(['-C', path, 'worktree', 'remove', '--force', worktree]);
       if (await exists(worktree)) {
         const stale = `${worktree}.stale-${stamp(new Date())}`;
@@ -289,7 +224,7 @@ export class GitCli {
     for (const name of names) {
       const folder = join(checkouts_dir, name);
       if (name.includes('.stale-') && await isdir(folder)) {
-        await _rmtree(folder);
+        await rmtree(folder);
         if (await exists(folder)) kept.push(folder);
       }
     }
@@ -364,5 +299,13 @@ function _same_path(p: string): string {
   let n = normalize(strip(p));
   const root = parse(n).root;
   while (n.length > root.length && /[\\/]$/.test(n)) n = n.slice(0, -1);
-  return process.platform === 'win32' ? n.toLowerCase() : n;
+  return process.platform === 'win32' ? normcase_lower(n) : n;
 }
+
+/** Windows' lower case, as `normcase` asks for it: character by character, so a final `Σ` is
+ *  `σ` (JavaScript's `toLowerCase` makes it `ς`), and a character whose lower case is longer
+ *  (`İ`) stays as it is. */
+const normcase_lower = (s: string) => Array.from(s, (c) => {
+  const lower = c.toLowerCase();
+  return Array.from(lower).length === 1 ? lower : c;
+}).join('');
