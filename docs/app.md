@@ -74,7 +74,8 @@ the real clock or runs on a real timer that no `vi.useFakeTimers()` around it fa
   clock). The app reads that one setting, never writes the file, and watches it. The exception
   goes once T3's server serves client settings.
 - **Seams, faked in tests:** T3 (MCP and WebSocket; `src/t3/seams.ts`: HTTP, the socket, the
-  CLI, the address), GitHub (`src/github.ts`; `test/fake-github.ts` for the build lane's reads),
+  CLI, the address), GitHub (`src/github-seam.ts`, ported from Python, with its fakes in `test/fakes.ts`; the
+  lanes still use `src/github.ts` and `test/fake-github.ts` until their ports move them),
   local git in a served repo's folder (`src/git.ts`: the fetch and leftover-branch check a build
   needs, since T3 does neither), and the platform (Windows: tray, notifications,
   start at logon, wake). Tests never touch the network, T3, GitHub or the Task Scheduler
@@ -714,6 +715,27 @@ this PC's local time, as in Python. A test passes the log its own clock.
 
 Nothing calls it yet: the lanes still write `src/job-log.ts` until the run loop, review, fix and
 merge ports (#219, #222, #223, #224) replace them.
+
+## The GitHub seam
+
+Ported from `queue_runner/github.py` (#215), in `src/github-seam.ts`, with `tests/test_github.py`
+ported case for case in `test/github-seam.test.ts` and `tests/fakes.py`'s `FakeGitHub`,
+`FakeGitHubWithPulls` and `FakeGitHubForReviews` in `test/fakes.ts`. It makes the same `gh api`
+calls (REST, and GraphQL for linked PRs, work lists and review threads) and reads their answers
+the same way, with Python's names: `Issue`, `WorkIssue`, `PullRequest`, `Comment`, `Checks`,
+`WorkflowRun`, `GhError`, `GhCli` and its calls (`ready_issues`, `work_issues`, `open_pulls`,
+`pull`, `checks`, `merge` and the rest). The `sol-review` status context stays Python's. What
+each call asks GitHub is the module's own comment, as in Python.
+
+Two differences are TypeScript's only. `run_gh` and every call are async, where Python's lanes
+block on their own threads. A Python dataclass is a frozen class built from its fields by name,
+with Python's defaults, and `replace` stands in for `dataclasses.replace`. A field Python reads
+as `x['key']` is an error when missing, as Python's `KeyError` is.
+
+Nothing calls it yet: the lanes still read and write GitHub through `src/github.ts` until the run
+loop, review, fix and merge ports (#219, #222, #223, #224) move them. `src/github.ts` keeps the
+remote read (`gh repo view`) and gh's failure shape that Repositories and Setup use (GitHub,
+below).
 
 ## Setup
 
