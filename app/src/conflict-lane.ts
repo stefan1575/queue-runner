@@ -56,6 +56,7 @@ import type { Retry } from './t3/project-feed.ts';
 import { NoAnswer } from './t3/seams.ts';
 import { watchJobThread, type ThreadEnd } from './t3/thread-end.ts';
 import type { T3Ws } from './t3/ws.ts';
+import { reading } from './costs.ts';
 import type { UsageGate } from './usage-gate.ts';
 
 export type ConflictLaneDoors = {
@@ -64,7 +65,7 @@ export type ConflictLaneDoors = {
   git: Pick<FixGit, 'fetchPr' | 'log' | 'diffstat' | 'worktrees'> & { hasBranch(folder: string, branch: string): Promise<boolean> };
   mcp: Pick<T3Mcp, 'call'>;
   ws: Pick<T3Ws, 'subscribe' | 'request' | 'first'>;
-  gate: Pick<UsageGate, 'pick' | 'started' | 'finished' | 'dropped' | 'forget'>;
+  gate: Pick<UsageGate, 'pick' | 'reading' | 'started' | 'finished' | 'dropped' | 'forget'>;
   catalog: () => Catalog | null;
   user: () => Promise<string>;
   log: JobLog;
@@ -386,12 +387,15 @@ export class ConflictLane implements RepoJobLane {
       this.d.say(`${name} not started: ${e instanceof NotStarted ? e.message : `${(e as Error).name}: ${(e as Error).message}`}`);
       return null;
     }
+    // the reading it's let in on, saved with its cost: a round watched again after a restart is
+    // measured from these, as a build is (F24)
+    const before = this.d.gate.reading(letIn.choice);
     const job = await this.d.log.started({
       kind: 'conflict', repo: repo.id, github: repo.github, issue: n, branch: pr.branch, base: pr.base, title,
-      choice: letIn.choice, onFallback: letIn.onFallback, cost: letIn.cost, sha: h, baseSha,
+      choice: letIn.choice, onFallback: letIn.onFallback, cost: letIn.cost, before, sha: h, baseSha,
       ...(where.kind === 'new' ? { workBranch: where.work } : {}),
     });
-    this.d.gate.started({ id: job.id, kind: 'conflict', choice: letIn.choice }, letIn.cost);
+    this.d.gate.started({ id: job.id, kind: 'conflict', choice: letIn.choice }, letIn.cost, before);
     if (!this.d.repos().some((r) => r.id === repo.id)) return this.notStarted(job, `${repo.title} is no longer served`);
     // a review of the PR started meanwhile (the review lane runs beside the chooser) goes on alone
     const review = this.d.log.jobs().find((j) => j.kind === 'review' && j.repo === repo.id && j.issue === n && !j.end);
@@ -454,7 +458,9 @@ export class ConflictLane implements RepoJobLane {
   }
 
   private async resume(job: Job): Promise<Job> {
-    this.d.gate.started({ id: job.id, kind: 'conflict', choice: job.choice }, job.cost ?? {});
+    // reserved and measured as it was let in; a line with no record of that (an older app's)
+    // teaches nothing rather than measure from a reading taken mid-run (F24)
+    this.d.gate.started({ id: job.id, kind: 'conflict', choice: job.choice }, job.cost ?? {}, job.before ?? reading(null, []));
     if (!job.threadId) return this.needsUser(job, 'the app stopped before T3 named its thread');
     this.d.say(`Watching ${job.title} again: ${job.link ?? job.threadId}`);
     return this.watch(job);

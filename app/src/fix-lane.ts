@@ -47,6 +47,7 @@ import type { Retry } from './t3/project-feed.ts';
 import { NoAnswer } from './t3/seams.ts';
 import { followThread, readThread, watchJobThread, type ThreadEnd, type ThreadRead } from './t3/thread-end.ts';
 import type { T3Ws } from './t3/ws.ts';
+import { reading } from './costs.ts';
 import type { UsageGate } from './usage-gate.ts';
 
 export type FixLaneDoors = {
@@ -55,7 +56,7 @@ export type FixLaneDoors = {
   git: Pick<FixGit, 'fetchPr' | 'log' | 'diffstat' | 'worktrees'> & { hasBranch(folder: string, branch: string): Promise<boolean> };
   mcp: Pick<T3Mcp, 'call'>;
   ws: Pick<T3Ws, 'subscribe' | 'request' | 'first'>;
-  gate: Pick<UsageGate, 'pick' | 'check' | 'started' | 'finished' | 'dropped' | 'forget'>;
+  gate: Pick<UsageGate, 'pick' | 'check' | 'reading' | 'started' | 'finished' | 'dropped' | 'forget'>;
   catalog: () => Catalog | null;
   jobs: () => Jobs;
   user: () => Promise<string>;
@@ -332,13 +333,16 @@ export class FixLane implements RepoJobLane {
       }
       return this.notStartedBefore(repo, pr, name, e, onLaunched);
     }
+    // the reading it's let in on, saved with its cost: a round watched again after a restart is
+    // measured from these, as a build is (F24)
+    const before = this.d.gate.reading(letIn.choice);
     const job = await this.d.log.started({
       kind: 'fix', repo: repo.id, github: repo.github, issue: n, branch: pr.branch, base: pr.base, title,
-      choice: letIn.choice, onFallback: letIn.onFallback, cost: letIn.cost, sha: h, round: review.round!,
+      choice: letIn.choice, onFallback: letIn.onFallback, cost: letIn.cost, before, sha: h, round: review.round!,
       ...(plan.send ? { to: plan.send.threadId!, knownRuns } : { fresh: plan.why! }),
       ...(where.kind === 'new' ? { workBranch: where.work } : {}),
     });
-    this.d.gate.started({ id: job.id, kind: 'fix', choice: letIn.choice }, letIn.cost);
+    this.d.gate.started({ id: job.id, kind: 'fix', choice: letIn.choice }, letIn.cost, before);
     if (!this.d.repos().some((r) => r.id === repo.id)) return this.notStarted(job, `${repo.title} is no longer served`);
     let thread: { threadId: string; runId: string | null; link: string | null };
     try {
@@ -481,7 +485,9 @@ export class FixLane implements RepoJobLane {
   }
 
   private async resume(job: Job): Promise<Job> {
-    this.d.gate.started({ id: job.id, kind: 'fix', choice: job.choice }, job.cost ?? {});
+    // reserved and measured as it was let in; a line with no record of that (an older app's)
+    // teaches nothing rather than measure from a reading taken mid-run (F24)
+    this.d.gate.started({ id: job.id, kind: 'fix', choice: job.choice }, job.cost ?? {}, job.before ?? reading(null, []));
     // a send the app stopped before T3 answered is one whose outcome isn't known (F4): the thread
     // read shows whether it took it
     if (!job.threadId && job.to) {

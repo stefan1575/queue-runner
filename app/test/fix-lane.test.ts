@@ -66,7 +66,11 @@ class FakeGate {
     return this.room ? { fits: true as const, cost: { five_hour: 40 } }
       : { fits: false as const, until: null, hold: { why: 'reading' as const, provider: 'Claude', checkedAt: null, stale: 'none' as const } };
   }
-  started(job: { id: string; choice: ModelChoice }) { this.calls.push(`started ${job.id} ${job.choice.model}`); }
+  started(job: { id: string; choice: ModelChoice }, _cost?: unknown, before?: unknown) { this.calls.push(`started ${job.id} ${job.choice.model}`); this.befores.push(before); }
+  /** T3's reading now: a round let in saves it, and is measured from it when watched again. */
+  now: any = { checkedAt: '2026-11-19T10:00:00.000Z', windows: {} };
+  befores: unknown[] = [];
+  reading() { return this.now; }
   finished(id: string) { this.calls.push(`finished ${id}`); }
   dropped(id: string) { this.calls.push(`dropped ${id}`); }
   forget() {}
@@ -495,6 +499,22 @@ describe("after a restart, don't guess", () => {
     await until(() => log.get(open.id)!.end !== undefined);
     expect(log.get(open.id)!.end).toMatchObject({ outcome: 'needs-user', error: expect.stringContaining('shows no new run') });
     expect(t3.sends).toEqual([]);
+  });
+
+  test("a round let in saves T3's reading, and one watched again after a restart is reserved from it, not from a reading mid-run (F24)", async () => {
+    await builder();
+    await blocking(1, H, [finding({})]);
+    makeLane();
+    await chooser.pass();
+    await until(() => t3.sends.length === 1);
+    const r = fixes()[0]!;
+    expect(r.before).toEqual(gate.now);
+    lane.stop();
+    gate.now = { checkedAt: '2026-11-19T11:00:00.000Z', windows: {} }; // a reading taken mid-run
+    makeLane();
+    void chooser.start();
+    await until(() => gate.befores.length === 2);
+    expect(gate.befores).toEqual([r.before, r.before]);
   });
 
   test('a round the log shows open is watched again on its new run; one with no thread line needs the user', async () => {

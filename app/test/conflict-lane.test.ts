@@ -82,7 +82,11 @@ class FakeGate {
     return this.room ? { fits: true as const, choice: CONFLICT, onFallback: false, cost: { five_hour: 40 } }
       : { fits: false as const, until: null, hold: { why: 'reading' as const, provider: 'Claude', checkedAt: null, stale: 'none' as const } };
   }
-  started(job: { id: string; kind: string; choice: ModelChoice }) { this.calls.push(`started ${job.kind} ${job.choice.model}`); }
+  started(job: { id: string; kind: string; choice: ModelChoice }, _cost?: unknown, before?: unknown) { this.calls.push(`started ${job.kind} ${job.choice.model}`); this.befores.push(before); }
+  /** T3's reading now: a round let in saves it, and is measured from it when watched again. */
+  now: any = { checkedAt: '2026-11-19T10:00:00.000Z', windows: {} };
+  befores: unknown[] = [];
+  reading() { return this.now; }
   finished(id: string) { this.calls.push(`finished ${id}`); }
   dropped(id: string) { this.calls.push(`dropped ${id}`); }
   forget() {}
@@ -575,6 +579,28 @@ describe("after a restart, don't guess", () => {
     expect(log.get(r.id)).toMatchObject({ end: { outcome: 'needs-user', error: expect.stringContaining('named no thread') } });
     expect(log.get(r.id)!.threadId).toBeUndefined();
     expect(log.needingUser(APP.id).map((j) => j.id)).toEqual([r.id]);
+  });
+
+  test("a round let in saves T3's reading, and one watched again after a restart is reserved from it, not from a reading mid-run; an older app's line teaches nothing (F24)", async () => {
+    makeLane();
+    await chooser.pass();
+    await until(() => t3.launches.length === 1);
+    const r = rounds()[0]!;
+    expect(r.before).toEqual(gate.now);
+    expect(gate.befores).toEqual([gate.now]);
+    lane.stop();
+    gate.now = { checkedAt: '2026-11-19T11:00:00.000Z', windows: {} }; // a reading taken mid-run
+    makeLane();
+    void chooser.start();
+    await until(() => gate.befores.length === 2);
+    expect(gate.befores[1]).toEqual(r.before);
+    lane.stop();
+    const older = await log.started(job({ sha: H2 }));
+    await log.thread(older.id, { threadId: 'thread-1', runId: 'run-1', link: null });
+    makeLane();
+    void chooser.start();
+    await until(() => gate.befores.length >= 4);
+    expect(gate.befores).toContainEqual({ checkedAt: null, windows: {} });
   });
 
   test('a round the log shows open is watched again on its thread; one with no thread line needs the user', async () => {
