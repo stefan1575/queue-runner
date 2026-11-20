@@ -1,7 +1,36 @@
 // The app's doors to T3, each a seam the tests fake (docs/app.md, Rules): HTTP to T3's server
 // (sign-in and MCP), a WebSocket to its API, and T3's CLI, which the app starts only to sign in.
 
-export class T3Error extends Error {}
+export class T3Error extends Error {
+  /** T3's typed codes for a failure it answered, outermost first: each `_tag` and `name` down
+   *  its cause chain (T3 0.1.9's "never had this thread" is
+   *  `OrchestrationV2GetThreadProjectionError` > `OrchestratorProjectionError` >
+   *  `ProjectionStoreThreadNotFoundError`). Empty for a failure T3 didn't answer. */
+  codes: string[];
+  constructor(message: string, codes: string[] = []) {
+    super(message);
+    this.codes = codes;
+  }
+}
+
+/** The typed codes down a failure's cause chain (`T3Error.codes`): an Effect Exit's `cause` (one
+ *  or a list of `{_tag: "Fail", error}`), then each `error` and `cause` under it. */
+export function failureCodes(cause: unknown): string[] {
+  const codes: string[] = [];
+  const walk = (x: any, depth: number) => {
+    if (depth > 12 || x === null || typeof x !== 'object') return;
+    if (Array.isArray(x)) { for (const y of x) walk(y, depth + 1); return; }
+    for (const key of ['_tag', 'name']) {
+      const v = x[key];
+      if (typeof v === 'string' && !['Fail', 'Die', 'Failure', 'Sequential', 'Parallel', 'Error'].includes(v) && !codes.includes(v)) codes.push(v);
+    }
+    walk(x.error, depth + 1);
+    walk(x.cause, depth + 1);
+    walk(x.defect, depth + 1);
+  };
+  walk(cause, 0);
+  return codes;
+}
 
 /** T3 refused the token: revoked, expired, or minted for another server. */
 export class Unauthorized extends T3Error {}

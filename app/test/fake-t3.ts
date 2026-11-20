@@ -13,9 +13,45 @@ export type FakeProject = { id: string; title: string; workspaceRoot: string; ar
 
 type ShellStream = { send(item: unknown): void; end(): void; ended: boolean };
 
-/** A thread's state as `orchestration.subscribeThread` shows it: its runs, runtime requests (a
- *  question to the user is a pending one) and turn items (a failed run's error among them). */
-export type FakeThread = { id: string; projectId: string; runs: any[]; runtimeRequests: any[]; turnItems: any[]; messages?: any[]; title?: string; branch?: string | null };
+/** A thread's state, modelled on T3 0.1.9 (the map of how T3's threads behave, PR #211's fix
+ *  round 4: T3's own server code and live reads). Its projection is built from it
+ *  (`projectionOf`):
+ *  - `runs`: `{id, threadId, ordinal, rootNodeId, status, queueHeld, queuePosition, requestedAt,
+ *    startedAt, completedAt, createdBy}`. A run's `id` keeps the number it was made with, while
+ *    its `ordinal` is renumbered when a queued run starts after a newer one ran;
+ *  - `nodes`: a question's child node (`kind: user_input_request`, `parentNodeId` the run's root);
+ *  - `runtimeRequests`: questions and approvals, `{id, nodeId, kind, status, responseCapability,
+ *    createdAt}`, with no `runId`;
+ *  - `turnItems`: the run's items, cards among them (`secret_request`, `link_request`), and a
+ *    failed run's `error` item;
+ *  - `userMessages`: the projection's `messages` (`{id, role, createdBy, updatedAt}`);
+ *  - `messages`: `t3_thread_read`'s items (MCP), as before;
+ *  - `archivedAt`, `deletedAt`: an archive, and a soft delete (the thread stays readable).
+ *  A test may build one with only some of these: the rest default. */
+export type FakeThread = {
+  id: string; projectId: string; runs: any[]; runtimeRequests: any[]; turnItems: any[]; nodes?: any[];
+  userMessages?: any[]; messages?: any[]; title?: string; branch?: string | null;
+  archivedAt?: string | null; deletedAt?: string | null;
+};
+
+/** The run statuses T3 counts as live (`isActivityRunForShell`): a secret card waits only while its
+ *  run is one of these. */
+const LIVE = new Set(['preparing', 'starting', 'running', 'waiting']);
+/** How many turn-item rows `getThreadProjection` keeps (`THREAD_HISTORY_SNAPSHOT_ROW_LIMIT`). */
+export const WINDOW_ROWS = 77;
+
+/** The failure T3 0.1.9 ends a read of a thread it never had with (seen live): its typed code
+ *  is the nested `cause.cause.name`. */
+export const threadNotFound = (threadId: string, tag = 'OrchestrationV2GetThreadProjectionError') => ({
+  _tag: 'Failure',
+  cause: [{
+    _tag: 'Fail',
+    error: {
+      _tag: tag, threadId, message: `Failed to load orchestration V2 thread ${threadId}`,
+      cause: { name: 'OrchestratorProjectionError', message: 'projection failed', cause: { name: 'ProjectionStoreThreadNotFoundError', message: `thread ${threadId} not found` } },
+    },
+  }],
+});
 
 export class FakeT3 {
   port = 3773;
@@ -64,8 +100,12 @@ export class FakeT3 {
   /** `orchestration.subscribeShell` fails at once, its snapshot (projects, the thread list) never
    *  sent. */
   shellDown = false;
-  /** How many `orchestration.getThreadProjection` reads of a thread the fake answered. */
+  /** How many reads of a thread's projection the fake answered: `getThreadProjection`, and each
+   *  `subscribeThread` snapshot. */
   projectionReads = 0;
+  /** How many `subscribeThread` requests fail at once with `readFailure` (T3 failing the read). */
+  failReads = 0;
+  readFailure: unknown = { _tag: 'Failure', cause: [{ _tag: 'Fail', error: { _tag: 'OrchestrationV2SubscribeThreadError', message: 'the thread could not be read', cause: { name: 'SqlError', message: 'database is locked' } } }] };
   /** WebSocket methods that answer once, by tag: the value T3's Exit carries. Any other
    *  method but subscribeServerConfig ends in a Failure. */
   wsMethods: Record<string, (payload: any) => unknown> = {};
@@ -157,20 +197,93 @@ export class FakeT3 {
     this.shells = [];
   }
 
-  /** A thread event, as T3 sends it on `subscribeThread`: the item (`run`, `runtime-request` or
-   *  `turn-item`) replaces the one with its id in the thread's state, and every open stream on
-   *  the thread is told. */
-  threadEvent(threadId: string, type: 'run' | 'runtime-request' | 'turn-item', payload: any) {
+  /** The fake's clock for T3's timestamps: each call a second later, so `completedAt` orders runs
+   *  as they ended. */
+  private clock = 0;
+  at() { return new Date(Date.UTC(2026, 10, 19, 12, 0, ++this.clock)).toISOString(); }
+
+  /** A thread's lists, each made if a test left it out. */
+  private t(threadId: string): FakeThread {
     const t = this.threadState[threadId]!;
-    const list = type === 'run' ? t.runs : type === 'runtime-request' ? t.runtimeRequests : t.turnItems;
-    const at = list.findIndex((x) => x.id === payload.id);
-    if (at >= 0) list[at] = payload; else list.push(payload);
+    t.nodes ??= [];
+    t.userMessages ??= [];
+    return t;
+  }
+
+  /** Sends a thread event to every open stream on the thread, as T3 does:
+   *  `{kind: "event", sequence, event: {id, type, threadId, runId?, occurredAt, payload}}`. */
+  private emit(threadId: string, type: string, payload: any) {
     for (const s of this.threadStreams.get(threadId) ?? []) {
-      s.send({ kind: 'event', sequence: ++this.n, event: { id: `event-${this.n}`, threadId, type: `${type}.updated`, payload } });
+      s.send({ kind: 'event', sequence: ++this.n, event: { id: `event-${this.n}`, type, threadId, runId: payload?.runId ?? undefined, occurredAt: this.at(), payload: structuredClone(payload) } });
     }
   }
 
+  /** Puts `payload` in place of the item with its id in the list (or adds it), and tells every
+   *  stream: `<kind>.updated`, or `run.created` for a run the thread didn't have. */
+  threadEvent(threadId: string, kind: 'run' | 'runtime-request' | 'turn-item' | 'node', payload: any) {
+    const t = this.t(threadId);
+    const list = kind === 'run' ? t.runs : kind === 'runtime-request' ? t.runtimeRequests : kind === 'node' ? t.nodes! : t.turnItems;
+    const at = list.findIndex((x) => x.id === payload.id);
+    if (at >= 0) list[at] = payload; else list.push(payload);
+    this.emit(threadId, kind === 'run' && at < 0 ? 'run.created' : `${kind}.updated`, payload);
+  }
+
   private run(threadId: string) { return this.threadState[threadId]!.runs.at(-1); }
+  /** The thread's live run (the newest by ordinal), or its last one. */
+  private liveRun(threadId: string) {
+    const t = this.threadState[threadId]!;
+    return [...t.runs].filter((r) => LIVE.has(r.status)).sort((a, b) => (a.ordinal ?? 0) - (b.ordinal ?? 0)).at(-1) ?? this.run(threadId);
+  }
+
+  /** A new run on the thread, as T3 makes one for a message: queued behind a live run
+   *  (`run.created` only, `queuePosition` set, never started), or started at once otherwise, past
+   *  a held queue too (`run.created` with `starting`, then `running`). Seen live (A, B). */
+  private newRun(threadId: string, createdBy: string): any {
+    const t = this.t(threadId);
+    const k = t.runs.length + 1;
+    const ordinal = Math.max(0, ...t.runs.map((r) => r.ordinal ?? 0)) + 1;
+    const busy = t.runs.some((r) => LIVE.has(r.status));
+    const queued = t.runs.filter((r) => r.status === 'queued' && r.queueHeld !== true).length;
+    const run = {
+      id: `${t.id}-run-${k}`, threadId: t.id, ordinal, rootNodeId: `${t.id}-node-${k}`, createdBy,
+      status: busy ? 'queued' : 'starting', queueHeld: false, queuePosition: busy ? queued + 1 : null,
+      requestedAt: this.at(), startedAt: busy ? null : this.at(), completedAt: null,
+    };
+    this.threadEvent(threadId, 'run', run);
+    if (!busy) this.threadEvent(threadId, 'run', { ...run, status: 'running' });
+    return run;
+  }
+
+  /** The run that ran last, as T3 takes it (`latestExecutedRun`): queued runs and runs cancelled
+   *  before they started skipped, the latest `completedAt`, an unfinished run the latest. */
+  private lastExecuted(t: FakeThread) {
+    const end = (r: any) => (r.completedAt ? Date.parse(r.completedAt) : Infinity);
+    return t.runs.filter((r) => r.status !== 'queued' && !(r.status === 'cancelled' && !r.startedAt))
+      .reduce<any>((a, r) => (!a || end(r) > end(a) || (end(r) === end(a) && r.ordinal > a.ordinal) ? r : a), null);
+  }
+
+  /** T3's queue after a run ends (`startNextQueuedRun`): nothing starts in an archived or
+   *  deleted thread, while a run is live, or while the run that ran last failed on a usage limit
+   *  (its queue isn't held, it waits); otherwise the first unheld queued run by `queuePosition ??
+   *  ordinal` starts, renumbered past any newer run that already ran. */
+  private startNextQueued(threadId: string) {
+    const t = this.t(threadId);
+    if (t.archivedAt || t.deletedAt || t.runs.some((r) => LIVE.has(r.status))) return;
+    const last = this.lastExecuted(t);
+    if (last?.status === 'failed' && this.failureOf(t, last)?.class === 'usage_limit') return;
+    const next = t.runs.filter((r) => r.status === 'queued' && r.queueHeld !== true)
+      .sort((a, b) => (a.queuePosition ?? a.ordinal) - (b.queuePosition ?? b.ordinal))[0];
+    if (!next) return;
+    const top = Math.max(0, ...t.runs.map((r) => r.ordinal ?? 0));
+    const ordinal = top > next.ordinal ? top + 1 : next.ordinal;
+    const started = { ...next, ordinal, status: 'starting', queuePosition: null, startedAt: this.at() };
+    this.threadEvent(threadId, 'run', started);
+    this.threadEvent(threadId, 'run', { ...started, status: 'running' });
+  }
+
+  private failureOf(t: FakeThread, run: any) {
+    return t.turnItems.filter((i) => i.type === 'error' && i.status === 'failed' && i.runId === run.id && i.nodeId === run.rootNodeId).at(-1)?.failure ?? null;
+  }
 
   /** How many characters of an item's text `t3_thread_read` gives at once. */
   textChunk = 1_000_000;
@@ -181,62 +294,235 @@ export class FakeT3 {
     (t.messages ??= []).push({ itemId: `msg-${++this.n}`, type: 'assistant_message', runId: this.run(threadId).id, text });
   }
 
-  /** The thread's run ends: `completed`, `failed`, `interrupted`, `cancelled`... */
+  /** The thread's live run ends (`completed`, `failed`, `interrupted`, `cancelled`...) and its
+   *  queue moves on. A completed run with no interrupt asked releases the held runs no user typed
+   *  (T3's release rule, src RL). */
   endRun(threadId: string, status: string) {
-    this.threadEvent(threadId, 'run', { ...this.run(threadId), status, completedAt: '2026-11-19T12:00:00.000Z' });
-  }
-
-  /** The thread's run stops on a question to the user: a pending request, the run waiting. */
-  askUser(threadId: string) {
-    const run = this.run(threadId);
-    this.threadEvent(threadId, 'runtime-request', { id: `request-${++this.n}`, nodeId: run.rootNodeId, kind: 'user_input', status: 'pending' });
-    this.threadEvent(threadId, 'run', { ...run, status: 'waiting' });
-  }
-
-  /** The user answers the thread's question in T3 itself: the request resolved, the run running
-   *  again. */
-  answerInT3(threadId: string) {
-    for (const r of this.threadState[threadId]!.runtimeRequests.filter((x: any) => x.status === 'pending')) {
-      this.threadEvent(threadId, 'runtime-request', { ...r, status: 'resolved' });
+    const t = this.t(threadId);
+    const run = this.liveRun(threadId);
+    this.threadEvent(threadId, 'run', { ...run, status, completedAt: this.at() });
+    if (status === 'completed' && !t.turnItems.some((i) => i.type === 'run_interrupt_request' && i.runId === run.id)) {
+      for (const r of t.runs.filter((x) => x.status === 'queued' && x.queueHeld === true && x.createdBy !== 'user')) {
+        this.threadEvent(threadId, 'run', { ...r, queueHeld: false });
+      }
     }
-    this.threadEvent(threadId, 'run', { ...this.run(threadId), status: 'running' });
+    this.startNextQueued(threadId);
   }
 
-  /** The thread's run fails on the provider's usage limit, as T3 records it: a failed error item
-   *  on the run's root node with the failure's class, then the run failed. */
-  hitUsageLimit(threadId: string, resetAt: string | null) {
-    const run = this.run(threadId);
-    this.threadEvent(threadId, 'turn-item', {
-      id: `item-${++this.n}`, type: 'error', status: 'failed', runId: run.id, nodeId: run.rootNodeId,
-      failure: { class: 'usage_limit', message: "You've hit your limit", resetAt },
-    });
+  /** The thread's run fails on the provider: a failed `error` item on its root node, then the run
+   *  failed. Any class but `usage_limit` and `validation_error` holds every queued run
+   *  (`queueHeld: true`); a usage limit leaves them queued, waiting behind it (src RL). */
+  failRun(threadId: string, failure: { class: string; message: string; resetAt?: string | null }) {
+    const t = this.t(threadId);
+    const run = this.liveRun(threadId);
+    this.threadEvent(threadId, 'turn-item', { id: `item-${++this.n}`, type: 'error', status: 'failed', runId: run.id, nodeId: run.rootNodeId, ordinal: this.n, updatedAt: this.at(), failure });
+    if (failure.class !== 'usage_limit' && failure.class !== 'validation_error') {
+      for (const r of t.runs.filter((x) => x.status === 'queued' && x.queueHeld !== true)) this.threadEvent(threadId, 'run', { ...r, queueHeld: true });
+    }
     this.endRun(threadId, 'failed');
   }
 
-  /** T3 restarts while the thread's run waits on a card: its streams end, the run is cancelled and
-   *  the request is kept pending, with no event (nothing was listening). */
-  restartCancelling(threadId: string) {
-    const t = this.threadState[threadId]!;
-    for (const s of [...(this.threadStreams.get(threadId) ?? [])]) s.end();
-    const run = this.run(threadId);
-    t.runs[t.runs.indexOf(run)] = { ...run, status: 'cancelled', completedAt: '2026-11-19T12:00:00.000Z' };
+  /** The thread's run fails on the provider's usage limit (`failure.class: usage_limit`). */
+  hitUsageLimit(threadId: string, resetAt: string | null) {
+    this.failRun(threadId, { class: 'usage_limit', message: "You've hit your limit", resetAt });
   }
 
-  /** The user answers the thread's pending request in T3, and the answer starts a new turn: the
-   *  request resolved, a new run running. */
-  answerInNewTurn(threadId: string) {
-    const t = this.threadState[threadId]!;
+  /** A send in `queue` mode, as T3 takes it: a new run, queued or started (`newRun`). The app's
+   *  sends come through MCP: unconfirmed whether T3 records them `createdBy: agent`. */
+  queueMessage(threadId: string, createdBy = 'agent') { return this.newRun(threadId, createdBy); }
+
+  /** The user writes in the thread in T3 itself: a user message (which moves past a link card),
+   *  every held run released (a message from the web or mobile app does that), and its run. */
+  userWrites(threadId: string) {
+    const t = this.t(threadId);
+    t.userMessages!.push({ id: `message-${++this.n}`, role: 'user', createdBy: 'user', createdAt: this.at(), updatedAt: this.at() });
+    this.emit(threadId, 'message.updated', t.userMessages!.at(-1));
+    for (const r of t.runs.filter((x) => x.status === 'queued' && x.queueHeld === true)) this.threadEvent(threadId, 'run', { ...r, queueHeld: false });
+    return this.newRun(threadId, 'user');
+  }
+
+  /** The user stops the thread (`t3_thread_interrupt {stop: true}`, seen live, B): the interrupt
+   *  asked, every queued run held, the run interrupted. Stopping closes pending link cards. */
+  stop(threadId: string) {
+    const t = this.t(threadId);
+    const run = this.liveRun(threadId);
+    this.threadEvent(threadId, 'turn-item', { id: `item-${++this.n}`, type: 'run_interrupt_request', status: 'completed', runId: run.id, nodeId: run.rootNodeId, updatedAt: this.at() });
+    for (const r of t.runs.filter((x) => x.status === 'queued' && x.queueHeld !== true)) this.threadEvent(threadId, 'run', { ...r, queueHeld: true });
+    this.closeLinkCards(threadId);
+    this.threadEvent(threadId, 'turn-item', { id: `item-${++this.n}`, type: 'run_interrupt_result', status: 'interrupted', runId: run.id, nodeId: run.rootNodeId, updatedAt: this.at() });
+    this.threadEvent(threadId, 'run', { ...this.t(threadId).runs.find((r) => r.id === run.id), status: 'interrupted', completedAt: this.at() });
+  }
+
+  /** A queued run cancelled before it ran (`t3_queue {action: cancel}`, seen live, A): it keeps
+   *  its ordinal, the highest, with `startedAt: null`. */
+  cancelQueued(threadId: string, runId: string) {
+    const run = this.threadState[threadId]!.runs.find((r) => r.id === runId);
+    this.threadEvent(threadId, 'run', { ...run, status: 'cancelled', queuePosition: null, startedAt: null, completedAt: this.at() });
+  }
+
+  /** The held queue released by hand (`queue.resume`), and the next run started. */
+  resumeQueue(threadId: string) {
+    for (const r of this.t(threadId).runs.filter((x) => x.status === 'queued' && x.queueHeld === true)) this.threadEvent(threadId, 'run', { ...r, queueHeld: false });
+    this.startNextQueued(threadId);
+  }
+
+  /** The thread's run stops on a question to the user (src RL; not producible here: Claude's
+   *  `AskUserQuestion` is denied on this machine): a child node `user_input_request` waiting, a
+   *  pending `user_input` runtime request on that node (no `runId`, a live capability) and a
+   *  waiting `user_input_request` item. Unconfirmed: whether the run itself goes `waiting` (T3's
+   *  code sets the node); here it stays as it was. */
+  askUser(threadId: string) {
+    const run = this.liveRun(threadId);
+    const node = { id: `node-${++this.n}`, kind: 'user_input_request', parentNodeId: run.rootNodeId, runId: run.id, status: 'waiting' };
+    this.threadEvent(threadId, 'node', node);
+    this.threadEvent(threadId, 'runtime-request', { id: `request-${++this.n}`, nodeId: node.id, providerTurnId: `turn-${this.n}`, kind: 'user_input', status: 'pending', responseCapability: { type: 'live' }, createdAt: this.at(), resolvedAt: null });
+    this.threadEvent(threadId, 'turn-item', { id: `item-${++this.n}`, type: 'user_input_request', status: 'waiting', runId: run.id, nodeId: node.id, updatedAt: this.at() });
+  }
+
+  /** The user answers the thread's pending question in T3. Answered live, the request resolves
+   *  and the same run goes on; one T3 restarted under (its capability `message`) goes as a
+   *  message: a new turn (unconfirmed in detail). */
+  answerInT3(threadId: string) {
+    const t = this.t(threadId);
+    let message = false;
     for (const r of t.runtimeRequests.filter((x: any) => x.status === 'pending')) {
-      this.threadEvent(threadId, 'runtime-request', { ...r, status: 'resolved' });
+      message ||= r.responseCapability?.type === 'message';
+      this.threadEvent(threadId, 'runtime-request', { ...r, status: 'resolved', resolvedAt: this.at() });
+      const node = t.nodes!.find((n) => n.id === r.nodeId);
+      if (node) this.threadEvent(threadId, 'node', { ...node, status: 'completed' });
+      for (const i of t.turnItems.filter((x) => x.type === 'user_input_request' && x.nodeId === r.nodeId && x.status === 'waiting')) {
+        this.threadEvent(threadId, 'turn-item', { ...i, status: 'completed', updatedAt: this.at() });
+      }
     }
-    const ordinal = Math.max(0, ...t.runs.map((r) => r.ordinal ?? 0)) + 1;
-    this.threadEvent(threadId, 'run', { id: `${t.id}-run-${ordinal}`, threadId: t.id, ordinal, rootNodeId: `${t.id}-node-${ordinal}`, status: 'running', completedAt: null });
+    if (message) this.userWrites(threadId);
   }
 
-  /** The thread is deleted in T3: it's gone from T3's state, and its open streams end. */
+  /** A secret card (T3's `request_secret`, seen live, D): a turn item, never a runtime request,
+   *  on the live run, which stays `running`. */
+  secretCard(threadId: string, label = 'a login') {
+    const run = this.liveRun(threadId);
+    const item = { id: `turn-item:secret-request:${threadId}:${++this.n}`, type: 'secret_request', status: 'waiting', runId: run.id, nodeId: run.rootNodeId, ordinal: 1_000_000 + this.n, secretStatus: 'pending', label, startedAt: this.at(), updatedAt: this.at() };
+    this.threadEvent(threadId, 'turn-item', item);
+    return item;
+  }
+
+  /** The secret card answered (`saved`, `declined`) or timed out (`cancelled`): the tool returns
+   *  into the same run, which goes on (seen live, D). */
+  answerSecret(threadId: string, secretStatus: 'saved' | 'declined' | 'cancelled' = 'saved') {
+    for (const i of this.t(threadId).turnItems.filter((x) => x.type === 'secret_request' && x.status === 'waiting')) {
+      this.threadEvent(threadId, 'turn-item', { ...i, status: secretStatus === 'cancelled' ? 'cancelled' : 'completed', secretStatus, updatedAt: this.at() });
+    }
+  }
+
+  /** A link card (src SRV `PeerLinkRequests`; none has existed in this T3): the ask doesn't wait,
+   *  so its run goes on and may end; the card stays `waiting` after it, until answered or the user
+   *  writes in the thread after it. */
+  linkCard(threadId: string) {
+    const run = this.liveRun(threadId);
+    const item = { id: `turn-item:link-request:${threadId}:${++this.n}`, type: 'link_request', status: 'waiting', runId: run.id, nodeId: run.rootNodeId, linkStatus: 'pending', hint: 'my vps', startedAt: this.at(), updatedAt: this.at() };
+    this.threadEvent(threadId, 'turn-item', item);
+    return item;
+  }
+
+  /** The link card answered (`link_request.record`): the card done, then its wake, a notification
+   *  message `queue_after_active` from the server: a new run (src RL). */
+  answerLink(threadId: string, linkStatus: 'linked' | 'declined' = 'linked') {
+    for (const i of this.t(threadId).turnItems.filter((x) => x.type === 'link_request' && x.status === 'waiting')) {
+      this.threadEvent(threadId, 'turn-item', { ...i, status: 'completed', linkStatus, updatedAt: this.at() });
+    }
+    return this.newRun(threadId, 'agent');
+  }
+
+  /** Stopping or archiving closes pending link cards, with no wake (`closePendingLinkRequests`). */
+  private closeLinkCards(threadId: string) {
+    for (const i of this.t(threadId).turnItems.filter((x) => x.type === 'link_request' && x.status === 'waiting')) {
+      this.threadEvent(threadId, 'turn-item', { ...i, status: 'cancelled', linkStatus: 'cancelled', updatedAt: this.at() });
+    }
+  }
+
+  /** T3 restarts (src RL's runtime reconcile; not tried live): every stream ends first, so nothing
+   *  hears the events it writes, which a stream opened after sees in its snapshot. In each thread:
+   *  live runs cancelled; a pending question kept pending, answerable as a message; any other
+   *  pending request expired; pending secret cards cancelled; link cards left alone; queued runs
+   *  held. Not modelled: the restart continuation T3 may start when
+   *  `continueThreadsAfterServerUpdate` is on. */
+  restart() {
+    this.endThreadStreams();
+    this.endShells();
+    for (const id of Object.keys(this.threadState)) {
+      const t = this.t(id);
+      t.runs = t.runs.map((r) => (LIVE.has(r.status) ? { ...r, status: 'cancelled', completedAt: this.at() }
+        : r.status === 'queued' ? { ...r, queueHeld: true } : r));
+      t.runtimeRequests = t.runtimeRequests.map((r) => (r.status !== 'pending' ? r
+        : r.kind === 'user_input' && r.responseCapability?.type === 'live' ? { ...r, responseCapability: { type: 'message' } }
+          : { ...r, status: 'expired', responseCapability: { type: 'not_resumable' } }));
+      t.turnItems = t.turnItems.map((i) => (i.type === 'secret_request' && i.status === 'waiting' ? { ...i, status: 'cancelled', secretStatus: 'cancelled' } : i));
+    }
+  }
+
+  /** The thread deleted in T3 (`thread.delete`, seen live, C): a soft delete. `deletedAt` set and
+   *  `thread.deleted` sent, then every live or queued run cancelled. Its projection stays
+   *  readable; `getThreadTitles` and both shell lists leave it out. Unconfirmed: whether T3 ends
+   *  an open thread stream after `thread.deleted`; here it stays open. */
   deleteThread(threadId: string) {
-    delete this.threadState[threadId];
-    for (const s of [...(this.threadStreams.get(threadId) ?? [])]) s.end();
+    const t = this.t(threadId);
+    t.deletedAt = this.at();
+    this.emit(threadId, 'thread.deleted', this.appThread(t));
+    for (const r of t.runs.filter((x) => LIVE.has(x.status) || x.status === 'queued')) {
+      this.threadEvent(threadId, 'run', { ...r, status: 'cancelled', queuePosition: null, completedAt: this.at() });
+    }
+    this.tell({ kind: 'thread.removed', sequence: ++this.n, threadId });
+  }
+
+  /** The thread archived (seen live, A): `archivedAt` set, `thread.archived` sent, pending link
+   *  cards closed. It leaves `subscribeShell` (as `thread.removed`) for
+   *  `getArchivedShellSnapshot`; its projection and `getThreadTitles` still have it. */
+  archiveThread(threadId: string) {
+    const t = this.t(threadId);
+    t.archivedAt = this.at();
+    this.emit(threadId, 'thread.archived', this.appThread(t));
+    this.closeLinkCards(threadId);
+    this.tell({ kind: 'thread.removed', sequence: ++this.n, threadId });
+  }
+
+  private appThread(t: FakeThread) {
+    return { id: t.id, projectId: t.projectId, title: t.title ?? null, branch: t.branch ?? null, archivedAt: t.archivedAt ?? null, deletedAt: t.deletedAt ?? null };
+  }
+
+  /** How many turn-item rows `getThreadProjection` keeps. */
+  windowRows = WINDOW_ROWS;
+
+  /** The thread's projection, as `orchestration.subscribeThread`'s snapshot has it (whole), or
+   *  `getThreadProjection` (`windowed`, src SRV `getThreadSnapshotWindow` and MER
+   *  `buildBoundedThreadProjection`): the newest `windowRows` turn items, pending approval and
+   *  question items added back (cards aren't); runs that are queued or live, own a kept item, or
+   *  are the shell's presented one; pending requests and the kept items' own. */
+  projectionOf(threadId: string, windowed: boolean) {
+    const t = this.t(threadId);
+    const whole = {
+      thread: this.appThread(t), runs: t.runs, attempts: [], nodes: t.nodes, subagents: [], providerSessions: [], providerThreads: [],
+      providerTurns: [], runtimeRequests: t.runtimeRequests, messages: t.userMessages, plans: [], turnItems: t.turnItems,
+      checkpointScopes: [], checkpoints: [], contextHandoffs: [], contextTransfers: [], visibleTurnItems: [], updatedAt: this.at(),
+    };
+    if (!windowed) return structuredClone(whole);
+    const kept = t.turnItems.slice(-this.windowRows);
+    for (const i of t.turnItems) {
+      if ((i.type === 'approval_request' || i.type === 'user_input_request') && i.status === 'waiting' && !kept.includes(i)) kept.unshift(i);
+    }
+    const owners = new Set(kept.map((i) => i.runId));
+    const nodes = new Set(kept.map((i) => i.nodeId));
+    const presented = t.runs.filter((r) => !(r.status === 'queued' && r.queueHeld === true)).sort((a, b) => b.ordinal - a.ordinal)[0];
+    return structuredClone({
+      ...whole, turnItems: kept,
+      runs: t.runs.filter((r) => r.status === 'queued' || LIVE.has(r.status) || owners.has(r.id) || r === presented),
+      runtimeRequests: t.runtimeRequests.filter((r) => r.status === 'pending' || r.status === 'waiting' || nodes.has(r.nodeId)),
+    });
+  }
+
+  /** `orchestration.getThreadTitles {threadIds}`: the title of each that exists, archived ones
+   *  included; deleted and unknown ids left out (src MER, `deleted_at IS NULL`). */
+  threadTitles(ids: string[]) {
+    return Object.fromEntries(ids.map((id) => this.threadState[id]).filter((t) => t && !t.deletedAt).map((t) => [t!.id, t!.title ?? '']));
   }
 
   /** T3 ends every thread stream (a restart, say). */
@@ -254,9 +540,17 @@ export class FakeT3 {
     for (const s of this.shells) s.send(item);
   }
 
-  /** Each launched thread as T3's shell snapshot lists it. */
-  private shellThreads() {
-    return Object.values(this.threadState).map((t) => ({ id: t.id, projectId: t.projectId, title: t.title ?? null, branch: t.branch ?? null }));
+  /** Each launched thread as T3's shell snapshot lists it: the active ones (`subscribeShell`), or
+   *  the archived ones (`getArchivedShellSnapshot`). A deleted thread is in neither. */
+  private shellThreads(archived = false) {
+    return Object.values(this.threadState).filter((t) => !t.deletedAt && Boolean(t.archivedAt) === archived)
+      .map((t) => ({ id: t.id, projectId: t.projectId, title: t.title ?? null, branch: t.branch ?? null, archivedAt: t.archivedAt ?? null }));
+  }
+
+  /** A thread a tool can act on: one T3 has and hasn't deleted. */
+  private kept(threadId: string) {
+    const t = this.threadState[threadId];
+    return t && !t.deletedAt ? t : undefined;
   }
 
   private tool(name: string, args: any): { result?: unknown; failure?: { code: string; message: string } } {
@@ -270,36 +564,36 @@ export class FakeT3 {
       if (this.launchFailure) return { failure: this.launchFailure };
       this.launches.push(args);
       const n = this.launches.length;
+      // T3 answers the launch at `preparing`; its run passes `starting` to `running` at once (no
+      // stream is open on a thread that didn't exist, so nothing hears those)
+      const at = this.at();
       this.threadState[`thread-${n}`] = {
-        id: `thread-${n}`, projectId: args.projectId, title: args.title, runtimeRequests: [], turnItems: [],
+        id: `thread-${n}`, projectId: args.projectId, title: args.title, runtimeRequests: [], turnItems: [], nodes: [], userMessages: [],
         messages: [{ itemId: `msg-${++this.n}`, type: 'user_message', runId: `run-${n}`, text: args.message }],
-        branch: args.workspaceStrategy?.branch ?? null,
-        runs: [{ id: `run-${n}`, threadId: `thread-${n}`, ordinal: 1, rootNodeId: `node-${n}`, status: 'running', completedAt: null }],
+        branch: args.workspaceStrategy?.branch ?? null, archivedAt: null, deletedAt: null,
+        runs: [{ id: `run-${n}`, threadId: `thread-${n}`, ordinal: 1, rootNodeId: `node-${n}`, createdBy: 'agent', status: 'running', queueHeld: false, queuePosition: null, requestedAt: at, startedAt: at, completedAt: null }],
       };
-      if (this.launchOmitsThreadId) return { result: { runId: `run-${n}`, status: 'running' } };
-      return { result: { threadId: `thread-${n}`, runId: `run-${n}`, link: `t3://thread/thread-${n}`, projectId: args.projectId, modelSelection: args.modelSelection, status: 'running' } };
+      if (this.launchOmitsThreadId) return { result: { runId: `run-${n}`, status: 'preparing' } };
+      return { result: { threadId: `thread-${n}`, runId: `run-${n}`, link: `t3://thread/thread-${n}`, projectId: args.projectId, modelSelection: args.modelSelection, status: 'preparing' } };
     }
     if (name === 't3_thread_send') {
-      // a message to a thread: a new run on it (T3's `queue` mode starts a new turn)
+      // a message to a thread in `queue` mode: a new run, queued behind a live one or started
+      // at once (`newRun`, seen live), answered as T3's MCP does (`status`, `delivery`)
       this.beforeSend();
-      const t = this.threadState[args.threadId];
+      const t = this.kept(args.threadId);
       if (!t) return { failure: { code: 'not_found', message: 'The thread was not found.' } };
       if (this.sendFailure && !this.sendTaken) return { failure: this.sendFailure };
       this.sends.push(args);
-      const ordinal = Math.max(0, ...t.runs.map((r) => r.ordinal ?? 0)) + 1;
-      const id = `${t.id}-run-${ordinal}`;
-      t.runs.push({ id, threadId: t.id, ordinal, rootNodeId: `${t.id}-node-${ordinal}`, status: 'running', completedAt: null });
-      (t.messages ??= []).push({ itemId: `msg-${++this.n}`, type: 'user_message', runId: id, text: args.message });
-      for (const s of this.threadStreams.get(t.id) ?? []) {
-        s.send({ kind: 'event', sequence: ++this.n, event: { id: `event-${this.n}`, threadId: t.id, type: 'run.updated', payload: t.runs.at(-1) } });
-      }
+      const run = this.newRun(t.id, 'agent');
+      (t.messages ??= []).push({ itemId: `msg-${++this.n}`, type: 'user_message', runId: run.id, text: args.message });
       if (this.sendFailure) return { failure: this.sendFailure }; // taken, then answered as failed
-      return { result: this.sendOmitsRunId ? { threadId: t.id } : { threadId: t.id, runId: id } };
+      const delivery = run.status === 'queued' ? 'queued' : 'started';
+      return { result: this.sendOmitsRunId ? { threadId: t.id, status: run.status, delivery } : { threadId: t.id, runId: run.id, status: run.status, delivery } };
     }
     if (name === 't3_thread_read') {
       // `view: messages` pages of `limit` items from `afterPosition`; `itemId` + `textOffset` reads
       // one item's text on, `textChunk` characters at a time (T3 truncates long text)
-      const t = this.threadState[args.threadId];
+      const t = this.kept(args.threadId);
       if (!t) return { failure: { code: 'not_found', message: 'The thread was not found.' } };
       if (this.readFailures > 0) { this.readFailures--; return { failure: { code: 'busy', message: 'T3 is busy' } }; }
       if (this.emptyReads > 0) { this.emptyReads--; return { result: { items: [], hasMore: false, nextPosition: null } }; }
@@ -319,7 +613,7 @@ export class FakeT3 {
       return { result: { items: page, hasMore: more, nextPosition: more ? from + args.limit : null } };
     }
     if (name === 't3_thread_organize') {
-      if (!this.threadState[args.threadId]) return { failure: { code: 'not_found', message: 'The thread was not found.' } };
+      if (!this.kept(args.threadId)) return { failure: { code: 'not_found', message: 'The thread was not found.' } };
       return { result: { threadId: args.threadId, action: args.action } };
     }
     if (name === 't3_project_create') {
@@ -449,15 +743,18 @@ export class FakeT3 {
           mine.push(sub);
           queueMicrotask(() => sub(this.serverConfig));
         } else if (msg._tag === 'Request' && msg.tag === 'orchestration.subscribeThread') {
-          // T3's thread stream: a snapshot of the thread's projection, then each change
+          // T3's thread stream: a snapshot of the thread's whole projection (a bounded one only
+          // with `acceptBoundedSnapshot`), then each change. A thread T3 never had fails with its
+          // tagged error; a deleted one still streams (seen live)
           const t = this.threadState[msg.payload?.threadId];
-          if (!t) {
-            const exit = { _tag: 'Failure', cause: { _tag: 'Fail', error: { message: `no thread ${msg.payload?.threadId}` } } };
-            queueMicrotask(() => open && on.message(JSON.stringify({ _tag: 'Exit', requestId: msg.id, exit })));
+          const failed = !t ? threadNotFound(msg.payload?.threadId, 'OrchestrationV2SubscribeThreadError')
+            : this.failReads > 0 ? (this.failReads--, this.readFailure) : null;
+          if (failed) {
+            queueMicrotask(() => open && on.message(JSON.stringify({ _tag: 'Exit', requestId: msg.id, exit: failed })));
             return;
           }
-          const set = this.threadStreams.get(t.id) ?? new Set();
-          this.threadStreams.set(t.id, set);
+          const set = this.threadStreams.get(t!.id) ?? new Set();
+          this.threadStreams.set(t!.id, set);
           const stream = {
             send: (item: unknown) => queueMicrotask(() => open && on.message(JSON.stringify({ _tag: 'Chunk', requestId: msg.id, values: [item] }))),
             end: () => {
@@ -469,20 +766,28 @@ export class FakeT3 {
           };
           set.add(stream);
           threadStream = () => set.delete(stream);
-          stream.send({ kind: 'snapshot', snapshotSequence: this.n, projection: structuredClone({ thread: { id: t.id, projectId: t.projectId }, runs: t.runs, runtimeRequests: t.runtimeRequests, turnItems: t.turnItems }) });
+          this.projectionReads++;
+          stream.send({ kind: 'snapshot', snapshotSequence: this.n, projection: this.projectionOf(t!.id, msg.payload?.acceptBoundedSnapshot === true) });
         } else if (msg._tag === 'Request' && msg.tag !== 'orchestration.subscribeShell') {
-          const own = msg.tag === 'orchestration.getThreadProjection' && this.threadState[msg.payload?.threadId]
-            ? () => {
+          const builtIn: Record<string, ((payload: any) => unknown) | undefined> = {
+            // windowed (src SRV); a deleted thread reads fine, with `deletedAt`
+            'orchestration.getThreadProjection': (payload) => {
+              if (!this.threadState[payload?.threadId]) throw threadNotFound(payload?.threadId);
               this.projectionReads++;
-              const t = this.threadState[msg.payload.threadId]!;
-              return structuredClone({ thread: { id: t.id, projectId: t.projectId }, runs: t.runs, runtimeRequests: t.runtimeRequests, turnItems: t.turnItems });
-            } : undefined;
-          const method = this.wsMethods[msg.tag] ?? own;
+              return this.projectionOf(payload.threadId, true);
+            },
+            'orchestration.getThreadTitles': (payload) => this.threadTitles(Array.isArray(payload?.threadIds) ? payload.threadIds : []),
+            // the shape of `OrchestrationV2ArchivedShellSnapshot` beyond its `threads` is unconfirmed
+            'orchestration.getArchivedShellSnapshot': () => ({ snapshotSequence: this.n, threads: this.shellThreads(true) }),
+          };
+          const method = this.wsMethods[msg.tag] ?? builtIn[msg.tag];
           let exit: unknown;
           try {
             exit = method ? { _tag: 'Success', value: method(msg.payload) } : { _tag: 'Failure', cause: { _tag: 'Die', defect: `no method ${msg.tag}` } };
-          } catch (e) { // the method failing in T3: a Failure, as T3 ends it
-            exit = { _tag: 'Failure', cause: { _tag: 'Fail', error: (e as Error).message } };
+          } catch (e) {
+            // the method failing in T3: a Failure, as T3 ends it; a thrown Exit (T3's tagged
+            // failure, `threadNotFound`) as it is
+            exit = (e as any)?._tag === 'Failure' ? e : { _tag: 'Failure', cause: { _tag: 'Fail', error: (e as Error).message } };
           }
           queueMicrotask(() => open && on.message(JSON.stringify({ _tag: 'Exit', requestId: msg.id, exit })));
         }
@@ -505,7 +810,7 @@ export class FakeT3 {
           };
           shell = stream;
           this.shells.push(stream);
-          stream.send({ kind: 'snapshot', snapshot: { schemaVersion: 2, snapshotSequence: this.n, projects: this.projects.map((p) => ({ ...p, scripts: [] })), threads: [{ id: 't1' }, ...this.shellThreads()], archivedThreads: [] } });
+          stream.send({ kind: 'snapshot', snapshot: { schemaVersion: 2, snapshotSequence: this.n, projects: this.projects.map((p) => ({ ...p, scripts: [] })), threads: [{ id: 't1' }, ...this.shellThreads()], archivedThreads: [] } }); // `archivedThreads` is always empty in T3 0.1.9
           stream.send({ kind: 'synchronized' });
           stream.send({ kind: 'thread.updated', sequence: this.n, location: 'active', thread: { id: 't1' } });
         }

@@ -4,7 +4,7 @@
 // `{_tag: "Ack", requestId}` before the next, and ends with `{_tag: "Exit", requestId, exit}`.
 // The upgrade needs `?orchestrationProtocol=2` and a client session's bearer token.
 import { retryAfter, type Retry } from './project-feed.ts';
-import { T3Error, type Address, type Cli, type Connect, type Http, type Socket } from './seams.ts';
+import { failureCodes, T3Error, type Address, type Cli, type Connect, type Http, type Socket } from './seams.ts';
 import { signInWebSocket } from './sign-in.ts';
 
 export const ORCHESTRATION_PROTOCOL = 2;
@@ -92,9 +92,11 @@ export class T3Ws {
             }
             if (msg._tag === 'Exit' && msg.requestId === id) {
               if (msg.exit?._tag === 'Success' && !closing) onExit?.(msg.exit.value);
-              return msg.exit?._tag === 'Success'
-                ? end()
-                : end(new T3Error(`T3 ended ${tag}: ${JSON.stringify(msg.exit?.cause ?? msg.exit).slice(0, 300)}`));
+              // a failure keeps T3's typed codes whole (`codes`), the text only says it (#211 F10)
+              if (msg.exit?._tag === 'Success') return end();
+              const codes = failureCodes(msg.exit?.cause ?? msg.exit);
+              const said = JSON.stringify(msg.exit?.cause ?? msg.exit).slice(0, 300);
+              return end(new T3Error(`T3 ended ${tag}${codes.length ? ` (${codes.join(' > ')})` : ''}: ${said}`, codes));
             }
             if (msg._tag === 'Defect' || msg._tag === 'ClientProtocolError') {
               return end(new T3Error(`T3's WebSocket failed ${tag}: ${text.slice(0, 300)}`));
