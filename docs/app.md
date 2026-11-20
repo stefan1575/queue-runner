@@ -384,7 +384,8 @@ builds (`docs/flow.md`, `docs/claude-lane.md`). `src/build-lane.ts`, `src/picker
   pending runtime request: a question to the user), `usage-limit` (with T3's `resetAt`) or
   `failed` (with the error item's message). A stream that drops opens again after 5 seconds.
 - **The job log** is `jobs.jsonl` in the state folder (`src/job-log.ts`, today's `state.py` cut to
-  a build): `start` (the model the gate let it in on, the cost it was let in at and T3's reading it
+  a build; the lanes' log until their port tickets replace them, and the port of `state.py` is The
+  job log, below): `start` (the model the gate let it in on, the cost it was let in at and T3's reading it
   was let in on, `cost` and `before`), `thread` (once T3 names it), `end` and, for a `needs-user`
   end, `answered` once the user has answered; `settled` once its thread is settled; `pr` once a
   PR lookup that failed at the end is done.
@@ -695,6 +696,24 @@ A PR whose head conflicts with its base gets a conflict round (#157; `docs/flow.
   and the repo starts nothing until the user answers (`ConflictLane.answered`).
 - **When:** open rounds are watched again at start; then a pass on usage, the repos, each review,
   fix round and merge that ends, and every minute.
+
+## The job log
+
+Ported from `queue_runner/state.py` (#214), in `src/state.ts`, with `tests/test_state.py` ported
+case for case in `test/state.test.ts`. It is the same append-only `jobs.jsonl`, with Python's
+records field for field (snake_case: `start`, `end`, `release`, `sol-back`), so the app reads a
+copy of the Python runner's state folder. `Job`, `JobLog` and its queries keep Python's names:
+`open_jobs`, `waiting_jobs`, `limited_jobs`, `writer`, `held_issues`, `open_stops`, `stopped`,
+`reviews_of`, `runner_review`, `pr_jobs`, `pr_threads`, `decided`, `sol_out` and the rest. What
+each record and query means is the module's own comment, as in Python.
+
+Two differences are TypeScript's only. Reads and writes are synchronous, so in Node's one thread
+none interleaves with another and Python's per-file lock has nothing to guard. `when` gives a
+`Date`, which has no offset of its own: a stamp with one is that instant, a stamp with none is
+this PC's local time, as in Python. A test passes the log its own clock.
+
+Nothing calls it yet: the lanes still write `src/job-log.ts` until the run loop, review, fix and
+merge ports (#219, #222, #223, #224) replace them.
 
 ## Setup
 
