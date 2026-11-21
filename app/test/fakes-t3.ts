@@ -70,7 +70,7 @@ export class FakeT3 {
 
   /** As `T3Server.start`: every thread names its provider, model and effort (issue #119). */
   async start(project: string, message: string, { title, provider, model, effort, worktree = null, branch = null }:
-    { title: string; provider: string; model: string; effort: string; worktree?: string | null; branch?: string | null }): Promise<RunResult> {
+    { title: string; provider: string; model: string; effort: string | null; worktree?: string | null; branch?: string | null }): Promise<RunResult> {
     this.starts.push({ project, message, title, provider, model, effort, worktree, branch });
     const outcome = this.next();
     const thread_id = `mcp:t${this.starts.length}`;
@@ -86,7 +86,7 @@ export class FakeT3 {
 
   /** A thread started without waiting: it's running, with no reply yet. */
   async launch(project: string, message: string, { title, provider, model, effort }:
-    { title: string; provider: string; model: string; effort: string }): Promise<Launched> {
+    { title: string; provider: string; model: string; effort: string | null }): Promise<Launched> {
     this.launches.push({ project, message, title, provider, model, effort });
     if (this.launch_error !== null) {
       const error = this.launch_error;

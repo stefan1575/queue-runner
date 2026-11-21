@@ -10,17 +10,10 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { BuildLane, servedRepos } from '../build-lane.ts';
-import { CostLog } from '../cost-log.ts';
-import { GitCli } from '../git.ts';
 import { GhGitHub, ghCli } from '../github.ts';
-import { JobLog } from '../job-log.ts';
-import { Deps } from '../review/deps.ts';
-import { ReviewLane } from '../review-lane.ts';
-import { FixLane } from '../fix-lane.ts';
-import { MergeLane } from '../merge-lane.ts';
-import { ConflictLane } from '../conflict-lane.ts';
-import { UsageGate } from '../usage-gate.ts';
+import { wall_sleep } from '../run.ts';
+import { Bases, makeRunner, repoLookup, runConfig, servedRepos, SharedTitles } from '../run-wiring.ts';
+import { RunnerBusy, runner_lock } from '../runner-lock.ts';
 import { windowsPlatform } from '../platform/windows.ts';
 import { checkJobs, DEFAULT_JOBS } from '../jobs.ts';
 import { Repositories } from '../repos.ts';
@@ -119,46 +112,17 @@ async function main() {
 
   if (shootTo) return shoot(shootTo, settings);
 
-  // The build lane (docs/app.md, Builds): served repos only; until the cutover only the sandboxes
-  // are ever served (Rules).
-  const gate = new UsageGate(catalog, () => settings.get(), await CostLog.open(join(state, 'usage.jsonl')));
-  const log = await JobLog.open(join(state, 'jobs.jsonl'));
-  gate.limitsFrom(log.jobs()); // a provider the last run saw run out stays held until its reset
+  // The run loop (docs/app.md, The run loop): one planner each pass reads the job log, GitHub and
+  // T3 fresh, chooses per repo and acts, the builder lane and the reviewer lane side by side, as
+  // the Python runner's `run_forever` runs them. Served repos only; until the cutover only the
+  // sandboxes are ever served (Rules).
   const say = (line: string) => console.log(`${new Date().toISOString()} ${line}`);
-  const user = async () => briefName(view.get()) ?? 'the user';
-  const lane = new BuildLane({
-    repos: () => servedRepos(repos.list()), github, git: new GitCli(), mcp: t3Doors!.mcp, ws: t3Doors!.ws, gate,
-    catalog: () => catalog.current().catalog, jobs: () => settings.get().jobs, user, log, exists: existsSync, say,
+  const bases = new Bases((g) => github.defaultBranch(g), say);
+  const titles = new SharedTitles(say);
+  const runner = await makeRunner({
+    config: runConfig(() => servedRepos(repos.list(), bases, titles), state, repoLookup(() => repos.list(), bases)), state, settings: () => settings.get(),
+    catalog, mcp: t3Doors!.mcp, user: async () => briefName(view.get()) ?? 'the user', out: () => {}, log_line: say,
   });
-  // The review lane (docs/app.md, Reviews): every open PR in a served repo, one review at a time.
-  // A review that ends tells the fix and merge lanes; a fix round that ends tells the review lane
-  // (its pushed head is reviewed next); a merge tells the build lane (docs/app.md, Fix rounds and
-  // merges). A conflict round that ends tells the review lane too; a review, a fix round or a merge
-  // that ends tells the conflict lane, since each may free a conflicted PR's turn (Conflict rounds).
-  const lanes: { fixes?: FixLane; merges?: MergeLane; conflicts?: ConflictLane } = {};
-  const reviews = new ReviewLane({
-    repos: () => servedRepos(repos.list()), github, git: new GitCli(), deps: new Deps(join(state, 'deps')),
-    mcp: t3Doors!.mcp, ws: t3Doors!.ws, gate, catalog: () => catalog.current().catalog, jobs: () => settings.get().jobs,
-    toolFree: () => settings.get().toolFreeInstances, user, log, stateDir: state, say,
-    ended: () => { void lanes.fixes?.pass(); void lanes.merges?.pass(); void lanes.conflicts?.pass(); },
-  });
-  const fixes = new FixLane({
-    repos: () => servedRepos(repos.list()), github, git: new GitCli(), mcp: t3Doors!.mcp, ws: t3Doors!.ws, gate,
-    catalog: () => catalog.current().catalog, jobs: () => settings.get().jobs, user, log, exists: existsSync, say,
-    ended: () => { void reviews.pass(); void lanes.conflicts?.pass(); },
-  });
-  const merges = new MergeLane({
-    repos: () => servedRepos(repos.list()), github, git: new GitCli(), mcp: t3Doors!.mcp, log, say,
-    merged: () => { void lane.pass(); void lanes.conflicts?.pass(); }, headMoved: () => void reviews.pass(),
-  });
-  const conflicts = new ConflictLane({
-    repos: () => servedRepos(repos.list()), github, git: new GitCli(), mcp: t3Doors!.mcp, ws: t3Doors!.ws, gate,
-    catalog: () => catalog.current().catalog, user, log, exists: existsSync, say,
-    ended: () => void reviews.pass(),
-  });
-  lanes.fixes = fixes;
-  lanes.merges = merges;
-  lanes.conflicts = conflicts;
 
   const shell: Shell = {
     singleInstance(onSecondStart) {
@@ -188,44 +152,21 @@ async function main() {
     hidden: process.argv.includes('--hidden'),
   });
   if (!desktop) return;
-  // Builds the log shows open are watched again before any pass, so a restart keeps one build per
-  // repo; then a pass on each change that may let one start.
-  void lane.start().then(() => {
-    gate.onChange(() => lane.usageChanged());
-    // a repo switched on or off passes at once; GitHub is polled for new tickets every 5 minutes
-    let servedKey = '';
-    repos.onChange(() => {
-      const key = servedRepos(repos.list()).map((r) => r.id).sort().join(' ');
-      if (key !== servedKey) { servedKey = key; void lane.pass(); }
-    });
-    setInterval(() => void lane.pass(), 5 * 60_000);
-  });
-  // An open review the log shows is carried on with first; then a pass on each change that may
-  // let one start, and every minute for PRs and their checks, as today's runner polls them.
-  void reviews.start().then(() => {
-    gate.onChange(() => reviews.usageChanged());
-    repos.onChange(() => void reviews.pass());
-    setInterval(() => void reviews.pass(), 60_000);
-  });
-  // Fix rounds the log shows open are watched again first; then a pass on usage, the repos and
-  // every minute, beside the reviews. Merges and marks pass on the same minute (checks and replies
-  // are read from GitHub), and on the repos changing.
-  void fixes.start().then(() => {
-    gate.onChange(() => fixes.usageChanged());
-    repos.onChange(() => void fixes.pass());
-    setInterval(() => void fixes.pass(), 60_000);
-  });
-  // Conflict rounds the log shows open are watched again first; then a pass on usage, the repos
-  // and every minute (GitHub works out whether a PR conflicts in its own time).
-  void conflicts.start().then(() => {
-    gate.onChange(() => conflicts.usageChanged());
-    repos.onChange(() => void conflicts.pass());
-    setInterval(() => void conflicts.pass(), 60_000);
-  });
-  void merges.pass().then(() => {
-    repos.onChange(() => void merges.pass());
-    setInterval(() => void merges.pass(), 60_000);
-  });
+  // Each pass settles what an earlier one (or a stopped app) left open before it chooses anything,
+  // so a restart is just another pass. The loop holds the state folder's one-run-loop lock, which
+  // the command line's `--once` takes too; while one holds it the loop doesn't start, as a second
+  // Python runner exits.
+  let release: (() => void) | null = null;
+  try {
+    release = runner_lock(state);
+  } catch (e) {
+    if (!(e instanceof RunnerBusy)) throw e;
+    say(`the run loop didn't start: a queue runner is already running (${e.message})`);
+  }
+  if (release) {
+    app.on('will-quit', release);
+    void runner.run_forever((seconds) => wall_sleep(seconds)).catch((e) => say(`the run loop stopped: ${(e as Error).stack ?? e}`));
+  }
   view.onChange((v) => win?.webContents.send(CHANNELS.changed, v));
   // The window only hides; the app lives in the tray until Quit.
   app.on('window-all-closed', () => {});

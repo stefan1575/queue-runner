@@ -179,6 +179,9 @@ export type JobFields = {
   base: string | null;           // a conflict round: the sha of origin/<base> it merged (#91)
   runs: unknown[];               // a rerun: [{id, attempt, url}], each failed Actions run and the
                                  // attempt that failed (#93)
+  choice: Record<string, unknown> | null;   // a build: the model it was launched on ({provider, model,
+                                 // effort}), so a restart charges it to that account (the app's;
+                                 // Python's runner has one account per lane and writes none)
 };
 
 type Required_ = 'id' | 'kind' | 'repo' | 'issue' | 'branch' | 'title' | 'started_at';
@@ -188,7 +191,7 @@ const DEFAULTS: Omit<JobFields, Required_> = {
   outcome: null, commits: [], pr: null, worktree: null, error: null, sha: null, round: null,
   verdict: null, signals: [], run_dir: null, resume_at: null, head: null, stop: null, reason: null,
   answer: null, about: null, question: null, context: null, last_request: null, applied: [],
-  prs: [], cause: null, resume: null, effort: null, reviewer: null, base: null, runs: [],
+  prs: [], cause: null, resume: null, effort: null, reviewer: null, base: null, runs: [], choice: null,
 };
 
 export interface Job extends Readonly<JobFields> {}
@@ -218,7 +221,7 @@ export type StartFields = {
   sha?: string | null; round?: number | null; stop?: string | null; thread_id?: string | null;
   about?: string | null; question?: string | null; head?: string | null; cause?: string | null;
   resume?: Record<string, unknown> | null; reviewer?: string | null; base?: string | null;
-  reason?: string | null; runs?: unknown[] | null;
+  reason?: string | null; runs?: unknown[] | null; choice?: Record<string, unknown> | null;
 };
 
 type Fold = [Job[], Map<string, { repo: string; issue: number | null; on: boolean }>, Set<string>];
@@ -249,20 +252,20 @@ export class JobLog {
 
   started({ kind, repo, issue, branch, title, sha = null, round = null, stop = null, thread_id = null,
     about = null, question = null, head = null, cause = null, resume = null, reviewer = null,
-    base = null, reason = null, runs = null }: StartFields): Job {
+    base = null, reason = null, runs = null, choice = null }: StartFields): Job {
     const at = this._now();
     const stamp_ = at.slice(0, 19).replaceAll('-', '').replaceAll(':', '').replaceAll('T', '-');
     const job = new Job({
       id: `${stamp_}-${kind}-${repo}-${issue ?? 'None'}-${randomUUID().replaceAll('-', '').slice(0, 6)}`, kind,
       repo, issue, branch, title, started_at: at, sha, round, stop, thread_id, about, question,
-      head, cause, resume, reviewer, base, reason, runs: [...(runs ?? [])],
+      head, cause, resume, reviewer, base, reason, runs: [...(runs ?? [])], choice,
     });
     const record: JsonRecord = { event: 'start', job: job.id, kind, repo, issue, branch, title, at };
     if (truthy(sha)) Object.assign(record, { sha, round });
     for (const [k, v] of [['stop', stop], ['thread_id', thread_id], ['about', about],
       ['question', question], ['head', head], ['cause', cause],
       ['resume', resume], ['reviewer', reviewer], ['base', base],
-      ['reason', reason], ['runs', runs]] as const) {
+      ['reason', reason], ['runs', runs], ['choice', choice]] as const) {
       if (truthy(v)) record[k] = v;
     }
     this._append(record);
@@ -296,6 +299,7 @@ export class JobLog {
           cause: get(e, 'cause'), resume: get(e, 'resume'),
           reviewer: get(e, 'reviewer'), base: get(e, 'base'),
           reason: get(e, 'reason'), runs: truthy(e.runs) ? (e.runs as unknown[]) : [],
+          choice: get(e, 'choice'),
         });
         jobs.set(job.id, job);
         if (job.kind === 'build') held.set(heldKey(job.repo, job.issue), { repo: job.repo, issue: job.issue, on: true });
