@@ -12,7 +12,8 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { GhGitHub, ghCli } from '../github.ts';
 import { wall_sleep } from '../run.ts';
-import { Bases, makeRunner, runConfig, servedRepos } from '../run-wiring.ts';
+import { Bases, makeRunner, repoLookup, runConfig, servedRepos } from '../run-wiring.ts';
+import { RunnerBusy, runner_lock } from '../runner-lock.ts';
 import { windowsPlatform } from '../platform/windows.ts';
 import { checkJobs, DEFAULT_JOBS } from '../jobs.ts';
 import { Repositories } from '../repos.ts';
@@ -118,7 +119,7 @@ async function main() {
   const say = (line: string) => console.log(`${new Date().toISOString()} ${line}`);
   const bases = new Bases((g) => github.defaultBranch(g), say);
   const runner = await makeRunner({
-    config: runConfig(() => servedRepos(repos.list(), bases), state), state, settings: () => settings.get(),
+    config: runConfig(() => servedRepos(repos.list(), bases), state, repoLookup(() => repos.list(), bases)), state, settings: () => settings.get(),
     catalog, mcp: t3Doors!.mcp, user: async () => briefName(view.get()) ?? 'the user', out: () => {}, log_line: say,
   });
 
@@ -151,8 +152,20 @@ async function main() {
   });
   if (!desktop) return;
   // Each pass settles what an earlier one (or a stopped app) left open before it chooses anything,
-  // so a restart is just another pass.
-  void runner.run_forever((seconds) => wall_sleep(seconds)).catch((e) => say(`the run loop stopped: ${(e as Error).stack ?? e}`));
+  // so a restart is just another pass. The loop holds the state folder's one-run-loop lock, which
+  // the command line's `--once` takes too; while one holds it the loop doesn't start, as a second
+  // Python runner exits.
+  let release: (() => void) | null = null;
+  try {
+    release = runner_lock(state);
+  } catch (e) {
+    if (!(e instanceof RunnerBusy)) throw e;
+    say(`the run loop didn't start: a queue runner is already running (${e.message})`);
+  }
+  if (release) {
+    app.on('will-quit', release);
+    void runner.run_forever((seconds) => wall_sleep(seconds)).catch((e) => say(`the run loop stopped: ${(e as Error).stack ?? e}`));
+  }
   view.onChange((v) => win?.webContents.send(CHANNELS.changed, v));
   // The window only hides; the app lives in the tray until Quit.
   app.on('window-all-closed', () => {});

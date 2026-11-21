@@ -9,7 +9,7 @@ import { GitCli } from './git-seam.ts';
 import { GhCli } from './github-seam.ts';
 import { kindModels, model } from './jobs.ts';
 import type { Repo as AppRepo } from './repos.ts';
-import { Runner, type Config, type Repo } from './run.ts';
+import { Runner, type Config, type KnownRepo, type Repo } from './run.ts';
 import type { Settings } from './settings.ts';
 import { JobLog } from './state.ts';
 import type { CatalogSource } from './t3/catalog-source.ts';
@@ -19,6 +19,12 @@ import { UsageGate } from './usage-gate.ts';
 
 /** Python's `config.poll_seconds` default: the pause after an idle pass. */
 export const POLL_SECONDS = 300;
+
+/** The run loop's job log in the state folder, in Python's format (`src/state.ts`). Its own file:
+ *  the desktop app's `jobs.jsonl` from before the port is `src/job-log.ts`'s format (a job's repo
+ *  named by T3 project id, its thread in a record of its own), which this log can't read, so it's
+ *  left in place, unread. */
+export const JOB_LOG = 'run-loop-jobs.jsonl';
 
 /** Each served repo's base: its default branch on GitHub, read once (Python's `Repo.base`, which
  *  config.toml names). A repo whose base isn't read yet is left out of the pass, and read again for
@@ -35,7 +41,8 @@ export class Bases {
     this.say = say;
   }
 
-  /** The base of `github` if it's read, starting a read when it isn't. */
+  /** The base of `github` if it's read, starting a read when it isn't (a repo not served is read
+   *  only when a job there needs it). */
   of(github: string): string | null {
     const base = this.known.get(github);
     if (base === undefined) void this.load([github]);
@@ -62,17 +69,38 @@ export class Bases {
 }
 
 /** The served repos (switched to Served, with a GitHub remote), as the run loop's Repos: each named
- *  by its T3 project's title, in its folder, on its base. */
+ *  by its T3 project's title, in its folder, on its base, merged by whom Settings says. */
 export function servedRepos(list: AppRepo[] | null, bases: Bases): Repo[] {
   return (list ?? []).filter((r) => r.served && r.github).flatMap((r) => {
     const base = bases.of(r.github!);
-    return base === null ? [] : [{ name: r.title, github: r.github, path: r.folder, base }];
+    return base === null ? [] : [{ name: r.title, github: r.github, path: r.folder, base, merge: r.merge }];
   });
 }
 
-/** The run loop's Config: the served repos, read each time they're asked for. */
-export function runConfig(repos: () => Repo[], state_dir: string, poll_seconds = POLL_SECONDS): Config {
-  return { get repos() { return repos(); }, state_dir, poll_seconds };
+/** A job's own repo by name, served or not (`Config.lookup`): a repo switched off Served still
+ *  finishes its work. Null while the app can't say (its repos, or that repo's remote, not read
+ *  yet); its base null until it's read. */
+export function repoLookup(list: () => AppRepo[] | null, bases: Bases): (name: string) => KnownRepo | null | undefined {
+  return (name) => {
+    const all = list();
+    if (all === null) return null;
+    const found = all.filter((r) => r.title === name);
+    if (found.some((r) => r.checking)) return null;
+    const r = found.find((x) => x.github);
+    if (!r) return undefined;
+    return { name: r.title, github: r.github, path: r.folder, base: bases.of(r.github!), merge: r.merge };
+  };
+}
+
+/** The run loop's Config: the served repos, read each time they're asked for, and a job's own repo
+ *  looked up by name. */
+export function runConfig(repos: () => Repo[], state_dir: string, lookup?: Config['lookup'], poll_seconds = POLL_SECONDS): Config {
+  return { get repos() { return repos(); }, state_dir, poll_seconds, ...(lookup ? { lookup } : {}) };
+}
+
+/** The run loop's job log in `state`. */
+export function jobLog(state: string): JobLog {
+  return new JobLog(join(state, JOB_LOG));
 }
 
 export type Wiring = {
@@ -98,7 +126,7 @@ export async function makeRunner(w: Wiring): Promise<Runner> {
   };
   return new Runner(w.config, {
     github: new GhCli(), t3: new T3Server(w.mcp, effortOption), git: new GitCli(),
-    jobs: new JobLog(join(w.state, 'jobs.jsonl')), gate, out: w.out, log_line: w.log_line,
+    jobs: jobLog(w.state), gate, out: w.out, log_line: w.log_line,
     job_choice: (kind) => { const c = catalog(); return c ? kindModels(w.settings().jobs, kind, c).choice : null; },
     user: w.user, exists: existsSync,
   });

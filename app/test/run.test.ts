@@ -16,7 +16,8 @@ import { run } from '../src/app.ts';
 import { CostLog } from '../src/cost-log.ts';
 import type { UsageRecord } from '../src/costs.ts';
 import { DEFAULT_JOBS, type Catalog, type ModelChoice } from '../src/jobs.ts';
-import { BUSY, GATED, IDLE, local_minute, Runner, Start, STARTED, type Config, type Did, type Repo } from '../src/run.ts';
+import { BUSY, GATED, IDLE, local_minute, Runner, Start, STARTED, type Config, type Did, type Gate, type KnownRepo, type Repo } from '../src/run.ts';
+import { LOCK_FILE, runner_lock } from '../src/runner-lock.ts';
 import { DEFAULT_SETTINGS, type Settings } from '../src/settings.ts';
 import { JobLog } from '../src/state.ts';
 import type { CatalogSource, CatalogState } from '../src/t3/catalog-source.ts';
@@ -95,7 +96,7 @@ afterEach(async () => {
 });
 
 /** A served repo in the test's folder. */
-const served = (name: string, path: string, github: string | null = `owner/${name}`): Repo => ({ name, github, path, base: 'main' });
+const served = (name: string, path: string, github: string | null = `owner/${name}`): Repo => ({ name, github, path, base: 'main', merge: 'me' });
 
 /** The config, the job log and the command line, with GitHub, T3, git and T3's usage faked (Python's
  *  `RunHarness`): each call makes its Runner and its gate afresh, as `cli.main` does. */
@@ -109,6 +110,8 @@ class Harness {
   gate: UsageGate | null = null;
   lines: string[] = [];
   runner: Runner | null = null;
+  /** `Config.lookup`, as the app wires it (`repoLookup`); none: a job's repo is a served one. */
+  lookup: Config['lookup'] | null = null;
 
   constructor(repos: Repo[], poll_seconds: number, now: Date) {
     this.repos = repos;
@@ -119,7 +122,9 @@ class Harness {
   }
 
   get config(): Config {
-    return { repos: this.repos, state_dir: join(dir, 'state'), poll_seconds: this.poll_seconds };
+    const h = this;
+    return { get repos() { return h.repos; }, state_dir: join(dir, 'state'), poll_seconds: this.poll_seconds,
+      ...(this.lookup ? { lookup: this.lookup } : {}) };
   }
 
   async make(github: any, t3: any, git: any = new FakeGit()): Promise<Runner> {
@@ -138,7 +143,8 @@ class Harness {
       const r = await this.make(github, t3, git);
       r.out = out;
       return r;
-    } }, (s) => { printed += s; });
+    }, lock: () => runner_lock(join(dir, 'state')),
+    release: async () => ({ jobs: this.log, log_line: (l) => this.lines.push(l) }) }, (s) => { printed += s; });
     return [code, printed];
   }
 
@@ -340,8 +346,133 @@ describe('RunTest', () => {
     expect([t3.starts.length, sleeps]).toEqual([1, [60]]);
   });
 
-  // test_a_second_runner_exits_while_one_holds_the_lock is left out: the app's frame keeps one app
-  // at a time (`src/desktop/shell.ts`), and the app has no runner.lock.
+  test('test_a_second_runner_exits_while_one_holds_the_lock', async () => {
+    // the desktop app's run loop holds the state folder's lock (`runner_lock`), as Python's runner holds runner.lock
+    const release = runner_lock(join(dir, 'state'));
+    try {
+      const t3 = new FakeT3();
+      const [code, out] = await h.run_main(['--once'], new FakeGitHubWithPulls({ issues: [issue(4)] }), t3);
+      expect(code).toBe(3);
+      expect(out).toContain('already running');
+      expect([t3.starts, h.log.jobs()]).toEqual([[], []]);
+    } finally {
+      release();
+    }
+  });
+
+  // --- #219's review 1 (F1, F2, F3, F6, F8) ------------------------------------------------
+
+  test("--once frees the lock when its pass ends, and a lock its process left behind is taken over", async () => {
+    const gh = new FakeGitHubWithPulls({ issues: [issue(4)] });
+    await h.run_main(['--once'], gh, new FakeT3([[0, 'completed']]));
+    await expect(readFile(join(dir, 'state', LOCK_FILE), 'utf8')).rejects.toThrow();   // freed
+    await writeFile(join(dir, 'state', LOCK_FILE), '999999999');   // a process that has gone
+    const release = runner_lock(join(dir, 'state'), 42, (pid) => pid === 42);
+    expect(await readFile(join(dir, 'state', LOCK_FILE), 'utf8')).toBe('42');
+    expect(() => runner_lock(join(dir, 'state'), 43, (pid) => pid === 42)).toThrow(/pid 42/);
+    release();
+    runner_lock(join(dir, 'state'), 43, () => true)();
+  });
+
+  test('a left-over build in a repo whose base is not read yet is looked up, not closed, and nothing starts there', async () => {
+    const repo = h.repos[0]!;
+    h.repos = [];   // after a restart: its base isn't read, so it's not among the served repos yet
+    h.lookup = (name): KnownRepo | undefined => (name === repo.name ? { ...repo, base: null } : undefined);
+    const gh = new FakeGitHubWithPulls({ issues: [issue(5)] });
+    const job = h.log.started({ kind: 'build', repo: 'first', issue: 4, branch: 'claude/a-ticket-4', title: 'Queue runner build: first#4' });
+    const t3 = new FakeT3([[0, 'completed']]);
+    t3.add('mcp:old', job.title, 'running');
+    await h.run_main(['--once'], gh, t3);
+    expect([h.log.open_jobs().map((j) => j.id), t3.starts]).toEqual([[job.id], []]);
+    t3.set_status('mcp:old', 'completed');   // it ended while the base is still unread: recorded later
+    const [, out] = await h.run_main(['--once'], gh, t3);
+    expect(out).toContain("it's recorded once first's base is read");
+    expect([h.log.open_jobs().map((j) => j.id), t3.starts]).toEqual([[job.id], []]);
+    h.lookup = (name) => (name === repo.name ? repo : undefined);   // the base is read now
+    h.repos = [repo];
+    await h.run_main(['--once'], gh, t3);
+    expect(h.log.jobs().map((j) => [j.issue, j.thread_id ?? null, j.outcome])).toEqual([[4, 'mcp:old', 'done-no-pr'], [5, 'mcp:t1', 'done-no-pr']]);
+  });
+
+  test("a waiting build the user's answer ran to its end is recorded only once its repo's base is read", async () => {
+    const gh = new FakeGitHubWithPulls({ issues: [issue(4), issue(5)] });
+    const t3 = new FakeT3([[2, 'waiting'], [0, 'completed']]);
+    await h.run_main(['--once'], gh, t3);
+    const repo = h.repos[0]!;
+    h.repos = [];
+    h.lookup = (name) => (name === repo.name ? { ...repo, base: null } : undefined);
+    t3.set_status('mcp:t1', 'completed');   // answered in T3 and ended, after a restart
+    await h.run_main(['--once'], gh, t3);
+    expect([h.log.waiting_jobs().length, t3.starts.length]).toEqual([1, 1]);
+    h.lookup = (name) => (name === repo.name ? repo : undefined);
+    await h.run_main(['--once'], gh, t3);
+    expect(h.log.jobs().map((j) => j.outcome)).toEqual(['done-no-pr']);
+  });
+
+  test("a left-over build is left open while the app hasn't read its repos", async () => {
+    h.repos = [];
+    h.lookup = () => null;   // the repos (or this one's remote) aren't read yet
+    h.log.started({ kind: 'build', repo: 'first', issue: 4, branch: 'claude/a-ticket-4', title: 'Queue runner build: first#4' });
+    const t3 = new FakeT3();
+    const [, out] = await h.run_main(['--once'], new FakeGitHubWithPulls({ issues: [issue(5)] }), t3);
+    expect(out).toContain("first isn't read yet");
+    expect([h.log.open_jobs().length, t3.starts]).toEqual([1, []]);
+  });
+
+  test('a build in a repo switched off Served while it runs is still recorded and settled', async () => {
+    const repo = h.repos[0]!;
+    h.lookup = (name) => (name === repo.name ? repo : undefined);   // the app still knows it
+    class SwitchedOff extends FakeT3 {
+      override async start(...args: Parameters<FakeT3['start']>) {
+        h.repos = [];   // switched off Served mid-build
+        return super.start(...args);
+      }
+    }
+    const t3 = new SwitchedOff([[0, 'completed']]);
+    await h.run_main(['--once'], new FakeGitHubWithPulls({ issues: [issue(4)], pulls_by_branch: { 'claude/a-ticket-4': PR } }), t3);
+    const [job] = h.log.jobs();
+    expect([job!.outcome, job!.thread_id]).toEqual(['done', 'mcp:t1']);
+    expect(t3.settles).toEqual(['mcp:t1']);
+  });
+
+  test("a left-over build counts on the model it was launched on, and its end is told on that model", async () => {
+    const SOL: ModelChoice = { provider: 'codex', model: 'gpt-6.2-sol', effort: 'high' };
+    h.repos = [served('first', dir), served('second', dir)];
+    const job = h.log.started({ kind: 'build', repo: 'first', issue: 4, branch: 'claude/a-ticket-4', title: 'Queue runner build: first#4', choice: SOL });
+    const t3 = new FakeT3();
+    t3.add('mcp:old', job.title, 'running');
+    const calls: unknown[][] = [];
+    const gate: Gate = {
+      pick: (id, kind, elsewhere) => { calls.push(['pick', id, elsewhere]); return { fits: false, until: null, hold: { why: 'reading', provider: 'Claude', checkedAt: null, stale: 'none' } }; },
+      started: () => {}, finished: () => {}, dropped: () => {}, forget: () => {},
+      job_ended: (kind, key, choice) => { calls.push(['job_ended', kind, key, choice]); },
+    };
+    const r = new Runner(h.config, { github: new FakeGitHubWithPulls({ issues: [issue(5)] }) as any, t3, git: new FakeGit() as any, jobs: h.log, gate,
+      now: () => h.now, out: () => {}, log_line: () => {} });
+    await r.run_pass();
+    expect(calls).toEqual([['pick', 'build second#5', [{ id: 'build first#4', kind: 'build', choice: SOL }]]]);
+    t3.set_status('mcp:old', 'completed');
+    calls.length = 0;
+    await r.run_pass();
+    expect(calls[0]).toEqual(['job_ended', 'build', null, SOL]);
+  });
+
+  test('a build records the model it was launched on', async () => {
+    await h.run_main(['--once'], new FakeGitHubWithPulls({ issues: [issue(4)] }), new FakeT3([[0, 'completed']]));
+    expect(h.log.jobs()[0]!.choice).toEqual(CLAUDE);
+  });
+
+  test('--release takes a repo named with spaces, from the job log alone', async () => {
+    h.repos = [served('queue-runner sandbox GitHub', dir)];
+    h.log.started({ kind: 'build', repo: 'queue-runner sandbox GitHub', issue: 4, branch: 'claude/a-ticket-4', title: 't' });
+    // `--release` makes no Runner: no T3 project list, no catalog
+    const [code, out] = await h.run_main(['--release', 'queue-runner sandbox GitHub#4'], null, null);
+    expect([code, h.runner]).toEqual([0, null]);
+    expect(out).toContain('Released queue-runner sandbox GitHub#4');
+    expect(h.log.held_issues('queue-runner sandbox GitHub')).toEqual(new Set());
+    const [bad, said] = await h.run_main(['--release', 'nowhere#4'], null, null);
+    expect([bad, said]).toEqual([2, '--release takes NAME#N with NAME a repo the job log has jobs in.\n']);
+  });
 
   // --- the Sol lane alongside: the reviews ticket's ---
   test.todo('test_once_runs_a_build_and_a_review_alongside (reviews, #222)');

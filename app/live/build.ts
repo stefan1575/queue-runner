@@ -55,7 +55,7 @@ console.log(`Building in ${project.workspaceRoot} on ${choice.provider} ${choice
 // a number of its own each run, so a branch an earlier run left never holds this one
 const number = Number(String(Date.now()).slice(-6));
 const title = 'Add a line to README';
-const repo: Repo = { name: project.title, github: null, path: project.workspaceRoot, base: 'main' };
+const repo: Repo = { name: project.title, github: null, path: project.workspaceRoot, base: 'main', merge: 'me' };
 const issue = new Issue({
   number, title,
   body: 'Add the line `Checked by the queue runner app live test.` at the end of `README.md`, commit it, '

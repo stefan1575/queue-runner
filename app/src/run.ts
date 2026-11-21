@@ -33,10 +33,22 @@ import type { Commit } from './git-seam.ts';
 import type { Comment as SeamComment, GhCli, PullState, Repo as SeamRepo } from './github-seam.ts';
 import { holdText } from './gate.ts';
 import type { JobKind, ModelChoice } from './jobs.ts';
+import type { Merger } from './settings.ts';
 import { NOT_SENT, NOT_STARTED, USAGE_LIMIT, when, type Job, type JobLog } from './state.ts';
 import { find_job_thread, settle_quietly, T3Error, type T3, type Thread } from './t3-seam.ts';
 import type { Cost } from './costs.ts';
-import type { UsageGate } from './usage-gate.ts';
+import type { Elsewhere, UsageGate } from './usage-gate.ts';
+
+/** A job still running that this runner didn't start (`settle`): its label, kind and record. */
+type Busy = [string, string, Job];
+
+/** The model a job was launched on, as its start record has it (`choice`), or null for one whose
+ *  record names none (the gate then takes its kind's model now). */
+export function launched_on(job: Job): ModelChoice | null {
+  const c = job.choice as Partial<ModelChoice> | null;
+  return c && typeof c.provider === 'string' && typeof c.model === 'string'
+    ? { provider: c.provider, model: c.model, effort: c.effort ?? null } : null;
+}
 
 // What a pass did: started (it started jobs), busy (a builder job is still running from an earlier
 // runner, so none was started where it runs, and nothing elsewhere), idle (nothing to start),
@@ -58,13 +70,22 @@ export const BUILDER_KINDS: readonly string[] = ['build', 'fix', 'decision', 'li
 export const FALLBACK_REVIEW = 'review';
 
 /** A served repo (Python's `config.Repo`): its name (T3's project title), `owner/name` on GitHub,
- *  its folder and its base branch. */
+ *  its folder, its base branch and who merges its clean PRs (Settings' choice: the runner, or the
+ *  user, Python's `stefan`). */
 export type Repo = { readonly name: string; readonly github: string | null; readonly path: string; readonly base: string;
-  readonly local_issues?: boolean };
+  readonly merge: Merger; readonly local_issues?: boolean };
 
-/** Python's `Config`, from the app's Settings and Repositories: the served repos, read each time
- *  they're asked for, the state folder and the pause after an idle pass. */
-export type Config = { readonly repos: readonly Repo[]; readonly state_dir: string; readonly poll_seconds: number };
+/** A repo a job may name, served or not (Python's `config.repos`, which keeps a stopped repo for
+ *  finishing its work): its base null while it isn't read yet. */
+export type KnownRepo = Omit<Repo, 'base'> & { readonly base: string | null };
+
+/** Python's `Config`, from the app's Settings and Repositories: the served repos (Python's
+ *  `working`), read each time they're asked for, the state folder and the pause after an idle
+ *  pass. `lookup` finds a job's own repo by name, served or not: undefined when the app has no such
+ *  repo, null while the app can't say yet (its repos or that repo's remote aren't read yet). With
+ *  no `lookup`, a job's repo is one of `repos`. */
+export type Config = { readonly repos: readonly Repo[]; readonly state_dir: string; readonly poll_seconds: number;
+  readonly lookup?: (name: string) => KnownRepo | null | undefined };
 
 export type GitHub = PickerGitHub & Pick<GhCli, 'issue_comments' | 'pull_for_branch' | 'pull'>;
 export type Git = {
@@ -212,7 +233,7 @@ export class Runner {
    *  and in the run loop, when each repo whose job started no thread may be tried again. */
   private _workers = new Map<string, Worker>();
   private _ended = new Signal();
-  private _busy = new Map<string, [string, string]>();
+  private _busy = new Map<string, Busy>();
   /** The jobs the gate let in this pass and not yet in a worker. */
   private _admitted: [string, JobKind | null, string | null][] = [];
   private _rests = false;
@@ -250,8 +271,17 @@ export class Runner {
     this.out(line);
   }
 
-  private _repo(name: string): Repo | undefined {
+  /** A job's own repo, served or not (`Config.lookup`). */
+  private _repo(name: string): KnownRepo | null | undefined {
+    if (this.config.lookup) return this.config.lookup(name);
     return this.config.repos.find((r) => r.name === name);
+  }
+
+  /** A job's own repo with its base, for recording its end; it throws when there's none. */
+  private _based(name: string): Repo {
+    const repo = this._repo(name);
+    if (!repo || repo.base === null) throw new Error(`${name}: the repo or its base isn't known, so a job there can't be recorded`);
+    return repo as Repo;
   }
 
   // --- one pass -------------------------------------------------------------------------
@@ -371,7 +401,7 @@ export class Runner {
    *  after the cost of every builder job still running and every one let in before it this pass
    *  (#50). One that waits is said once per repo (until that changes) and doesn't hold back a later
    *  repo's job that fits. */
-  private _admit(chosen: Start[], busy: Map<string, [string, string]>): Start[] {
+  private _admit(chosen: Start[], busy: Map<string, Busy>): Start[] {
     this._admitted = [];   // an earlier pass's are in their workers by now
     const running = this._running(busy);
     const starts: Start[] = [];
@@ -408,9 +438,9 @@ export class Runner {
    *  a stopped runner left running (`settle`), and the reviewer lane's fallback review open in the
    *  job log (a stopped runner's, before the reviewer lane settles it). This runner's own workers
    *  and the jobs let in this pass the gate counts already: it let them in. */
-  private _running(busy: Map<string, [string, string]>): { id: string; kind: JobKind }[] {
+  private _running(busy: Map<string, Busy>): Elsewhere[] {
     const jobs = [...busy.values()].filter(([, kind]) => BUILDER_KINDS.includes(kind) && kind !== 'live')
-      .map(([label, kind]) => ({ id: label, kind: kind as JobKind }));
+      .map(([label, kind, job]) => ({ id: label, kind: kind as JobKind, choice: launched_on(job) }));
     return [...jobs, ...this._open_reviews().map((label) => ({ id: label, kind: FALLBACK_REVIEW as JobKind }))];
   }
 
@@ -465,7 +495,7 @@ export class Runner {
           this.gate.dropped(start.label);
           // A thread ran though the pass started nothing (a decision whose retry never reached its
           // job): what it spent isn't learned, but no reading before it serves.
-          if (fresh.some((j) => j.thread_id && j.outcome !== NOT_SENT)) this.gate.job_ended(start.kind!);
+          if (fresh.some((j) => j.thread_id && j.outcome !== NOT_SENT)) this.gate.job_ended(start.kind!, null, start.choice);
         }
       }
     } catch (e) {
@@ -482,8 +512,8 @@ export class Runner {
   /** A builder job's thread was seen to end outside a measured pass (`settle`): the next check
    *  waits for a usage reading taken after now (PR 67's review 1, F1). With `key` (a run id), only
    *  the first telling counts. */
-  private _thread_ended(kind: string, key: string | null = null): void {
-    if (this.gate !== null) this.gate.job_ended(kind as JobKind, key);
+  private _thread_ended(job: Job, key: string | null = null): void {
+    if (this.gate !== null) this.gate.job_ended(job.kind as JobKind, key, launched_on(job));
   }
 
   /** The pause after a pass that started nothing, or while jobs run: `poll_seconds`, or less when
@@ -500,8 +530,8 @@ export class Runner {
    *  no other builder job (one per repo, #50) and whose cost the gate counts. A repo with a job
    *  running in one of this runner's own workers is left alone: that job is its worker's to
    *  record. */
-  async settle(): Promise<Map<string, [string, string]>> {
-    const busy = new Map<string, [string, string]>();
+  async settle(): Promise<Map<string, Busy>> {
+    const busy = new Map<string, Busy>();
     this._orphan_review = false;
     const mine = new Set(this._alive());
     for (const job of this.jobs.open_jobs()) {
@@ -517,6 +547,13 @@ export class Runner {
       }
       if (job.kind === 'live') continue;   // the live steps are dropped from the port
       if (job.kind !== 'build' && job.kind !== 'fix') continue;   // an open review or merge is the reviewer lane's
+      const repo = this._repo(job.repo);
+      if (repo === null) {
+        // The app hasn't read its repos (or this one's remote) yet: no decision until it has.
+        this.say(`${name_of(job)}: ${job.repo} isn't read yet; no other builder job starts there until it is`);
+        busy.set(job.repo, [name_of(job), job.kind, job]);
+        continue;
+      }
       const thread = await this._find_thread(job);
       if (thread === null) {
         this.jobs.ended(job.id, { exit_code: null, outcome: NOT_STARTED, error: 'No T3 thread was found for this job.' });
@@ -524,10 +561,14 @@ export class Runner {
         this._uncontinue(job);
       } else if (thread.active && !thread.pending_requests) {
         this.say(`${name_of(job)} is still running in ${thread.link}: no other builder job starts in ${job.repo}`);
-        busy.set(job.repo, [name_of(job), job.kind]);
+        busy.set(job.repo, [name_of(job), job.kind, job]);
+      } else if (repo && repo.base === null) {
+        // Its end is recorded against its base, which isn't read yet: the next pass records it.
+        this.say(`${name_of(job)} has ended in ${thread.link}; it's recorded once ${job.repo}'s base is read, and no other builder job starts there until then`);
+        busy.set(job.repo, [name_of(job), job.kind, job]);
       } else {
         await this.finish(job, thread.thread_id, _exit_code(thread), thread.status, null, thread.latest_run_id);
-        this._thread_ended(job.kind);
+        this._thread_ended(job);
       }
     }
     for (const job of this.jobs.waiting_jobs()) {
@@ -539,18 +580,22 @@ export class Runner {
         if (!(e instanceof T3Error)) throw e;
         // The user may have answered it and set it running: start nothing until T3 says.
         this.say(`${name_of(job)}: cannot read ${job.thread_id} (${e.message}); no other builder job starts in ${job.repo}`);
-        busy.set(job.repo, [name_of(job), job.kind]);
+        busy.set(job.repo, [name_of(job), job.kind, job]);
         continue;
       }
       if (thread.active && !thread.pending_requests) {
-        busy.set(job.repo, [name_of(job), job.kind]);   // answered, and running again
+        busy.set(job.repo, [name_of(job), job.kind, job]);   // answered, and running again
       } else if (_exit_code(thread) === 2) {
         // A run newer than the one that asked ran on the user's answer and asks again, seen
         // running or not (#85): the gate is told once, keyed on that run.
-        if (thread.latest_run_id && thread.latest_run_id !== job.run_id) this._thread_ended(job.kind, thread.latest_run_id);
+        if (thread.latest_run_id && thread.latest_run_id !== job.run_id) this._thread_ended(job, thread.latest_run_id);
+      } else if (this._repo(job.repo) === null || this._repo(job.repo)?.base === null) {
+        // Its end is recorded against its repo's base, not read yet: the next pass records it.
+        this.say(`${name_of(job)} has ended in ${thread.link}; it's recorded once ${job.repo}'s base is read, and no other builder job starts there until then`);
+        busy.set(job.repo, [name_of(job), job.kind, job]);
       } else {
         await this.finish(job, thread.thread_id, _exit_code(thread), thread.status, null, thread.latest_run_id);
-        this._thread_ended(job.kind);   // the user's answer set it running again, and it ended
+        this._thread_ended(job);   // the user's answer set it running again, and it ended
       }
     }
     this._busy = busy;
@@ -599,7 +644,8 @@ export class Runner {
     const n = build.issue.number;
     this.titles.set(`${repo.name}#${n}`, build.issue.title);
     await this.git.fetch(repo.path, repo.base);
-    const job = this.jobs.started({ kind: 'build', repo: repo.name, issue: n, branch: build.branch, title: job_title(repo, n) });
+    const job = this.jobs.started({ kind: 'build', repo: repo.name, issue: n, branch: build.branch, title: job_title(repo, n),
+      choice });
     if (await this.git.has_branch(repo.path, build.branch)) {
       this.jobs.ended(job.id, { exit_code: null, outcome: 'branch-exists', error: `A local branch ${build.branch} is left from an earlier run.` });
       this.say(`${name_of(job)} not started: local branch ${build.branch} already exists (held until released)`);
@@ -654,7 +700,7 @@ export class Runner {
    *  `waiting`. */
   async finish_fix(job: Job, thread_id: string, exit_code: number, status: string, error: string | null,
     run_id: string | null): Promise<Job> {
-    const repo = this._repo(job.repo)!;
+    const repo = this._based(job.repo);
     let link: string | null = null;
     let worktree: string | null = null;
     let head: string | null = null;
@@ -694,7 +740,7 @@ export class Runner {
   async finish(job: Job, thread_id: string, exit_code: number, status: string, error: string | null,
     run_id: string | null): Promise<Job> {
     if (job.kind === 'fix') return this.finish_fix(job, thread_id, exit_code, status, error, run_id);
-    const repo = this._repo(job.repo)!;
+    const repo = this._based(job.repo);
     let link: string | null = null;
     let worktree: string | null = null;
     try {

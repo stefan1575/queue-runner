@@ -2,7 +2,8 @@ import { join } from 'node:path';
 import { run } from './app.ts';
 import { GhGitHub } from './github.ts';
 import { listProjects } from './projects.ts';
-import { Bases, firstCatalog, makeRunner, runConfig, servedRepos } from './run-wiring.ts';
+import { Bases, firstCatalog, jobLog, makeRunner, repoLookup, runConfig, servedRepos } from './run-wiring.ts';
+import { runner_lock } from './runner-lock.ts';
 import { SettingsStore } from './settings.ts';
 import { APP_DATA_NAME, savedStateFolder } from './state-folder.ts';
 import { T3Catalog } from './t3/catalog-source.ts';
@@ -18,10 +19,14 @@ const ws = new T3Ws(address, cli, fetchHttp, nodeConnect);
 const github = new GhGitHub();
 const started: { catalog: T3Catalog | null } = { catalog: null };
 
+/** The desktop app's own state folder. */
+const stateDir = () => savedStateFolder(join(process.env.APPDATA ?? '', APP_DATA_NAME, 'machine.json'));
+const stamp = (line: string) => console.error(`${new Date().toISOString()} ${line}`);
+
 /** The run loop on the desktop app's own state folder and settings, its served repos as T3 and gh
- *  name them now (`--once`, `--release`). What it says goes to the output and the app's log line. */
+ *  name them now (`--once`). What it says goes to the output and the app's log line. */
 async function runner(out: (line: string) => void) {
-  const state = savedStateFolder(join(process.env.APPDATA ?? '', APP_DATA_NAME, 'machine.json'));
+  const state = stateDir();
   const settings = await SettingsStore.open(state);
   const saved = settings.get().repos ?? {};
   const projects = await listProjects(mcp, github);
@@ -34,15 +39,17 @@ async function runner(out: (line: string) => void) {
   const catalog = T3Catalog.start(ws);
   started.catalog = catalog;
   await firstCatalog(catalog);
-  const stamp = (line: string) => console.error(`${new Date().toISOString()} ${line}`);
   return makeRunner({
-    config: runConfig(() => servedRepos(repos, bases), state), state, settings: () => settings.get(), catalog, mcp,
+    config: runConfig(() => servedRepos(repos, bases), state, repoLookup(() => repos, bases)), state, settings: () => settings.get(), catalog, mcp,
     user: async () => settings.get().name ?? 'the user', out, log_line: stamp,
   });
 }
 
 try {
-  process.exitCode = await run(process.argv.slice(2), { mcp, ws, github, runner }, (s) => process.stdout.write(s));
+  process.exitCode = await run(process.argv.slice(2), {
+    mcp, ws, github, runner, lock: () => runner_lock(stateDir()),
+    release: async () => ({ jobs: jobLog(stateDir()), log_line: stamp }),
+  }, (s) => process.stdout.write(s));
 } catch (e) {
   if (!(e instanceof T3Error)) throw e;
   process.stderr.write(`${e.message}\n`);
