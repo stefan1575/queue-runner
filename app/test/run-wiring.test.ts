@@ -5,7 +5,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import type { Repo as AppRepo } from '../src/repos.ts';
-import { Bases, JOB_LOG, jobLog, repoLookup, runConfig, servedRepos } from '../src/run-wiring.ts';
+import { Bases, firstCatalog, JOB_LOG, jobLog, repoLookup, runConfig, servedRepos, SharedTitles } from '../src/run-wiring.ts';
+import { T3Catalog } from '../src/t3/catalog-source.ts';
 
 let dir: string;
 beforeEach(async () => {
@@ -33,7 +34,7 @@ async function bases(known: Record<string, string>, ...first: string[]) {
 describe('the config', () => {
   test("a served repo carries Settings' choice of who merges (#219 F9)", async () => {
     const b = await bases({ 'owner/a': 'main', 'owner/b': 'trunk' }, 'owner/a', 'owner/b');
-    expect(servedRepos([repo('a', { merge: 'runner' }), repo('b')], b)).toEqual([
+    expect(servedRepos([repo('a', { merge: 'runner' }), repo('b')], b, new SharedTitles(() => {}))).toEqual([
       { name: 'a', github: 'owner/a', path: 'C:/code/a', base: 'main', merge: 'runner' },
       { name: 'b', github: 'owner/b', path: 'C:/code/b', base: 'trunk', merge: 'me' },
     ]);
@@ -52,6 +53,34 @@ describe('the config', () => {
     expect(lookup('reading')).toBeNull();   // its remote is still being read
     expect(lookup('gone')).toBeUndefined();
     expect(runConfig(() => [], dir, lookup).lookup).toBe(lookup);
+  });
+
+  test("two T3 projects with one title aren't served, and a job naming it is left undecided, said once (#219 F11)", async () => {
+    const b = await bases({ 'owner/one': 'main', 'owner/two': 'main', 'owner/b': 'main' }, 'owner/one', 'owner/two', 'owner/b');
+    const said: string[] = [];
+    const titles = new SharedTitles((l) => said.push(l));
+    const list = [repo('a', { id: 'p1', github: 'owner/one', folder: 'C:/one/a' }), repo('a', { id: 'p2', github: 'owner/two', folder: 'C:/two/a' }), repo('b')];
+    expect(servedRepos(list, b, titles)).toEqual([{ name: 'b', github: 'owner/b', path: 'C:/code/b', base: 'main', merge: 'me' }]);
+    expect(servedRepos(list, b, titles)).toHaveLength(1);
+    expect(said).toEqual(['2 T3 projects are titled "a" (C:/one/a, C:/two/a): none of them is served until all but one are renamed, as the run loop names a repo by its title']);
+    expect(repoLookup(() => list, b)('a')).toBeNull();   // neither repo's GitHub is the job's for sure
+    const renamed = [list[0]!, { ...list[1]!, title: 'a2' }, list[2]!];
+    expect(servedRepos(renamed, b, titles).map((r) => r.github)).toEqual(['owner/one', 'owner/two', 'owner/b']);
+    expect(repoLookup(() => renamed, b)('a')).toMatchObject({ github: 'owner/one' });
+  });
+
+  test("--once's wait for T3's models ends when T3 refuses the stream, with why (#219 F12)", async () => {
+    const ws = { subscribe: () => ({ close: () => {}, done: Promise.reject(new Error('T3 refused the WebSocket')) }) };
+    const catalog = T3Catalog.start(ws as any, 60_000);
+    try {
+      let got: string | null | 'still waiting' = 'still waiting';
+      void firstCatalog(catalog).then((why) => { got = why; });
+      for (let i = 0; i < 10; i++) await Promise.resolve();   // the refusal and the wait's answer settle
+      expect(got).toBe('T3 refused the WebSocket');
+      expect(await firstCatalog(catalog)).toBe('T3 refused the WebSocket');   // already failed: at once
+    } finally {
+      catalog.stop();
+    }
   });
 
   test("the run loop's job log is its own file, and the desktop app's old jobs.jsonl is left unread (#219 F4)", async () => {

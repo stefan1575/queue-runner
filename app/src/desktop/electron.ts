@@ -12,7 +12,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { GhGitHub, ghCli } from '../github.ts';
 import { wall_sleep } from '../run.ts';
-import { Bases, makeRunner, repoLookup, runConfig, servedRepos } from '../run-wiring.ts';
+import { Bases, makeRunner, repoLookup, runConfig, servedRepos, SharedTitles } from '../run-wiring.ts';
 import { RunnerBusy, runner_lock } from '../runner-lock.ts';
 import { windowsPlatform } from '../platform/windows.ts';
 import { checkJobs, DEFAULT_JOBS } from '../jobs.ts';
@@ -118,8 +118,9 @@ async function main() {
   // sandboxes are ever served (Rules).
   const say = (line: string) => console.log(`${new Date().toISOString()} ${line}`);
   const bases = new Bases((g) => github.defaultBranch(g), say);
+  const titles = new SharedTitles(say);
   const runner = await makeRunner({
-    config: runConfig(() => servedRepos(repos.list(), bases), state, repoLookup(() => repos.list(), bases)), state, settings: () => settings.get(),
+    config: runConfig(() => servedRepos(repos.list(), bases, titles), state, repoLookup(() => repos.list(), bases)), state, settings: () => settings.get(),
     catalog, mcp: t3Doors!.mcp, user: async () => briefName(view.get()) ?? 'the user', out: () => {}, log_line: say,
   });
 

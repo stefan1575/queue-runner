@@ -368,7 +368,9 @@ comment, as in Python, and `docs/claude-lane.md` is the behaviour.
   keeps a stopped repo: a repo switched off Served finishes and records its running work. While
   the app hasn't read its repos, that repo's remote or its base, a job left open there isn't
   taken as gone: its thread is looked up when the folder is known, and the repo starts nothing
-  until its end can be recorded.
+  until its end can be recorded. A title two T3 projects share names no one repo (config.toml
+  names each once): none of those projects is served and a job naming that title is left
+  undecided until all but one are renamed, which the loop says once each time it changes.
 - **Its job log** is `run-loop-jobs.jsonl` in the state folder, in Python's format (The job log,
   below). The desktop app's `jobs.jsonl` from before the port is `src/job-log.ts`'s format (a job's
   repo named by T3 project id), so it's left in place and unread.
@@ -380,7 +382,9 @@ comment, as in Python, and `docs/claude-lane.md` is the behaviour.
   releases a held issue, as `cli.py` has them, on the desktop app's state folder and settings.
   `--once` is real: it starts threads. `--release` takes NAME, a T3 project's title (spaces and
   all), when the job log has jobs there, and writes the release from the job log alone, with no
-  T3 or GitHub.
+  T3 or GitHub. When T3 refuses the stream that names its providers and models, `--once` says so
+  and runs its pass on what it could read, the usage gate starting no job, then exits, as Python's
+  `--once` runs on past a failed T3 read.
 - **One run loop at a time** (Python's `runner.lock`, `src/runner-lock.ts`): the desktop app's loop
   holds `run-loop.lock` in the state folder, and `--once` takes it for its pass. While one holds
   it, `--once` exits 3 ("A queue runner is already running") and the desktop app doesn't start its

@@ -2,7 +2,7 @@ import { join } from 'node:path';
 import { run } from './app.ts';
 import { GhGitHub } from './github.ts';
 import { listProjects } from './projects.ts';
-import { Bases, firstCatalog, jobLog, makeRunner, repoLookup, runConfig, servedRepos } from './run-wiring.ts';
+import { Bases, firstCatalog, jobLog, makeRunner, repoLookup, runConfig, servedRepos, SharedTitles } from './run-wiring.ts';
 import { runner_lock } from './runner-lock.ts';
 import { SettingsStore } from './settings.ts';
 import { APP_DATA_NAME, savedStateFolder } from './state-folder.ts';
@@ -38,9 +38,11 @@ async function runner(out: (line: string) => void) {
   await bases.load(repos.filter((r) => r.served && r.github).map((r) => r.github!));
   const catalog = T3Catalog.start(ws);
   started.catalog = catalog;
-  await firstCatalog(catalog);
+  const unread = await firstCatalog(catalog);
+  if (unread !== null) out(`T3's providers and models couldn't be read (${unread}); the usage gate starts no job this pass`);
+  const titles = new SharedTitles(out);
   return makeRunner({
-    config: runConfig(() => servedRepos(repos, bases), state, repoLookup(() => repos, bases)), state, settings: () => settings.get(), catalog, mcp,
+    config: runConfig(() => servedRepos(repos, bases, titles), state, repoLookup(() => repos, bases)), state, settings: () => settings.get(), catalog, mcp,
     user: async () => settings.get().name ?? 'the user', out, log_line: stamp,
   });
 }

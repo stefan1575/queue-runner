@@ -68,10 +68,45 @@ export class Bases {
   }
 }
 
-/** The served repos (switched to Served, with a GitHub remote), as the run loop's Repos: each named
- *  by its T3 project's title, in its folder, on its base, merged by whom Settings says. */
-export function servedRepos(list: AppRepo[] | null, bases: Bases): Repo[] {
-  return (list ?? []).filter((r) => r.served && r.github).flatMap((r) => {
+/** The titles two or more of T3's projects share. The run loop names a repo by its T3 project's
+ *  title (Python's `Repo.name`, which config.toml names once each), so a shared title can't say
+ *  which repo a job is in: those projects aren't served, and a job naming that title is left
+ *  undecided, until one is renamed. Said once each time the shared titles change. */
+export class SharedTitles {
+  private said = '';
+  private say: (line: string) => void;
+
+  constructor(say: (line: string) => void) {
+    this.say = say;
+  }
+
+  /** The shared titles in `list`, saying them when they've changed. */
+  check(list: AppRepo[] | null): Set<string> {
+    const shared = sharedTitles(list);
+    const text = [...shared].sort().map((t) => {
+      const same = (list ?? []).filter((r) => r.title === t);
+      return `${same.length} T3 projects are titled "${t}" (${same.map((r) => r.folder).join(', ')}): none of them is served until all but one are renamed, as the run loop names a repo by its title`;
+    }).join('\n');
+    if (text !== this.said && text) this.say(text);
+    this.said = text;
+    return shared;
+  }
+}
+
+/** The titles two or more projects in `list` share. */
+export function sharedTitles(list: AppRepo[] | null): Set<string> {
+  const seen = new Set<string>();
+  const shared = new Set<string>();
+  for (const r of list ?? []) (seen.has(r.title) ? shared : seen).add(r.title);
+  return shared;
+}
+
+/** The served repos (switched to Served, with a GitHub remote, a title no other project has), as
+ *  the run loop's Repos: each named by its T3 project's title, in its folder, on its base, merged by
+ *  whom Settings says. */
+export function servedRepos(list: AppRepo[] | null, bases: Bases, titles: SharedTitles): Repo[] {
+  const shared = titles.check(list);
+  return (list ?? []).filter((r) => r.served && r.github && !shared.has(r.title)).flatMap((r) => {
     const base = bases.of(r.github!);
     return base === null ? [] : [{ name: r.title, github: r.github, path: r.folder, base, merge: r.merge }];
   });
@@ -79,13 +114,13 @@ export function servedRepos(list: AppRepo[] | null, bases: Bases): Repo[] {
 
 /** A job's own repo by name, served or not (`Config.lookup`): a repo switched off Served still
  *  finishes its work. Null while the app can't say (its repos, or that repo's remote, not read
- *  yet); its base null until it's read. */
+ *  yet, or two projects share that title); its base null until it's read. */
 export function repoLookup(list: () => AppRepo[] | null, bases: Bases): (name: string) => KnownRepo | null | undefined {
   return (name) => {
     const all = list();
     if (all === null) return null;
     const found = all.filter((r) => r.title === name);
-    if (found.some((r) => r.checking)) return null;
+    if (found.length > 1 || found.some((r) => r.checking)) return null;
     const r = found.find((x) => x.github);
     if (!r) return undefined;
     return { name: r.title, github: r.github, path: r.folder, base: bases.of(r.github!), merge: r.merge };
@@ -132,14 +167,19 @@ export async function makeRunner(w: Wiring): Promise<Runner> {
   });
 }
 
-/** Until T3 has named its providers and models: the gate decides nothing before. */
-export function firstCatalog(source: CatalogSource): Promise<void> {
-  if (source.current().catalog) return Promise.resolve();
+/** Until T3 has named its providers and models, or has failed to (the gate decides nothing before):
+ *  null once it has, else why it couldn't be read. The source asks again later; the desktop app
+ *  doesn't wait on this, and `--once` runs its pass on what it could read (the gate holds every
+ *  start while T3's models are unread), as Python's `--once` runs on past a failed T3 read. */
+export function firstCatalog(source: CatalogSource): Promise<string | null> {
+  const now = source.current();
+  if (now.catalog) return Promise.resolve(null);
+  if (now.error) return Promise.resolve(now.error);
   return new Promise((resolve) => {
     const off = source.onChange((s) => {
-      if (!s.catalog) return;
+      if (!s.catalog && !s.error) return;
       off();
-      resolve();
+      resolve(s.catalog ? null : s.error!);
     });
   });
 }
