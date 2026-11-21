@@ -309,8 +309,9 @@ loop, below); the tests drive it on fake T3's events.
   an hour when T3 gave none, so the next job of the kind goes to its fallback (#155 F22). A reading
   T3 takes after the hold began decides instead, and one with room ends it, so a reset credit
   sends jobs back to the provider (#155 F25); a provider T3 reads no usage for has no such
-  reading and stays held to the reset. A start restores these holds from the job log's ends
-  (`UsageGate.limitsFrom`), under the same rule.
+  reading and stays held to the reset. These holds are the gate's own and a restart starts with
+  none: after one, the run loop waits on a job the log has ended on a usage limit until its
+  `resume_at` (`Runner.choose`, as Python's does).
 - **Which model** (`UsageGate.pick`): the kind's own; while that doesn't fit, its fallback if it
   has one and that fits (#152); else held with its own model's reason. `holds()` keeps each held
   job's reason and since when, for the dashboard.
@@ -356,18 +357,35 @@ comment, as in Python, and `docs/claude-lane.md` is the behaviour.
   job let in, `finished` once its thread ran, `dropped` for one that reached no thread, and
   `job_ended` for a thread seen to end outside a pass (a stopped runner's job settled, one the
   user answered in T3), so the next job waits for T3's next reading. The jobs a stopped runner
-  left running are passed to `pick`, each at its kind's expected cost.
+  left running are passed to `pick`, each on the model its start record says it was launched on
+  (`choice`, the app's own field: Python's lanes have one account each and write none) at its
+  expected cost there, and one seen to end holds that model's login for T3's next reading.
 - **The config** (`src/run-wiring.ts`) is Python's `Config` and `Repo` from Settings and
   Repositories: the repos switched to Served with a GitHub remote, each named by its T3 project's
   title, in its folder, on its base, GitHub's default branch read once (a repo whose base can't be
-  read gets no job until it can). The pause after an idle pass is Python's 300 seconds.
+  read gets no job until it can), and who merges its clean PRs. The pause after an idle pass is
+  Python's 300 seconds. A job's own repo is looked up served or not (`Config.lookup`), as Python
+  keeps a stopped repo: a repo switched off Served finishes and records its running work. While
+  the app hasn't read its repos, that repo's remote or its base, a job left open there isn't
+  taken as gone: its thread is looked up when the folder is known, and the repo starts nothing
+  until its end can be recorded.
+- **Its job log** is `run-loop-jobs.jsonl` in the state folder, in Python's format (The job log,
+  below). The desktop app's `jobs.jsonl` from before the port is `src/job-log.ts`'s format (a job's
+  repo named by T3 project id), so it's left in place and unread.
 - **Names:** the lanes are the builder's and the reviewer's (#68's rule), where Python says Claude
   and Sol; a review job's `reviewer` names the fallback (Python's `OPUS_KINDS`, the only values it
   writes there).
 - **Where it runs:** the desktop app runs `run_forever` (`src/desktop/electron.ts`), its log the
   console for now. The command line's `--once` runs one pass of each lane and `--release NAME#N`
   releases a held issue, as `cli.py` has them, on the desktop app's state folder and settings.
-  `--once` is real: it starts threads.
+  `--once` is real: it starts threads. `--release` takes NAME, a T3 project's title (spaces and
+  all), when the job log has jobs there, and writes the release from the job log alone, with no
+  T3 or GitHub.
+- **One run loop at a time** (Python's `runner.lock`, `src/runner-lock.ts`): the desktop app's loop
+  holds `run-loop.lock` in the state folder, and `--once` takes it for its pass. While one holds
+  it, `--once` exits 3 ("A queue runner is already running") and the desktop app doesn't start its
+  loop, as a second Python runner exits. Node has no byte lock, so the file holds its holder's
+  pid, and one whose process has gone is taken over.
 
 ## Reviews
 
@@ -646,7 +664,7 @@ none interleaves with another and Python's per-file lock has nothing to guard. `
 `Date`, which has no offset of its own: a stamp with one is that instant, a stamp with none is
 this PC's local time, as in Python. A test passes the log its own clock.
 
-The run loop writes it (#219). The old review, fix, merge and conflict lanes' `src/job-log.ts`
+The run loop writes it, as `run-loop-jobs.jsonl` (#219; The run loop, Its job log). The old review, fix, merge and conflict lanes' `src/job-log.ts`
 stays, with them, until their ports (#222, #223, #224) remove it.
 
 ## The GitHub seam
