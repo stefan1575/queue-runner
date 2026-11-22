@@ -34,6 +34,19 @@ jobs:
           cache: pnpm
           cache-dependency-path: app/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
+      # DIAG #273 (temporary)
+      - name: diag bash
+        run: node diag/diag-273.mjs
+      - name: diag pwsh
+        shell: pwsh
+        run: node diag/diag-273.mjs
+      - name: git-seam under bash
+        continue-on-error: true
+        run: pnpm exec vitest run test/git-seam.test.ts
+      - name: git-seam under pwsh
+        continue-on-error: true
+        shell: pwsh
+        run: pnpm exec vitest run test/git-seam.test.ts
       - run: pnpm typecheck
       - run: pnpm test
       # The tag names the version (v0.1.0 is 0.1.0); a PR's build keeps package.json's.
