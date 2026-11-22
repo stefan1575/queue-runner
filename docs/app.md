@@ -784,7 +784,10 @@ the same JSON-RPC call, with Python's names: `Gate`, `decide`, `Cost`, `CostBook
 `Reading`, `UsageError`, `CodexUsage`, `CodexUsageError` and the rest. `sol.py`'s `LimitWindow`
 and `Limits` are in `src/codex-usage.ts` until the Sol port (#222). What each decides is the
 module's own comment, as in Python. The three files name the providers as Python's do, so
-`test/no-model-names.test.ts` passes them by name.
+`test/no-model-names.test.ts` passes them by name. `tests/test_usage_refresh.py`'s cases test
+control.json, the dashboard's server, the snapshot and the dashboard's sample, so they are
+pending in `test/usage-refresh.test.ts` until #229, #230 and #235 turn them on; `--gate` moved to
+#229.
 
 The differences are TypeScript's only. Every `CachedUsage` method is async and queues on one
 promise lock, where Python's hold a thread lock through the endpoint's call: a caller still waits
