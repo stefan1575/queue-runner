@@ -8,6 +8,21 @@ import { join } from 'node:path';
 import { describe, expect, it, test } from 'vitest';
 import { EVIDENCE, read_template, TEMPLATES } from '../src/build-brief.ts';
 
+// Python's patterns, spelled out so JavaScript matches exactly what Python's `re` matches (checked
+// against Python over every code point and 100,000 mixed strings): its `\w` is Unicode letters,
+// numbers and `_`, its `\b` is the edge of those, its `\s` takes U+001C to U+001F and U+0085 but
+// not U+FEFF, `(?i)` folds `s` to U+017F, `k` to U+212A and `i` to U+0130 and U+0131, and `(?m)^`
+// starts a line only after `\n`.
+const WORD = String.raw`[\p{L}\p{N}_]`;
+const EDGE = String.raw`(?:(?<=${WORD})(?!${WORD})|(?<!${WORD})(?=${WORD}))`;
+const SPACE = String.raw`[\t\n\v\f\r\x1c-\x20\x85\xa0  -     　]`;
+// r'(?i)\bskills?\b'
+const SKILL = new RegExp(String.raw`${EDGE}[sSſ][kKK][iIİı][lL][lL][sSſ]?${EDGE}`, 'u');
+// r'(?m)^\s*/[a-z][\w-]*\b'
+const SLASH_LINE = new RegExp(String.raw`(?<![^\n])${SPACE}*\/[a-z][\p{L}\p{N}_\-]*${EDGE}`, 'u');
+// r'`/[a-z][\w-]*`'
+const SLASH_INLINE = /`\/[a-z][\p{L}\p{N}_-]*`/u;
+
 function templates(): Record<string, string> {
   return Object.fromEntries(readdirSync(TEMPLATES).filter((name) => name.endsWith('.md'))
     .map((name) => [name, read_template(join(TEMPLATES, name))]));
@@ -20,15 +35,18 @@ describe('TemplatesTest', () => {
 
   test('no template names a skill', () => {
     for (const [name, text] of Object.entries(templates())) {
-      expect(text, name).not.toMatch(/\bskills?\b/i);
+      expect(text, name).not.toMatch(SKILL);
     }
+    expect('ſkill').toMatch(SKILL);   // Python's (?i) folds U+017F to `s`
   });
 
   test('no template starts a slash command', () => {
     for (const [name, text] of Object.entries(templates())) {
-      expect(text, name).not.toMatch(/^\s*\/[a-z][\w-]*\b/m);
-      expect(text, name).not.toMatch(/`\/[a-z][\w-]*`/);
+      expect(text, name).not.toMatch(SLASH_LINE);
+      expect(text, name).not.toMatch(SLASH_INLINE);
     }
+    expect('`/café`').toMatch(SLASH_INLINE);   // Python's `\w` is Unicode
+    expect('\x85/cmd').toMatch(SLASH_LINE);        // Python's `\s` takes U+0085
   });
 
   test('no template points outside the repo', () => {
