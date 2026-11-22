@@ -28,7 +28,6 @@ from .fallback import OPUS_KINDS
 from .gate import CLAUDE_KINDS, FALLBACK_REVIEW
 from . import limits as lim
 from .lock import RunnerBusy, runner_lock  # noqa: F401 (the CLI takes them from here)
-from .merge import Merger
 from .picker import BuildJob, pick
 from .review import Reviewer
 from .snapshot import Wait

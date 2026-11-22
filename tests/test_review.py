@@ -1,12 +1,11 @@
 """The Sol lane: which open PRs it adopts, the brief it builds from sources, and a review whose
-comment, sol-review status, follow-up issues and PR body row are posted, with GitHub, git and Sol
+comment, sol-review status and follow-up issues are posted, with GitHub, git and Sol
 faked: every post is checked against FakeGitHubForReviews.posts."""
 import dataclasses
 import datetime
 import glob
 import json
 import os
-import re
 import tempfile
 import unittest
 
