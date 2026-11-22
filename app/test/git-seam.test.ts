@@ -62,7 +62,7 @@ describe('GitCliTest', { timeout: 30_000 }, () => {
     await commit('b.txt', 'two', 'Add b', wt);
     head = git(wt, 'rev-parse', 'HEAD');
     cli = new GitCli();
-  });
+  }, 30_000); // the describe's timeout is the cases' only; this set-up runs real git too (#269)
 
   test('test_log_and_diffstat_between_two_commits', async () => {
     expect(await cli.log(repo, base, head)).toStrictEqual([{ sha: head, subject: 'Add b' }]);
