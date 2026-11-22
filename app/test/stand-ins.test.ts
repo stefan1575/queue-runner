@@ -145,3 +145,33 @@ describe('limit recovery (#227)', () => {
     expect(h.runner_log()).not.toContain('failed');
   });
 });
+
+describe('the switches (#229)', () => {
+  const pause = (lanes: unknown) => JSON.stringify({ version: 1, written_at: '2026-11-23T11:58:00+08:00', lanes });
+
+  test("a control.json Python's --pause wrote stops the Claude lane: the ready ticket waits", async () => {
+    const h = new Harness();
+    writeFileSync(join(h.state, 'control.json'), pause({ claude: { stop: 'after-job', at: '2026-11-23T11:58:00+08:00' } }), 'utf8');
+    const t3 = new FakeT3([[0, 'completed']]);
+    const [, out] = await h.once(new FakeGitHubWithPulls({ issues: [issue(4)] }), t3);
+    expect(t3.starts).toEqual([]);
+    expect(out).toContain('The Claude lane is stopped by Stefan: it starts no job');
+  });
+
+  test('once resumed it starts the ticket', async () => {
+    const h = new Harness();
+    writeFileSync(join(h.state, 'control.json'), pause({ claude: { stop: null, at: '2026-11-23T11:59:00+08:00' } }), 'utf8');
+    const t3 = new FakeT3([[0, 'completed']]);
+    await h.once(new FakeGitHubWithPulls({ issues: [issue(4)] }), t3);
+    expect(t3.starts).toHaveLength(1);
+  });
+
+  test('an unreadable control.json starts nothing', async () => {
+    const h = new Harness();
+    writeFileSync(join(h.state, 'control.json'), pause({ claude: { at: '2026-11-23T11:58:00+08:00' } }), 'utf8');   // no `stop`
+    const t3 = new FakeT3([[0, 'completed']]);
+    const [, out] = await h.once(new FakeGitHubWithPulls({ issues: [issue(4)] }), t3);
+    expect(t3.starts).toEqual([]);
+    expect(out).toContain('Neither lane starts anything: control.json is unreadable (lane "claude" is not');
+  });
+});

@@ -19,6 +19,7 @@ import { FakeT3, type Outcome } from './fakes-t3.ts';
 
 const HOUR = 3_600_000, DAY = 24 * HOUR;
 const NOW = new Date('2026-11-15T12:00:00Z');
+const WRITTEN = '2026-11-15T19:58:00+08:00';
 const ROOM = new Usage(new Window(0, null), new Window(0, null));
 
 class Done extends Error {}
@@ -110,6 +111,10 @@ path = "${this.dir}/${name}"
       code = null;
     }
     return [code, out];
+  }
+
+  put(data: unknown): void {
+    writeFileSync(join(this.state, 'control.json'), typeof data === 'string' ? data : JSON.stringify(data), 'utf8');
   }
 
   built(): string[] {
@@ -226,6 +231,12 @@ describe('SideBySideTest', () => {
     expect(planned.slice(0, 3)).toEqual(['first', 'second', 'second']);
   });
 
+  test('a stopped repo gets none', async () => {
+    h.put({ version: 1, written_at: WRITTEN, lanes: {}, repos: { first: { stop: 'after-job', at: WRITTEN } } });
+    await h.run_main(['--once']);
+    expect(h.built()).toEqual(['second']);
+  });
+
   test('a job a dead runner left running holds only its own repo', async () => {
     h.write_events({
       event: 'start', job: 'dead', kind: 'build', repo: 'first', issue: 3, branch: 'claude/x-3',
@@ -237,10 +248,6 @@ describe('SideBySideTest', () => {
     expect(h.built()).toEqual(['second']);
     expect(h.runner_log()).toContain('build first#3 is still running in');
   });
-});
-
-describe('SideBySideTest, turned on by the switches (#229)', () => {
-  it.todo('test_a_stopped_repo_gets_none');
 });
 
 describe('RestartTest, turned on by serving itself (#237)', () => {

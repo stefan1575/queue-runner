@@ -1,9 +1,13 @@
 // What the run loop (`src/run.ts`) calls in Python modules that later port tickets bring over, each
 // standing in with Python's names until its ticket ports it and replaces it here. Each answers as
 // its Python part does when there is nothing for it: no decision, ask, answer or fix round to
-// start, no title to change, no stop in `control.json`, no wake task, no toast, no effort read
-// back. None reads a file, T3 or GitHub. A method only a later part reaches throws, naming the
-// ticket that ports it: nothing here can call it until that ticket does.
+// start, no title to change, no wake task, no toast, no effort read
+// back. A stand-in may do less than Python, never something Python wouldn't: `control.read`,
+// the Decider's case finding and the limit stop read as Python's do, so the run loop holds a
+// repo where Python would start a part not ported yet. A method only a later part reaches throws,
+// naming the ticket that ports it: nothing here can call it until that ticket does.
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { type Config, type Repo, working } from './config.ts';
 import { type GhCli, PullRequest } from './github-seam.ts';
 import { err_str, type_name } from './python.ts';
@@ -29,45 +33,123 @@ export class Wait {
   }
 }
 
-// --- `control.py` (#229): `control.json`, read as an empty one ----------------------------------
+// --- `control.py` (#229): reading `control.json` ----------------------------------------------
+// `read` is Python's: both lanes' stops and each repo's, or the error that holds both lanes. The
+// asks' marks, the Usage card's Refresh and the writing (`--pause`, `--resume`) come with #229.
 
 export const LANES = ['claude', 'sol'] as const;
+const STOPS: readonly (string | null)[] = [null, 'after-job', 'now'];
+const REPO_STOPS: readonly (string | null)[] = [null, 'after-job'];   // a repo's: Stop now stays a lane's
 export const NAMES: Readonly<Record<string, string>> = { claude: 'Claude', sol: 'reviewing' };
 
-/** `control.Stop`: what Stefan last asked of one lane or repo. */
+/** `control.Stop`: what Stefan last asked of one lane or repo: `asked` "after-job", "now" or null,
+ *  and when. */
 export class Stop {
   readonly asked: string | null;
-  constructor(asked: string | null = null) {
-    this.asked = asked;
+  readonly at: Date | null;
+  readonly by: string | null;   // 'control': read from control.json
+  constructor(asked: string | null = null, at: Date | null = null, by: string | null = null) {
+    [this.asked, this.at, this.by] = [asked, at, by];
     Object.freeze(this);
   }
 
   get stopped(): boolean {
-    return this.asked !== null;
+    return this.asked !== null;   // "now" stops after the job too, until ticket 34
   }
 }
 
-/** `control.Switch`: both lanes' stops and each repo's, as read now. */
+/** `control.Switch`: both lanes' stops and each repo's, as read now, and the file's own
+ *  `written_at`. `error`: control.json is unreadable, and nothing starts in either lane. */
 export class Switch {
-  readonly error: string | null = null;
-  readonly repos: ReadonlyMap<string, Stop> = new Map();
+  readonly lanes: ReadonlyMap<string, Stop>;
+  readonly written_at: string | null;
+  readonly error: string | null;
+  readonly repos: ReadonlyMap<string, Stop>;
+  constructor({ lanes = new Map(), written_at = null, error = null, repos = new Map() }: {
+    lanes?: ReadonlyMap<string, Stop>; written_at?: string | null; error?: string | null; repos?: ReadonlyMap<string, Stop>;
+  } = {}) {
+    [this.lanes, this.written_at, this.error, this.repos] = [lanes, written_at, error, repos];
+    Object.freeze(this);
+  }
 
-  stop(_lane: string): Stop {
-    return new Stop();
+  stop(lane: string): Stop {
+    return this.lanes.get(lane) ?? new Stop();
   }
 
   repo_stop(name: string): Stop {
     return this.repos.get(name) ?? new Stop();
   }
 
+  /** Whether the lane may start nothing now. */
   holds(lane: string): boolean {
     return this.error !== null || this.stop(lane).stopped;
   }
 }
 
-/** `control.read`: until #229 the switch as an absent `control.json` reads (nothing stopped). */
-export function read(_state_dir: string): Switch {
-  return new Switch();
+export function path(state_dir: string): string {
+  return join(state_dir, 'control.json');
+}
+
+function _when(stamp: unknown): Date | null {
+  if (typeof stamp !== 'string') return null;
+  const t = new Date(stamp);   // one with no offset is this PC's local time, as `astimezone` makes it
+  return Number.isNaN(t.getTime()) ? null : t;
+}
+
+class Unreadable extends Error {}
+
+type Raw = Record<string, unknown>;
+const is_object = (v: unknown): v is Raw => typeof v === 'object' && v !== null && !Array.isArray(v);
+
+/** A lane's or repo's entry as the page writes it: an object whose `stop` is one of `stops`. One
+ *  without a `stop` is not a Resume: it can't be used. */
+function _usable(entry: unknown, stops: readonly (string | null)[]): boolean {
+  return is_object(entry) && Object.hasOwn(entry, 'stop') && stops.includes(entry.stop as string | null);
+}
+
+/** control.json as an object ({} when there is none); Unreadable if it isn't one the page could
+ *  have written. */
+function _load(state_dir: string): Raw {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(readFileSync(path(state_dir), 'utf8'));
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === 'ENOENT') return {};
+    throw new Unreadable(e instanceof Error ? e.message : String(e));
+  }
+  if (!is_object(raw)) throw new Unreadable('it is not a JSON object');
+  const lanes = Object.hasOwn(raw, 'lanes') ? raw.lanes : {};   // `raw.get('lanes', {})`: a null is no object
+  if (!is_object(lanes)) throw new Unreadable('its "lanes" is not an object');
+  for (const [id, entry] of Object.entries(lanes)) {
+    if (!_usable(entry, STOPS)) throw new Unreadable(`lane "${id}" is not {"stop": "after-job", "now" or null}`);
+  }
+  const repos = Object.hasOwn(raw, 'repos') ? raw.repos : {};
+  if (!is_object(repos)) throw new Unreadable('its "repos" is not an object');
+  for (const [name, entry] of Object.entries(repos)) {
+    if (!_usable(entry, REPO_STOPS)) throw new Unreadable(`repo "${name}" is not {"stop": "after-job" or null}`);
+  }
+  return raw;
+}
+
+/** `control.read`: never throws; an unreadable control.json is the Switch's `error`. */
+export function read(state_dir: string): Switch {
+  let raw: Raw;
+  try {
+    raw = _load(state_dir);
+  } catch (e) {
+    if (!(e instanceof Unreadable)) throw e;
+    return new Switch({ error: `control.json is unreadable (${e.message})` });
+  }
+  const entries = (raw.lanes || {}) as Record<string, Raw>;
+  const lanes = new Map<string, Stop>();
+  for (const id of LANES) {
+    const e = entries[id];
+    lanes.set(id, Object.hasOwn(entries, id) && e ? new Stop((e.stop as string | null) ?? null, _when(e.at), 'control') : new Stop());
+  }
+  const written = raw.written_at;
+  const repos = new Map(Object.entries((raw.repos || {}) as Record<string, Raw>)
+    .map(([name, e]) => [name, new Stop((e.stop as string | null) ?? null, _when(e.at), 'control')]));
+  return new Switch({ lanes, written_at: typeof written === 'string' ? written : null, repos });
 }
 
 /** `control.stopped_repos`: the served repos stopped, and the names stopped that aren't served. */
