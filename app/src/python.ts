@@ -215,6 +215,11 @@ export class ValueError extends Error {
   override name = 'ValueError';
 }
 
+/** Python's `KeyError`, where a port reads a key that must be there (`x['key']`) and it isn't. */
+export class KeyError extends Error {
+  override name = 'KeyError';
+}
+
 const FLOAT = /^[+-]?(?:(?:\d(?:_?\d)*)?\.?\d(?:_?\d)*(?:[eE][+-]?\d(?:_?\d)*)?|\d(?:_?\d)*\.|inf(?:inity)?|nan)$/i;
 
 /** Python's `float()` of a JSON value: a number or a bool as it is, a string of a float's

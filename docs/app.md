@@ -97,9 +97,26 @@ runner) the git-seam tests' deny-delete ACL stops nothing; `release.yml`'s test 
   on projects switched to Served (Repositories ticket), and until the cutover only the sandbox
   project ("queue-runner sandbox") and the GitHub sandbox `stefan1575/queue-runner-sandbox` (its
   T3 project "queue-runner sandbox GitHub") are ever switched on, by live checks.
-- **Port, don't redesign.** Today's runner and its docs (`docs/flow.md`, `docs/claude-lane.md`,
-  `docs/reviews.md`, `docs/stops.md`, `docs/usage.md`, `docs/dashboard.md`) are the behaviour to
-  port, with #68's changes on top. A rule you'd change is a comment on #68, not a quiet change.
+- **Port, don't redesign.** A port is one-to-one: the Python files a ticket names, and their
+  tests, rewritten in TypeScript, nothing else. Its modules, names (where TypeScript allows),
+  inputs, files and decisions are Python's: where Python reads `config.toml`, `gate.json`,
+  `control.json`, T3's database, Claude Code's or Codex's files, or runs `t3`, `gh`, `git`,
+  `schtasks`, bash or a PowerShell toast, the port does the same. Nothing from the app stands in
+  for Python's code: not Settings or Repositories, and not the app's usage gate, briefs, job
+  models or notifications. Where an app rule clashes with copying Python
+  (`test/no-model-names.test.ts` included), the port copies Python and its PR says so. No new
+  behaviour, no fixes, and no failure handling Python doesn't have: a bug Python has too is
+  ported as it is, and noted for a ticket after the cutover (#165). Until the cutover the app
+  runs only with `--config` pointing at a config that names the sandboxes; the repo's
+  `config.toml` stays the Python runner's. A rule you'd change is a comment on #68, not a quiet
+  change.
+- **The blocking bar for a port's review** (#68, 2026-11-23): a difference from Python blocks only
+  when a real input triggers it. Real inputs are the files as the runner, Claude Code and Codex
+  actually write them on the machine, and the tools as installed there. A ported test that fails,
+  or that asserts less than Python's, also blocks. Every other difference is a nit: listed in the
+  PR's nits ticket and not fixed. A nit is fixed later only if the side-by-side run shows it, or it
+  would still be a bug with Python gone. A case whose code isn't ported yet is an `it.todo` named
+  as in Python, turned on by the ticket that ports the code.
 - **No model or vendor name in code.** Models come from T3 and the settings (#121's rule);
   `test/no-model-names.test.ts` fails on one in `src`, `renderer/src` or `live`, comments
   included (tests and their fixtures may name them). The GitHub-facing
@@ -700,6 +717,41 @@ this PC's local time, as in Python. A test passes the log its own clock.
 
 Nothing calls it yet: the lanes still write `src/job-log.ts` until the run loop, review, fix and
 merge ports (#219, #222, #223, #224) replace them.
+
+## The config, the lock and the build brief
+
+Ported from `queue_runner/config.py`, `queue_runner/lock.py`, and `queue_runner/brief.py` with
+`queue_runner/templates/build.md` (#219, part 1), in `src/config.ts`, `src/lock.ts`, and
+`src/build-brief.ts` with `src/templates/build.md`, a byte-for-byte copy. `tests/test_brief.py`
+and `tests/test_templates.py` are ported case for case in `test/build-brief.test.ts` and
+`test/templates.test.ts`, and the config cases of `tests/test_effort.py`, `tests/test_fallback.py`
+and `tests/test_inbox.py` in `test/config.test.ts`. They keep Python's names: `Config`, `Repo`
+(`stefan_merges`), `load_config`, `DEFAULT_CONFIG`, `set_stopped`, `stopped`, `working`,
+`EFFORTS`, `REVIEW_PROVIDERS`, `runner_lock`, `RunnerBusy`, `build_brief` and `EVIDENCE`.
+`load_config` reads the same keys with the same defaults and errors, so a config the Python runner
+reads gives the same `Config`. `sol.py`'s `SOL_SCRIPT` and `GIT_BASH`, which it defaults to, are in
+`src/config.ts` until the Sol port (#222). What each does is the module's own comment, as in
+Python.
+
+The differences are TypeScript's only. TOML is read by `smol-toml`, as Node has no `tomllib`.
+`set_stopped` keeps a config's stopped repos beside it, as a frozen object takes no new field.
+Node has no byte lock, so `runner_lock` opens `runner.lock` with no sharing (libuv's
+`UV_FS_O_EXLOCK`, Windows only): Python's byte-locked file refuses it and a second take raises
+`RunnerBusy`, and the OS drops it with the process, as Python's; while the app holds it, Python's
+`open` of the file fails before its lock is tried. Off Windows, where Python takes
+`fcntl.flock`, the file is only opened. The lock is a `Disposable`, held with `using` where
+Python has `with`. `string.Template` and reading a template with universal newlines are spelled
+out in `src/build-brief.ts`, so the brief is Python's text.
+
+Left out: test_effort's `test_the_served_config_runs_claude_jobs_at_medium`, which reads the
+runner's real `config.toml` and asserts Stefan's effort, which a test here may not (Test it,
+above; #172). Pending: test_templates'
+`test_builder_and_reviewer_hold_screenshots_to_the_same_finish_line` and
+`test_screenshots_go_where_the_review_reads_them` read `fix.md` and `review.md`, which the fix and
+reviews ports (#223, #222) copy in.
+
+Nothing calls them yet: builds still brief through `src/briefs/build.ts` and the app's Settings
+and Repositories until the run loop's port (#219, part 2) calls these.
 
 ## The GitHub seam
 
