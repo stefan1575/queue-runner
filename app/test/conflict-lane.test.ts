@@ -128,6 +128,8 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   lane?.stop();
+  // a test may end while a round it started still writes to the state folder (#245, #269)
+  await lane?.idle();
   await rm(dir, { recursive: true, force: true });
 });
 
