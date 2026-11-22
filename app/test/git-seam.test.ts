@@ -3,7 +3,7 @@
 // `tests/test_git.py` case for case (#216).
 import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
-import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, symlink, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
@@ -28,6 +28,10 @@ async function deny_delete(folder: string): Promise<void> {
   await writeFile(join(folder, 'f.txt'), 'x');
   execFileSync('icacls', [folder, '/deny', '*S-1-1-0:(OI)(CI)(DE,DC)'], { stdio: 'pipe' });
   addCleanup(() => spawnSync('icacls', [folder, '/remove:d', '*S-1-1-0'], { stdio: 'pipe' }));
+  // A process holding the restore privilege deletes past any ACL (Git Bash enables it, #273).
+  const deleted = await unlink(join(folder, 'f.txt')).then(() => true, () => false);
+  if (deleted) throw new Error(`the deny-delete ACL on ${folder} didn't hold: this process can delete past ACLs `
+    + '(Git Bash enables the backup and restore privileges in its token; run the tests from PowerShell)');
 }
 
 /** Sets Windows' read-only attribute on `path` (on a link itself, not what it points to);

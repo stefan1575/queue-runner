@@ -70,6 +70,11 @@ clean-up then found git still in the folder (`EBUSY`). And a test's clean-up sto
 started before it removes its temp folder: a lane's `afterEach` stops the lane and awaits its
 `idle()`, so no round still writes there (`ENOTEMPTY`, #245).
 
+**The tests run from PowerShell, not Git Bash** (#273). Git Bash enables the backup and restore
+privileges in its token and every process it starts inherits them, so in an elevated shell (CI's
+runner) the git-seam tests' deny-delete ACL stops nothing; `release.yml`'s test step runs under
+`pwsh` as `tests.yml` does, and `deny_delete` fails with that reason if its ACL doesn't hold.
+
 ## Rules for every rebuild ticket
 
 - **T3 and GitHub only.** No reads of T3's database or settings, of Claude's or Codex's files,
