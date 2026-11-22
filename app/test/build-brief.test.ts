@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import { build_brief, EVIDENCE, type Job } from '../src/build-brief.ts';
-import { pick, type Repo as PickerRepo } from '../src/build-picker.ts';
+import { pick } from '../src/build-picker.ts';
 import { Repo } from '../src/config.ts';
 import { Comment } from '../src/github-seam.ts';
 import { FakeGitHub, issue } from './fakes.ts';
@@ -19,7 +19,12 @@ describe('BuildBriefTest', () => {
     tmp = mkdtempSync(join(tmpdir(), 'qr-brief-'));
     const repo = new Repo({ name: 'demo', github: 'owner/demo', path: tmp });
     const body = 'Make the widget blue.\n\n## Acceptance\n\n- [ ] It costs $5';
-    job = (await pick(repo as PickerRepo, new FakeGitHub({ issues: [issue(42, 'Blue widget', body)] }))) as Job;
+    // The picker's port types its repo by what it reads (a GitHub name and a base); the brief takes
+    // the config's `Repo`, whose `github` may be null.
+    const picked = await pick({ github: 'owner/demo', base: repo.base },
+      new FakeGitHub({ issues: [issue(42, 'Blue widget', body)] }));
+    if (!picked) throw new Error('pick found no job');
+    job = { ...picked, repo };
     comments = [new Comment({ author: 'stefan', created_at: '2026-11-01T10:00:00Z', body: 'Navy, not sky blue.' })];
   });
   afterEach(() => {

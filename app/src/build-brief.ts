@@ -85,9 +85,10 @@ function _comments(comments: readonly Comment[]): string {
   return comments.map((c) => `**${c.author}**, ${c.created_at}:\n\n${strip(c.body)}`).join('\n\n');
 }
 
-/** A build job as Python's `BuildJob` has it: its repo is the config's `Repo` that `pick` was
- *  given, which the picker's port types only by what it reads. */
-export type Job = BuildJob & { readonly repo: Repo };
+/** A build job as Python's `BuildJob` has it, with the config's `Repo` as its repo: `github` may
+ *  be null, as the no-GitHub live sandbox's is (`scripts/live_sandbox.py`), which builds its job
+ *  without the picker. */
+export type Job = Omit<BuildJob, 'repo'> & { readonly repo: Repo };
 
 export function build_brief(job: Job, comments: readonly Comment[]): string {
   return substitute(_template('build'), {
