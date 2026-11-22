@@ -18,10 +18,21 @@ const doors = {
   github: new GhGitHub(),
 };
 // The run loop's T3 (`src/t3-seam.ts`): each model's effort option is the one T3's catalog names,
-// read once when the loop starts.
-const t3 = async () => {
-  const catalog = catalogFromConfig((await doors.ws.first('subscribeServerConfig', {})).config);
-  return new T3Server(doors.mcp, (provider, m) => model(catalog, { provider, model: m })?.effortOption ?? null);
+// read on the loop's first call to T3 that finds it up. Until then each call fails as T3 being down
+// fails it in Python, so the loop waits for T3 at logon (`wait_for_t3`) as Python's does.
+let server: T3Server | null = null;
+const seam = async (): Promise<T3Server> => {
+  if (server === null) {
+    const catalog = catalogFromConfig((await doors.ws.first('subscribeServerConfig', {})).config);
+    server = new T3Server(doors.mcp, (provider, m) => model(catalog, { provider, model: m })?.effortOption ?? null);
+  }
+  return server;
+};
+const t3 = {
+  start: async (...a: Parameters<T3Server['start']>) => (await seam()).start(...a),
+  show: async (...a: Parameters<T3Server['show']>) => (await seam()).show(...a),
+  list: async (...a: Parameters<T3Server['list']>) => (await seam()).list(...a),
+  settle: async (...a: Parameters<T3Server['settle']>) => (await seam()).settle(...a),
 };
 const out = (s: string) => process.stdout.write(s);
 try {

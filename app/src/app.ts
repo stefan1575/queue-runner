@@ -33,20 +33,25 @@ export type Doors = { mcp: Pick<T3Mcp, 'call'>; ws: Pick<T3Ws, 'first'>; github:
 
 /** What the ported command line runs on: Python's `main` takes each as a keyword, and builds the
  *  real one when it's left out. Here the caller (`src/main.ts`, the desktop app) gives the real
- *  ones; `t3` may be given as a function that makes it, so `--release` and `--reserve` never need
- *  T3. */
+ *  ones. */
 export type RunnerDoors = {
-  github: GitHub; git: Git; t3: RunnerOptions['t3'] | (() => Promise<RunnerOptions['t3']>);
+  github: GitHub; git: Git; t3: RunnerOptions['t3'];
   sleep?: Sleep | null; usage?: Endpoint<Usage> | CachedUsage<Usage> | null; clock?: (() => Date) | null;
   waker?: NoWaker | null; toaster?: NoToaster | null;
 };
 
-const USAGE = 'usage: pnpm --dir app start -- --list\n';
+const USAGE = 'usage: pnpm --dir app start -- --list\n'
+  + '       pnpm --dir app start -- --config CONFIG [--once | --release NAME#N | --reserve PERCENT]\n';
 
+/** `--list`, or with `--config` the ported command line (`main`). Without `--config` the run loop
+ *  doesn't start: until the cutover it runs only on a config that names the sandboxes (docs/app.md,
+ *  Rules), never on the Python runner's own `config.toml`. */
 export async function run(argv: string[], doors: Doors, out: (s: string) => void, runner?: RunnerDoors): Promise<number> {
   const args = argv.filter((a) => a !== '--');
   if (args.length === 1 && args[0] === '--list') return list(doors, out);
-  if (runner !== undefined && !args.includes('--list')) return main(args, runner, out);
+  if (runner !== undefined && !args.includes('--list') && args.some((a) => a === '--config' || a.startsWith('--config='))) {
+    return main(args, runner, out);
+  }
   out(USAGE);
   return 2;
 }
@@ -200,9 +205,8 @@ export async function main(argv: string[], doors: RunnerDoors, out: (s: string) 
     return code;
   }
   const gate = _gate(config, doors.usage ?? null, doors.clock ?? null, sleep);
-  const t3 = typeof doors.t3 === 'function' ? await doors.t3() : doors.t3;
   const runner = new Runner(config, {
-    github: doors.github, t3, git: doors.git, out, log_line, toaster: doors.toaster ?? null, gate,
+    github: doors.github, t3: doors.t3, git: doors.git, out, log_line, toaster: doors.toaster ?? null, gate,
     now: doors.clock ?? null, waker: doors.waker ?? null,
   });
   let restart: string | null = null;

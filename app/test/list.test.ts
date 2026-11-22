@@ -58,6 +58,20 @@ describe('listing projects', () => {
     expect(await run([], doors, (s) => { out += s; })).toBe(2);
     expect(out).toMatch(/usage/);
   });
+
+  // Until the cutover the run loop runs only on a config naming the sandboxes (docs/app.md, Rules):
+  // without --config it never reads the Python runner's own config.toml.
+  it.each([[['--once']], [[]], [['--release', 'first#4']], [['--reserve', '10']]])(
+    'the run loop does not start without --config (%j)', async (argv) => {
+      let out = '';
+      const doors = { mcp: pagedMcp([], 1), ws: { first: async () => ({}) }, github };
+      const never = () => {
+        throw new Error('the run loop was asked for a door');
+      };
+      const runner = { github: new Proxy({}, { get: never }), git: new Proxy({}, { get: never }), t3: new Proxy({}, { get: never }) };
+      expect(await run(argv, doors, (s) => { out += s; }, runner as never)).toBe(2);
+      expect(out).toMatch(/--config CONFIG/);
+    });
 });
 
 describe('GitHub through gh', () => {
