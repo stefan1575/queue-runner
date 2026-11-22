@@ -19,24 +19,27 @@ export class CostLog {
   }
 
   static async open(file: string): Promise<CostLog> {
-    let text = '';
+    let data = Buffer.alloc(0);
     try {
-      text = await readFile(file, 'utf8');
+      data = await readFile(file);
     } catch (e) {
       if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw new CostLogError(`${file} can't be read: ${(e as Error).message}`);
     }
-    const lines = text.split('\n');
+    // Every complete record ends in a newline; what follows the last one was torn by a crash (maybe
+    // inside a multibyte character), so it's cut off before it's parsed, as Python's
+    // `read_records` cuts it (review 3 of #261, F19): a torn record is never learned from.
+    const whole = data.lastIndexOf(0x0a) + 1;
     const records: UsageRecord[] = [];
-    lines.forEach((line, i) => {
+    data.subarray(0, whole).toString('utf8').split('\n').forEach((line, i) => {
       if (!line.trim()) return;
       try {
         records.push(JSON.parse(line));
       } catch {
-        if (i < lines.length - 1 && lines.slice(i + 1).some((l) => l.trim())) throw new CostLogError(`${file} line ${i + 1} isn't a record`);
+        throw new CostLogError(`${file} line ${i + 1} isn't a record`);
       }
     });
-    // a torn last line is cut off, so the next record isn't written onto it
-    if (text && !text.endsWith('\n')) await truncate(file, Buffer.byteLength(text.slice(0, text.lastIndexOf('\n') + 1)));
+    // and off the disk, so the next record isn't written onto it
+    if (whole < data.length) await truncate(file, whole);
     return new CostLog(file, records);
   }
 

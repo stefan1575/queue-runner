@@ -80,6 +80,17 @@ describe('learned costs', () => {
     expect(log.records()).toEqual([r]);
   });
 
+  test('a last record whose newline was lost is cut off before it is parsed, never learned from (review 3 of #261, F19)', async () => {
+    dir = await mkdtemp(join(tmpdir(), 'qr-costs-'));
+    const file = join(dir, 'usage.jsonl');
+    const r = rec(opusMedium, 4, 1);
+    // the torn record parses whole: only its newline was lost
+    await writeFile(file, `${JSON.stringify(r)}\n${JSON.stringify(rec(opusMedium, 50, 1))}`);
+    expect((await CostLog.open(file)).records()).toEqual([r]);
+    expect(await readFile(file, 'utf8')).toBe(`${JSON.stringify(r)}\n`);
+    expect((await CostLog.open(file)).records()).toEqual([r]);   // the same before a reopen and after
+  });
+
   test('a bad line before the last is an error', async () => {
     dir = await mkdtemp(join(tmpdir(), 'qr-costs-'));
     const file = join(dir, 'usage.jsonl');
