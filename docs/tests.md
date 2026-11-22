@@ -40,8 +40,7 @@ order; a call named in `fail` raises), `FakeReviewGit` and `FakeSol` (`tests/tes
 fake install) and the junction kept on removal and a checkout git can't delete (a deny-delete ACL) in `tests/test_git.py`. Stops and toasts are in `tests/test_stops.py` (a fake toaster), with a failed Actions check's one re-run per run and head (`FakeGitHubForReviews.workflow_runs` and `rerun_failed`). Main's own failure (#98): `tests/test_base_red.py`, through the real `Runner` (`FakeGitHubForReviews.base_heads`, `update_branch`, `close_completed`): a PR held and one base stop, a second PR filing nothing, no build but a fix round while main is red, each held PR updated and the stop closed once main passes, a refused update, the PR's own failure still a stop, and the Inbox's one broken ask; then PR #110's review 1: a new failure main doesn't have on a held head, an update that fails for another reason, a held PR with a writer, and an issue that couldn't be filed. Merging
 (`tests/test_merge.py`) plays GitHub moving on through `FakeGitHubForReviews.now` (a PR's fields
 now), `threads` and `push_before_merge`; fix rounds (`tests/test_fix.py`) run the real `Runner`
-with a T3 fake whose thread pushes; `AdoptedReviewTest` runs them all again with a cutover
-set, and adopts a review from before it (not one after). Conflict rounds (`tests/test_conflicts.py`): a pair of
+with a T3 fake whose thread pushes. Conflict rounds (`tests/test_conflicts.py`): a pair of
 conflicted PRs through the real `Runner`, one after the other, with a T3 fake whose thread
 resolves (or doesn't), and the stops. Decisions (`tests/test_decisions.py`): the answer block
 parsed, and each case and action through the real `Runner`, `FakeT3` giving a decision thread's

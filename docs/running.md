@@ -36,8 +36,7 @@ second runner out: it logs `a second runner started (pid N) and exited at once` 
 merges himself: `docs/claude-lane.md`, Stefan merges), in an order that breaks ties between repos' work
 (`docs/claude-lane.md`, Two lanes); the runner's `state_dir` and `log_dir` (`~/.queue-runner/`, outside every served repo);
 `runs_dir`, `checkouts_dir` and `deps_dir` for reviews; `poll_seconds`, the pause after a pass that started
-nothing; `adopt_reviews_before`, the cutover date before which a blocking review the runner
-didn't run counts as its own for fix rounds (A Claude pass, step 4); `[claude]`, the T3
+nothing; `[claude]`, the T3
 provider instance, model and `effort` (default `high`) for Claude jobs (`docs/usage.md`, The effort);
 and `[sol]`,
 `codex-sol.sh` and the Git bash that runs it. `--config <path>` reads another one.

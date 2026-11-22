@@ -37,10 +37,6 @@ class Config:
     deps_dir: str = ''        # node_modules per lockfile, linked into Sol's checkout (ticket 16)
     sol_script: str = ''      # scripts/codex-sol.sh
     sol_bash: str = ''        # Git's bash, which runs it
-    # The runner's cutover (issue 3): a blocking review it didn't run, posted on GitHub before
-    # this date (GitHub's UTC time, `YYYY-MM-DD`), counts as its own for the fix lane. '' adopts
-    # none.
-    adopt_reviews_before: str = ''
     # Who reviews every PR (issue #76): 'chatgpt' (Sol, through codex-sol.sh; the Opus fallback
     # steps in only while Sol is out of usage, #69) or 'claude' (an Opus thread in T3 at
     # [claude]'s model and effort, through the usage gate). `[review] provider` in config.toml.
@@ -137,7 +133,6 @@ def load_config(path: str = DEFAULT_CONFIG) -> Config:
                   deps_dir=_path(raw.get('deps_dir') or os.path.join(home, 'deps')),
                   sol_script=_path(sol.get('script') or SOL_SCRIPT),
                   sol_bash=sol.get('bash') or GIT_BASH,
-                  adopt_reviews_before=str(raw.get('adopt_reviews_before') or ''),
                   review_provider=_review_provider(raw.get('review', {})),
                   review_claude_provider=_review_claude_provider(
                       raw.get('review', {}), claude.get('provider', 'claudeAgent')))

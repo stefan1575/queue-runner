@@ -63,20 +63,7 @@ and it gets no other fix round. A repo has one Claude job at a time, so two neve
    approach note goes to Stefan) and that review is still the PR's newest review comment, or
    when that review stopped and a decision has since ordered a round (`Fixer.order`: Stefan's
    rework or fix on, or a decision thread's `fix`; one more round on H, its text first in the
-   brief under `## Direction first`). **A review
-   from before the cutover** (issue 3; `Fixer.adopted`): with no runner review of H, the PR's
-   newest review comment, in any readable format (the old script's marker, or Sol's visible
-   `sol-findings` block from a T3 child), blocking on H and posted before `config.toml`'s
-   `adopt_reviews_before` (GitHub's UTC time; 2026-11-10, `''` adopts none), counts as the
-   runner's review of H: its findings, classes and declines feed the brief, and a restarted
-   round finds it by its round. Checked on 2026-11-10: leads-dashboard #152, #162, #163 and #168
-   each get a round from their old review 1. A PR whose newest review was hand-run after the
-   cutover is left to the session that ran it, and so is one that decide() would have sent to
-   Stefan (`ledger.escalation`, read from the ledgers: a kept decline, a reopened finding, an
-   earlier class repeated, or review 3 or later still blocking), since stops and Approach notes
-   read only the runner's own reviews. Such a PR gets no conflict round either
-   (`Fixer.old_escalation`, PR #4's review 2): nothing automatic runs on it until a decision
-   orders a round on H. **One round per head:**
+   brief under `## Direction first`). **One round per head:**
    once a round on H ended (except `not-started`), H gets no other until `--release NAME#PR`. The
    runner fetches the PR's head (moved since listing: nothing starts, Sol reviews it first),
    writes a start record (`sha` H, `round` the review's, `branch` the PR's), then blocks on
