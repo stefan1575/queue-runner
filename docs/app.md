@@ -319,8 +319,9 @@ loop, below); the tests drive it on fake T3's events.
   window by its id; the cautious default (build 60 of the 5 hours and 15 of the week, fix and
   conflict 40/10, decision, review and ask 15/4; any longer window takes the weekly figure) until
   3 solo records measured that window, then the largest of the last 5. A job's record (`usage.jsonl`
-  in the state folder) is the reading it was let in on and T3's first reading of its login after
-  it ended (from any provider instance on that login, taken as it arrives, so the reading that
+  in the state folder) is the reading it was let in on and T3's first usable reading of its login after
+  it ended (one with windows, from any provider instance on that login now, so neither a failed
+  probe nor an instance that has since switched logins counts (review 2 of #262, F9); taken as it arrives, so the reading that
   lets the next job in on that login is the one the job ended before it is measured on, as
   Python's gate reads its account once for both; review 1 of #262, F4), with `spent` per window (null for one that reset meanwhile) and `sharedWith`
   when another job ran on the same login meanwhile (then it teaches nothing). With no reading after

@@ -245,6 +245,70 @@ describe('two provider instances on one login (review 1 of #262, F4)', () => {
     const records = (await CostLog.open(join(dir, 'usage.jsonl'))).records();
     expect(records.map((r) => [r.job, r.spent?.five_hour ?? null, r.sharedWith ?? null])).toEqual([['build a#1', 20, null]]);
   });
+
+  // review 2 of #262, F9: a job is measured only on a usable reading of its own login
+  const OTHER: ModelChoice = { provider: 'claudeReviewer', model: 'claude-opus-5-5', effort: 'high' };
+  /** A ran on claudeAgent from 19:06:30, 10% of 5 hours used, and ended at 19:10. */
+  async function aRanAndEnded() {
+    jobs({ build: { own: OPUS, fallback: null }, review: { own: OTHER, fallback: null } });
+    await oneReads('claudeAgent', '2026-11-18T19:06:00Z', 10);
+    await oneReads('claudeReviewer', '2026-11-18T19:06:00Z', 10);
+    now = new Date('2026-11-18T19:06:30Z');
+    const a = gate.pick('build a#1', 'build');
+    if (!a.fits) throw new Error('A should fit');
+    gate.started({ id: 'build a#1', kind: 'build', choice: OPUS }, a.cost);
+    now = new Date('2026-11-18T19:10:00Z');
+    gate.finished('build a#1');
+  }
+  /** T3's probe of `instance` failed at `checkedAt`: no windows. */
+  async function probeFails(instance: string, checkedAt: string) {
+    const p = providers.find((x) => x.instanceId === instance);
+    p.usageLimits = { checkedAt, windows: [], unavailable: { reason: 'probeFailed' } };
+    t3.pushConfig('providerStatuses', { providers: structuredClone(providers) });
+    await until(() => source.current().usage.find((u) => u.provider === instance)?.unavailable === 'probeFailed');
+  }
+  const recorded = async () => {
+    await gate.settled();
+    return (await CostLog.open(join(dir, 'usage.jsonl'))).records().map((r) => [r.job, r.spent?.five_hour ?? null, r.error ?? null]);
+  };
+
+  test("a failed probe on a sibling instance doesn't measure the job: the usable reading after it does", async () => {
+    await aRanAndEnded();
+    await probeFails('claudeReviewer', '2026-11-18T19:11:00Z');
+    expect(await recorded()).toEqual([]);
+    const original = snapshot.config.providers.find((x: any) => x.instanceId === 'claudeReviewer');
+    providers[providers.findIndex((x) => x.instanceId === 'claudeReviewer')] = structuredClone(original);
+    await oneReads('claudeReviewer', '2026-11-18T19:12:00Z', 30);
+    await gate.measured('build a#1');
+    expect(await recorded()).toEqual([['build a#1', 20, null]]);
+  });
+
+  test("an instance that has switched logins isn't read for the job, though it's the job's own", async () => {
+    await aRanAndEnded();
+    // in one event: the login's other instance reads A's 20%, and A's own instance, now on
+    // another login, reads that login's 12%, later
+    const own = providers.find((x) => x.instanceId === 'claudeAgent');
+    own.auth = { ...own.auth, workspaceId: 'another-claude-workspace' };
+    own.usageLimits.checkedAt = '2026-11-18T19:12:00Z';
+    own.usageLimits.windows.find((w: any) => w.id === 'five_hour').usedPercent = 12;
+    const sibling = providers.find((x) => x.instanceId === 'claudeReviewer');
+    sibling.usageLimits.checkedAt = '2026-11-18T19:11:00Z';
+    sibling.usageLimits.windows.find((w: any) => w.id === 'five_hour').usedPercent = 30;
+    t3.pushConfig('providerStatuses', { providers: structuredClone(providers) });
+    await gate.measured('build a#1');
+    expect(await recorded()).toEqual([['build a#1', 20, null]]);
+  });
+
+  test('with only failed readings till the wait ends, a failed measurement is recorded', async () => {
+    await aRanAndEnded();
+    await probeFails('claudeAgent', '2026-11-18T19:11:00Z');
+    await probeFails('claudeReviewer', '2026-11-18T19:12:00Z');
+    expect(await recorded()).toEqual([]);
+    // the run loop's `measure_wait` ends (`Runner._measured`)
+    await gate.unmeasured('build a#1', 'no reading after the job');
+    await gate.measured('build a#1');
+    expect(await recorded()).toEqual([['build a#1', null, 'no reading after the job']]);
+  });
 });
 
 describe("jobs the gate did not let in (#219: Python's `job_ended` and `check(running=...)`)", () => {

@@ -325,8 +325,8 @@ export class UsageGate {
 
   private measuring: Promise<void> = Promise.resolve();
 
-  /** Each ended job whose login T3 has read since it ended gets its record, on the latest such
-   *  reading of any provider instance on that login, taken now: the reading a check lets the next
+  /** Each ended job whose login T3 has read usably since it ended gets its record, on the latest
+   *  such reading of any provider instance on that login, taken now: the reading a check lets the next
    *  job in on is the one the jobs ended before it are measured on, so none learns a later job's
    *  spend as its own, as Python's gate takes admission and measurement from one reading of the
    *  account (`gate.py:307`, `:365`; review 1 of #262, F4). */
@@ -343,13 +343,17 @@ export class UsageGate {
     return this.measuring;
   }
 
-  /** T3's latest reading of the ended job's login taken after it ended (its own provider's, or
-   *  another instance's on the same login), or undefined. */
+  /** T3's latest usable reading of the ended job's login taken after it ended, from any provider
+   *  instance on that login now, or undefined. Usable is read with windows: a failed probe never
+   *  stands in for one. The login is the one the reading itself is on, so an instance that has
+   *  switched logins since, the job's own included, doesn't count (Python's `gate.measured` takes
+   *  only a value read of the job's own account; review 2 of #262, F9). */
   private afterEnd(e: Ended): ProviderUsage | undefined {
     const account = e.account ?? this.usage(e.job.choice.provider)?.account ?? null;
     let best: ProviderUsage | undefined;
     for (const u of this.source.current().usage) {
-      if (u.provider !== e.job.choice.provider && (account === null || u.account !== account)) continue;
+      if (account !== null ? u.account !== account : u.provider !== e.job.choice.provider) continue;
+      if (u.unavailable !== null || u.windows.length === 0) continue;
       const at = u.checkedAt ? Date.parse(u.checkedAt) : NaN;
       if (!(at > e.ended.getTime())) continue;
       if (!best || at > Date.parse(best.checkedAt!)) best = u;
