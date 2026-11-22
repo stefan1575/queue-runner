@@ -66,8 +66,17 @@ describe('readFolder', () => {
       github: null, reason: "git can't read its origin remote (error: No such remote 'origin')",
     });
     expect(await readFolder('C:/a', fakeGit('https://gitlab.com/o/r.git', 'main').run, there)).toEqual({
-      github: null, reason: "its origin remote isn't on GitHub (https://gitlab.com/o/r.git)",
+      github: null, reason: "its origin remote isn't on GitHub",
     });
+    // a credentialed remote off GitHub: its user and token are never said (review 1 of #262, F5)
+    const token = 'ghp_SYNTHETIC0123456789token';
+    const secret = await readFolder('C:/a', fakeGit(`https://someone:${token}@git.example.com/o/r.git`, 'main').run, there);
+    expect(secret).toEqual({ github: null, reason: "its origin remote isn't on GitHub" });
+    expect(JSON.stringify(secret)).not.toMatch(/someone|SYNTHETIC|example/);
+    // nor in git's own error that names the URL
+    const unset = fakeGit(`https://someone:${token}@github.com/owner/a`, null, new Error(`unable to access 'https://someone:${token}@github.com/owner/a/': 403`));
+    const said = await readFolder('C:/a', unset.run, there);
+    expect(said).toEqual({ github: 'owner/a', reason: "its origin/HEAD is missing and git couldn't set it (fatal: unable to access 'https://github.com/owner/a/': 403)" });
     const broken = async (): Promise<[number, string, string]> => { throw new Error('spawn git ENOENT'); };
     expect(await readFolder('C:/a', broken, there)).toEqual({ github: null, reason: "git couldn't run (spawn git ENOENT)" });
   });

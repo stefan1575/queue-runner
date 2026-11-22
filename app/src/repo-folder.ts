@@ -19,7 +19,9 @@ export function githubName(url: string): string | null {
   return m ? `${m[1]}/${m[2]}` : null;
 }
 
-const firstLine = (s: string) => s.trim().split('\n')[0] ?? '';
+// git's own errors may name the remote's URL ("unable to access 'https://user:token@…'"): its
+// user info is cut from what's said (review 1 of #262, F5)
+const firstLine = (s: string) => (s.trim().split('\n')[0] ?? '').replace(/(\w+:\/\/)[^/\s@]+@/g, '$1');
 
 /** The served repo's folder, read: its GitHub `owner/name` and base, or why not. Never throws. */
 export async function readFolder(folder: string, run: Run = run_git,
@@ -30,7 +32,9 @@ export async function readFolder(folder: string, run: Run = run_git,
     const [code, out, err] = await run(['-C', folder, 'remote', 'get-url', 'origin']);
     if (code) return { github: null, reason: `git can't read its origin remote (${firstLine(err) || `exit ${code}`})` };
     github = githubName(out);
-    if (github === null) return { github: null, reason: `its origin remote isn't on GitHub (${firstLine(out)})` };
+    // the URL itself is never said: one off GitHub may carry a user and token (review 1 of #262, F5),
+    // and Python reads no URL at all
+    if (github === null) return { github: null, reason: "its origin remote isn't on GitHub" };
     const head = ['-C', folder, 'symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD'];
     let [hcode, hout] = await run(head);
     if (hcode) {   // no origin/HEAD: set once from the remote, then read again

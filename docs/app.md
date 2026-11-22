@@ -388,7 +388,8 @@ comment, as in Python, and `docs/claude-lane.md` is the behaviour.
   has no remote, and the Repositories page blocks Served for it.
 - **Repos are independent**, as in Python. Folders are read side by side, and one that can't be
   read (missing, no origin, an origin off GitHub, no `origin/HEAD` git can set) is named in one
-  line ("… isn't served: why") and does no work; every other repo carries on, in `--once` (which
+  line ("… isn't served: why") and does no work (a remote's URL is never said, and a URL in git's
+  own error is said without its user or token, review 1 of #262, F5); every other repo carries on, in `--once` (which
   exits 0) and the desktop app alike. There's no unread state, no retry and no repo joining a
   running loop: a folder that reads only later, or a change to Served or who merges, is taken up at
   the next start (picking it up while the loop runs is #260).
