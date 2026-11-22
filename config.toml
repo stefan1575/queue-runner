@@ -42,8 +42,7 @@ claude_provider = "claudeReviewer"
 
 # First in this order (Stefan, 2026-11-15: "prioritize game backdrop full stop", its first
 # run under the dashboard). Stefan merges its PRs himself (2026-11-15: "no auto merge, just
-# leave it up to me"): a desktop app nobody runs before a merge. It has no live steps: merged
-# is live.
+# leave it up to me"): a desktop app nobody runs before a merge.
 [[repos]]
 name = "game-backdrop"
 github = "stefan1575/game-backdrop"
