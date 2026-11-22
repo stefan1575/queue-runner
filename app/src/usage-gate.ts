@@ -128,6 +128,8 @@ export class UsageGate {
 
   private checkReading(job: GateJob, u: ProviderUsage | undefined, elsewhere: readonly Elsewhere[]): Verdict {
     this.placeJobs();
+    // the jobs ended before this check are measured on the readings it decides on (F4, `measure`)
+    void this.measure();
     let records: UsageRecord[];
     try {
       records = this.log.records();
@@ -323,20 +325,36 @@ export class UsageGate {
 
   private measuring: Promise<void> = Promise.resolve();
 
-  /** Each ended job whose provider T3 has read since it ended gets its record. */
+  /** Each ended job whose login T3 has read since it ended gets its record, on the latest such
+   *  reading of any provider instance on that login, taken now: the reading a check lets the next
+   *  job in on is the one the jobs ended before it are measured on, so none learns a later job's
+   *  spend as its own, as Python's gate takes admission and measurement from one reading of the
+   *  account (`gate.py:307`, `:365`; review 1 of #262, F4). */
   private measure(): Promise<void> {
+    const ready: [Ended, Reading][] = [];
+    for (const e of this.toMeasure) {
+      const u = this.afterEnd(e);
+      if (u) ready.push([e, reading(u.checkedAt, u.windows)]);
+    }
+    this.toMeasure = this.toMeasure.filter((e) => !ready.some(([x]) => x === e));
     this.measuring = this.measuring.then(async () => {
-      const ready = this.toMeasure.filter((e) => {
-        const at = this.usage(e.job.choice.provider)?.checkedAt;
-        return at !== null && at !== undefined && Date.parse(at) > e.ended.getTime();
-      });
-      this.toMeasure = this.toMeasure.filter((e) => !ready.includes(e));
-      for (const e of ready) {
-        const u = this.usage(e.job.choice.provider)!;
-        await this.write(e, reading(u.checkedAt, u.windows), null);
-      }
+      for (const [e, after] of ready) await this.write(e, after, null);
     });
     return this.measuring;
+  }
+
+  /** T3's latest reading of the ended job's login taken after it ended (its own provider's, or
+   *  another instance's on the same login), or undefined. */
+  private afterEnd(e: Ended): ProviderUsage | undefined {
+    const account = e.account ?? this.usage(e.job.choice.provider)?.account ?? null;
+    let best: ProviderUsage | undefined;
+    for (const u of this.source.current().usage) {
+      if (u.provider !== e.job.choice.provider && (account === null || u.account !== account)) continue;
+      const at = u.checkedAt ? Date.parse(u.checkedAt) : NaN;
+      if (!(at > e.ended.getTime())) continue;
+      if (!best || at > Date.parse(best.checkedAt!)) best = u;
+    }
+    return best;
   }
 
   /** Appends the ended job's record: `after` T3's reading after it, or null with the `error`. A

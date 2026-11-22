@@ -209,6 +209,44 @@ describe('every job waits for room in its own provider', () => {
   });
 });
 
+describe('two provider instances on one login (review 1 of #262, F4)', () => {
+  /** T3 read one instance's usage at `checkedAt`, `five`% of 5 hours, and told the app. */
+  async function oneReads(instance: string, checkedAt: string, five: number) {
+    const p = providers.find((x) => x.instanceId === instance);
+    p.usageLimits.checkedAt = checkedAt;
+    p.usageLimits.windows.find((w: any) => w.id === 'five_hour').usedPercent = five;
+    t3.pushConfig('providerStatuses', { providers: structuredClone(providers) });
+    await until(() => source.current().usage.find((u) => u.provider === instance)?.checkedAt === checkedAt);
+  }
+
+  test("the reading on one instance that lets a job in measures the job that ended on the other, before the new one spends", async () => {
+    const OTHER: ModelChoice = { provider: 'claudeReviewer', model: 'claude-opus-5-5', effort: 'high' };
+    jobs({ build: { own: OPUS, fallback: null }, review: { own: OTHER, fallback: null } });
+    expect(source.current().usage.find((u) => u.provider === 'claudeReviewer')!.account)
+      .toBe(source.current().usage.find((u) => u.provider === 'claudeAgent')!.account);
+    await oneReads('claudeAgent', '2026-11-18T19:06:00Z', 10);
+    await oneReads('claudeReviewer', '2026-11-18T19:06:00Z', 10);
+    now = new Date('2026-11-18T19:06:30Z');
+    const a = gate.pick('build a#1', 'build');
+    if (!a.fits) throw new Error('A should fit');
+    gate.started({ id: 'build a#1', kind: 'build', choice: OPUS }, a.cost);
+    now = new Date('2026-11-18T19:10:00Z');
+    gate.finished('build a#1');
+    // only the other instance reads the login again: A spent 20
+    await oneReads('claudeReviewer', '2026-11-18T19:11:00Z', 30);
+    now = new Date('2026-11-18T19:11:30Z');
+    const b = gate.pick('review a#2', 'review');
+    if (!b.fits) throw new Error('B should fit');
+    gate.started({ id: 'review a#2', kind: 'review', choice: OTHER }, b.cost);
+    // A's own instance reads next, with B's spend in it
+    await oneReads('claudeAgent', '2026-11-18T19:15:00Z', 55);
+    await gate.measured('build a#1');
+    await gate.settled();
+    const records = (await CostLog.open(join(dir, 'usage.jsonl'))).records();
+    expect(records.map((r) => [r.job, r.spent?.five_hour ?? null, r.sharedWith ?? null])).toEqual([['build a#1', 20, null]]);
+  });
+});
+
 describe("jobs the gate did not let in (#219: Python's `job_ended` and `check(running=...)`)", () => {
   test('a job seen to end elsewhere holds the next check on its login for a reading after it, told once per key', async () => {
     await t3Reads('2026-11-18T19:06:00Z', () => { window('claudeAgent', 'five_hour').usedPercent = 10; });

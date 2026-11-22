@@ -319,12 +319,15 @@ loop, below); the tests drive it on fake T3's events.
   window by its id; the cautious default (build 60 of the 5 hours and 15 of the week, fix and
   conflict 40/10, decision, review and ask 15/4; any longer window takes the weekly figure) until
   3 solo records measured that window, then the largest of the last 5. A job's record (`usage.jsonl`
-  in the state folder) is the reading it was let in on and T3's first reading of its provider
-  after it ended, with `spent` per window (null for one that reset meanwhile) and `sharedWith`
+  in the state folder) is the reading it was let in on and T3's first reading of its login after
+  it ended (from any provider instance on that login, taken as it arrives, so the reading that
+  lets the next job in on that login is the one the job ended before it is measured on, as
+  Python's gate reads its account once for both; review 1 of #262, F4), with `spent` per window (null for one that reset meanwhile) and `sharedWith`
   when another job ran on the same login meanwhile (then it teaches nothing). With no reading after
   it, `after` and `spent` are null and `error` says why (Python's failed after-job read). A torn last line is
   cut off, at the start and before each append, and a record counts for what's learned only once
-  it's written; a bad line before it is an error. No plan setting: #118 closed it, the costs being
+  it's written; a bad line before it makes the log unreadable, and the gate holds every job till
+  it reads (review 1 of #262, F3). No plan setting: #118 closed it, the costs being
   percents that follow a plan change.
 - **Your share** (Settings, Your share; `shares`, keyed `<driver>/<window id>`): one row per
   provider per weekly window, the percent kept (0% by default) and how many hours before the
