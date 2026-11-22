@@ -38,6 +38,14 @@ export const JOB_LOG = 'run-loop-jobs.jsonl';
  *  much wasn't read either), whose open jobs wait for a later start. */
 export type Served = { repos: Repo[]; unread: (string | null)[] };
 
+/** A repo's name in the run loop, its job log and `--release`: its GitHub `owner/name` in lowercase,
+ *  since GitHub's names aren't case-sensitive, so two clones that differ only in case are one repo
+ *  and a remote edited only in case keeps its jobs, as config.toml's name stays put when the
+ *  remote's spelling changes (review 1 of #262, F2). GitHub calls keep the remote's spelling. */
+export function repoName(github: string): string {
+  return github.toLowerCase();
+}
+
 /** The served repos as Python's config.toml names them: each T3 project Settings switched to
  *  Served, named by its GitHub `owner/name`, in its folder, on its base (`origin/HEAD`), both read
  *  from the folder (`readFolder`), merged by whom Settings says, in T3's order of projects (which
@@ -55,15 +63,16 @@ export async function servedRepos(mcp: Pick<T3Mcp, 'call'>, saved: Record<string
     const merge = saved![p.id]!.merge;
     if ('reason' in r) {
       say(`${p.title} isn't served: ${r.reason}`);
-      served.unread.push(r.github);
+      served.unread.push(r.github === null ? null : repoName(r.github));
       return;
     }
-    const by = served.repos.find((x) => x.name === r.github);
+    const name = repoName(r.github);
+    const by = served.repos.find((x) => x.name === name);
     if (by) {
-      say(`${p.folder} isn't served: ${by.path} serves ${r.github} already`);
+      say(`${p.folder} isn't served: ${by.path} serves ${name} already`);
       return;
     }
-    served.repos.push({ name: r.github, github: r.github, path: p.folder, base: r.base, merge });
+    served.repos.push({ name, github: r.github, path: p.folder, base: r.base, merge });
   });
   return served;
 }

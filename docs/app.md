@@ -378,7 +378,11 @@ comment, as in Python, and `docs/claude-lane.md` is the behaviour.
   Served, named by its GitHub `owner/name`, in its folder, on its base, merged by whom Settings
   says, in T3's order of projects (which breaks a tie between repos' work, as config.toml's order
   does). A remote two served projects share is served from the first in T3's order, and the other
-  is said.
+  is said. GitHub's names aren't case-sensitive, so a repo's name (in its lines, the job log and
+  `--release`, which takes any spelling) is its `owner/name` in lowercase: two clones that differ
+  only in case are one repo, and a remote edited only in case keeps its jobs, as config.toml's name
+  stays put when the remote's spelling changes (review 1 of #262, F2). GitHub calls keep the
+  remote's spelling.
 - **Each repo is read from its own folder** (`src/repo-folder.ts`), once at start, with no network
   call, as Python reads config.toml (Stefan's decision on #261, 2026-11-22): its `owner/name` from
   the folder's `origin` remote (an https, `git@github.com:` or `ssh://` URL on github.com), its base

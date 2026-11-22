@@ -174,6 +174,12 @@ export async function wall_sleep(seconds: number, sleep: (s: number) => Promise<
   for (let left = end - clock(); left > 0; left = end - clock()) await sleep(Math.min(step, left));
 }
 
+/** Whether two repo names are one repo: GitHub's `owner/name` isn't case-sensitive (review 1 of
+ *  #262, F2). */
+function same_repo(a: string, b: string): boolean {
+  return a.toLowerCase() === b.toLowerCase();
+}
+
 export function job_title(repo: Repo, issue: number): string {
   return `Queue runner build: ${repo.name}#${issue}`;
 }
@@ -301,7 +307,7 @@ export class Runner {
   private _waits_for_repo(job: Job): boolean {
     if (this._repo(job.repo)) return false;
     const unread = this.unread;
-    if (!unread.includes(job.repo) && !unread.includes(null)) return false;
+    if (!unread.some((u) => u === null || same_repo(u, job.repo))) return false;
     if (!this._said_waits.has(job.id)) {
       this.say(`${name_of(job)} waits for ${job.repo}'s folder to be read at a later start; it counts as running till then`);
     }
@@ -316,7 +322,7 @@ export class Runner {
 
   /** A job's own repo (Python's `self.repos.get`). */
   private _repo(name: string): Repo | undefined {
-    return this.config.repos.find((r) => r.name === name);
+    return this.config.repos.find((r) => same_repo(r.name, name));
   }
 
   /** A job's own repo, for recording its end: it throws when the config has none, as Python's

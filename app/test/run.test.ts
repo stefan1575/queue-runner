@@ -467,6 +467,10 @@ describe('RunTest', () => {
     expect([code, h.runner]).toEqual([0, null]);
     expect(out).toContain('Released owner/first#4');
     expect(h.log.held_issues('owner/first')).toEqual(new Set());
+    // any spelling of its name: GitHub's names aren't case-sensitive (review 1 of #262, F2)
+    h.log.started({ kind: 'build', repo: 'owner/first', issue: 5, branch: 'claude/a-ticket-5', title: 't' });
+    expect((await h.run_main(['--release', 'Owner/First#5'], null, null))[0]).toBe(0);
+    expect(h.log.releases().map((r) => r.slice(0, 2))).toEqual([['owner/first', 4], ['owner/first', 5]]);
     for (const ref of ['owner/nowhere#4', 'owner/first#٤']) {
       const [bad, said] = await h.run_main(['--release', ref], null, null);
       expect([bad, said]).toEqual([2, '--release takes NAME#N with NAME a repo (its GitHub owner/name) the job log has jobs in.\n']);

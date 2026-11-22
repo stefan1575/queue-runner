@@ -89,6 +89,22 @@ describe('the config', () => {
     expect(said).toEqual(["C:/two/a isn't served: C:/one/a serves owner/a already"]);
   });
 
+  test("GitHub names aren't case-sensitive: clones that differ only in case are one repo, and a case-only remote edit keeps the repo's name (review 1 of #262, F2)", async () => {
+    const d = doors([{ id: 'p1', title: 'a', folder: 'C:/one/a' }, { id: 'p2', title: 'a', folder: 'C:/two/a' }],
+      { 'C:/one/a': ok('Owner/Repo'), 'C:/two/a': ok('owner/repo') });
+    const said: string[] = [];
+    const served = await servedRepos(d.mcp, { p1: choice(), p2: choice() }, (l) => said.push(l), d.read);
+    // named in lowercase, served from the first; GitHub calls keep its remote's spelling
+    expect(served.repos.map((r) => [r.name, r.github, r.path])).toEqual([['owner/repo', 'Owner/Repo', 'C:/one/a']]);
+    expect(said).toEqual(["C:/two/a isn't served: C:/one/a serves owner/repo already"]);
+    // the same folder after a case-only edit of its remote: the same name, so its jobs still match
+    const edited = doors([{ id: 'p1', title: 'a', folder: 'C:/one/a' }], { 'C:/one/a': ok('OWNER/repo') });
+    expect((await servedRepos(edited.mcp, { p1: choice() }, () => {}, edited.read)).repos[0]!.name).toBe('owner/repo');
+    // and an unread folder's name, for the jobs open there
+    const unread = doors([{ id: 'p1', title: 'a', folder: 'C:/one/a' }], { 'C:/one/a': { github: 'Owner/Repo', reason: 'its origin/HEAD is missing' } });
+    expect((await servedRepos(unread.mcp, { p1: choice() }, () => {}, unread.read)).unread).toEqual(['owner/repo']);
+  });
+
   test("a served repo whose folder can't be read is named in one line and left out; the others are served", async () => {
     const d = doors([
       { id: 'p1', title: 'a', folder: 'C:/a' },

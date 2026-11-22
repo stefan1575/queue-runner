@@ -31,8 +31,10 @@ const USAGE = 'usage: pnpm --dir app start -- --list | --once | --release NAME#N
  *  as the run loop names it (Python's `[\w.-]+` name, with its owner). */
 function repo_ref(value: string, jobs: JobLog): [string, number] | null {
   const m = /^([\w.-]+(?:\/[\w.-]+)?)#([0-9]+)$/.exec(value);
-  if (!m || !jobs.jobs().some((j) => j.repo === m[1])) return null;
-  return [m[1]!, Number(m[2])];
+  // GitHub's names aren't case-sensitive: any spelling names the repo (review 1 of #262, F2)
+  const repo = m && jobs.jobs().find((j) => j.repo.toLowerCase() === m[1]!.toLowerCase())?.repo;
+  if (!repo) return null;
+  return [repo, Number(m[2])];
 }
 
 export async function run(argv: string[], doors: Doors, out: (s: string) => void): Promise<number> {
