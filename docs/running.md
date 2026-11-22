@@ -148,8 +148,8 @@ on; `"now"` is read as `"after-job"` until ticket 34.
   earlier job stays as it was, so the case is decided again after Resume.
 - **Unreadable** (not JSON, not an object, `lanes` or `repos` there but not an object, a lane's
   or repo's entry that isn't an object or has no `stop` the page could have written: a missing
-  `stop` is never a Resume): neither lane starts anything until it's fixed, said once. An old
-  `repo_order` (Two lanes) or an odd ask entry is ignored instead (Read and snoozed). Any Stop or
+  `stop` is never a Resume): neither lane starts anything until it's fixed, said once. An odd
+  ask entry is ignored instead (Read and snoozed). Any Stop or
   Resume on the page, any other request it sends, or `--pause`/`--resume`, writes it afresh
   from what they can read (`control.repaired`, and the page's `serve.usable`, the same file
   from either end) and **lets go only of what it names**: an entry it can't use is written

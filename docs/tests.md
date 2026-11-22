@@ -164,8 +164,7 @@ a repo while its first runs; a stopped repo and a dead runner's running job each
 their own repo; the gate with room for one (config.toml's order on a tie, else the repo that
 waited longest), a held job not holding back a later one that fits, shared passes teaching
 nothing; both jobs cut off by a limit and each recovered in its repo; new code waiting for the
-running jobs; the dry run and `--gate`; the snapshot while both run; an old `repo_order` ignored
-silently and dropped on write). The gate beside running jobs: `RunningJobsTest` in
+running jobs; the dry run and `--gate`; the snapshot while both run). The gate beside running jobs: `RunningJobsTest` in
 `tests/test_gate.py`. `FakeT3` takes a lock, as two workers call it at once. The Opus review
 beside the Claude lane: `tests/test_review_beside_lane.py` (an open review holding a build, one
 the Sol lane let in, the review held by a running build, `shared_with` both ways whichever

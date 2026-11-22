@@ -25,12 +25,10 @@ class Done(Exception):
     pass
 
 
-def control(order=(), lanes=None, **repos):
-    """control.json as the page writes it; each repo's stop by its name (`**{LD: ...}`). `order`
-    is ticket 33's old `repo_order`, which the runner no longer reads (#50): left in the file."""
+def control(lanes=None, **repos):
+    """control.json as the page writes it; each repo's stop by its name (`**{LD: ...}`)."""
     return {'version': 1, 'written_at': WRITTEN,
             'lanes': {k: {'stop': v, 'at': WRITTEN} for k, v in (lanes or {}).items()},
-            'repo_order': list(order),
             'repos': {k: {'stop': v, 'at': WRITTEN} for k, v in repos.items()}}
 
 
@@ -106,7 +104,7 @@ class FirstRunTest(Harness):
 
     def test_with_leads_dashboard_stopped_the_first_job_is_game_backdrops_build(self):
         self.leads_ready()
-        self.put(control([GB, LD], lanes={'claude': None}, **{LD: 'after-job'}))
+        self.put(control(lanes={'claude': None}, **{LD: 'after-job'}))
         self.run_loop(self.runner())
         self.assertEqual(self.titles()[:1], [f'Queue runner build: {GB}#5'])
         self.assertNotIn(f'Queue runner build: {LD}#3', self.titles())
@@ -114,7 +112,7 @@ class FirstRunTest(Harness):
 
     def test_without_the_stop_its_build_starts_beside_game_backdrops_build(self):   # #50
         self.leads_ready()
-        self.put(control([GB, LD], lanes={'claude': None}))
+        self.put(control(lanes={'claude': None}))
         runner = self.runner()
         runner.take_stops()
         self.assertEqual({s.repo: s.kind for s in runner.choose()}, {GB: 'build', LD: 'build'})
@@ -163,12 +161,12 @@ class ClaudeLaneTest(Harness):
             with self.subTest(what):
                 self.setUp()
                 make()
-                self.put(control([GB, LD]))
+                self.put(control())
                 runner = self.runner()
                 runner.take_stops()
                 # the control: GB's work is due
                 self.assertEqual({s.repo: s.kind for s in runner.choose()}[GB], kind)
-                self.put(control([GB, LD], **{GB: 'after-job'}))
+                self.put(control(**{GB: 'after-job'}))
                 runner = self.runner()
                 runner.run_pass()
                 self.assertEqual(self.titles()[:1], [f'Queue runner build: {LD}#3'])
@@ -206,14 +204,14 @@ class SolLaneTest(Harness):
         return [(j.repo, j.issue, j.stop) for j in self.jobs.jobs() if j.kind == 'stop']
 
     def test_without_the_stop_it_reviews_stops_and_merges_game_backdrops_prs(self):   # control
-        self.put(control([GB, LD]))
+        self.put(control())
         self.sol_pass()
         self.assertEqual(self.reviewed(), [(GB, 30)])
         self.assertIn((GB, 31, 'failed-check'), self.stops())
         self.assertEqual([p[1] for p in self.gh.posts if p[0] == 'merge'], [30])
 
     def test_a_stopped_repo_gets_no_stop_merge_ready_mark_or_review(self):
-        self.put(control([GB, LD], **{GB: 'after-job'}))
+        self.put(control(**{GB: 'after-job'}))
         self.sol_pass()
         self.assertNotIn(GB, self.gh.read)
         self.assertEqual(self.reviewed(), [(LD, 40)])
@@ -224,11 +222,11 @@ class SolLaneTest(Harness):
         from tests.fakes_t3 import FakeSol
         from tests.test_ledger import reply
         test = self
-        self.put(control([GB, LD]))
+        self.put(control())
 
         class StoppedMidReview(FakeSol):
             def review(self, *args, **kwargs):
-                test.put(control([GB, LD], **{GB: 'after-job'}))   # Stefan stops it
+                test.put(control(**{GB: 'after-job'}))   # Stefan stops it
                 return super().review(*args, **kwargs)
         runner = self.runner(sol=StoppedMidReview([reply()]))
         runner._sol_pass()
@@ -245,8 +243,7 @@ class PageControlTest(unittest.TestCase):
 
     def test_a_repo_is_stopped_and_resumed_and_the_rest_is_kept(self):
         from dashboard.serve import apply_control
-        c = apply_control({'repo_order': [GB, LD]}, {'lane': 'claude', 'stop': 'after-job'}, WRITTEN)
-        self.assertNotIn('repo_order', c)   # #50: an old order is dropped
+        c = apply_control({}, {'lane': 'claude', 'stop': 'after-job'}, WRITTEN)
         c = apply_control(c, {'repo': LD, 'stop': 'after-job'}, '2026-11-15T20:00:00+08:00')
         self.assertEqual(c['repos'], {LD: {'stop': 'after-job', 'at': '2026-11-15T20:00:00+08:00'}})
         self.assertEqual(c['lanes']['claude']['stop'], 'after-job')
@@ -320,7 +317,7 @@ class CliControlTest(unittest.TestCase):
         from dashboard import serve
         from queue_runner import control as ctl
         at = '2026-11-15T20:01:02+08:00'
-        before = control([GB, LD], lanes={'sol': 'after-job'}, **{GB: 'after-job'})
+        before = control(lanes={'sol': 'after-job'}, **{GB: 'after-job'})
         for name, stop in ((LD, 'after-job'), (GB, None)):
             with self.subTest(name=name, stop=stop), tempfile.TemporaryDirectory() as page, \
                     tempfile.TemporaryDirectory() as cli:
@@ -341,7 +338,7 @@ class UnreadableTest(Harness):
     def test_a_repo_entry_the_page_couldnt_write_starts_nothing_in_either_lane(self):
         for bad in ({LD: {'stop': 'now'}}, {LD: 'after-job'}, ['x']):
             with self.subTest(bad=bad):
-                self.put(dict(control([GB, LD]), repos=bad))
+                self.put(dict(control(), repos=bad))
                 runner = self.runner()
                 self.assertEqual(runner.run_pass(), 'stopped')
                 self.assertEqual(self.t3.starts, [])
@@ -360,20 +357,20 @@ class SaysTest(Harness):
     """The log, the wake tasks and the Inbox."""
 
     def test_the_log_says_a_stop_and_a_resume_once_each(self):
-        self.put(control([GB, LD], **{GB: 'after-job'}))
+        self.put(control(**{GB: 'after-job'}))
         runner = self.runner()
         runner.run_pass()
         runner.run_pass()
         said = [l for l in self.lines if l.startswith(f'{GB} is stopped by Stefan')]
         self.assertEqual(len(said), 1, self.lines)
         self.assertIn(f'--resume {GB}', said[0])
-        self.put(control([GB, LD], **{GB: None}))
+        self.put(control(**{GB: None}))
         runner.run_pass()
         runner.run_pass()
         self.assertEqual(self.lines.count(f'{GB} runs again: Stefan resumed it'), 1)
 
     def test_a_name_that_isnt_served_is_ignored_and_said_once(self):
-        self.put(control([GB, LD], **{'old-repo': 'after-job'}))
+        self.put(control(**{'old-repo': 'after-job'}))
         runner = self.runner()
         runner.run_pass()
         runner.run_pass()
@@ -395,9 +392,9 @@ class SaysTest(Harness):
             runner.waker = waker
             self.run_loop(runner)
             return {t for times in waker.synced for t in times}
-        self.put(control([GB, LD]))
+        self.put(control())
         self.assertEqual(wakes(), {resume})   # the control: the limit's resume wakes the PC
-        self.put(control([GB, LD], **{GB: 'after-job'}))
+        self.put(control(**{GB: 'after-job'}))
         self.assertEqual(wakes(), set())
 
     def test_a_stopped_repos_asks_stay_in_the_inbox(self):
@@ -408,7 +405,7 @@ class SaysTest(Harness):
                                  title='stop', sha='3' * 40, stop='failed-check')
         self.jobs.ended(stop.id, exit_code=None, outcome='filed',
                         link=f'https://github.com/owner/{GB}/issues/901')
-        self.put(control([GB, LD], **{GB: 'after-job'}))
+        self.put(control(**{GB: 'after-job'}))
         runner = self.runner()
         runner.run_pass()   # takes the stop up
         self.assertEqual([(w.repo, w.number) for w in collect(self.config, self.gh, self.jobs).items],
@@ -425,14 +422,14 @@ class SnapshotTest(Harness):
     def test_a_stopped_repo_carries_stopped_with_when_and_control_read_at_moves(self):
         snap = self.snapshot()
         self.assertEqual([r['stopped'] for r in snap['repos']], [None, None])
-        self.put(control([GB, LD], **{LD: 'after-job'}))
+        self.put(control(**{LD: 'after-job'}))
         snap = self.snapshot()
         stopped = {r['name']: r['stopped'] for r in snap['repos']}
         self.assertIsNone(stopped[GB])
         self.assertEqual(datetime.datetime.fromisoformat(stopped[LD]['at']),
                          datetime.datetime.fromisoformat(WRITTEN))
         self.assertEqual(snap['control_read_at'], WRITTEN)
-        later = dict(control([GB, LD], **{LD: None}), written_at='2026-11-15T20:05:00+08:00')
+        later = dict(control(**{LD: None}), written_at='2026-11-15T20:05:00+08:00')
         self.put(later)
         snap = self.snapshot()
         self.assertEqual([r['stopped'] for r in snap['repos']], [None, None])
@@ -469,7 +466,7 @@ class CliSaysTest(Harness):
         return out.getvalue()
 
     def test_gate_says_which_repos_are_stopped(self):
-        self.put(control([GB, LD], **{LD: 'after-job', 'old-repo': 'after-job'}))
+        self.put(control(**{LD: 'after-job', 'old-repo': 'after-job'}))
         out = self.main('--gate')
         self.assertIn(f'{LD} is stopped by Stefan: neither lane takes up its work', out)
         self.assertIn('control.json stops old-repo, which is not served: ignored', out)
@@ -477,7 +474,7 @@ class CliSaysTest(Harness):
 
     def test_the_dry_run_says_so_and_would_build_game_backdrop_not_leads_dashboard(self):
         self.leads_ready()
-        self.put(control([GB, LD], **{LD: 'after-job'}))
+        self.put(control(**{LD: 'after-job'}))
         out = self.main('--once', '--dry-run')
         self.assertIn(f'dry run: {LD} is stopped by Stefan: neither lane takes up its work', out)
         self.assertNotIn('#3 Leads', out)
@@ -486,7 +483,7 @@ class CliSaysTest(Harness):
 
     def test_without_the_stop_the_dry_run_would_build_leads_dashboard(self):   # the control
         self.leads_ready()
-        self.put(control([GB, LD]))
+        self.put(control())
         self.assertIn('issue:  #3 Leads', self.main('--once', '--dry-run'))
 
 

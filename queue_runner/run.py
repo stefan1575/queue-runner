@@ -558,7 +558,7 @@ class Runner:
         """The repos Stefan stopped (ticket 37), read now from control.json: from then on every
         part that chooses work goes through `working`, which leaves them out. Each lane calls it
         at the start of its pass, so a job already running goes on. Each change is said once,
-        and a name that isn't served once. (control.json's old `repo_order` isn't read: #50.)"""
+        and a name that isn't served once."""
         switch = control.read(self.config.state_dir)
         if switch.error is not None:   # nothing starts until it's fixed: `held` says so
             return

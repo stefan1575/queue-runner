@@ -85,8 +85,7 @@ path = "{self.dir}"
 
 def control(**lanes):
     return {'version': 1, 'written_at': '2026-11-15T19:58:00+08:00',
-            'lanes': {k: {'stop': v, 'at': '2026-11-15T19:58:00+08:00'} for k, v in lanes.items()},
-            'repo_order': []}
+            'lanes': {k: {'stop': v, 'at': '2026-11-15T19:58:00+08:00'} for k, v in lanes.items()}}
 
 
 class SwitchReadTest(Harness):
@@ -282,8 +281,7 @@ class SameFileTest(unittest.TestCase):
         at = '2026-11-15T20:01:02+08:00'
         before = {'version': 1, 'written_at': '2026-11-15T19:00:00+08:00',
                   'lanes': {'sol': {'stop': 'after-job', 'at': '2026-11-15T19:00:00+08:00'},
-                            'junk': 'not an entry'},
-                  'repo_order': ['queue-runner', 'leads-dashboard', 7]}
+                            'junk': 'not an entry'}}
         for lane, stop in (('claude', 'after-job'), ('sol', None), ('claude', None)):
             with self.subTest(lane=lane, stop=stop), tempfile.TemporaryDirectory() as page, \
                     tempfile.TemporaryDirectory() as cli:
@@ -488,10 +486,8 @@ BAD_SHAPES = {   # control.json shapes the page could not have written (review 1
     'a repo without a stop': {'repos': {'first': {}}},
     'a repo stopped now': {'repos': {'first': {'stop': 'now'}}},
 }
-# Shapes the runner reads without fault: an old order it ignores (#50), asks it leaves out.
+# Shapes the runner reads without fault: asks it leaves out.
 ODD_SHAPES = {
-    'repo_order a string': {'repo_order': 'first'},
-    'repo_order an object': {'repo_order': {'first': 1}},
     'asks a list': {'asks': ['stop-1']},
     'an ask not an object': {'asks': {'stop-1': True}},
 }
@@ -643,7 +639,6 @@ class ControlRepairTest(unittest.TestCase):
                 self.assertTrue(all(isinstance(v, dict) for v in got['lanes'].values()))
                 self.assertIsInstance(got['repos'], dict)
                 self.assertTrue(all(isinstance(v, dict) for v in got['repos'].values()))
-                self.assertNotIn('repo_order', got)   # #50: an old order is dropped
                 self.assertIsInstance(got['asks'], dict)
                 self.assertTrue(all(isinstance(v, dict) for v in got['asks'].values()))
                 self.assertEqual(serve.App(state, sample=True).snapshot()[0], 200)

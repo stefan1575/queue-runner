@@ -33,12 +33,6 @@ class ApplyControlTest(unittest.TestCase):
         resumed = apply_control(stopped, {"lane": "claude", "stop": None}, NOW)
         self.assertIsNone(resumed["lanes"]["claude"]["stop"])
 
-    def test_a_build_order_already_in_the_file_is_dropped(self):
-        # The page can't reorder (#61), and the runner reads no order (#50).
-        c = apply_control({"repo_order": ["queue-runner", "leads-dashboard"]}, {"lane": "claude", "stop": "now"}, NOW)
-        self.assertNotIn("repo_order", c)
-        self.assertEqual(c["lanes"]["claude"]["stop"], "now")
-
     def test_an_ask_is_marked_read_or_unread_under_asks_and_the_rest_is_kept(self):
         c = apply_control({}, {"lane": "claude", "stop": "after-job"}, NOW)
         c = apply_control(c, {"ask": "stop-0042", "read": True}, NOW)
@@ -82,12 +76,6 @@ class ApplyControlTest(unittest.TestCase):
             {"lane": "../x", "stop": "now"},
             {"lane": 3, "stop": "now"},
             {"lane": "claude"},
-            {"repo_order": []},
-            {"repo_order": ["queue-runner", "leads-dashboard"]},   # #61: the page can't reorder
-            {"repo_order": ["a", "a"]},
-            {"repo_order": ["a", 2]},
-            {"repo_order": "a"},
-            {"lane": "claude", "stop": "now", "repo_order": ["a"]},
             {"paused": True},
             {"ask": "stop-1", "read": "yes"},
             {"ask": "stop-1", "read": None},
@@ -326,9 +314,6 @@ class SampleTest(unittest.TestCase):
         states = {i["state"] for i in s["issues"] if i["feature"] in top}
         # done, merged but not live, in a PR, building, waiting on Stefan, ready, blocked
         self.assertLessEqual({"done", "merged", "review", "building", "you", "ready", "blocked"}, states)
-        swapped = {"written_at": self.T.isoformat(), "repo_order": ["queue-runner", "leads-dashboard"]}
-        later = sample.build("busy", base=self.T, now=self.T + timedelta(seconds=sample.ACK_SECONDS), control=swapped)
-        self.assertEqual(later["features"][0]["title"], "Ring-to numbers")   # an old order is read no more (#50)
 
     def test_a_features_tickets_come_in_the_order_they_are_built(self):
         for name in sample.STATES:
@@ -380,8 +365,7 @@ class SampleTest(unittest.TestCase):
 
     def test_the_pretend_runner_reads_control_a_few_seconds_after_it_was_written(self):
         written = self.T.isoformat()
-        asked = {"written_at": written, "lanes": {"claude": {"stop": "after-job", "at": written}, "sol": {"stop": "now", "at": written}},
-                 "repo_order": ["queue-runner", "leads-dashboard"]}
+        asked = {"written_at": written, "lanes": {"claude": {"stop": "after-job", "at": written}, "sol": {"stop": "now", "at": written}}}
         early = sample.build("busy", base=self.T, now=self.T + timedelta(seconds=1), control=asked)
         self.assertIsNone(early["control_read_at"])
         self.assertEqual([l["state"] for l in early["lanes"]], ["working", "working"])

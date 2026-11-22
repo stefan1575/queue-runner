@@ -12,10 +12,6 @@ Stop and Resume write it (`dashboard/serve.py`, `apply_control`) and so do `--pa
 each lane starts a job; an unreadable file (an entry without a `stop` included) starts nothing
 in either lane until it's fixed, and a write over it lets go only of what it names (`repaired`).
 
-`repo_order` (ticket 33's build order) is no longer read or written (#50: each repo runs its own
-Claude job side by side): a file that still has it is read as before for everything else, and a
-write drops it.
-
 `asks.<id>` (ticket 36) is what Stefan did with one ask in the Inbox: `read` (true or false) and
 `snooze_until` (an ISO time or null), beside other keys other tickets keep there (35's `open`).
 The page writes them; the runner only reads them into the snapshot's asks (`Switch.asks`), and
@@ -147,7 +143,7 @@ def repaired(raw, now: str) -> dict:
     a lane's or repo's entry that can't be used is written stopped ("after-job", at `now`), and
     with no lanes to read (not JSON, not an object, `lanes` not one) each lane is. A `repos` that
     isn't an object names no repo, an ask that can't be used is dropped (it held nothing), and
-    an old `repo_order` is dropped (#50)."""
+    so is a key the file has no use for."""
     if raw is MISSING:
         raw = {}
     broken = not isinstance(raw, dict)

@@ -112,8 +112,7 @@ python3 -m dashboard    # http://queue.localhost/ is the runner's; http://localh
   "snooze_until"}` (an ISO time with its offset, kept in this PC's, or null), or `{"ask": <id>,
   "open": true}` (`asks.<id>.open`: Deciding an ask in T3, above), or `{"ask": <id>, "fresh":
   true}` (`asks.<id>.fresh`: A stale waiting thread, below), or `{"usage": "refresh"}`
-  (`usage.refresh_at`: Usage, below), and anything else is refused, `{"repo_order"}` too
-  since #61 (and a `repo_order` already in the file is dropped, #50);
+  (`usage.refresh_at`: Usage, below), and anything else is refused;
   each write keeps what the others wrote. The page shows a request as asked until
   `control_read_at` reaches its time.
 - **Usage** (ticket 42): the Usage card's head has Refresh (an icon, "Refresh" on hover), and

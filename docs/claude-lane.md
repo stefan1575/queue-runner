@@ -28,9 +28,7 @@ one job log (a lock per file inside the process).
 - **The Sol lane** (`review.py`) runs alongside in a thread: merges, then one review a pass,
   taking the repos in config.toml's order. `--once` chooses the Claude jobs before the Sol lane
   starts, so what that pass's review decides waits for the next pass.
-- **No build order:** ticket 33's `control.json` `repo_order` (the Build order card until #61) is
-  no longer read or written. A file that still has it is read as before for its stops, the order
-  is ignored without a word, and the next write drops it.
+- **No build order:** the repos run side by side (#50), with config.toml's order breaking a tie.
 - `--once --dry-run` lists each working repo's job under `dry run: <repo>'s Claude job:`
   (`Nothing to start in <repo>: ...` for one with none; `none: <job> is still running there` for
   one whose Claude job is open in the job log, which the lane skips), after a limit that holds

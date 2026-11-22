@@ -1,6 +1,5 @@
 """Repos side by side (#50): each working repo gets its own Claude job at once, the usage gate
-counting the jobs still running, and control.json's old `repo_order` (ticket 33's build order) is
-no longer read. GitHub, T3 and Sol are faked; every file is in a temp folder."""
+counting the jobs still running. GitHub, T3 and Sol are faked; every file is in a temp folder."""
 import datetime
 import io
 import json
@@ -45,13 +44,10 @@ class PerRepo(FakeGitHubWithPulls):
         return []
 
 
-def control(order=None, **lanes):
-    """control.json as the page writes it; with `order`, an old `repo_order` left in it."""
-    data = {'version': 1, 'written_at': WRITTEN,
+def control(**lanes):
+    """control.json as the page writes it."""
+    return {'version': 1, 'written_at': WRITTEN,
             'lanes': {k: {'stop': v, 'at': WRITTEN} for k, v in lanes.items()}}
-    if order is not None:
-        data['repo_order'] = order
-    return data
 
 
 class Harness(unittest.TestCase):
@@ -448,44 +444,6 @@ class SnapshotTest(Harness):
                          [('first', '#4'), ('second', '#7')])
         doing = {r['name']: r['doing'] and r['doing']['ref'] for r in snap['repos']}
         self.assertEqual(doing, {'first': '#4', 'second': '#7'})
-
-
-class OldOrderTest(Harness):
-    """A control.json that still has `repo_order` is read as before for its stops, and the order
-    is ignored without a word."""
-
-    def snapshot(self, config=None):
-        from queue_runner import snapshot
-        calls = snapshot.Calls(lambda: NOW)
-        return snapshot.Snapshots(config or load_config(self.config), calls=calls,
-                                  clock=lambda: NOW, info=snapshot.RunnerInfo(1, NOW, None),
-                                  claude=None, sol=None).build()
-
-    def test_an_old_order_is_ignored_without_a_word(self):
-        for order in (['second', 'first'], ['second'], 'second', ['second', 2]):
-            with self.subTest(order=order):
-                self.put(control(order))
-                self.run_main(['--once', '--dry-run'])
-                log = self.runner_log()
-                self.assertNotIn('repo_order', log)
-                self.assertNotIn('build order', log)
-
-    def test_its_stops_still_stand(self):
-        self.put(control(['second', 'first'], claude='after-job'))
-        self.run_main(['--once'])
-        self.assertEqual(self.t3.starts, [])
-
-    def test_the_snapshot_keeps_config_tomls_order(self):
-        self.put(control(['second', 'first']))
-        snap = self.snapshot()
-        self.assertEqual([r['name'] for r in snap['repos']], ['first', 'second'])
-        self.assertEqual(snap['control_read_at'], WRITTEN)
-
-    def test_a_write_drops_it(self):
-        from queue_runner import control as ctl
-        self.put(control(['second', 'first']))
-        data = ctl.ask(self.state, ('claude',), 'after-job', WRITTEN)
-        self.assertNotIn('repo_order', data)
 
 
 if __name__ == '__main__':
