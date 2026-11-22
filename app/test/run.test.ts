@@ -12,7 +12,7 @@ import { main } from '../src/app.ts';
 import { NoToaster, NoWaker } from '../src/later-parts.ts';
 import { runner_lock } from '../src/lock.ts';
 import { JobLog } from '../src/state.ts';
-import { RunResult, T3Error } from '../src/t3-seam.ts';
+import { Message, RunResult, T3Error } from '../src/t3-seam.ts';
 import { FakeGit, FakeGitHubWithPulls, FakeUsage, issue } from './fakes.ts';
 import { FakeT3, type Outcome } from './fakes-t3.ts';
 
@@ -302,6 +302,37 @@ describe('RunTest, turned on by reviews (#222)', () => {
   it.todo('test_review_one_pr_now');
 });
 
+// What a failed run's end record says of a usage limit, read from what the run said, as Python's
+// Runner reads it with no T3Store (`limits` None); the rest waits on #227.
+const LIMIT_SAID = "You've hit your weekly limit · resets Nov 9, 7pm (Asia/Singapore)";
+
+describe('LimitRecoveryTest', () => {
+  test('any other failure is not a limit stop', async () => {
+    const h = new Harness();
+    const t3 = new FakeT3([[1, 'failed']]);
+    t3.messages.set('mcp:t1', [new Message('assistant', 'The type checker keeps failing.')]);
+    await h.run_main(['--once'], new FakeGitHubWithPulls({ issues: [issue(4), issue(5)] }), t3);
+    expect(h.log.jobs()[0]!.outcome).toBe('failed');
+  });
+
+  test("an earlier run's limit message doesn't make a later failure a limit stop", async () => {
+    const h = new Harness();
+    const t3 = new FakeT3([[1, 'failed']]);
+    t3.messages.set('mcp:t1', [new Message('assistant', LIMIT_SAID, 'run:mcp:t1:0')]);
+    await h.run_main(['--once'], new FakeGitHubWithPulls({ issues: [issue(4), issue(5)] }), t3);   // this run is run:mcp:t1:1 and said nothing
+    expect(h.log.jobs()[0]!.outcome).toBe('failed');
+  });
+
+  test("claude code's limit message is enough when t3 recorded nothing", async () => {
+    const h = new Harness();
+    const t3 = new FakeT3([[1, 'failed']]);
+    t3.messages.set('mcp:t1', [new Message('assistant', LIMIT_SAID)]);
+    await h.run_main(['--once'], new FakeGitHubWithPulls({ issues: [issue(4), issue(5)] }), t3);
+    const job = h.log.jobs()[0]!;
+    expect([job.outcome, job.context]).toEqual(['usage-limit', null]);
+  });
+});
+
 describe('LimitRecoveryTest, turned on by limit recovery (#227)', () => {
   it.todo('test_a_limit_stop_is_recorded_with_its_resume_time_and_context');
   it.todo('test_nothing_else_starts_until_ten_minutes_after_the_reset');
@@ -310,10 +341,7 @@ describe('LimitRecoveryTest, turned on by limit recovery (#227)', () => {
   it.todo('test_a_cold_thread_under_120k_tokens_is_continued_in_place');
   it.todo('test_a_small_thread_is_continued_in_place_after_the_reset');
   it.todo('test_a_cold_big_thread_restarts_fresh_on_its_branch_at_its_newest_commit');
-  it.todo('test_any_other_failure_is_not_a_limit_stop');
   it.todo('test_the_runner_warns_at_start_if_t3_resumes_limited_threads_itself');
   it.todo('test_t3s_record_of_another_failure_wins_over_a_limit_message');
-  it.todo('test_an_earlier_runs_limit_message_doesnt_make_a_later_failure_a_limit_stop');
   it.todo('test_a_restart_that_cant_be_made_holds_the_job_and_isnt_tried_again');
-  it.todo('test_claude_codes_limit_message_is_enough_when_t3_recorded_nothing');
 });

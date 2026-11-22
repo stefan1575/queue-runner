@@ -21,9 +21,12 @@
 // The parts of Python's run loop that later tickets port (decisions, ask threads, answers on
 // GitHub, thread titles, fix rounds, limit recovery, the switches, the effort read-back, reviews,
 // the snapshot, wake tasks, serving itself) are called where Python calls them, through
-// `src/later-parts.ts`, which answers "nothing to do" for each until its ticket ports it. The
-// Runner's own methods that only those parts reach (`continue_job`, `recover`, `_restart`,
-// `run_fix`, `finish_fix`) come with their tickets, and `_limit` reads no limit stop until #227.
+// `src/later-parts.ts`, which answers "nothing to do" for each until its ticket ports it. A
+// stand-in may do less than Python, never something Python wouldn't: where Python would start a
+// part not ported yet (a decision, a limited job's recovery), the repo is held for the pass
+// (`_hold`). The Runner's own methods that only those parts reach (`continue_job`, `recover`,
+// `_restart`, `run_fix`, `finish_fix`) come with their tickets; `_limit` reads a limit stop from
+// what the run said, as Python does with no `T3Store`, until #227 ports the store.
 import { join as join_path } from 'node:path';
 import type { Usage } from './claude-usage.ts';
 import { build_brief } from './build-brief.ts';
@@ -35,11 +38,11 @@ import { CLAUDE_KINDS, FALLBACK_REVIEW, type Gate, type RunningJob } from './job
 import * as control from './later-parts.ts';
 import {
   AskThreads, Decider, Effort, Fixer, GitHubAnswers, NoToaster, NoWaker, NotPorted, OPUS_KINDS, Prefixes,
-  type Reviewer, Wait, gate_label, red_base,
+  type Reviewer, Wait, gate_label, limit_stop, red_base, resume_at, resume_choice,
 } from './later-parts.ts';
 import { KeyError, err_str, py_repr, type_name } from './python.ts';
 import { type Job, JobLog, NOT_SENT, NOT_STARTED, USAGE_LIMIT, when } from './state.ts';
-import { T3Error, type T3, type Thread, find_job_thread, settle_quietly } from './t3-seam.ts';
+import { type Message, T3Error, type T3, type Thread, find_job_thread, settle_quietly } from './t3-seam.ts';
 
 // What a pass did: started (it started jobs), busy (a Claude job is still running from an earlier
 // runner, so none was started where it runs, and nothing elsewhere), idle (nothing to start),
@@ -83,6 +86,11 @@ const pad = (n: number) => String(n).padStart(2, '0');
 /** `t.astimezone():%Y-%m-%d %H:%M`, in this machine's time zone. */
 function local_minute(t: Date): string {
   return `${t.getFullYear()}-${pad(t.getMonth() + 1)}-${pad(t.getDate())} ${pad(t.getHours())}:${pad(t.getMinutes())}`;
+}
+
+/** `t.isoformat(timespec='seconds')` of a time in UTC, as `Runner.now` gives it. */
+function utc_seconds(t: Date): string {
+  return `${t.toISOString().slice(0, 19)}+00:00`;
 }
 
 /** `t.astimezone():%H:%M:%S`. */
@@ -385,9 +393,11 @@ export class Runner {
   async _choose_in(repo: Repo, limited: readonly Job[], switch_: control.Switch): Promise<Start | null> {
     const [name, only] = [repo.name, [repo.name]];
     const mine = limited.filter((j) => j.repo === name);
-    if (mine.length) {
+    if (mine.length) {   // Python recovers it here: until #227 the repo is held instead
       const old = mine[0]!;
-      return new Start(name, old.kind, null, () => this.recover(old), Runner._name(old));
+      this._hold(name, `${Runner._name(old)} was cut off by a usage limit and may resume: limit recovery is ported `
+        + `in #227, so nothing else starts in ${name} meanwhile`);
+      return null;
     }
     const ask = await this.asking.next(switch_, { only });   // Stefan's click (35)
     if (ask) return new Start(name, 'decision', null, () => this.asking.open(ask), `ask ${name}#${ask.number}`);
@@ -855,11 +865,6 @@ export class Runner {
     throw new NotPorted('Runner.continue_job', '#226 and #227');
   }
 
-  /** A build or fix cut off by a usage limit, once the limit has reset. Ported in #227. */
-  async recover(_old: Job): Promise<string> {
-    throw new NotPorted('Runner.recover', '#227');
-  }
-
   /** A fresh Claude thread on a PR the runner found blocking, or a conflict round. Ported in #223. */
   async run_fix(_repo: Repo, _pr: PullRequest, _review: Job | null): Promise<string> {
     throw new NotPorted('Runner.run_fix', '#223');
@@ -877,7 +882,7 @@ export class Runner {
     const repo = this.repos.get(job.repo);
     if (repo === undefined) throw new KeyError(py_repr(job.repo));
     let link: string | null = null, worktree: string | null = null;
-    let said: import('./t3-seam.ts').Message[] = [];
+    let said: Message[] = [];
     try {
       let thread: Thread;
       [thread, said] = await this.t3.show(thread_id);
@@ -923,11 +928,26 @@ export class Runner {
   }
 
   /** For a failed run that stopped on a usage limit: the end record's `resume_at` and `context`
-   *  (`limits.py`). Until limit recovery is ported (#227) no limit stop is read, and a run that
-   *  stopped on one ends `failed`. */
-  _limit(_thread_id: string, _run_id: string | null, _exit_code: number, _error: string | null,
-    _said: readonly unknown[]): Record<string, unknown> | null {
-    return null;
+   *  (`limits.py`), said once in the log. Null for any other end. Read as Python reads it with no
+   *  `T3Store` (`limits` None): from what the run said; #227 ports the store, which names the reset
+   *  and the thread's last call. */
+  _limit(thread_id: string, run_id: string | null, exit_code: number, error: string | null,
+    said: readonly Message[]): Record<string, unknown> | null {
+    if (exit_code !== 1) return null;
+    // Only this run's own message: an earlier run's limit message may still be the last.
+    const last = said.filter((m) => m.role === 'assistant' && (m.run_id === null || run_id === null || m.run_id === run_id))
+      .map((m) => m.text).slice(-1);
+    const stop = limit_stop([error, ...last]);
+    if (stop === null) return null;
+    const resume = resume_at(this.now(), stop.reset_at);
+    const call = { started: null, tokens: null };   // lim.LastCall(None, None): no store
+    const tokens = call.tokens;
+    const known = stop.reset_at ? `T3 says it resets at ${local_minute(stop.reset_at)}` : "T3 doesn't say when it resets: 5h05m from now";
+    // As it would be chosen then; the recovery chooses again when it runs.
+    const then = resume_choice(call.started, tokens, resume);
+    this.say(`${thread_id} stopped on a usage limit; ${known}. It resumes after ${local_minute(resume)} `
+      + `(${then.in_place ? 'in place' : 'a fresh thread'}: ${then.why}).`);
+    return { resume_at: utc_seconds(resume), context: tokens, last_request: null };
   }
 
   /** A job that picked up a waiting one (`about`) never reached a thread: the waiting job was marked

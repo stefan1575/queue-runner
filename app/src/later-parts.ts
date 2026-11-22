@@ -339,6 +339,64 @@ export function red_base(jobs: { jobs(): Job[] }, repo_name: string, branch: str
   return null;
 }
 
+// --- `limits.py` (#227): a usage-limit stop, read from what the run said ----------------------
+
+export const RESET_UNKNOWN = (5 * 60 + 5) * 60;   // seconds from the stop, when T3 has no reset
+export const RESUME_AFTER = 10 * 60;              // seconds after the reset
+const WARM_FOR = 55 * 60;                         // seconds: a thread this recently asked is warm
+const COLD_FRESH_MIN = 120_000;                   // tokens: a cold thread this big or bigger restarts fresh
+
+/** What Claude Code and T3 say on a limit stop, for when T3's record can't be read. */
+export const LIMIT_SAID = /you've hit your (?:\w+ )?limit|claude api rate limit reached/i;
+
+/** `limits.LimitStop`: `reset_at` null when T3 stored none, or couldn't be read. */
+export type LimitStop = { readonly reset_at: Date | null };
+
+/** `limits.LastCall`: a thread's last real call to Claude. */
+export type LastCall = { readonly started: Date | null; readonly tokens: number | null };
+
+/** `limits.limit_stop` with no `T3Store` (Python's `limits` None: its tests and live checks): the
+ *  limit message in what this run said (its error, its last message) decides. #227 ports the store,
+ *  where T3's record of the run's failure decides first and names the reset. */
+export function limit_stop(said: readonly (string | null)[]): LimitStop | null {
+  return said.some((s) => LIMIT_SAID.test(s || '')) ? { reset_at: null } : null;
+}
+
+/** When a job cut off by a limit may run again: 10 minutes after the reset, or after 5h05m from
+ *  the stop if the reset is unknown. */
+export function resume_at(stopped: Date, reset: Date | null): Date {
+  return new Date((reset ?? new Date(stopped.getTime() + RESET_UNKNOWN * 1000)).getTime() + RESUME_AFTER * 1000);
+}
+
+/** `limits.ResumeChoice`: in place or fresh, and why. */
+export type ResumeChoice = { readonly in_place: boolean; readonly why: string };
+
+function _age(minutes: number): string {
+  if (minutes < 60) return `${minutes} min`;
+  const [h, m] = [Math.floor(minutes / 60), minutes % 60];
+  return m ? `${h} h ${m} min` : `${h} h`;
+}
+
+const commas = (n: number) => n.toLocaleString('en-US');
+
+/** `limits.resume_choice`: warm (its last request started under 55 minutes ago) continues at any
+ *  size; cold continues below 120k tokens and starts fresh at or above. An unknown age is cold, an
+ *  unknown size large. */
+export function resume_choice(last_request: Date | null, tokens: number | null, now: Date): ResumeChoice {
+  const gap = last_request === null ? null : (now.getTime() - last_request.getTime()) / 1000;
+  const idle = gap === null ? null : Math.max(0, Math.floor(gap / 60));
+  if (gap !== null && gap < WARM_FOR) {
+    return { in_place: true, why: `warm (its last request started ${_age(idle!)} ago): continuing it in place is cheaper at any size` };
+  }
+  const age = idle === null ? 'when its last request started is unknown' : `its last request started ${_age(idle)} ago`;
+  if (tokens === null) return { in_place: false, why: `cold (${age}) and its size unknown: a fresh thread` };
+  const small = tokens < COLD_FRESH_MIN;
+  const why = small
+    ? `cold (${age}) and ${commas(tokens)} tokens, under ${commas(COLD_FRESH_MIN)}: continuing it in place is cheaper`
+    : `cold (${age}) and ${commas(tokens)} tokens, at least ${commas(COLD_FRESH_MIN)}: a fresh thread is cheaper`;
+  return { in_place: small, why };
+}
+
 // --- `toast.py` and `wake.py` (#236) ------------------------------------------------------------
 
 /** `toast.NoToaster`: toasts nothing. */

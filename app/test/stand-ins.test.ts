@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { main } from '../src/app.ts';
 import { NoToaster, NoWaker } from '../src/later-parts.ts';
 import { JobLog } from '../src/state.ts';
+import { Message } from '../src/t3-seam.ts';
 import { FakeGit, FakeGitHubWithPulls, FakeUsage, issue } from './fakes.ts';
 import { FakeT3 } from './fakes-t3.ts';
 
@@ -114,5 +115,33 @@ describe('decisions (#226)', () => {
     const t3 = new FakeT3([[0, 'completed']]);
     await h.once(new FakeGitHubWithPulls({ issues: [issue(5)] }), t3);
     expect(t3.starts).toHaveLength(1);
+  });
+});
+
+describe('limit recovery (#227)', () => {
+  test("a run stopped on Claude's rate limit is recorded usage-limit, and holds every repo until it may resume", async () => {
+    const h = new Harness();
+    const t3 = new FakeT3([[1, 'failed']]);
+    t3.messages.set('mcp:t1', [new Message('assistant', 'Claude API rate limit reached')]);
+    const gh = new FakeGitHubWithPulls({ issues: [issue(4), issue(5)] });
+    await h.once(gh, t3);
+    const job = h.log.jobs()[0]!;
+    expect([job.outcome, job.context]).toEqual(['usage-limit', null]);
+    expect(job.resume_at).toBe('2026-11-23T09:15:00+00:00');   // 5h05m from the stop, then 10 minutes
+    const [, out] = await h.once(gh, t3);
+    expect(t3.starts).toHaveLength(1);   // issue 5 waits too: the limit is the account's
+    expect(out).toContain('Claude lane waits: build first#4 was cut off by a usage limit');
+  });
+
+  test('a usage-limit job due to resume holds its repo: nothing starts, nothing is recorded, nothing throws', async () => {
+    const h = new Harness();
+    h.a_build(4, 'usage-limit', 'mcp:l', { resume_at: '2026-11-23T03:00:00+00:00' });   // as Python wrote it
+    const t3 = new FakeT3([[0, 'completed']]);
+    const [code, out] = await h.once(new FakeGitHubWithPulls({ issues: [issue(5)] }), t3);
+    expect(code).toBe(0);
+    expect(t3.starts).toEqual([]);
+    expect(h.log.jobs()).toHaveLength(1);
+    expect(out).toContain('build first#4 was cut off by a usage limit and may resume: limit recovery is ported in #227');
+    expect(h.runner_log()).not.toContain('failed');
   });
 });
