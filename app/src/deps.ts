@@ -88,7 +88,7 @@ function isfile_sync(p: string): boolean {
 
 /** `shutil.which(cmd)`: the first match on PATH, with PATHEXT's extensions on Windows and the
  *  current folder first there (Windows' `NeedCurrentDirectoryForExePath`), else null. */
-function which(cmd: string): string | null {
+export function which(cmd: string): string | null {
   const path = process.env.PATH;
   if (!path) return null;
   const dirs = path.split(delimiter);
@@ -167,7 +167,7 @@ export const run_install: Run = async (cmd, cwd, out_path, timeout) => {
 };
 
 /** `subprocess.list2cmdline`: the command line Windows' CreateProcess gets from Python's list. */
-function list2cmdline(seq: string[]): string {
+export function list2cmdline(seq: string[]): string {
   const result: string[] = [];
   for (const arg of seq) {
     let bs: string[] = [];

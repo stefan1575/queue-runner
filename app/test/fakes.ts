@@ -1,9 +1,12 @@
 // In-memory GitHub and git for tests: no network, no gh, no git. Ported from `tests/fakes.py`'s
 // `FakeGitHub`, `FakeGitHubWithPulls` and `FakeGitHubForReviews` (#215), and `tests/fakes_t3.py`'s
-// `FakeGit` and `FakeReviewGit` (#216), with Python's names and answers. Each call is async, as
-// the seams' are (`src/github-seam.ts`, `src/git-seam.ts`).
+// `FakeGit` and `FakeReviewGit` (#216), and `FakeUsage` and `StubEndpoint` (#263), with Python's
+// names and answers. Each call is async, as the seams' are (`src/github-seam.ts`,
+// `src/git-seam.ts`).
+import { writeFileSync } from 'node:fs';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { type Clock, HTTPError, OAuthUsage, type Request, Usage, Window } from '../src/claude-usage.ts';
 import type { Commit } from '../src/git-seam.ts';
 import { Checks, Comment, GhError, Issue, PullRequest, type PullState, type Repo, replace, type WorkflowRun, type WorkIssue } from '../src/github-seam.ts';
 
@@ -422,5 +425,63 @@ export class FakeReviewGit extends FakeGit {
   async remove_worktree(_path: string, worktree: string, branch: string | null = null): Promise<boolean> {
     this.removed_worktrees.push([worktree, branch]);
     return !this.stuck.has(worktree);
+  }
+}
+
+/** Plays Claude's usage endpoint: each read gives the next of `reads` (the last one again once
+ *  they run out); an error in it is thrown. Tests never read the real one. It never answers 429,
+ *  so it may be asked at any pace: `call_every` 0 leaves `CachedUsage`'s budget out of the tests
+ *  that use it (the budget's own tests give their endpoint one). */
+export class FakeUsage {
+  readonly call_every = 0;
+  readonly reads: (Usage | Error)[];
+  count = 0;
+
+  constructor(...reads: (Usage | Error)[]) {
+    const far = new Date(Date.UTC(2099, 0, 1));
+    this.reads = reads.length ? reads : [new Usage(new Window(0, null), new Window(0, far))];
+  }
+
+  read(): Usage {
+    const got = this.reads[Math.min(this.count, this.reads.length - 1)]!;
+    this.count += 1;
+    if (got instanceof Error) throw got;
+    return got;
+  }
+}
+
+/** Plays `api/oauth/usage` behind a real `OAuthUsage` (its `fetch`), on a test's clock: it answers
+ *  a response shaped like the real one, or HTTP 429 when it's asked within `limit` seconds of its
+ *  last call, as the real one does (issue 66). `fail` makes every call answer that status.
+ *  `calls` is every call, as [time, status]. Nothing calls Anthropic. */
+export class StubEndpoint {
+  fail: number | null = null;
+  readonly calls: [Date, number][] = [];
+  readonly resets: [Date | null, Date | null];   // the windows' resets_at
+
+  readonly clock: Clock;
+  five: number;
+  week: number;
+  limit: number;
+
+  constructor(clock: Clock, five = 38, week = 46, limit = 60, resets: [Date | null, Date | null] | null = null) {
+    [this.clock, this.five, this.week, this.limit] = [clock, five, week, limit];
+    this.resets = resets ?? [null, null];
+  }
+
+  readonly fetch = async (request: Request): Promise<string> => {
+    const now = this.clock();
+    const last = this.calls[this.calls.length - 1];
+    const status = this.fail || (last && (now.getTime() - last[0].getTime()) / 1000 < this.limit ? 429 : 200);
+    this.calls.push([now, status]);
+    if (status !== 200) throw new HTTPError(request.full_url, status, 'stub');
+    const [five, week] = this.resets.map((r) => (r ? r.toISOString() : null));
+    return JSON.stringify({ five_hour: { utilization: this.five, resets_at: five }, seven_day: { utilization: this.week, resets_at: week } });
+  };
+
+  /** A real `OAuthUsage` on this stub, with a fake login written in `config_dir`. */
+  oauth(config_dir: string): OAuthUsage {
+    writeFileSync(join(config_dir, '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: 'sk-fake' } }), 'utf8');
+    return new OAuthUsage(config_dir, this.fetch, this.clock);
   }
 }

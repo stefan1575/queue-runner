@@ -74,7 +74,7 @@ export function py_eq(a: Json, b: Json): boolean {
 export const among = (xs: readonly Json[], x: Json): boolean => xs.some((y) => py_eq(x, y));
 
 /** Python's `repr` of a float: the shortest digits, in exponent form below 1e-4 and from 1e16. */
-function float_repr(x: number): string {
+export function float_repr(x: number): string {
   if (Number.isNaN(x)) return 'nan';
   if (!Number.isFinite(x)) return x > 0 ? 'inf' : '-inf';
   const [mant, exp] = x.toExponential().split('e') as [string, string];
@@ -172,8 +172,8 @@ export const by_code_point = (a: string, b: string) => {
 
 /** `json.dumps(x, sort_keys=True)`: `, ` and `: ` between items, every dict's keys in code-point
  *  order, and everything outside printable ASCII as `\uXXXX` (`ensure_ascii`). A whole number is
- *  an int, as `py_str` reads one. */
-export function json_dumps(x: Json): string {
+ *  an int, as `py_str` reads one. With `sort_keys` false, `json.dumps(x)`: the keys in order. */
+export function json_dumps(x: Json, sort_keys = true): string {
   if (x === null || x === undefined) return 'null';
   if (x === true) return 'true';
   if (x === false) return 'false';
@@ -185,9 +185,9 @@ export function json_dumps(x: Json): string {
   if (typeof x === 'string') {
     return JSON.stringify(x).replace(/[^\x20-\x7e]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`);
   }
-  if (Array.isArray(x)) return `[${x.map(json_dumps).join(', ')}]`;
-  const keys = Object.keys(x).sort(by_code_point);
-  return `{${keys.map((k) => `${json_dumps(k)}: ${json_dumps(x[k])}`).join(', ')}}`;
+  if (Array.isArray(x)) return `[${x.map((v) => json_dumps(v, sort_keys)).join(', ')}]`;
+  const keys = sort_keys ? Object.keys(x).sort(by_code_point) : Object.keys(x);
+  return `{${keys.map((k) => `${json_dumps(k)}: ${json_dumps(x[k], sort_keys)}`).join(', ')}}`;
 }
 
 /** `f'{x:.0f}'`: the nearest whole number, a tie to the even one, as Python rounds a float. */
@@ -195,4 +195,40 @@ export function format_0f(x: number): string {
   const floor = Math.floor(x);
   const n = x - floor === 0.5 ? (floor % 2 === 0 ? floor : floor + 1) : Math.round(x);
   return (Object.is(n, -0) || (n === 0 && x < 0) ? '-0' : String(n));
+}
+
+/** `f'{x:g}'`: six significant digits, trailing zeros dropped, in exponent form below 1e-4 and
+ *  from 1e6. */
+export function format_g(x: number): string {
+  if (Number.isNaN(x)) return 'nan';
+  if (!Number.isFinite(x)) return x > 0 ? 'inf' : '-inf';
+  if (x === 0) return Object.is(x, -0) ? '-0' : '0';
+  const [mant, exp] = x.toExponential(5).split('e') as [string, string];
+  const e = Number(exp);
+  const trim = (s: string) => (s.includes('.') ? s.replace(/0+$/, '').replace(/\.$/, '') : s);
+  if (e < -4 || e >= 6) return `${trim(mant)}e${e < 0 ? '-' : '+'}${String(Math.abs(e)).padStart(2, '0')}`;
+  return trim(x.toFixed(5 - e));
+}
+
+/** Python's `ValueError`, where a port raises one Python's callers catch by that name. */
+export class ValueError extends Error {
+  override name = 'ValueError';
+}
+
+const FLOAT = /^[+-]?(?:(?:\d(?:_?\d)*)?\.?\d(?:_?\d)*(?:[eE][+-]?\d(?:_?\d)*)?|\d(?:_?\d)*\.|inf(?:inity)?|nan)$/i;
+
+/** Python's `float()` of a JSON value: a number or a bool as it is, a string of a float's
+ *  literal (`ValueError` otherwise), and anything else a `TypeError`. */
+export function py_float(x: Json): number {
+  if (typeof x === 'number') return x;
+  if (typeof x === 'boolean') return x ? 1 : 0;
+  if (typeof x === 'string') {
+    const s = strip(x);
+    if (!FLOAT.test(s)) throw new ValueError(`could not convert string to float: ${str_repr(x)}`);
+    const t = s.replace(/_/g, '').toLowerCase();
+    const sign = t.startsWith('-') ? -1 : 1;
+    const bare = t.replace(/^[+-]/, '');
+    return bare.startsWith('inf') ? sign * Infinity : bare === 'nan' ? NaN : Number(t);
+  }
+  throw new TypeError(`float() argument must be a string or a real number, not '${type_of(x)}'`);
 }

@@ -770,6 +770,37 @@ Nothing calls it yet: builds pick through `src/picker.ts`, and the fix, conflict
 read `closedIssues` and `JOB_BRANCH_PREFIX` there, until the run loop, review and fix ports
 (#219, #222, #223) move them.
 
+## The usage gate, ported
+
+Ported from `queue_runner/gate.py`, `queue_runner/usage.py` and `queue_runner/codex_usage.py`
+(#263), in `src/job-gate.ts`, `src/claude-usage.ts` and `src/codex-usage.ts`, with
+`tests/test_gate.py`, `tests/test_usage.py` and `tests/test_codex_usage.py` ported case for case
+in `test/job-gate.test.ts`, `test/claude-usage.test.ts` and `test/codex-usage.test.ts`, and
+`tests/fakes.py`'s `FakeUsage` and `StubEndpoint` in `test/fakes.ts`. It reads and writes the
+same files (`gate.json`, `usage.jsonl`, Claude Code's `.credentials.json`), asks the same usage
+endpoint with T3's headers inside the same five-minute budget, and runs `codex app-server` for
+the same JSON-RPC call, with Python's names: `Gate`, `decide`, `Cost`, `CostBook`, `Running`,
+`Knob`, `Verdict`, `read_knob`, `write_knob`, `Usage`, `Window`, `OAuthUsage`, `CachedUsage`,
+`Reading`, `UsageError`, `CodexUsage`, `CodexUsageError` and the rest. `sol.py`'s `LimitWindow`
+and `Limits` are in `src/codex-usage.ts` until the Sol port (#222). What each decides is the
+module's own comment, as in Python. The three files name the providers as Python's do, so
+`test/no-model-names.test.ts` passes them by name. `tests/test_usage_refresh.py`'s cases test
+control.json, the dashboard's server, the snapshot and the dashboard's sample, so they are
+pending in `test/usage-refresh.test.ts` until #229, #230 and #235 turn them on; `--gate` moved to
+#229.
+
+The differences are TypeScript's only. Every `CachedUsage` method is async and queues on one
+promise lock, where Python's hold a thread lock through the endpoint's call: a caller still waits
+for a call in flight. `Gate.check`, `usage`, `after_wait` and `measured` are async with it, and
+`measured`'s default wait is `wall_sleep` in steps of `WALL_STEP`, as `run.py` has it.
+`job_ended` never awaits, so it needs no lock. A `Date` holds milliseconds, not microseconds, and
+no offset of its own: a reset time is written in UTC (`+00:00`). JSON is JavaScript's (The review
+ledger, below, has the same limits), and a caught error's text is Node's where Python prints its
+own.
+
+Nothing calls it yet: the app's own usage gate (Usage, above) runs the lanes until the run loop's
+port (#219) calls this one.
+
 ## The review ledger
 
 Ported from `queue_runner/ledger.py` and `queue_runner/post.py` (#220), in `src/review-ledger.ts`
