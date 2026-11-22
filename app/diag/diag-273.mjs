@@ -9,7 +9,7 @@ console.log('tmpdir', tmpdir(), 'TEMP', process.env.TEMP, 'TMP', process.env.TMP
 console.log('PATH', process.env.PATH);
 // env dump removed
 sh('where', ['icacls']);
-sh('C:\Windows\System32\whoami.exe', ['/priv']);
+sh('C:/Windows/System32/whoami.exe', ['/priv']);
 const base = mkdtempSync(join(tmpdir(), 'd273-'));
 const folder = join(base, 'x');
 mkdirSync(folder); writeFileSync(join(folder, 'f.txt'), 'x');
