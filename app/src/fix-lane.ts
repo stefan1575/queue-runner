@@ -506,6 +506,7 @@ export class FixLane {
     const w = watchThreadEnd(this.d.ws, job.threadId!, job.runId ?? null, this.d.retry,
       (why) => this.d.say(`${job.title}: T3's thread stream dropped (${why}); opening it again`), new Set(job.knownRuns ?? []));
     this.watches.add(w);
+    if (this.stopped) w.stop(); // a round launched as the lane stopped watches nothing
     let end: ThreadEnd;
     try {
       end = await w.end;
