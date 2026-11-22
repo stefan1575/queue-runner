@@ -155,6 +155,7 @@ describe('AfterJobTest', () => {
     expect(h.endpoint.calls).toEqual([[t(14, 1, 49), 200], [t(14, 6, 49), 200]]);
     const recs = readFileSync(h.gate.book.path, 'utf8').split('\n').filter((l) => l.trim()).map((l) => JSON.parse(l));
     expect(recs).toHaveLength(1);
+    expect(recs[0]).toHaveProperty('after');   // Python's rec['after']: the key there, and not None
     expect(recs[0].after).not.toBeNull();
     expect(recs[0]).not.toHaveProperty('error');
   });
@@ -396,6 +397,7 @@ describe('MeasuredRaceTest', () => {
     await h.gate.measured('fix', ['j1'], verdict.usage!);
     const lines = readFileSync(join(h.state, 'usage.jsonl'), 'utf8').split(/\r?\n/).filter(Boolean);
     const last = JSON.parse(lines.at(-1)!);
+    expect(last, JSON.stringify(last)).toHaveProperty('after');   // Python's last['after']
     expect(last.after, JSON.stringify(last)).not.toBeNull();
   });
 });
