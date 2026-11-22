@@ -40,8 +40,7 @@ order; a call named in `fail` raises), `FakeReviewGit` and `FakeSol` (`tests/tes
 fake install) and the junction kept on removal and a checkout git can't delete (a deny-delete ACL) in `tests/test_git.py`. Stops and toasts are in `tests/test_stops.py` (a fake toaster), with a failed Actions check's one re-run per run and head (`FakeGitHubForReviews.workflow_runs` and `rerun_failed`). Main's own failure (#98): `tests/test_base_red.py`, through the real `Runner` (`FakeGitHubForReviews.base_heads`, `update_branch`, `close_completed`): a PR held and one base stop, a second PR filing nothing, no build but a fix round while main is red, each held PR updated and the stop closed once main passes, a refused update, the PR's own failure still a stop, and the Inbox's one broken ask; then PR #110's review 1: a new failure main doesn't have on a held head, an update that fails for another reason, a held PR with a writer, and an issue that couldn't be filed. Merging
 (`tests/test_merge.py`) plays GitHub moving on through `FakeGitHubForReviews.now` (a PR's fields
 now), `threads` and `push_before_merge`; fix rounds (`tests/test_fix.py`) run the real `Runner`
-with a T3 fake whose thread pushes; `AdoptedReviewTest` runs them all again with a cutover
-set, and adopts a review from before it (not one after). Conflict rounds (`tests/test_conflicts.py`): a pair of
+with a T3 fake whose thread pushes. Conflict rounds (`tests/test_conflicts.py`): a pair of
 conflicted PRs through the real `Runner`, one after the other, with a T3 fake whose thread
 resolves (or doesn't), and the stops. Decisions (`tests/test_decisions.py`): the answer block
 parsed, and each case and action through the real `Runner`, `FakeT3` giving a decision thread's
@@ -60,7 +59,7 @@ fallback review, either lane seeing it end first) and `MeasuredRaceTest` (the ot
 job ended mid-read), and `tests/test_review2_fallback_settle.py` (PR 67's review 2, as Sol wrote
 it).
 The Opus fallback: `tests/test_fallback.py` (through the Sol seam, `FakeT3` and
-`FakeGitHubForReviews`: the thread and its brief, the comment, status, Review row and
+`FakeGitHubForReviews`: the thread and its brief, the comment, status and
 `decision.json` naming it, the effort read back in the label, failed and waiting threads, the
 gate holding it back and learning its cost, `--gate`'s line, the switch back to Sol after the
 reset, a clean fallback review merging or marking ready, a blocking one's fix round through the
@@ -76,15 +75,12 @@ database or settings). A decision's `retry` and `answer` in place or fresh: the 
 says otherwise).
 The effort: `tests/test_effort.py` (`[claude] effort`; `T3Files` on a temp SQLite and
 transcript folder; the provider, model and effort named, end records and log lines through a
-real build, decision, continued job, fix round and live run with `FakeFiles`). Every kind's
+real build, decision, continued job and fix round with `FakeFiles`). Every kind's
 start names them on `FakeT3` (which requires them): also the conflict round
 (`test_conflicts.py`), the Opus review (`test_fallback.py`) and the ask thread
 (`test_ask_threads.py`). The MCP launch and wait: `tests/test_t3.py` (`FakeMcp`).
-Local tickets: `tests/test_tickets.py` (both status forms, blocker lines, a sandbox git repo
-with three tickets in a blocker chain) and `LocalTicketsDryRunTest` in `tests/test_cli.py`.
-Live steps: `tests/test_live.py` (the answer block, the batch from `FakeLiveGit`, about to land,
-each outcome and its stop, a restart through the real `Runner`); `GitCli`'s first-parent log and
-changed files in `tests/test_git.py`.
+The job log still reads the `live` jobs of the removed live steps (#265):
+`test_an_old_live_runs_records_still_read_as_an_ended_job` in `tests/test_state.py`.
 Stefan merges: `StefanMergesTest` in `tests/test_merge.py` (marked once, unmarked on a new head
 or a stop, his merge noticed once, a closed PR, a failed label) and `tests/test_inbox.py`
 (`--inbox` through `main`, and the `merge` setting).
@@ -153,13 +149,12 @@ keys); `CollectTest` in `tests/test_inbox.py` (`--inbox` prints the collection);
 `InboxTest` in `tests/test_snapshot_runner.py` (a Sol pass reads it, only with a publisher).
 The work lists: `tests/test_work.py` (`work.Reader` on a temp job log and `FakeGitHubForReviews`
 with its `work_list`, written by `snapshot.build`: each lane's queue in its order, the build
-order and a stopped repo, a limited job and the running one, decisions, conflict rounds, live
-steps with `FakeLiveGit` and nothing fetched; each issue state, features and their order; each
+order and a stopped repo, a limited job and the running one, decisions, conflict rounds; each issue state, features and their order; each
 PR status, left alone included; timelines and activity; GitHub down; and a real issue, feature,
 PR, queue entry and activity row held to the sample's keys); `WorkTest` and `--snapshot`'s
 GitHub read in `tests/test_snapshot_runner.py`; `GhCli.work_issues` in `tests/test_github.py`.
-Stopping a lane: `tests/test_switch.py` (today's gate.json pause through the run loop, each
-stop through `main` and `Runner.run_once`, the older pause against an entry, `--pause` and
+Stopping a lane: `tests/test_switch.py` (each
+stop through `main` and `Runner.run_once`, `--pause` and
 `--resume`, the same file from the CLI's writer and `serve.App.write_control`, `--gate` and the
 dry run's words, an unreadable control.json in every shape, read and repaired from both
 ends, the wake tasks a stopped lane doesn't set, and a Stop asked mid-review or mid-merge).
@@ -169,14 +164,13 @@ a repo while its first runs; a stopped repo and a dead runner's running job each
 their own repo; the gate with room for one (config.toml's order on a tie, else the repo that
 waited longest), a held job not holding back a later one that fits, shared passes teaching
 nothing; both jobs cut off by a limit and each recovered in its repo; new code waiting for the
-running jobs; the dry run and `--gate`; the snapshot while both run; an old `repo_order` ignored
-silently and dropped on write). The gate beside running jobs: `RunningJobsTest` in
+running jobs; the dry run and `--gate`; the snapshot while both run). The gate beside running jobs: `RunningJobsTest` in
 `tests/test_gate.py`. `FakeT3` takes a lock, as two workers call it at once. The Opus review
 beside the Claude lane: `tests/test_review_beside_lane.py` (an open review holding a build, one
 the Sol lane let in, the review held by a running build, `shared_with` both ways whichever
 started first, a review alone still teaching, `--gate`).
-Stopping one repo: `tests/test_repo_stop.py` (leads-dashboard with live steps due and
-game-backdrop first through the run loop: game-backdrop's build, with leads-dashboard's live steps
+Stopping one repo: `tests/test_repo_stop.py` (leads-dashboard with a ready issue and
+game-backdrop first through the run loop: game-backdrop's build, with leads-dashboard's build
 beside it unless stopped; each kind of Claude
 work and the Sol lane's stops, merges and reviews with a control run unstopped; a review that ends
 after its repo was stopped; `apply_control` and `--pause NAME` writing the same file; the log said

@@ -129,7 +129,7 @@ class ContinuousTest(Harness):
         self.assertEqual([l['id'] for l in snap['lanes']], ['claude', 'sol'])
         self.assertEqual(lane(snap, 'claude')['state'], 'idle')   # the build ended, nothing else to do
 
-    def test_paused_through_gate_json_the_lane_reads_stopped(self):
+    def test_paused_the_lane_reads_stopped(self):
         self.run_main(['--pause'])
 
         def sleep(s):

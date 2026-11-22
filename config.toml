@@ -8,10 +8,6 @@ runs_dir = "~/.queue-runner/runs"            # each Sol review's brief, inputs, 
 checkouts_dir = "~/.queue-runner/checkouts"  # Sol's detached checkout of a PR's head
 deps_dir = "~/.queue-runner/deps"            # node_modules per lockfile, linked into that checkout
 poll_seconds = 300   # continuous mode: the pause after a pass that started nothing
-# The runner's cutover (issue 3): a blocking review posted before this date by the old loop (or by
-# Sol from a T3 child) counts as the runner's own for fix rounds. One posted after it is left to
-# the session that ran it.
-adopt_reviews_before = 2026-11-10
 
 # Claude jobs run as T3 threads on this provider instance and model, at this effort (ticket 39;
 # Stefan, 2026-11-15: "keep it at high by default", until his Claude Max plan ends; 2026-11-16:
@@ -42,8 +38,7 @@ claude_provider = "claudeReviewer"
 
 # First in this order (Stefan, 2026-11-15: "prioritize game backdrop full stop", its first
 # run under the dashboard). Stefan merges its PRs himself (2026-11-15: "no auto merge, just
-# leave it up to me"): a desktop app nobody runs before a merge. It has no live steps: merged
-# is live.
+# leave it up to me"): a desktop app nobody runs before a merge.
 [[repos]]
 name = "game-backdrop"
 github = "stefan1575/game-backdrop"
@@ -58,7 +53,3 @@ name = "queue-runner"
 github = "stefan1575/queue-runner"
 path = "~/Code/Personal/queue-runner"
 base = "main"
-
-# A repo whose tickets are local markdown (`.scratch/<feature>/issues/NN-<slug>.md`, ticket 12)
-# would say `issues = "local"`; the runner only names its next ticket in `--once --dry-run` and
-# builds none (no served repo needs it: Stefan, 2026-11-10).

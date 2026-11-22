@@ -69,13 +69,9 @@ describe('GitCliTest', { timeout: 30_000 }, () => {
     expect(await cli.diffstat(repo, base, head)).toContain('b.txt');
   });
 
-  test('test_a_merged_pr_on_the_first_parent_line_and_its_files', async () => {
+  test('test_sha_reads_a_refs_commit', async () => {
     git(repo, 'merge', '-q', '--no-ff', '-m', 'Merge pull request #7 from o/claude/x-1', 'claude/x-1');
-    const merge = git(repo, 'rev-parse', 'HEAD');
-    expect(await cli.sha(repo, 'main')).toBe(merge);
-    expect(await cli.first_parent(repo, base, merge))
-      .toStrictEqual([{ sha: merge, subject: 'Merge pull request #7 from o/claude/x-1' }]);
-    expect(await cli.name_status(repo, base, merge)).toStrictEqual([['A', 'b.txt']]);
+    expect(await cli.sha(repo, 'main')).toBe(git(repo, 'rev-parse', 'HEAD'));
   });
 
   test('test_a_worktree_and_its_branch_are_removed', async () => {

@@ -124,14 +124,6 @@ class FallbackTest(unittest.TestCase):
         with open(os.path.join(job.run_dir, 'decision.json'), encoding='utf-8') as f:
             self.assertEqual(json.load(f)['reviewer'], LABEL)
 
-    def test_the_review_row_names_the_fallback(self):
-        self.use(Repo(name='first', github='owner/first', path=self.dir, review_table=True))
-        self.sol_out()
-        self.reviewer((0, 'completed', reply())).review_pass()
-        [(_, _, body)] = self.posted('body')
-        row = next(line for line in body.splitlines() if line.startswith('| ['))
-        self.assertTrue(row.startswith(f'| [Review 1, {LABEL}](https://'), row)
-
     def test_sols_own_review_still_names_sol(self):
         r = self.reviewer(sol=[reply()])
         r.review_pass()
@@ -366,8 +358,7 @@ class ClaudeReviewsTest(unittest.TestCase):
         self.assertTrue(any('Opus (config.toml says so) reviews' in s for s in self.said),
                         self.said)
 
-    def test_the_comment_status_and_row_say_config_toml_chose_it(self):
-        self.use(Repo(name='first', github='owner/first', path=self.dir, review_table=True))
+    def test_the_comment_and_status_say_config_toml_chose_it(self):
         self.reviewer((0, 'completed', reply())).review_pass()
         [(_, _, body)] = self.posted('comment')
         self.assertTrue(body.startswith(f'## Sol review 1 · Clean · {self.SET_LABEL}\n'),
@@ -375,9 +366,6 @@ class ClaudeReviewsTest(unittest.TestCase):
         self.assertNotIn('fallback', body)
         [(_, _, _, description, _)] = self.posted('status')
         self.assertTrue(description.startswith(f'{self.SET_LABEL}: Clean'), description)
-        [(_, _, pr_body)] = self.posted('body')
-        row = next(line for line in pr_body.splitlines() if line.startswith('| ['))
-        self.assertTrue(row.startswith(f'| [Review 1, {self.SET_LABEL}](https://'), row)
 
     def test_sol_out_of_usage_changes_nothing(self):
         self.sol_out()

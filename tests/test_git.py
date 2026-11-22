@@ -42,14 +42,10 @@ class GitCliTest(unittest.TestCase):
                          [{'sha': self.head, 'subject': 'Add b'}])
         self.assertIn('b.txt', self.cli.diffstat(self.repo, self.base, self.head))
 
-    def test_a_merged_pr_on_the_first_parent_line_and_its_files(self):
+    def test_sha_reads_a_refs_commit(self):
         git('merge', '-q', '--no-ff', '-m', 'Merge pull request #7 from o/claude/x-1',
             'claude/x-1', cwd=self.repo)
-        merge = git('rev-parse', 'HEAD', cwd=self.repo)
-        self.assertEqual(self.cli.sha(self.repo, 'main'), merge)
-        self.assertEqual(self.cli.first_parent(self.repo, self.base, merge),
-                         [{'sha': merge, 'subject': 'Merge pull request #7 from o/claude/x-1'}])
-        self.assertEqual(self.cli.name_status(self.repo, self.base, merge), [('A', 'b.txt')])
+        self.assertEqual(self.cli.sha(self.repo, 'main'), git('rev-parse', 'HEAD', cwd=self.repo))
 
     def test_a_worktree_and_its_branch_are_removed(self):
         self.assertTrue(self.cli.remove_worktree(self.repo, self.wt.replace('\\', '/'),

@@ -15,7 +15,7 @@ The review loop's rules and words are `docs/flow.md`, The review loop; a served 
 3. **Merge** (`merge.Merger`, also right after a clean review is posted). A PR merges once the
    runner's own newest review of its head H is `clean` (a clean review that stops for Stefan is
    `stop`). Just before, it's read again: open, still at H (moved: nothing is tried, and Sol
-   reviews the new head), not a draft, no Claude job writing to it, no live run open in the repo, its newest review comment
+   reviews the new head), not a draft, no Claude job writing to it, its newest review comment
    the clean one on H, checks passed on H (`sol-review` not counted), no conflict, nothing said
    on it since that review (bots, `*[bot]`, aside) and no unresolved review thread. Why not is
    logged once. Then `PUT pulls/<n>/merge` with `sha=H` and `merge_method=merge` (a merge
@@ -23,9 +23,7 @@ The review loop's rules and words are `docs/flow.md`, The review loop; a served 
    Two failed merges on H leave it until a push or `--release`. After the merge the worktrees of
    the PR's build and fix jobs are removed with their local branches (`GitCli.remove_worktree`:
    gone from `git worktree list` counts, since T3 may hold the empty folder), and one that
-   can't be is said, and their threads are settled (`docs/stops.md`, Settling threads). The repo's live
-   steps run later in the Claude
-   lane (`docs/claude-lane.md`, Live steps). **In a repo Stefan merges** (`merge = "stefan"`), the PR is marked
+   can't be is said, and their threads are settled (`docs/stops.md`, Settling threads). **In a repo Stefan merges** (`merge = "stefan"`), the PR is marked
    `ready-for-stefan` instead, and his merge is noticed on a later pass (`docs/claude-lane.md`, Stefan merges).
    **Merge job records** (kind `merge`): `sha` H, `head` the merge commit; outcomes `merged`,
    `head-moved`, `failed`.
@@ -73,8 +71,7 @@ The review loop's rules and words are `docs/flow.md`, The review loop; a served 
    `<!-- sol-finding owner/name#N ID -->` line (an open issue with that line, the old script's
    footer for the PR and ID, or the same title is linked instead of filed again); the comment,
    linking them, its ledger recording each issue's URL (`issue`); `sol-review` on H, never the
-   PR's head now; with `review_table`, a row in the PR body's `## Review` table, read afresh
-   (`with_review_row`, ported from the old script). The comment is the review's record: if it
+   PR's head now. The comment is the review's record: if it
    can't be posted the review is `failed` and the PR is reviewed again. A failure after it is
    said and left. A filing that fails is marked `unfiled` in the ledger, and the next review
    files it. Issues go before the comment, as the old script did, so the comment can link them;
@@ -187,8 +184,8 @@ doesn't wait: a PR that needs a review gets one from a T3 thread on the Claude m
 - **The label** (`fallback.label`): "Opus 5.5 high, fallback while Sol is out", with the effort
   the run used, read back (`Effort.used`), else the config's. It's in the comment's heading
   (`## Sol review N · V · <label>`, so `HEADING` still reads it) and byline, the `sol-review`
-  status's description (`<label>: Clean: ...`; the context stays `sol-review`), the Review row
-  (`[Review N, <label>](...)`) and `decision.json`'s `reviewer`. The hidden marker is the same,
+  status's description (`<label>: Clean: ...`; the context stays `sol-review`) and
+  `decision.json`'s `reviewer`. The hidden marker is the same,
   so the review counts as any other: **a clean fallback review merges** (or marks
   `ready-for-stefan`), and a blocking one gets a fix round.
 - **The job record:** kind `review` with `reviewer` `opus-fallback` in its start record, and the

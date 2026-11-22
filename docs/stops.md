@@ -14,8 +14,7 @@ the run folder's `decision.json`), `no-push` (a fix round on H ended without pus
 again with the base its last round merged, or after 5 conflict rounds: `docs/claude-lane.md`, Conflict rounds). A review that stops files right after it posts. Two kinds are
 filed by decisions in the Claude lane: `approach-note` (review 3 or later still blocking, filed
 with the Approach note; the Sol pass files it again from the decision's record if filing failed)
-and `decision` (a decision thread's question on a PR). Live runs file `live` and `live-todo` on a
-merged PR (`docs/claude-lane.md`, Live steps).
+and `decision` (a decision thread's question on a PR).
 
 **Filing** (automated posts, no go-ahead): the PR's one open `needs-info` issue, found by its
 hidden `<!-- queue-runner needs-info owner/name#N -->` line, gets the stop as a comment; with
@@ -37,9 +36,7 @@ there for good) answers it too, `pr-closed`: each of its `needs-info` issues sti
 one-line note (hidden `stop pr-closed pr=N` line, so a retry doesn't post it twice) and is
 closed, completed for a merge and not planned for a close, and only then is the stop recorded,
 so GitHub failing leaves it `filed` for the next pass. An issue he closed himself still reads
-`issue-closed`. `live` and `live-todo` stops sit on merged PRs by design, so a merge never
-answers them, and an issue one of them shares is left open (no note): closing it would answer
-that live work without Stefan. Answers are read at the start of each Sol pass. A
+`issue-closed`. Answers are read at the start of each Sol pass. A
 closed issue puts the PR back in the loop; a reply holds it until a decision acts on what it asks
 (`docs/claude-lane.md`, Decision threads). Every comment the runner posts outside a review carries a hidden
 `<!-- queue-runner ... -->` line (`ledger.RUNNER_MARK`), so none counts as a reply.
@@ -142,7 +139,7 @@ didn't start: only ids from its own job records.
   thread, and a job whose question waits on Stefan,** are settled once they no longer need him
   (Threads that need Stefan, below), or once their prompt cache expires (A stale waiting thread,
   below); an ask thread never at a merge (a decision acted on from
-  one carries its id). **Not settled:** live threads.
+  one carries its id).
 - **A settled thread stays readable:** `thread show` and `thread list` still give it and its
   messages (checked live 2026-11-16), so decisions and restarts read its last reply as before.
   **A message to a settled thread unsettles it** (T3's `thread.unsettled` on a new turn,

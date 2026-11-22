@@ -16,9 +16,9 @@ passed) and `base-hold` (a PR held on H because the base fails the
 same checks: `held`, then `updated`, `update-failed` (GitHub refused: a conflict) or `moved`,
 or `own-failure` (a check the base doesn't fail failed on H too) or `cleared` (nothing fails
 on H any more)) and `decision` (a one-off Claude decision thread, or Stefan's reply read directly, on a case the flow
-doesn't cover: `about` the job it decides on, its outcome the action taken) and `live` (a repo's
-live steps after merges, `live.py`: `sha` where the last live run reached, `head` the base's
-commit this one brings live).
+doesn't cover: `about` the job it decides on, its outcome the action taken). The log may still
+hold `live` jobs from the removed live steps after merges (#265): they read as any other ended
+job, and nothing acts on them.
 
 A build or fix started by a decision continues an earlier job's thread: its start record has
 `thread_id` (that thread) and `about` (the earlier job). A job that picks up an earlier one (a
@@ -143,8 +143,6 @@ class Job:
     question: str | None = None    # a decision: which question (decisions.QUESTIONS)
     context: int | None = None     # usage-limit: the thread's context in tokens (None: unknown)
     last_request: str | None = None   # usage-limit: when its last real request started
-    applied: list = field(default_factory=list)   # live: the migrations its thread applied
-    prs: list = field(default_factory=list)       # live: the PRs merged in its batch
     cause: str | None = None       # a fix: `conflict` for a conflict round (ticket 15), else None
     resume: dict | None = None     # a job picking up an earlier one: in place or fresh, and why
     effort: str | None = None      # a Claude job: the effort its run used, read back (ticket 39)
@@ -160,7 +158,7 @@ class Job:
 
 _END_FIELDS = ('thread_id', 'link', 'run_id', 'exit_code', 'status', 'outcome', 'commits', 'pr',
                'worktree', 'error', 'verdict', 'signals', 'run_dir', 'resume_at', 'head',
-               'reason', 'answer', 'context', 'last_request', 'applied', 'prs', 'effort', 'runs')
+               'reason', 'answer', 'context', 'last_request', 'effort', 'runs')
 
 
 class JobLog:
@@ -295,7 +293,7 @@ class JobLog:
         settle at its merge): its build and fix threads, the decisions on it or on one of
         those jobs (a failed build's, before the PR existed), and its Opus fallback reviews.
         Never an ask thread, which `prefixes.py` settles once decided (a decision acted on
-        from one carries its id), nor a live run's, which isn't the PR's."""
+        from one carries its id)."""
         jobs = self.jobs()
         writers = self.pr_jobs(repo, number, branch)
         ids = {j.id for j in writers}
@@ -337,13 +335,6 @@ class JobLog:
         release settled), oldest first."""
         jobs, _, gone = self._fold()
         return self._limited(jobs, gone)
-
-    def live(self, repo: str, released: bool = True) -> list[Job]:
-        """The repo's live jobs, oldest first; without `released`, leaving out those a release
-        settled (a release of the batch's newest PR)."""
-        jobs, _, gone = self._fold()
-        return [j for j in jobs if j.kind == 'live' and j.repo == repo
-                and (released or j.id not in gone)]
 
     def open_stops(self, repo: str, number: int) -> list[Job]:
         """Stops filed on this PR that Stefan hasn't answered (or released), oldest first: while

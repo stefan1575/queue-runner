@@ -950,7 +950,7 @@ const wasRead = (at) => !at || (snap.control_read_at && ms(snap.control_read_at)
 // ------------------------------------------------------------------ words
 const KIND = {
   build: ["Building", "build"], fix: ["Fixing", "fix round"], conflict: ["Merging main into", "conflict round"],
-  decision: ["Deciding on", "decision"], live: ["Running the live steps for", "live run"],
+  decision: ["Deciding on", "decision"],
   review: ["Reviewing", "review"], merge: ["Merging", "merge"],
 };
 const kind = (k) => KIND[k] || [k ? k[0].toUpperCase() + k.slice(1) : "Working on", "job"];
@@ -961,7 +961,7 @@ const ASK = {
   merge: ["Ready to merge", "Where it stands", "ready to merge", "ready to merge"], broken: ["Broken", "What failed", "broken", "broken"],
 };
 const askWords = (a) => ASK[a.kind] || ["Yours", "Why it's yours", "other", "others"];
-const QUEUED = { build: "Build", fix: "Fix round on", conflict: "Conflict round on", decision: "Decision on", live: "Live steps for", review: "Review", merge: "Merge" };
+const QUEUED = { build: "Build", fix: "Fix round on", conflict: "Conflict round on", decision: "Decision on", review: "Review", merge: "Merge" };
 const STATE = {
   ready: ["Ready", "ready"], building: ["Building", "moving"], review: ["In review", "moving"], fixing: ["Fixing", "moving"],
   you: ["Waiting on you", "yours"], blocked: ["Blocked", "blocked"], "not-ready": ["Not ready", "blocked"], done: ["Done", "done"],

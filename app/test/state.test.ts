@@ -125,6 +125,24 @@ describe('JobLogTest', () => {
     expect(open().open_jobs().map((j) => j.id)).toEqual([job.id]);
   });
 
+  test("an old live run's records still read, as an ended job, after the live steps went (#265)", () => {
+    const log = open();
+    start(log, 4);
+    const id = '20261110-211802-live-leads-dashboard-179-8692e3';
+    appendFileSync(path, [
+      { event: 'start', job: id, kind: 'live', repo: 'leads-dashboard', issue: 179, branch: 'main',
+        title: 'Queue runner live: leads-dashboard', at: '2026-11-10T21:18:02+08:00', sha: 'ff58c6d', round: null,
+        head: '1c6808d' },
+      { event: 'end', job: id, at: '2026-11-10T21:18:46+08:00', exit_code: 0, outcome: 'live', thread_id: 'mcp:t9',
+        status: 'completed', applied: [], prs: [179], reason: null, error: null },
+    ].map((r) => JSON.stringify(r) + '\n').join(''), 'utf8');
+    const live = open().jobs().find((j) => j.id === id)!;
+    expect([live.kind, live.repo, live.issue, live.outcome, live.head, live.open])
+      .toEqual(['live', 'leads-dashboard', 179, 'live', '1c6808d', false]);
+    expect(open().open_jobs().map((j) => j.issue)).toEqual([4]);
+    expect(open().held_issues('leads-dashboard')).toEqual(new Set());
+  });
+
   test('a released waiting job stays released when its issue is built again', () => {
     const log = open();
     end(log, start(log, 4), 2, 'waiting', { status: 'waiting' });

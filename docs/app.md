@@ -718,8 +718,7 @@ case for case in `test/git-seam.test.ts`, against a real git repo in a temp fold
 `tests/fakes_t3.py`'s `FakeGit` and `FakeReviewGit` in `test/fakes.ts`. It runs the same git
 commands and reads their answers the same way, with Python's names: `GitError`, `run_git`,
 `GitCli` and its calls (`fetch`, `has_branch`, `free_branch`, `commits`, `fetch_pr`, `evidence`,
-`checkout`, `remove_checkout`, `sweep_stale`, `remove_worktree`, `log`, `first_parent`,
-`name_status` and the rest). What each call does is the module's own comment, as in Python.
+`checkout`, `remove_checkout`, `sweep_stale`, `remove_worktree`, `log`, `sha` and the rest). What each call does is the module's own comment, as in Python.
 `remove_checkout` unlinks the checkout's `node_modules` first, with the ported `Deps.unlink`
 (The dependencies, below). Deleting goes by Python's calls on Windows (`src/python-files.ts`,
 which the dependencies port shares): Node's `unlink` and
@@ -779,12 +778,12 @@ and `src/review-post.ts`, with `tests/test_ledger.py` ported case for case in
 port (#222) ports. It reads and writes Python's markers and text byte for byte: the
 `<!-- sol-pr-review round=N verdict=V sha=H findings=<base64> -->` marker, the hand-posted
 `<!-- sol-review round=N head=H -->` with its `## Sol review N · V` heading, the visible
-`sol-findings` ledger, the comment, the `<!-- sol-finding <repo>#<n> <id> -->` mark on a
-follow-up issue and the PR body's `## Review` table, so it carries on the ledgers of PRs the
+`sol-findings` ledger, the comment and the `<!-- sol-finding <repo>#<n> <id> -->` mark on a
+follow-up issue, so it carries on the ledgers of PRs the
 Python runner reviewed. It keeps Python's names: `read_review`, `read_reviews`, `newest_on`,
 `runner_post`, `said_since`, `next_round`, `state`, `escalation`, `norm`, `parse_findings`,
-`parse_earlier`, `decide`, `with_issues`, `SolFailed`, and `GitHubPoster`, `review_row`,
-`with_review_row`, `filed_already`, `issue_body` and `PostFailed`. What each decides is the
+`parse_earlier`, `decide`, `with_issues`, `SolFailed`, and `GitHubPoster`, `filed_already`,
+`issue_body` and `PostFailed`. What each decides is the
 module's own comment, as in Python.
 
 The differences are TypeScript's only. Python's regex classes, its `^` and `$` under `re.M`, its

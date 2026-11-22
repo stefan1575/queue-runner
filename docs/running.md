@@ -32,13 +32,11 @@ second runner out: it logs `a second runner started (pid N) and exited at once` 
 `--review` and the running lane never run two at once.
 
 `config.toml` names the repos it serves (GitHub repo, local clone, base branch, and
-`review_table` for a repo whose PR bodies keep a `## Review` table, `issues = "local"` for one
-whose tickets are local markdown: `docs/claude-lane.md`, Local tickets, `merge = "stefan"` for one whose PRs Stefan
+`merge = "stefan"` for one whose PRs Stefan
 merges himself: `docs/claude-lane.md`, Stefan merges), in an order that breaks ties between repos' work
 (`docs/claude-lane.md`, Two lanes); the runner's `state_dir` and `log_dir` (`~/.queue-runner/`, outside every served repo);
 `runs_dir`, `checkouts_dir` and `deps_dir` for reviews; `poll_seconds`, the pause after a pass that started
-nothing; `adopt_reviews_before`, the cutover date before which a blocking review the runner
-didn't run counts as its own for fix rounds (A Claude pass, step 4); `[claude]`, the T3
+nothing; `[claude]`, the T3
 provider instance, model and `effort` (default `high`) for Claude jobs (`docs/usage.md`, The effort);
 and `[sol]`,
 `codex-sol.sh` and the Git bash that runs it. `--config <path>` reads another one.
@@ -150,8 +148,8 @@ on; `"now"` is read as `"after-job"` until ticket 34.
   earlier job stays as it was, so the case is decided again after Resume.
 - **Unreadable** (not JSON, not an object, `lanes` or `repos` there but not an object, a lane's
   or repo's entry that isn't an object or has no `stop` the page could have written: a missing
-  `stop` is never a Resume): neither lane starts anything until it's fixed, said once. An old
-  `repo_order` (Two lanes) or an odd ask entry is ignored instead (Read and snoozed). Any Stop or
+  `stop` is never a Resume): neither lane starts anything until it's fixed, said once. An odd
+  ask entry is ignored instead (Read and snoozed). Any Stop or
   Resume on the page, any other request it sends, or `--pause`/`--resume`, writes it afresh
   from what they can read (`control.repaired`, and the page's `serve.usable`, the same file
   from either end) and **lets go only of what it names**: an entry it can't use is written
@@ -161,11 +159,6 @@ on; `"now"` is read as `"after-job"` until ticket 34.
   to (review 2's F9). A `repos`
   that isn't an object names no repo and is dropped. The page reads control.json through the
   same repair (`App.control`), so it shows those lanes stopped.
-- **The older pause:** with `paused: true` in gate.json and no `claude` entry in control.json,
-  the Claude lane is stopped (since gate.json's mtime). An entry, either way, wins. The CLI's
-  `ask` (and `--reserve`, through `carry_over`) moves that pause into control.json and leaves
-  gate.json with `reserve` only; the runner itself writes neither file. Today's runner was
-  paused that way, so restarting onto this code starts no Claude job.
 - **Wake tasks:** a stopped lane sets none (`Runner.wake_times`).
 - `--gate` prints each lane's switch first (and each kind `waits: the Claude lane is stopped by
   Stefan` while it is); `--once --dry-run` says a stopped lane's line before what it would do
@@ -180,10 +173,10 @@ the Repositories card's Stop and Resume (`apply_control`'s `{"repo", "stop"}`) a
 and `--resume NAME` (`control.ask(..., repos=[NAME])`; a lane's id and `all` keep their meaning, and
 any other name is refused with exit 2).
 
-- **A stopped repo gets nothing from either lane:** no decision, live run, fix or conflict round,
+- **A stopped repo gets nothing from either lane:** no decision, fix or conflict round,
   limit recovery or build in the Claude lane; no stop filed, merge, ready mark, noticing of
   Stefan's merge or review in the Sol lane. Each of those goes through `config.working(config)`,
-  the served repos less the stopped ones (`decisions.next_case`, `live.served`, `Runner.next_fix`,
+  the served repos less the stopped ones (`decisions.next_case`, `Runner.next_fix`,
   `Runner.choose`'s builds and limited jobs, `stops.stop_pass`, `merge.merge_pass`,
   `Reviewer.review_pass`); `config.repos` keeps every repo for what is only looked up or shown (a
   job's own repo when it's settled, the Inbox, the snapshot). The other repos' jobs go on.
@@ -196,8 +189,8 @@ any other name is refused with exit 2).
   once (`control.json stops old-repo, which is not served: ignored`). An entry the page couldn't
   have written (`"now"`, not an object) makes control.json unreadable, as a lane's does.
 - **Its asks stay in the Inbox** (`inbox.collect` reads every repo); stopping the work answers
-  nothing. **Its waits set no wake task:** a stopped repo's limited job and live run are skipped,
-  so they set no `gate_until`. The usage limit is the account's, so another repo's job may then
+  nothing. **Its waits set no wake task:** a stopped repo's limited job is skipped,
+  so it sets no `gate_until`. The usage limit is the account's, so another repo's job may then
   start and meet the gate or the limit itself.
 - `--gate` lists the stopped repos after the lanes; `--once --dry-run` says them first and lists
   no job for them.

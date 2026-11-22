@@ -198,8 +198,6 @@ def _knob(config, args, out) -> int:
         read_knob(config.state_dir)
     except (OSError, ValueError) as e:   # set afresh
         print(f'gate.json was unreadable ({e}); writing it afresh.', file=out)
-    else:
-        control.carry_over(config.state_dir, _now_iso())   # an older pause in it stands
     write_knob(config.state_dir, Knob(reserve=args.reserve))
     print(f'The weekly reserve is {args.reserve:g}%. A running runner reads this before its '
           'next Claude job.', file=out)
@@ -276,7 +274,6 @@ def _dry_run(config, github, git, out, log_line, t3=None, gate=None) -> int:
         if not _dry_run_limited(one, out, log_line) and \
                 not _dry_run_ask(one, github, t3, switch, out, log_line) and \
                 not _dry_run_decision(one, github, t3, out, log_line) and \
-                not _dry_run_live(one, github, git, t3, out, log_line) and \
                 not _dry_run_fix(one, github, git, out, log_line):
             _dry_run_build(one, github, out, log_line)
     if not working(config):
@@ -357,48 +354,6 @@ def _dry_run_decision(config, github, t3, out, log_line) -> bool:
     return True
 
 
-class _NoStops:
-    """A dry run's stopper: files nothing."""
-
-    def file(self, *args, **kwargs):
-        return 'dry-run'
-
-
-def _dry_run_live(config, github, git, t3, out, log_line) -> bool:
-    """Prints the live run the Claude lane would start, with its brief, and why each repo with
-    live steps waits. It fetches the base (a remote ref only) and records and files nothing, not
-    even a first sight."""
-    from .live import LiveSteps
-    from .merge import Merger
-    jobs = _jobs(config)
-    said = []
-    live = LiveSteps(config, github=github, git=git, t3=t3, jobs=jobs, say=said.append,
-                     stopper=_NoStops(), merger=Merger(config, github=github, git=git, jobs=jobs,
-                                                       say=lambda line: None))
-    for repo in live.served():
-        try:
-            b = live.batch(repo, record=False)
-        except Exception as e:
-            print(f'Live {repo.name}: reading its state failed ({type(e).__name__}: {e})',
-                  file=out)
-            continue
-        for line in said:
-            print('L' + line[1:], file=out)
-        said.clear()
-        if b is None:
-            continue
-        log_line(f'dry run: would start live steps on {repo.name} at {b.target[:7]}')
-        print(f'Would start the live steps on {repo.name} (dry run: nothing started)', file=out)
-        print(f'  batch:  {", ".join(f"#{n}" for n in b.prs)} merged, '
-              f'{b.start[:7]}..{b.target[:7]}', file=out)
-        print('  brief:', file=out)
-        print('-' * 72, file=out)
-        print(live.brief(repo, b), file=out)
-        print('-' * 72, file=out)
-        return True
-    return False
-
-
 def _dry_run_fix(config, github, git, out, log_line) -> bool:
     """Prints the fix round the Claude lane would start, with its brief. It fetches the PR's
     head (local refs only) so the brief's commits and files are real; nothing else changes."""
@@ -453,9 +408,6 @@ def _dry_run_build(config, github, out, log_line) -> None:
     from .picker import pick
     jobs = _jobs(config)
     for repo in working(config):   # a stopped repo: none (37)
-        if repo.local_issues:   # shown, but the lane builds none: go on to what it would build
-            _dry_run_ticket(repo, out, log_line)
-            continue
         if not repo.github:
             continue
         job = pick(repo, github, held=jobs.held_issues(repo.name))
@@ -476,21 +428,6 @@ def _dry_run_build(config, github, out, log_line) -> None:
     log_line(f'dry run: nothing to start in {names}')
     print(f'Nothing to start in {names}: no unblocked ready-for-agent issue that isn\'t '
           'already being built or held.', file=out)
-
-
-def _dry_run_ticket(repo, out, log_line) -> None:
-    """A repo whose tickets are local: the ticket a build would take. The runner builds none
-    (no served repo needs the no-remote flow: ticket 12), so the dry run says so."""
-    from .tickets import pick_ticket
-    ticket = pick_ticket(repo.path)
-    if ticket is None:
-        return
-    log_line(f'dry run: next local ticket in {repo.name} is {ticket.key}')
-    print(f'Next local ticket in {repo.name} (dry run; the runner builds no local tickets yet: '
-          'ticket 12 asks Stefan how)', file=out)
-    print(f'  repo:   {repo.name} ({repo.path})', file=out)
-    print(f'  ticket: {ticket.key} {ticket.title}', file=out)
-    print(f'  file:   {ticket.path}', file=out)
 
 
 def _dry_run_reviews(config, github, out) -> None:

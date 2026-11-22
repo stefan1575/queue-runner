@@ -6,8 +6,7 @@
 //
 // In order: each new Pre-existing finding filed once as a `needs-triage` issue (an open issue that
 // already holds it is linked instead), the review comment with those links and its ledger, the
-// `sol-review` status on H (the commit reviewed, never a newer one), then the repo's own records
-// (leads-dashboard: a row in the PR body's `## Review` table). The comment is the review's record:
+// `sol-review` status on H (the commit reviewed, never a newer one). The comment is the review's record:
 // if it can't be posted, the review failed and nothing counts. Anything after it that fails is
 // said and left; the review stands.
 //
@@ -15,19 +14,15 @@
 import { writeFileSync } from 'node:fs';
 import { join as path_join } from 'node:path';
 import type { GhCli, Issue, PullRequest } from './github-seam.ts';
-import { B_AFTER, capitalize, err_str, get, join, key, among, py_eq, py_str, S, str_only, strip, truthy, type_name, type Json } from './python.ts';
-import { _cell, _where, OPEN, with_issues, type Decision, type Finding } from './review-ledger.ts';
+import { capitalize, err_str, get, key, py_str, str_only, strip, truthy, type_name, type Json } from './python.ts';
+import { _where, with_issues, type Decision, type Finding } from './review-ledger.ts';
 
-/** A repo as posting needs it (Python's `config.Repo`): its short name, its `owner/name`, and
- *  whether its PR body keeps a `## Review` table. */
-export type Repo = { readonly name: string; readonly github: string; readonly review_table: boolean };
+/** A repo as posting needs it (Python's `config.Repo`): its short name and its `owner/name`. */
+export type Repo = { readonly name: string; readonly github: string };
 /** What posting reads and writes on GitHub. */
-export type GitHub = Pick<GhCli, 'open_issues' | 'create_issue' | 'post_comment' | 'set_status' | 'pull_body' | 'edit_pull_body'>;
+export type GitHub = Pick<GhCli, 'open_issues' | 'create_issue' | 'post_comment' | 'set_status'>;
 
 export const TRIAGE = 'needs-triage';
-export const OUTCOMES = { stop: 'stopped for Stefan', 'approach-note': 'approach note for Stefan',
-  merge: 'to merge', fix: 'back to fix' } as const;
-export const TABLE_HEAD = '| Step | Time (UTC) | Commit | Verdict |';
 
 /** The review comment couldn't be posted: nothing is on the PR, so the review failed. */
 export class PostFailed extends Error {
@@ -59,82 +54,15 @@ export function filed_already(issues: readonly Issue[], github: string, n: numbe
     || strip(i.title) === strip(title)) ?? null;
 }
 
-const pad = (v: number, width = 2) => String(v).padStart(width, '0');
-/** `{at:%Y-%m-%d %H:%M}` on a UTC time. */
-const minute = (at: Date) =>
-  `${pad(at.getUTCFullYear(), 4)}-${pad(at.getUTCMonth() + 1)}-${pad(at.getUTCDate())} ${pad(at.getUTCHours())}:${pad(at.getUTCMinutes())}`;
-
-/** The PR body's `## Review` row for this review: what it found, closed and left open. */
-export function review_row(d: Decision, url: string, at: Date): string {
-  const rnd = d.round, fs = d.findings;
-  const ids = (ok: (f: Finding) => boolean) => join(', ', fs.filter(ok).map((f) => f.id));
-  const came = new Set(d.signals.filter((s) => s.signal === 'reopened').flatMap((s) => s.ids).map(key));
-  const signal = d.signals.length ? ` (${d.signals.map((s) => s.signal).join(', ')})` : '';
-  const parts = [`**${capitalize(d.verdict)}**, ${OUTCOMES[d.outcome as keyof typeof OUTCOMES]}${signal}`];
-  const kinds: [string, (f: Finding) => boolean][] = [
-    ['raised', (f) => py_eq(f.raised, rnd) && f.tag !== 'pre-existing'],
-    ['came back', (f) => came.has(key(f.id))],
-    ['fixed', (f) => py_eq(get(f, 'closed'), rnd) && f.status === 'fixed'],
-    ['decline accepted', (f) => py_eq(get(f, 'closed'), rnd) && f.status === 'decline-accepted'],
-    ['decline kept open', (f) => among(d.kept, f.id)],
-    ['filed as follow-ups', (f) => py_eq(f.raised, rnd) && f.tag === 'pre-existing'],
-    ['left open', (f) => f.tag === 'important' && among(OPEN, f.status)],
-  ];
-  for (const [label, ok] of kinds) {
-    const got = ids(ok);
-    if (got) parts.push(`${label}: ${got}`);
-  }
-  const name = d.reviewer ? `Review ${rnd}, ${d.reviewer}` : `Sol review ${rnd}`;
-  return `| [${_cell(name)}](${url}) | ${minute(at)} | \`${d.sha.slice(0, 7)}\` | ${_cell(parts.join('; '))} |`;
-}
-
-const REVIEW_SECTION = new RegExp(`^##[${S}]+Review[${S}]*$`, 'u');
-const SECTION = new RegExp(`^#{1,2}[${S}]`, 'u');
-const EVIDENCE = new RegExp(`^##[${S}]+Evidence${B_AFTER}`, 'u');
-
-/** The PR body with `row` appended to its `## Review` table. A section without a table gets
- *  one; a body without the section gets it after `## Evidence` (or at the end). Rows already
- *  there stay. Ported from `~/sol-pr-review.py`. */
-export function with_review_row(body: string | null, row: string): string {
-  const lines = (body || '').replaceAll('\r\n', '\n').replace(/\n+$/, '').split('\n');
-  const head = (pat: RegExp) => { const i = lines.findIndex((line) => pat.test(line)); return i < 0 ? null : i; };
-  const end = (i: number) => { for (let j = i + 1; j < lines.length; j += 1) if (SECTION.test(lines[j]!)) return j; return lines.length; };
-  const table = [TABLE_HEAD, '|---|---|---|---|', row];
-  // In place of the blank lines before line `at`, one blank line either side of `add`.
-  const put = (at: number, floor: number, add: string[]) => {
-    let s = at;
-    while (s > floor && !strip(lines[s - 1]!)) s -= 1;
-    lines.splice(s, at - s, '', ...add, ...(at < lines.length ? [''] : []));
-  };
-  const r = head(REVIEW_SECTION);
-  if (r !== null) {
-    const rows: number[] = [];
-    for (let j = r + 1, stop = end(r); j < stop; j += 1) if (lines[j]!.startsWith('|')) rows.push(j);
-    // A table with another header (written by hand) keeps its rows; ours starts below it.
-    if (rows.length && strip(lines[rows[0]!]!) === TABLE_HEAD) lines.splice(rows.at(-1)! + 1, 0, row);
-    else if (rows.length) lines.splice(rows.at(-1)! + 1, 0, '', ...table);
-    else put(end(r), r + 1, table);
-  } else {
-    const ev = head(EVIDENCE);
-    put(ev === null ? lines.length : end(ev), 0,
-      ['## Review', '', '_Rows from the Sol review loop, one per review; each links its comment._', '', ...table]);
-  }
-  return lines.join('\n').replace(/^\n+/, '') + '\n';
-}
-
 const _write = (path: string, text: string): void => writeFileSync(path, text, 'utf8');
-
-const _utcnow = (): Date => new Date();
 
 export class GitHubPoster {
   readonly github: GitHub;
   readonly say: (line: string) => void;
-  readonly now: () => Date;
 
-  constructor(github: GitHub, say: (line: string) => void, now: () => Date = _utcnow) {
+  constructor(github: GitHub, say: (line: string) => void) {
     this.github = github;
     this.say = say;
-    this.now = now;
   }
 
   /** Posts the review; resolves to its comment's URL. PostFailed if the comment didn't post. */
@@ -156,16 +84,6 @@ export class GitHubPoster {
       this.say(`${name}: sol-review ${st.state} on ${d.sha.slice(0, 7)}`);
     } catch (e) {
       this.say(`${name}: setting sol-review on ${d.sha.slice(0, 7)} failed: ${err_str(e)}`);
-    }
-    if (repo.review_table) {
-      try {   // read afresh: someone may have edited the body while Sol ran
-        const row = review_row(d, url, this.now());
-        const updated = with_review_row(await this.github.pull_body(repo, n), row);
-        _write(path_join(run_dir, 'pr-body.md'), updated);
-        await this.github.edit_pull_body(repo, n, updated);
-      } catch (e) {
-        this.say(`${name}: adding the Review row to the PR body failed: ${err_str(e)}`);
-      }
     }
     return url;
   }

@@ -20,7 +20,7 @@ writes it, the PR's open findings and the earlier threads, and it tells the thre
   released (`JobLog.released_ids`: its outcome stays `filed`), or already decided, is the other
   answer's; the thread's is never acted on then, and a request to open one is dropped.
 
-Asks that can be opened are the PR stops a reply would answer (`OPENS`): not a live run's.
+Asks that can be opened are the PR stops a reply would answer (`OPENS`).
 
 **A stale thread opened afresh** (issue #72). A thread that waits on Stefan goes cold once its
 prompt cache expires (`limits.stale`), and `prefixes.py` settles it. Its Inbox item stays, and

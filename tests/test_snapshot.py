@@ -194,10 +194,6 @@ class LanesTest(unittest.TestCase):
         self.assertEqual(lane(snap, 'sol')['state'], 'idle')
         self.assertEqual(snap['knob'], {'paused': True, 'reserve': 5.0})   # one word: the switch
 
-    def test_gate_jsons_old_pause_reads_stopped_too(self):
-        snap = snapshot.build(facts(switch=stopped(claude=('after-job', NOW, 'gate'))))
-        self.assertEqual(lane(snap, 'claude')['state'], 'stopped')
-
     def test_now_reads_stopped_after_the_job_until_stop_now_is_built(self):
         snap = snapshot.build(facts(switch=stopped(claude=('now', NOW, 'control')),
                                     jobs=[job('build', 212, 3)]))
@@ -338,18 +334,18 @@ class UsageTest(unittest.TestCase):
 class CostsAndRolesTest(unittest.TestCase):
     def test_each_claude_job_kinds_expected_cost_and_where_it_comes_from(self):
         costs = {'build': (Cost(60, 15), False), 'fix': (Cost(34, 6), True),
-                 'decision': (Cost(15, 4), False), 'live': (Cost(20, 5), False)}
+                 'decision': (Cost(15, 4), False)}
         rows = snapshot.build(facts(costs=costs))['costs']
         self.assertEqual([(r['kind'], r['label'], r['session'], r['week']) for r in rows],
                          [('build', 'Build', 60, 15), ('fix', 'Fix round', 34, 6),
-                          ('decision', 'Decision', 15, 4), ('live', 'Live steps', 20, 5)])
+                          ('decision', 'Decision', 15, 4)])
         self.assertEqual(rows[1]['basis'], 'The largest of the last 5')
         self.assertEqual(rows[0]['basis'], 'The cautious default, until 3 builds are recorded')
 
     def test_every_role_names_a_lane(self):
         snap = snapshot.build(facts())
         lanes = {l['id'] for l in snap['lanes']}
-        self.assertEqual([r['lane'] for r in snap['roles']], ['claude'] * 4 + ['sol'])
+        self.assertEqual([r['lane'] for r in snap['roles']], ['claude'] * 3 + ['sol'])
         self.assertTrue({r['lane'] for r in snap['roles']} <= lanes)
 
 
@@ -476,7 +472,7 @@ def busy_facts():
         calls={id: call for id in ('github', 't3', 'claude_usage', 'sol_usage')},
         claude_usage=snapshot.Reading(Usage(Window(38, FIVE_RESET), Window(46, WEEK_RESET)), NOW),
         sol_usage=snapshot.Reading(SolLimits('plus', (SolWindow(300, 1.0, FIVE_RESET),)), NOW),
-        costs={k: (Cost(1, 1), False) for k in ('build', 'fix', 'decision', 'live')})
+        costs={k: (Cost(1, 1), False) for k in ('build', 'fix', 'decision')})
 
 
 class ContractTest(unittest.TestCase):
@@ -503,7 +499,7 @@ class ContractTest(unittest.TestCase):
 
     def test_the_real_snapshot_has_the_samples_keys(self):
         for snap in (snapshot.build(busy_facts()), snapshot.build(facts()),
-                     snapshot.build(facts(switch=stopped(claude=('after-job', NOW, 'gate'))))):
+                     snapshot.build(facts(switch=stopped(claude=('after-job', NOW, 'control'))))):
             self.assertEqual(set(snap), set(self.samples[0]) - {'sample'})
             self.holds(snap['lanes'], lambda s: s['lanes'], 'a lane')
             self.holds([l['job'] for l in snap['lanes'] if l['job']],

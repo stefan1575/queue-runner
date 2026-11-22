@@ -13,22 +13,9 @@ class Repo:
     github: str | None  # owner/name; None for a repo with no GitHub (the live-check sandbox)
     path: str          # local clone; T3's project for its jobs
     base: str = 'main'
-    review_table: bool = False   # a posted review adds a row to the PR body's `## Review` table
-    # Live steps after merges (ticket 11, `live.py`): the repo's doc that says how a merge goes
-    # live (None: the repo has none), and where its migrations and edge functions live.
-    live_doc: str | None = None
-    live_migrations: str = 'supabase/migrations'
-    live_functions: str = 'supabase/functions'
-    # Where its tickets are (ticket 12, `tickets.py`): 'github' (issues), or 'local' (markdown
-    # under `.scratch/*/issues/`). No repo is local unless its entry says so.
-    issues: str = 'github'
     # Who merges a clean PR (ticket 17, `merge.py`): 'runner' (it merges itself), or 'stefan'
     # (it labels the PR `ready-for-stefan` and toasts once; Stefan merges, and the runner notices).
     merge: str = 'runner'
-
-    @property
-    def local_issues(self) -> bool:
-        return self.issues == 'local'
 
     @property
     def stefan_merges(self) -> bool:
@@ -50,10 +37,6 @@ class Config:
     deps_dir: str = ''        # node_modules per lockfile, linked into Sol's checkout (ticket 16)
     sol_script: str = ''      # scripts/codex-sol.sh
     sol_bash: str = ''        # Git's bash, which runs it
-    # The runner's cutover (issue 3): a blocking review it didn't run, posted on GitHub before
-    # this date (GitHub's UTC time, `YYYY-MM-DD`), counts as its own for the fix lane. '' adopts
-    # none.
-    adopt_reviews_before: str = ''
     # Who reviews every PR (issue #76): 'chatgpt' (Sol, through codex-sol.sh; the Opus fallback
     # steps in only while Sol is out of usage, #69) or 'claude' (an Opus thread in T3 at
     # [claude]'s model and effort, through the usage gate). `[review] provider` in config.toml.
@@ -84,14 +67,6 @@ def working(config: Config) -> list[Repo]:
 
 def _path(p: str) -> str:
     return os.path.normpath(os.path.expanduser(p))
-
-
-def _issues(entry: dict) -> str:
-    issues = entry.get('issues', 'github')
-    if issues not in ('github', 'local'):
-        raise ValueError(f"repo {entry['name']}: issues must be 'github' or 'local', "
-                         f"not {issues!r}")
-    return issues
 
 
 def _merge(entry: dict) -> str:
@@ -141,11 +116,8 @@ def load_config(path: str = DEFAULT_CONFIG) -> Config:
     with open(path, 'rb') as f:
         raw = tomllib.load(f)
     repos = [Repo(name=r['name'], github=r.get('github'), path=_path(r['path']),
-                  base=r.get('base', 'main'), review_table=bool(r.get('review_table')),
-                  live_doc=r.get('live_doc') or None,
-                  live_migrations=r.get('live_migrations', 'supabase/migrations'),
-                  live_functions=r.get('live_functions', 'supabase/functions'),
-                  issues=_issues(r), merge=_merge(r))
+                  base=r.get('base', 'main'),
+                  merge=_merge(r))
              for r in raw.get('repos', [])]
     claude, sol = raw.get('claude', {}), raw.get('sol', {})
     state_dir = _path(raw['state_dir'])
@@ -161,7 +133,6 @@ def load_config(path: str = DEFAULT_CONFIG) -> Config:
                   deps_dir=_path(raw.get('deps_dir') or os.path.join(home, 'deps')),
                   sol_script=_path(sol.get('script') or SOL_SCRIPT),
                   sol_bash=sol.get('bash') or GIT_BASH,
-                  adopt_reviews_before=str(raw.get('adopt_reviews_before') or ''),
                   review_provider=_review_provider(raw.get('review', {})),
                   review_claude_provider=_review_claude_provider(
                       raw.get('review', {}), claude.get('provider', 'claudeAgent')))

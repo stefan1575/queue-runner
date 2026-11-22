@@ -1,6 +1,6 @@
 # The Claude lane
 
-What the Claude lane does each pass: builds, fix and conflict rounds, decisions, ask threads, live steps, and the repos Stefan merges or keeps local tickets for.
+What the Claude lane does each pass: builds, fix and conflict rounds, decisions, ask threads, and the repos Stefan merges.
 
 ## Two lanes
 
@@ -28,9 +28,7 @@ one job log (a lock per file inside the process).
 - **The Sol lane** (`review.py`) runs alongside in a thread: merges, then one review a pass,
   taking the repos in config.toml's order. `--once` chooses the Claude jobs before the Sol lane
   starts, so what that pass's review decides waits for the next pass.
-- **No build order:** ticket 33's `control.json` `repo_order` (the Build order card until #61) is
-  no longer read or written. A file that still has it is read as before for its stops, the order
-  is ignored without a word, and the next write drops it.
+- **No build order:** the repos run side by side (#50), with config.toml's order breaking a tie.
 - `--once --dry-run` lists each working repo's job under `dry run: <repo>'s Claude job:`
   (`Nothing to start in <repo>: ...` for one with none; `none: <job> is still running there` for
   one whose Claude job is open in the job log, which the lane skips), after a limit that holds
@@ -58,27 +56,12 @@ and it gets no other fix round. A repo has one Claude job at a time, so two neve
    comes first.
    **A decision** (`decisions.py`; Decision threads, below), before any fix round or build: the
    first case the fixed flow doesn't cover.
-3. **Live steps** (`live.py`; Live steps, below): a repo's merges since its last live run, once no
-   other merge is about to land.
-4. **A fix round** (`fix.py`), before any build, so open PRs finish first. A PR gets one when
+3. **A fix round** (`fix.py`), before any build, so open PRs finish first. A PR gets one when
    the runner's own newest review of its head H is `blocking` (decide()'s `fix`; a stop or an
    approach note goes to Stefan) and that review is still the PR's newest review comment, or
    when that review stopped and a decision has since ordered a round (`Fixer.order`: Stefan's
    rework or fix on, or a decision thread's `fix`; one more round on H, its text first in the
-   brief under `## Direction first`). **A review
-   from before the cutover** (issue 3; `Fixer.adopted`): with no runner review of H, the PR's
-   newest review comment, in any readable format (the old script's marker, or Sol's visible
-   `sol-findings` block from a T3 child), blocking on H and posted before `config.toml`'s
-   `adopt_reviews_before` (GitHub's UTC time; 2026-11-10, `''` adopts none), counts as the
-   runner's review of H: its findings, classes and declines feed the brief, and a restarted
-   round finds it by its round. Checked on 2026-11-10: leads-dashboard #152, #162, #163 and #168
-   each get a round from their old review 1. A PR whose newest review was hand-run after the
-   cutover is left to the session that ran it, and so is one that decide() would have sent to
-   Stefan (`ledger.escalation`, read from the ledgers: a kept decline, a reopened finding, an
-   earlier class repeated, or review 3 or later still blocking), since stops and Approach notes
-   read only the runner's own reviews. Such a PR gets no conflict round either
-   (`Fixer.old_escalation`, PR #4's review 2): nothing automatic runs on it until a decision
-   orders a round on H. **One round per head:**
+   brief under `## Direction first`). **One round per head:**
    once a round on H ended (except `not-started`), H gets no other until `--release NAME#PR`. The
    runner fetches the PR's head (moved since listing: nothing starts, Sol reviews it first),
    writes a start record (`sha` H, `round` the review's, `branch` the PR's), then blocks on
@@ -93,7 +76,7 @@ and it gets no other fix round. A repo has one Claude job at a time, so two neve
 
    **A conflict round** (ticket 15; Conflict rounds, below) is a fix round too, for a PR with
    no blocking review whose head conflicts with its base.
-5. **Pick and build** (`run.py`): a repo with a pickable issue gets one build, **unless its
+4. **Pick and build** (`run.py`): a repo with a pickable issue gets one build, **unless its
    base fails its checks** (an open base stop, `stops.red_base`: Stops for Stefan, Main's own
    failure): then no build starts there, said once per base head (`first: no build starts while
    main fails its checks (...)`), and the dashboard's Claude queue lists none; fix rounds,
@@ -106,7 +89,7 @@ and it gets no other fix round. A repo has one Claude job at a time, so two neve
 JSON object per line, each synced to disk as it's written. A last line torn by a crash is
 ignored and cut off by the next write; a bad line anywhere else is an error. An end record has the thread id and link, run id, T3's exit code and
 status, the branch's commits, the PR found by branch, the worktree path, `effort` (the effort
-the run used, read back: `docs/usage.md`, The effort; on every Claude job's end, decisions and live runs
+the run used, read back: `docs/usage.md`, The effort; on every Claude job's end, decisions
 too) and any error.
 Outcomes: `done` (exit 0, a PR found), `done-no-pr`, `failed` (exit 1), `waiting` (exit 2),
 `continued` (it was waiting, and a decision's answer, or Stefan's reply on GitHub, went to
@@ -248,7 +231,7 @@ tries again.
 
 `ask_threads.py` and `templates/ask.md` (ticket 35; spec `.scratch/queue-runner/dashboard-live.md`).
 On a stopped PR's ask (a stop of kind `review`, `approach-note`, `no-push`, `conflict`,
-`failed-check` or `decision`; not a live run's), the Inbox offers **Decide in T3**: the page writes
+`failed-check` or `decision`), the Inbox offers **Decide in T3**: the page writes
 `{"ask": <id>, "open": true}` (`control.json`'s `asks.<id>.open`, `{"at"}`; the first time stands,
 and ticket 36's keys in the same record are kept). The runner starts a thread for it only on that
 click, never by itself.
@@ -301,62 +284,11 @@ click, never by itself.
   until `control_read_at` reaches it, then `decide.note`; open, the thread's link and the issue's.
 - `--once --dry-run` prints the ask thread it would open, with its brief.
 
-## Live steps
-
-`live.py` and `templates/live.md` (ticket 11; `docs/flow.md`, Merge). A repo whose `config.toml`
-entry has `live_doc` (`live_migrations` and
-`live_functions` default to `supabase/migrations` and `supabase/functions`) gets one Claude thread
-per batch, `Queue runner live: <repo>`, gated as kind `live` (default cost 20% of 5 hours, 5% of
-the week), after decisions and before fix rounds. Merged and live are reported apart: the merge
-pass says `merged`, the live run says `live` (the log, and a **Live.** comment on each PR).
-
-- **The batch** is read from git, not handoff files: `origin/<base>` now (T) against where the
-  last live run reached (R): the PRs from the first-parent subjects (`Merge pull request #N`, or
-  a squash's `(#N)`), the migrations added under `live_migrations` (in file order, their
-  timestamps), migrations changed or deleted (the repo forbids it: the thread is told to stop)
-  and the edge functions changed. Commits with no PR (Lovable's own pushes) wait for the next PR.
-- **About to land** (`LiveSteps.about_to_land`): an open merge, review or fix job in the repo, or
-  an open PR whose runner review of its head is clean and that the merge re-check would merge now
-  or that would once its checks pass. While one is, no live run starts (said once). A clean PR
-  held for Stefan doesn't hold the live steps, whatever its checks; in a repo Stefan merges, no
-  clean PR does (when he merges it is his call).
-- **The Sol lane, alongside:** while a live job is open, nothing merges in that repo
-  (`Merger.why_not`), so the batch stays the one the thread was given. After writing its start
-  record the run reads the base and about-to-land again; a merge that landed or began since the
-  batch was read ends it `not-started`, and the next pass reads the batch afresh.
-- **The thread** runs in a T3 worktree at T on `claude/live-<T7>-<id6>`, never pushed, removed
-  after (`.env` is tracked, so `npm run check:live-schema` runs there with plain node). Its brief:
-  the live doc to follow, the PRs, commits, migrations in order, functions, migrations an earlier
-  run applied, Stefan's words after the last live stop, and the fixed answer block. It may not
-  ask Lovable in its chat (credits): such steps go in `stefan`.
-- **The answer** is the reply's last ```` ```queue-runner-live ```` block: `version` 1, `result`
-  `live`, `partial` (with `failed`) or `stop` (with `question`), `applied` (the migrations it
-  applied this run), `stefan`, optional `notes`. `live` that didn't apply every listed migration
-  reads as `partial`; a file it wasn't given, or anything unreadable, is `failed`.
-- **First sight** is recorded before anything may hold it, so a merge after it is always a live
-  run's.
-- **State** is the job log, kind `live`: `sha` R, `head` T, `issue` the batch's newest PR; at the
-  end `applied`, `prs`, `reason`. Outcomes: `live` (R moves to T), `partial`, `stop`, `failed`,
-  `usage-limit` (waits for `resume_at`; no stop), `not-started`, and `assumed`: **on first sight
-  of a repo the runner records its base's head as live**, since the steps before were Stefan's.
-  A run that didn't go live keeps R; its `applied` are left out of the next run's list, and a
-  `failed` or `usage-limit` run marks its batch "maybe applied", so the next thread checks each
-  migration through `query_database` before running it. A migration an earlier run applied that a
-  later merge edited is listed as changed (the thread stops). A `usage-limit` run's `resume_at`
-  is the idle lane's `gate_until`, so a wake task is set for it. A dead runner's open live job is settled
-  from its thread's last reply, like a build.
-- **Stops:** `partial`, `stop` and `failed` file a `live` stop (`docs/stops.md`, Stops for Stefan) on the
-  batch's newest PR; no live run starts in that repo until it's answered (issue closed or a
-  reply) or `--release <repo>#<that PR>`, and one that couldn't be filed is filed next pass.
-  `stefan` steps on a `live` result file a `live-todo` stop, which holds nothing.
-- `--once --dry-run` prints the live run it would start, with its brief, and records nothing.
-
 ## Stefan merges
 
 `merge.py` (ticket 17). A repo whose `config.toml` entry says `merge = "stefan"` isn't merged by the runner; `merge = "runner"` (the default) is.
 
-- **Ready:** where the merge pass would merge (the same re-check, A Sol pass, step 3, except an
-  open live run doesn't hold it: his merge goes in the next batch), it labels the PR
+- **Ready:** where the merge pass would merge (the same re-check, A Sol pass, step 3), it labels the PR
   `ready-for-stefan` and toasts "<repo> PR #N is ready to merge", opening the PR, **once per
   head**: a `ready` job, `marked` (`failed` if the label couldn't be added: the next pass tries
   again, and the toast waits for it). A failed toast is said and left.
@@ -367,9 +299,7 @@ pass says `merged`, the live run says `live` (the log, and a **Live.** comment o
 - **His merge:** a marked PR gone from the open list is read once: merged, it gets a `merge` job
   `merged` (`reason` "Stefan merged it"), its label and its build and fix worktrees go and their
   threads are settled as after the runner's own merge, and the log says `Stefan merged it; its live steps follow`; closed
-  unmerged, it's `unmarked` and the label goes (so a reopened PR isn't left ready). The live steps then read the merge from git as for any merge (a
-  merge commit or a squash's `(#N)`; **a rebase merge names no PR**, so its commits wait for the
-  next PR's batch).
+  unmerged, it's `unmarked` and the label goes (so a reopened PR isn't left ready).
 - **`--inbox`** (`inbox.py`, read only; `--needs-me` until 2026-11-15): the PRs ready to merge (the re-check passes now,
   as the merge pass reads it), the `needs-info` stops filed and not answered or released,
   the builds a decision left to Stefan (until `--release`), and the threads waiting for his
@@ -378,24 +308,3 @@ pass says `merged`, the live run says `live` (the log, and a **Live.** comment o
   the one collection the dashboard's Inbox is written from too (`docs/dashboard.md`, The Inbox's asks).
 - `--once --dry-run`'s merge lines say `would mark ready for Stefan at H` (or `ready for Stefan
   at H`) instead of `would merge`.
-
-## Local tickets
-
-`tickets.py` (ticket 12). A repo whose `config.toml` entry says `issues = "local"` keeps its
-tickets as markdown, `.scratch/<feature>/issues/NN-<slug>.md` (its
-`docs/agents/issue-tracker.md`). **No repo is local by default**; Stefan turns one on.
-
-- **Status:** the first `Status:` line above `## Comments`, in either form (`Status: x` or
-  `**Status:** x`), with or without a trailing date or note: `done (2026-11-10)`, `done.` and
-  `needs-info (2026-11-10: ...)` read as their first word. Done is `done` (or `resolved`, a
-  wayfinding child's done).
-- **Blockers:** the numbers on the first `Blocked by:` line (`05`, `01, 02`,
-  `03-sol-review-dry-run.md`, `#04`; words and dates in brackets and `None` name nothing), in
-  the ticket's own feature folder. A blocker with no file blocks.
-- **Picking** (`pick_ticket`): `ready-for-agent`, every blocker done, lowest number first, a tie
-  going to the feature first by name. Numbers repeat across features, so a ticket is
-  `<feature>/NN`. Checked on 2026-11-10 against every ticket in personal-ops and royal-bully-ops
-  (128): each has a status this reads.
-- **Not built:** the Claude lane skips local repos, and `--once --dry-run` only names the
-  next ticket. The no-remote flow was dropped (ticket 12): queue-runner moved to GitHub and
-  personal-ops is not served (Stefan, 2026-11-10).

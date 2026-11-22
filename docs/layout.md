@@ -9,7 +9,6 @@ What each module and script is for.
   PR on one, or an open PR that closes it or that GitHub links to it by hand), not a spec with
   open sub-issues (its children are the work); lowest number first. The job branches `claude/<slug>-<issue>` from
   `origin/<base>`. `pickable` yields every build in that order (the dashboard's queue).
-- `queue_runner/tickets.py`: local tickets: status, blockers and the next one (ticket 12).
 - `queue_runner/brief.py` and `templates/<kind>.md`: a job's brief, filled from the issue and the
   repo; no handoff files.
 - `queue_runner/github.py`: the GitHub seam and its `gh api` adapter.
@@ -33,8 +32,6 @@ What each module and script is for.
   brief, the answer and acting on it.
 - `queue_runner/fix.py`, `templates/fix.md` and `templates/conflict.md`: which PRs get a fix
   round or a conflict round, and their briefs.
-- `queue_runner/live.py` and `templates/live.md`: live steps after merges: the batch, about to
-  land, the brief, the answer and its stops.
 - `queue_runner/merge.py`: the pre-merge re-check, the expected-head merge and the worktrees
   removed after; in a repo Stefan merges, the `ready-for-stefan` mark and noticing his merge.
 - `queue_runner/inbox.py`: `--inbox`, everything waiting on Stefan: `collect`, the one
@@ -47,8 +44,7 @@ What each module and script is for.
 - `queue_runner/stops.py`: stops for Stefan: which, the `needs-info` issue, the PR comment, the
   toast, and holding the PR until he answers.
 - `queue_runner/toast.py` and `assets/icon.png`: the runner's own Windows toast.
-- `queue_runner/post.py`: posting a review: follow-up issues, the comment, `sol-review`, the
-  PR body's Review row.
+- `queue_runner/post.py`: posting a review: follow-up issues, the comment and `sol-review`.
 - `queue_runner/sol.py`: the Sol seam and its codex-sol.sh adapter.
 - `queue_runner/fallback.py`: the Opus fallback reviewer while Sol is out of usage: the Sol
   seam over a T3 thread, gated, and its label (issue #69).
@@ -60,8 +56,8 @@ What each module and script is for.
   app-server` (ticket 42).
 - `queue_runner/gate.py`: the usage gate: `decide()` beside the jobs running (`Running`),
   Stefan's knob (`gate.json`), learned costs (`usage.jsonl`).
-- `queue_runner/control.py`: each lane's switch: reading `control.json` (and gate.json's older
-  pause), writing it for `--pause` and `--resume`, and what the runner says (ticket 30); each
+- `queue_runner/control.py`: each lane's switch: reading `control.json`, writing it for
+  `--pause` and `--resume`, and what the runner says (ticket 30); each
   repo's stop, `stopped_repos` (ticket 37); each ask's
   entry, `Switch.asks`, read only (ticket 36).
 - `queue_runner/config.py`: the served repos and the runner's folders; the stopped repos

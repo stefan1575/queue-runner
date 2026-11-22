@@ -33,11 +33,11 @@ WRITE_EVERY = 30    # seconds: the longest the runner goes between writes
 READ_EVERY = 300    # seconds: the snapshot reads usage itself no more often than this
 
 
-CLAUDE_KINDS = ('build', 'fix', 'decision', 'live')   # the Claude lane's jobs (gate.CLAUDE_KINDS)
+CLAUDE_KINDS = ('build', 'fix', 'decision')   # the Claude lane's jobs (gate.CLAUDE_KINDS)
 SOL_KINDS = ('review', 'merge')                       # the reviewing lane's
 SOL_MODEL = 'GPT-6.2 Sol'   # codex-sol.sh's model
-# A job whose `issue` is a PR (a live run's: its batch's newest).
-ON_PR = ('fix', 'review', 'merge', 'live')
+# A job whose `issue` is a PR.
+ON_PR = ('fix', 'review', 'merge')
 NO_STOP_NOW = {'available': False, 'note': "Stop now isn't built yet: stop after the job instead.",
                'effect': None}
 
@@ -51,13 +51,12 @@ class Wait:
 START_HINT = ('Double-click Queue runner.lnk in ~/.queue-runner, or run pythonw -m queue_runner '
               'in the repo.')
 COST_LABELS = {'build': ('Build', 'builds'), 'fix': ('Fix round', 'fix rounds'),
-               'decision': ('Decision', 'decisions'), 'live': ('Live steps', 'live runs')}
+               'decision': ('Decision', 'decisions')}
 ROLES = [
     {'job': 'Build', 'what': 'A new issue becomes a PR', 'lane': 'claude'},
     {'job': 'Fix', 'what': 'Answers a blocking review, or merges main into a PR that conflicts',
      'lane': 'claude'},
     {'job': 'Decision', 'what': "Decides a case the fixed flow doesn't cover", 'lane': 'claude'},
-    {'job': 'Live steps', 'what': 'After a merge, makes it live', 'lane': 'claude'},
     {'job': 'Review', 'what': 'Reviews each PR head', 'lane': 'sol'},
 ]
 # The sources, in the page's order: (id, group, name, short, what an answer is called).
@@ -97,7 +96,7 @@ class Facts:
     repos: list = field(default_factory=list)
     jobs: list = field(default_factory=list)     # state.Job, the job log folded
     knob: Knob | None = Knob()                   # gate.json; None: unreadable
-    # Each lane's stop (control.json, or gate.json's older pause), as read for this snapshot.
+    # Each lane's stop (control.json), as read for this snapshot.
     switch: control.Switch = control.Switch()
     claude_model: str = 'claude-opus-5-5'
     review_provider: str = 'chatgpt'   # config.toml's `[review] provider` (issue #76)
@@ -314,7 +313,7 @@ def _job(facts: Facts, job) -> dict:
         'ref': f'PR #{job.issue}' if on_pr else f'#{job.issue}',
         'title': facts.titles.get((job.repo, job.issue), ''),
         'started_at': _iso(datetime.datetime.fromisoformat(job.started_at.replace('Z', '+00:00'))),
-        'sha': job.sha[:7] if job.sha and job.kind != 'live' else None,
+        'sha': job.sha[:7] if job.sha else None,
         'pr': job.issue if on_pr else None,
         'thread': facts.threads.get(job.id) or job.link,
     }

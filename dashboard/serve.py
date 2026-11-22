@@ -84,8 +84,8 @@ def usable(raw: object, now: str) -> dict:
     read is kept, and nothing an unreadable file held is let go by a write that doesn't name it.
     A lane's or repo's entry that can't be used reads as stopped ("after-job", at `now`), and
     with no lanes to read (not JSON, not an object, `lanes` not one) each lane does. A `repos`
-    that isn't an object names no repo; an ask that can't be used is dropped, and so is an old
-    `repo_order` (#50: the runner no longer reads one)."""
+    that isn't an object names no repo; an ask that can't be used is dropped, and so is a key the
+    file has no use for."""
     broken = not isinstance(raw, dict) and raw is not MISSING
     raw = raw if isinstance(raw, dict) else {}
     stopped = {"stop": "after-job", "at": now}
@@ -126,8 +126,7 @@ def apply_control(control: object, body: object, now: str, asks: set | None = No
     `{"ask", "open": true}` (ticket 35: decide that ask in a T3 thread) and `{"ask", "fresh":
     true}` (issue #72: a fresh thread in place of a stale one), kept under `asks.<id>`
     beside that object's other keys, or `{"usage": "refresh"}` (ticket 42: read both plans'
-    usage now), kept as `usage.refresh_at`. `{"repo_order"}` is refused: the page can't reorder
-    the repos (#61), and the runner reads no order (#50), so one already in the file is dropped.
+    usage now), kept as `usage.refresh_at`. Anything else is refused.
     `control` is the file as parsed, repaired first
     (`usable`) if the runner couldn't read it. With `asks`, the ids the snapshot
     lists now, entries for any other ask are dropped."""

@@ -1,12 +1,11 @@
 """The Sol lane: which open PRs it adopts, the brief it builds from sources, and a review whose
-comment, sol-review status, follow-up issues and PR body row are posted, with GitHub, git and Sol
+comment, sol-review status and follow-up issues are posted, with GitHub, git and Sol
 faked: every post is checked against FakeGitHubForReviews.posts."""
 import dataclasses
 import datetime
 import glob
 import json
 import os
-import re
 import tempfile
 import unittest
 
@@ -490,23 +489,6 @@ class ReviewerTest(unittest.TestCase):
         self.assertEqual([p[0] for p in self.gh.posts], ['comment'])
         self.assertEqual(self.jobs.jobs()[0].outcome, 'blocking')
         self.assertTrue(any('setting sol-review' in s for s in self.said))
-
-    def test_a_repo_with_a_review_table_gets_its_row_in_the_pr_body(self):
-        self.repo = dataclasses.replace(self.repo, review_table=True)
-        self.config = dataclasses.replace(self.config, repos=[self.repo])
-        body = ('Closes #5\n\n## Evidence\n\nTests pass.\n\n## Review\n\n'
-                '| Step | Time (UTC) | Commit | Verdict |\n|---|---|---|---|\n'
-                '| Opened | 2026-11-09 11:00 | `bbbbbbb` | Waiting on Sol |\n')
-        edited = body.replace('Tests pass.', 'Tests pass, edited while Sol ran.')
-        self.one_pr(body=body, bodies={20: edited}).review_pass()
-        [_, _, (b, n, new)] = self.gh.posts
-        self.assertEqual((b, n), ('body', 20))
-        self.assertRegex(new, re.escape(
-            '| Opened | 2026-11-09 11:00 | `bbbbbbb` | Waiting on Sol |\n'
-            '| [Sol review 1](https://github.com/owner/first/pull/20#issuecomment-901) | ')
-            + r'\d{4}-\d\d-\d\d \d\d:\d\d' + re.escape(
-            ' | `bbbbbbb` | **Blocking**, back to fix; raised: F1; left open: F1 |\n'))
-        self.assertIn('edited while Sol ran', new)   # read afresh, not from the listing
 
     def test_the_old_scripts_labels_no_longer_hold_a_pr(self):
         # Since the cutover (ticket 13) the old sol-pr-review.py is stopped: its labels mean nothing.

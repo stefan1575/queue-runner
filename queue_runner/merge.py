@@ -7,8 +7,7 @@ checks passed on H (`sol-review` not counted), no conflict, nothing said on it s
 and no unresolved review thread, and no Claude job writing to its branch. Then it merges with the
 expected head, so GitHub refuses if H moved in between, with a merge commit (Lovable syncs main).
 A head that moved is left to the Sol lane, which reviews the new one. After the merge, the
-worktrees of the PR's build and fix jobs are removed. The repo's live steps run later, in
-the Claude lane (`live.py`).
+worktrees of the PR's build and fix jobs are removed.
 
 A repo whose `config.toml` entry says `merge = "stefan"` (ticket 17) isn't merged
 by the runner: once the same re-check passes, the PR is marked ready for Stefan instead, once per
@@ -16,8 +15,7 @@ head: the `ready-for-stefan` label and a toast that opens the PR (a `ready` job,
 mark comes off (`unmarked`, the label removed) when the head moves or the re-check no longer
 passes (a stop, a reply, a failed check...), so a new head is reviewed before it's ready again. When a marked PR is no
 longer open, the next pass reads it: merged by Stefan, it gets a `merge` job `merged` and its
-worktrees go, as after the runner's own merge; closed unmerged, the mark and the label come off. The live steps
-read his merge from git as usual (`live.py`).
+worktrees go, as after the runner's own merge; closed unmerged, the mark and the label come off.
 
 Merges are automated posts that need no go-ahead (`docs/flow.md`, Who runs it).
 """
@@ -65,7 +63,7 @@ class Merger:
 
     def why_not(self, repo, n: int, h: str, checks: bool = True) -> str | None:
         """The pre-merge re-check, read afresh: why the PR doesn't merge at H now, or None.
-        Without `checks`, its checks aren't looked at (live.py: would it merge once they pass?)."""
+        Without `checks`, its checks aren't looked at."""
         return next((why for _, why in self.steps(repo, n, h, checks) if why), None)
 
     def steps(self, repo, n: int, h: str, checks: bool = True):
@@ -84,12 +82,6 @@ class Merger:
         yield 'Not a draft', 'it is a draft' if pr.draft else None
         job = self.jobs.writer(repo.name, pr.branch)
         yield 'No job writing to it', f'a {job.kind} job is writing to {pr.branch}' if job else None
-        # Stefan may merge while a live run is open: his merge goes in the next batch.
-        if not repo.stefan_merges:
-            live = next((j for j in self.jobs.live(repo.name) if j.open), None)
-            yield 'No live run open', (
-                f'the live run {live.id} is bringing {repo.base} live: merges wait for it, so '
-                'its batch stays the one it was given') if live else None
         yield 'Not held for you', held(self.jobs, repo, n)
         failed = sum(j.outcome == 'failed' for j in self.jobs.on('merge', repo.name, n, h))
         yield 'No failed merges', (f'{failed} merges failed on {h7}: left until a new head or '

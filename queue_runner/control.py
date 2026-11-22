@@ -12,10 +12,6 @@ Stop and Resume write it (`dashboard/serve.py`, `apply_control`) and so do `--pa
 each lane starts a job; an unreadable file (an entry without a `stop` included) starts nothing
 in either lane until it's fixed, and a write over it lets go only of what it names (`repaired`).
 
-`repo_order` (ticket 33's build order) is no longer read or written (#50: each repo runs its own
-Claude job side by side): a file that still has it is read as before for everything else, and a
-write drops it.
-
 `asks.<id>` (ticket 36) is what Stefan did with one ask in the Inbox: `read` (true or false) and
 `snooze_until` (an ISO time or null), beside other keys other tickets keep there (35's `open`).
 The page writes them; the runner only reads them into the snapshot's asks (`Switch.asks`), and
@@ -57,7 +53,7 @@ class Stop:
     """What Stefan last asked of one lane: `asked` "after-job", "now" or None, and when."""
     asked: str | None = None
     at: datetime.datetime | None = None
-    by: str | None = None   # 'control' (control.json) or 'gate' (gate.json's old pause)
+    by: str | None = None   # 'control': read from control.json
 
     @property
     def stopped(self) -> bool:
@@ -92,10 +88,6 @@ def path(state_dir: str) -> str:
     return os.path.join(state_dir, 'control.json')
 
 
-def _gate_path(state_dir: str) -> str:
-    return os.path.join(state_dir, 'gate.json')
-
-
 def _when(stamp) -> datetime.datetime | None:
     if not isinstance(stamp, str):
         return None
@@ -104,21 +96,6 @@ def _when(stamp) -> datetime.datetime | None:
     except ValueError:
         return None
     return t if t.tzinfo else t.astimezone()
-
-
-def _old_pause(state_dir: str) -> datetime.datetime | None:
-    """When gate.json was written, if it holds the older code's `paused: true`. An unreadable
-    gate.json is the gate's to say (it starts no Claude job either)."""
-    p = _gate_path(state_dir)
-    try:
-        with open(p, encoding='utf-8') as f:
-            raw = json.load(f)
-        at = os.path.getmtime(p)
-    except (OSError, ValueError):
-        return None
-    if isinstance(raw, dict) and raw.get('paused') is True:
-        return datetime.datetime.fromtimestamp(at, datetime.timezone.utc)
-    return None
 
 
 class Unreadable(ValueError):
@@ -166,7 +143,7 @@ def repaired(raw, now: str) -> dict:
     a lane's or repo's entry that can't be used is written stopped ("after-job", at `now`), and
     with no lanes to read (not JSON, not an object, `lanes` not one) each lane is. A `repos` that
     isn't an object names no repo, an ask that can't be used is dropped (it held nothing), and
-    an old `repo_order` is dropped (#50)."""
+    so is a key the file has no use for."""
     if raw is MISSING:
         raw = {}
     broken = not isinstance(raw, dict)
@@ -209,8 +186,6 @@ def read(state_dir: str) -> Switch:
     for id in LANES:
         if id in entries:
             lanes[id] = Stop(entries[id].get('stop'), _when(entries[id].get('at')), 'control')
-        elif id == 'claude' and (at := _old_pause(state_dir)) is not None:
-            lanes[id] = Stop('after-job', at, 'gate')
         else:
             lanes[id] = Stop()
     written = raw.get('written_at')
@@ -253,10 +228,6 @@ def stopped_repos(repos: list, switch: Switch) -> tuple[list[str], list[str]]:
 
 # --- asking: --pause and --resume --------------------------------------------------------------
 
-def _iso(t: datetime.datetime) -> str:
-    return t.astimezone().isoformat(timespec='seconds')
-
-
 def _write(state_dir: str, data: dict) -> None:
     """Whole: a temp file beside it, then swapped in, so a lane never reads half a file."""
     os.makedirs(state_dir, exist_ok=True)
@@ -276,9 +247,7 @@ def ask(state_dir: str, lanes, stop: str | None, now: str, repos=()) -> dict:
     """control.json after Stefan asks `stop` of each of `lanes` and `repos` (served repos' names,
     ticket 37) at `now` (an ISO time), in the page's format (`dashboard/serve.py`'s
     `apply_control`), written whole. An unreadable file is
-    written afresh from what can be read (`repaired`), as the page does. gate.json's older
-    pause, with no Claude entry yet, is carried over first (since gate.json was written), and
-    gate.json is left with its reserve only."""
+    written afresh from what can be read (`repaired`), as the page does."""
     if stop not in STOPS or (repos and stop not in REPO_STOPS):
         raise ValueError(f'stop must be one of {REPO_STOPS if repos else STOPS}')
     try:   # as the page reads it (`serve.App.control`): what it can't use is repaired
@@ -290,9 +259,6 @@ def ask(state_dir: str, lanes, stop: str | None, now: str, repos=()) -> dict:
         raw = BROKEN
     base = repaired(raw, now)
     entries, stops, marks = base['lanes'], base['repos'], base['asks']
-    old = _old_pause(state_dir)
-    if old is not None and 'claude' not in entries:
-        entries['claude'] = {'stop': 'after-job', 'at': _iso(old)}
     for lane in lanes:
         entries[lane] = {'stop': stop, 'at': now}
     for name in repos:
@@ -301,19 +267,7 @@ def ask(state_dir: str, lanes, stop: str | None, now: str, repos=()) -> dict:
     if 'usage' in base:   # a Refresh asked from the page stands (ticket 42), kept by `repaired`
         data['usage'] = base['usage']
     _write(state_dir, data)
-    if old is not None:
-        from .gate import Knob, read_knob, write_knob
-        write_knob(state_dir, Knob(reserve=read_knob(state_dir).reserve))
     return data
-
-
-def carry_over(state_dir: str, now: str) -> bool:
-    """Moves gate.json's older pause into control.json, if it holds one (before gate.json is
-    written with the reserve only)."""
-    if _old_pause(state_dir) is None:
-        return False
-    ask(state_dir, (), None, now)
-    return True
 
 
 # --- what the runner says -----------------------------------------------------------------------

@@ -8,7 +8,7 @@ Limits). Sol isn't gated.
   wouldn't fit the week even then waits for the weekly reset.
 - **Stefan's knob** is `<state_dir>/gate.json` (`reserve`), set with `--reserve N`; the runner
   reads it before every Claude job, so it works while it runs. Stopping a lane isn't the gate's:
-  it's `control.json` (`control.py`), and an older `paused` here is read there.
+  it's `control.json` (`control.py`).
 - **Expected cost** per job kind (build, fix, decision), in percent of each window, is learned from
   `<state_dir>/usage.jsonl`: one record per Claude job pass, usage before and after. With fewer
   than `SAMPLES` usable records it's the cautious `DEFAULTS`; then the largest of the last `RECENT`.
@@ -37,7 +37,7 @@ RESERVE_RELEASE = datetime.timedelta(hours=24)   # before the weekly reset, the 
 AFTER_RESET = datetime.timedelta(minutes=2)      # wait this past a reset before reading again
 SAME_WINDOW = datetime.timedelta(minutes=10)     # two reads' resets this close: the same window
 SAMPLES, RECENT = 3, 5
-CLAUDE_KINDS = ('build', 'fix', 'decision', 'live')
+CLAUDE_KINDS = ('build', 'fix', 'decision')
 # The Opus review while Sol is out of usage (issue #69) runs in the Sol lane, gated as `review`.
 # It isn't one of the Claude lane's kinds: that lane's measurement counts only its own jobs.
 FALLBACK_REVIEW = 'review'
@@ -65,11 +65,10 @@ class Cost:
 
 
 # Cautious until learned: a build is a long Opus thread, a fix round shorter, a decision one call.
-# A live run reads the live doc, runs a few connector calls and one check: a little over a decision.
 # An Opus review reads the diff and the code around it and may run the tests: about a decision's
 # cost to start with (issue #76), until three real reviews are learned.
 DEFAULTS = {'build': Cost(60, 15), 'fix': Cost(40, 10), 'decision': Cost(15, 4),
-            'live': Cost(20, 5), FALLBACK_REVIEW: Cost(15, 4)}
+            FALLBACK_REVIEW: Cost(15, 4)}
 
 
 @dataclass(frozen=True)
@@ -179,7 +178,6 @@ def read_knob(state_dir: str) -> Knob:
             raw = json.load(f)
     except FileNotFoundError:
         return Knob()
-    # An older `paused` in it is control.py's to read.
     return Knob(reserve=float(raw.get('reserve', DEFAULT_RESERVE)))
 
 

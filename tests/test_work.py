@@ -136,28 +136,6 @@ class QueueTest(WorkCase):
                          [('decision', '#9'), ('conflict', 'PR #5')])
         self.assertEqual(lane(snap, 'claude')['queue'][0]['title'], 'Nine')
 
-    def test_live_steps_after_merges_come_before_fix_rounds_and_nothing_is_fetched(self):
-        from tests.test_live import FakeLiveGit
-        self.repo = Repo(name='first', github=GH, path=self.dir, live_doc='docs/live.md')
-        self.config = Config(repos=[self.repo], state_dir=self.config.state_dir,
-                             log_dir=self.config.log_dir)
-        live = self.jobs.started(kind='live', repo='first', issue=None, branch='main',
-                                 title='Queue runner live', sha=H1, head=H1)
-        self.jobs.ended(live.id, exit_code=None, outcome='assumed')
-        git = FakeLiveGit(base=H2, ancestors={(H1, H2)})
-        git.logs[(H1, H2)] = [{'sha': '1' * 40, 'subject': 'Merge pull request #12 from o/claude/one-3'},
-                              {'sha': '2' * 40, 'subject': 'Two (#13)'}]
-        self.gh.prs = [full_pr(5, 'claude/red-3', H3, title='Red')]
-        self.reviewed(5, H3, 'blocking')
-        reader = work.Reader(self.config, self.gh, git, self.jobs, clock=lambda: NOW)
-        reader.read()
-        snap = self.snap(reader)
-        self.assertEqual(lane(snap, 'claude')['queue'][:2], [
-            {'kind': 'live', 'repo': 'first', 'ref': 'PR #13', 'title': '2 merged PRs: #12, #13'},
-            {'kind': 'fix', 'repo': 'first', 'ref': 'PR #5', 'title': 'Red'}])
-        self.assertEqual(git.fetches, [])
-
-
 def by_n(snap):
     return {i['n']: i for i in snap['issues']}
 
@@ -491,16 +469,14 @@ class GitHubDownTest(WorkCase):
         old = work.RepoRead(at=NOW, prs=(work.PrRead(pr=pr, issue=4, review_why=None,
                                                       fix=('fix', None), merge=(('x', None),),
                                                       reviews=({'round': 1},)),),
-                            decisions=(('failed', 4, False),), live=(6, (6,)), pending=(5,),
-                            pending_issues=(3,), builds=((10, 'Ten'),),
+                            decisions=(('failed', 4, False),), builds=((10, 'Ten'),),
                             in_flight=frozenset({4}), findings={'r1': {}})
         bare = work.RepoRead(at=None, prs=(work.PrRead(pr=pr, issue=4,
                                                        review_why='it could not be read'),))
         parts = {'fix': lambda r: r.prs[0].fix, 'review_why': lambda r: r.prs[0].review_why,
                  ('merge', 6): lambda r: r.prs[0].merge,
                  ('reviews', 6): lambda r: r.prs[0].reviews,
-                 'decisions': lambda r: r.decisions, 'live': lambda r: r.live,
-                 'pending': lambda r: (r.pending, r.pending_issues), 'builds': lambda r: r.builds,
+                 'decisions': lambda r: r.decisions, 'builds': lambda r: r.builds,
                  'in_flight': lambda r: r.in_flight, 'findings': lambda r: r.findings}
         for key, of in parts.items():
             with self.subTest(key):

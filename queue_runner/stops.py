@@ -70,13 +70,9 @@ KINDS = {
     'conflict': 'It conflicts with its base',
     'no-push': 'The fix round pushed nothing',
     'decision': 'A decision needs you',
-    'live': 'Merged, but not live yet',
-    'live-todo': 'Live, with steps only you can do',
 }
 # A stop's `answer` when its PR was merged or closed on GitHub while it was filed (issue #88).
 PR_CLOSED = 'pr-closed'
-# Stops filed on a PR that's merged already (live runs): its merge answers nothing.
-ON_MERGED = ('live', 'live-todo')
 SIGNALS = {   # decide()'s stop signals, when the review's run folder can't say more
     'repeated-class': 'a new Important finding repeats an earlier class',
     'reopened': 'a fixed finding came back',
@@ -650,8 +646,7 @@ class Stopper:
             try:
                 closed = {u for u in {j.link for j in stops if j.link}
                           if self.github.issue_state(repo.github, number_of(u)) == 'closed'}
-                gone = (self.github.pull(repo, n).state
-                        if any(j.stop not in ON_MERGED for j in stops) else 'open')
+                gone = self.github.pull(repo, n).state
                 said = (self.github.issue_comments(repo, n)
                         + self.github.review_replies(repo, n))
                 on_issue = {u: self.github.issue_comments(repo, number_of(u))
@@ -663,7 +658,7 @@ class Stopper:
                 continue
             for j in stops:
                 how = ('issue-closed' if j.link in closed else
-                       PR_CLOSED if gone != 'open' and j.stop not in ON_MERGED else
+                       PR_CLOSED if gone != 'open' else
                        'replied' if said_since(said + on_issue.get(j.link, []),
                                                utc(j.started_at)) else None)
                 if how:
@@ -679,14 +674,11 @@ class Stopper:
     def _close_for_pr(self, repo, n: int, state: str, stops, closed) -> bool:
         """Issue #88: the PR was merged or closed on GitHub while its stops were filed, so
         there's nothing left for Stefan to decide. Each of their `needs-info` issues still open
-        gets a one-line note and is closed (completed for a merge, not planned for a close),
-        except one a `live` or `live-todo` stop shares: that work is still Stefan's, and closing
-        its issue would answer it. False when GitHub failed: the stops stay filed and the next
+        gets a one-line note and is closed (completed for a merge, not planned for a close).
+        False when GitHub failed: the stops stay filed and the next
         pass tries again, and a note already posted isn't posted twice."""
         mark = f'{RUNNER_MARK}stop pr-closed pr={n} -->'
-        live = {j.link for j in stops if j.stop in ON_MERGED}
-        for u in sorted({j.link for j in stops if j.link and j.stop not in ON_MERGED}
-                        - closed - live):
+        for u in sorted({j.link for j in stops if j.link} - closed):
             i = number_of(u)
             try:
                 if not any(mark in c.body for c in self.github.issue_comments(repo, i)):

@@ -2,7 +2,7 @@
 lane takes up next, the issues and features, the open PRs and what happened.
 
 - **The read** (`read_repo`, kept by `Reader`): GitHub and git are read the way the lanes read
-  them, through their own code (`Decider.cases`, `LiveSteps.batch`, `Fixer.candidates`, the
+  them, through their own code (`Decider.cases`, `Fixer.candidates`, the
   picker, `Reviewer.candidates`, the merge re-check), so the queues agree with what the lanes
   really take up. Nothing is posted, started, fetched or recorded. One read of a repo answers
   each GitHub call once (`Memo`), and the Sol lane reads once after each pass; a repo GitHub
@@ -27,27 +27,6 @@ NOT_READ = "The runner hasn't read GitHub for its work yet."
 
 def _noop(*args, **kwargs):
     return None
-
-
-class _NoStops:
-    """The read's stopper: files nothing."""
-
-    def file(self, *args, **kwargs):
-        return None
-
-
-class NoFetch:
-    """Git for the read: everything but `fetch`, which the read leaves to the lanes (it would
-    write the clone's remote refs while a lane may be using them)."""
-
-    def __init__(self, git):
-        self._git = git
-
-    def fetch(self, *args, **kwargs):
-        return None
-
-    def __getattr__(self, name):
-        return getattr(self._git, name)
 
 
 # The GitHub calls a read makes; each is answered once per read.
@@ -102,21 +81,16 @@ class RepoRead:
     issues: tuple = ()                  # github.WorkIssue, open
     prs: tuple = ()                     # PrRead, lowest number first
     decisions: tuple = ()               # (question, number, on a PR)
-    live: tuple | None = None           # the live batch that would run: (newest PR, its PRs)
-    pending: tuple = ()                 # PRs merged and not live yet
-    pending_issues: tuple = ()          # ... and the issues their branches name
     builds: tuple = ()                  # (issue, title) in the picker's order
     in_flight: frozenset = frozenset()  # issues a branch or PR is on (`picker.in_flight`)
     errors: tuple = ()
     findings: dict = field(default_factory=dict)   # review job id: {findings, signals}
     # The parts that couldn't be read (`read_repo`'s keys), which the Reader takes from the
     # last good read: 'fix' and 'review_why' (every PR's, or one PR's as ('fix', n)...),
-    # ('merge', n), ('reviews', n), 'decisions', 'live', 'pending', 'builds', 'in_flight',
-    # 'findings'.
+    # ('merge', n), ('reviews', n), 'decisions', 'builds', 'in_flight', 'findings'.
     failed: frozenset = frozenset()
 
 
-_FROM_BRANCH = re.compile(r'\bfrom \S+?/claude/\S+-(\d+)\b')
 
 
 def read_repo(config, github, git, jobs, repo, now=None) -> RepoRead:
@@ -125,7 +99,6 @@ def read_repo(config, github, git, jobs, repo, now=None) -> RepoRead:
     from .decisions import Decider
     from .fix import Fixer
     from .ledger import read_reviews
-    from .live import LiveSteps, pr_numbers
     from .merge import Merger
     from .picker import closed_issues, in_flight, pickable
     from .review import DryRunPoster, Reviewer
@@ -184,20 +157,6 @@ def read_repo(config, github, git, jobs, repo, now=None) -> RepoRead:
     decisions = part('decisions', lambda: tuple(
         (c.question, c.number, c.pr is not None or c.about.kind in ('fix', 'review'))
         for c in decider.cases(repo)), (), 'decisions')
-    live, pending, pending_issues = None, (), ()
-    if repo.live_doc and git is not None:
-        steps = LiveSteps(config, github=github, git=NoFetch(git), t3=None, jobs=jobs, say=_noop,
-                          stopper=_NoStops(), merger=merger, now=now)
-        b = part('live steps', lambda: steps.batch(repo, record=False), None, 'live')
-        if b is not None:
-            live = (b.prs[-1], tuple(b.prs))
-        last, _ = steps.reach(repo)
-        if last is not None and last.head:
-            commits = part('what is merged and not live', lambda: git.first_parent(
-                repo.path, last.head, f'origin/{repo.base}'), (), 'pending')
-            pending = tuple(pr_numbers(commits))
-            pending_issues = tuple(int(m[1]) for c in commits
-                                   if (m := _FROM_BRANCH.search(c['subject'])))
     from .stops import red_base
     picked = () if red_base(jobs, repo.name, repo.base) else part('builds', lambda: tuple(
         (b.issue.number, b.issue.title)
@@ -208,13 +167,12 @@ def read_repo(config, github, git, jobs, repo, now=None) -> RepoRead:
     # Each review's decision.json (its findings and signals), as `asks.Story` reads them.
     found = part("the reviews' findings", lambda: reviews(
         jobs.jobs(), {(repo.name, p.number) for p in pulls}), {}, 'findings')
-    return RepoRead(at=None, issues=issues, prs=tuple(prs), decisions=decisions, live=live,
-                    findings=found,
-                    pending=pending, pending_issues=pending_issues, builds=picked,
+    return RepoRead(at=None, issues=issues, prs=tuple(prs), decisions=decisions,
+                    findings=found, builds=picked,
                     in_flight=flying, errors=tuple(errors), failed=frozenset(failed))
 
 
-_PARTS = ('decisions', 'live', 'builds', 'in_flight', 'findings')
+_PARTS = ('decisions', 'builds', 'in_flight', 'findings')
 FAILED_READ = 'reading it failed '   # `Reviewer._candidates`' and `Fixer.candidates`' why
 
 
@@ -235,8 +193,6 @@ def kept(got: RepoRead, last: RepoRead | None) -> RepoRead:
                               if k in f or (k, n) in f})
         prs.append(p)
     change = {k: getattr(last, k) for k in _PARTS if k in f}
-    if 'pending' in f:
-        change.update(pending=last.pending, pending_issues=last.pending_issues)
     return replace(got, prs=tuple(prs), **change)
 
 
@@ -267,7 +223,7 @@ class Reader:
         """Reads every served repo once (with `github`, a `Memo` the pass shares, else its own)."""
         gh = github if github is not None else Memo(self.github)
         for repo in self.config.repos:
-            if not repo.github or repo.local_issues:
+            if not repo.github:
                 continue
             try:
                 got = read_repo(self.config, gh, self.git, self.jobs, repo, now=self.clock)
@@ -342,14 +298,14 @@ def _entry(kind, repo, on_pr, n, title) -> dict:
 def _same(entry: dict, job) -> bool:
     if job is None:
         return False
-    on_pr = job.kind in ('fix', 'review', 'merge', 'live') or (job.kind == 'decision' and job.sha)
+    on_pr = job.kind in ('fix', 'review', 'merge') or (job.kind == 'decision' and job.sha)
     kind = 'conflict' if job.kind == 'fix' and job.cause == 'conflict' else job.kind
     return (entry['kind'], entry['repo'], entry['ref']) == (kind, job.repo, _ref(on_pr, job.issue))
 
 
 def claude_queue(v: View) -> list[dict]:
     """The Claude lane's queue, as `Runner.choose` takes it: a job a limit cut off, decisions,
-    live steps, fix and conflict rounds, then builds in the picker's order; each kind through
+    fix and conflict rounds, then builds in the picker's order; each kind through
     the repos in config.toml's order."""
     working = [r for r in v.repos if r.name not in v.off and r.name in v.reads]
     out = []
@@ -358,17 +314,11 @@ def claude_queue(v: View) -> list[dict]:
             continue
         read = v.reads.get(j.repo)
         kind = 'conflict' if j.kind == 'fix' and j.cause == 'conflict' else j.kind
-        out.append(_entry(kind, j.repo, j.kind in ('fix', 'live'), j.issue,
+        out.append(_entry(kind, j.repo, j.kind == 'fix', j.issue,
                           _title(read, j.issue) if read else ''))
     for r in working:
         for question, n, on_pr in v.reads[r.name].decisions:
             out.append(_entry('decision', r.name, on_pr, n, _title(v.reads[r.name], n)))
-    for r in working:
-        if live := v.reads[r.name].live:
-            newest, prs = live
-            out.append(_entry('live', r.name, True, newest,
-                              f'{len(prs)} merged PR{"s" * (len(prs) != 1)}: '
-                              + ', '.join(f'#{n}' for n in prs)))
     for r in working:
         for p in v.reads[r.name].prs:
             if p.fix and p.fix[1] is None:
@@ -562,15 +512,12 @@ def _issues(v: View, asks, prs: dict, cq: list) -> list[dict]:
             item = _issue(r.name, n, i.title, state, feature, pr, _blocked_by(r, i, names), note)
             item['pick'] = picks.get((r.name, f'#{n}'))
             out.append(item)
-        for f in features.values():   # a feature's closed tickets: done, or merged not live yet
+        for f in features.values():   # a feature's closed tickets: done
             for s in f.sub_issues:
                 if s.state != 'closed' or s.repo.lower() != r.github.lower():
                     continue
-                merged = s.number in read.pending_issues
-                out.append(_issue(r.name, s.number, s.title, 'merged' if merged else 'done',
-                                  _key(r.name, f.number),
-                                  note='Merged; its live steps are still to run' if merged
-                                  else None))
+                out.append(_issue(r.name, s.number, s.title, 'done', _key(r.name, f.number),
+                                  note=None))
     return out
 
 
@@ -618,8 +565,7 @@ def _pr_status(v: View, repo, p: PrRead, cq: list, sq: list) -> tuple[str, str, 
     if p.merge is not None and not (p.fix and p.fix[0] == 'conflict'):
         why = next((w for _, w in p.merge if w), None)
         if why is None and repo.stefan_merges:
-            return ('Ready for you to merge', 'You merge it.' + (
-                ' Its live steps follow your merge.' if repo.live_doc else ''), YOU)
+            return 'Ready for you to merge', 'You merge it.', YOU
         if why is None:
             return 'Merging next', 'The runner merges it on its next pass.', REVIEW
         who = 'It comes to you to merge' if repo.stefan_merges else 'The runner merges it'
@@ -682,7 +628,7 @@ def _pr_list(v: View, statuses: dict, story, releases) -> list[dict]:
 # --- what happened ------------------------------------------------------------------------------
 
 ACTIVITY_MAX = 200
-_PR_KINDS = ('review', 'fix', 'merge', 'ready', 'stop', 'live', 'rerun', 'base-hold')
+_PR_KINDS = ('review', 'fix', 'merge', 'ready', 'stop', 'rerun', 'base-hold')
 
 
 def _h7(sha) -> str:
@@ -726,7 +672,7 @@ def _event(story, j) -> list[tuple]:
     is two: the stop, and his answer."""
     from .asks import REVIEWED, SKIPPED
     from .stops import number_of
-    if j.outcome in SKIPPED or (j.kind == 'live' and j.outcome == 'assumed'):
+    if j.outcome in SKIPPED:
         return []
     at, sha = j.ended_at or j.started_at, _h7(j.sha)
     tone = None
@@ -753,10 +699,6 @@ def _event(story, j) -> list[tuple]:
         text = ('You merged it.' if mine else 'The runner merged it.') \
             if j.outcome == 'merged' else _other(j)
         actor, tone = ('you' if mine else 'runner'), 'ok' if j.outcome == 'merged' else None
-    elif j.kind == 'live':
-        text, actor = story._live(j), 'claude'
-        tone = 'ok' if j.outcome == 'live' else 'bad' if j.outcome in ('failed', 'partial') \
-            else 'you' if j.outcome == 'stop' else None
     elif j.kind == 'decision':
         text, actor = story._decision(j) or f'A decision ended {j.outcome}.', 'claude'
         tone = 'you' if j.outcome == 'stop' else None
@@ -816,14 +758,14 @@ def _on_pr(j) -> bool:
 
 def _timeline(story, v: View, repo, p: PrRead, releases) -> list[dict]:
     """The PR's story, oldest first, each event on the head it happened at: its build, the
-    runner's reviews, fix rounds, decisions, stops, ready marks, merges, live runs and releases."""
+    runner's reviews, fix rounds, decisions, stops, ready marks, merges and releases."""
     n = p.pr.number
     pos = {j.id: k for k, j in enumerate(v.jobs)}
     events = []
     for j in v.jobs:
         if j.repo != repo.name:
             continue
-        mine = (j.issue == n and _on_pr(j)) or (j.kind == 'live' and n in (j.prs or ())) or (
+        mine = (j.issue == n and _on_pr(j)) or (
             j.kind == 'build' and isinstance(j.pr, dict) and j.pr.get('number') == n)
         if mine:
             events += [(e, pos[j.id]) for e in _event(story, j)]
