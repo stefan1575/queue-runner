@@ -89,7 +89,7 @@ function _jobs(config: Config): JobLog {
 
 /** The gate, with Claude's one shared reader (`claude-usage.ts`'s `CachedUsage`, issue 66): the
  *  endpoint is asked once every 5 minutes. */
-function _gate(config: Config, usage: Endpoint<Usage> | CachedUsage<Usage> | null, clock: (() => Date) | null,
+export function _gate(config: Config, usage: Endpoint<Usage> | CachedUsage<Usage> | null, clock: (() => Date) | null,
   sleep: Sleep | null): Gate {
   const endpoint = usage ?? new OAuthUsage();
   const reader = endpoint instanceof CachedUsage ? endpoint : new CachedUsage(endpoint, clock);
