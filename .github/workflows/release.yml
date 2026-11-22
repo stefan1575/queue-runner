@@ -34,16 +34,11 @@ jobs:
           cache: pnpm
           cache-dependency-path: app/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
-      # DIAG #273 (temporary)
-      - name: diag bash
-        run: node diag/diag-273.mjs
-      - name: diag bash, Windows whoami directly
-        run: /c/Windows/System32/whoami.exe //priv
-      - name: diag pwsh
-        shell: pwsh
-        run: node diag/diag-273.mjs
       - run: pnpm typecheck
+      # Not Git Bash: it enables the backup and restore privileges in its token, which every
+      # process it starts inherits, so the git-seam tests' deny-delete ACL stops nothing (#273).
       - run: pnpm test
+        shell: pwsh
       # The tag names the version (v0.1.0 is 0.1.0); a PR's build keeps package.json's.
       - name: pnpm installer
         run: |
