@@ -321,7 +321,8 @@ loop, below); the tests drive it on fake T3's events.
   3 solo records measured that window, then the largest of the last 5. A job's record (`usage.jsonl`
   in the state folder) is the reading it was let in on and T3's first reading of its provider
   after it ended, with `spent` per window (null for one that reset meanwhile) and `sharedWith`
-  when another job ran on the same login meanwhile (then it teaches nothing). A torn last line is
+  when another job ran on the same login meanwhile (then it teaches nothing). With no reading after
+  it, `after` and `spent` are null and `error` says why (Python's failed after-job read). A torn last line is
   cut off; a bad line before it is an error. No plan setting: #118 closed it, the costs being
   percents that follow a plan change.
 - **Your share** (Settings, Your share; `shares`, keyed `<driver>/<window id>`): one row per
@@ -360,10 +361,14 @@ comment, as in Python, and `docs/claude-lane.md` is the behaviour.
   waits for its job's measurement (`measured`: T3's next reading of its provider, recorded) before
   it ends, as Python's `gate.measured` reads usage in the worker, so `--once` records it before it
   returns; it waits five minutes at most (Python's wait for the usage endpoint's budget), and a
-  measurement still unread then is the gate's to record on a later reading. The jobs a stopped runner
+  measurement still unread then is recorded with no `after` (`unmeasured`), as is one on a provider
+  T3 marks `unsupported`, at once. A record that can't be written is logged and the worker ends, as
+  Python's worker logs it. The jobs a stopped runner
   left running are passed to `pick`, each on the model its start record says it was launched on
   (`choice`, the app's own field: Python's lanes have one account each and write none) at its
-  expected cost there, and one seen to end holds that model's login for T3's next reading.
+  expected cost there, and to `started`, so a new job on the same login names them in `sharedWith`
+  (Python's `_launch` adds `_busy`'s labels); one seen to end holds that model's login for T3's
+  next reading.
 - **The config** (`src/run-wiring.ts`, `readRepos`) is Python's `Config` and `Repo`, read once at
   start as Python reads config.toml: each T3 project Settings switched to Served with a GitHub
   remote, named by its GitHub `owner/name`, in its folder, on its base (GitHub's default branch,

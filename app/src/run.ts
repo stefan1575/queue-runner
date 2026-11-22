@@ -65,7 +65,7 @@ export type Did = typeof STARTED | typeof BUSY | typeof IDLE | typeof GATED | ty
 export const WALL_STEP = 30;   // a long wait looks at the wall clock this often (seconds)
 /** How long a worker waits for T3's usage reading after its job, to measure it (Python's after-job
  *  read waits at most the usage endpoint's five-minute budget; T3 reads usage on its own now). A
- *  measurement still unread then is the gate's to record on a later reading. */
+ *  measurement still unread then is recorded with no `after`, as Python records a failed read. */
 export const MEASURE_WAIT = 300;
 
 /** The builder lane's kinds (Python's in `gate.py`): what its measurement counts. */
@@ -92,7 +92,7 @@ export type Git = {
   fetch_pr(path: string, number: number, base: string): Promise<[string, string]>;
   log(path: string, a: string, b: string): Promise<Commit[]>;
 };
-export type Gate = Pick<UsageGate, 'pick' | 'started' | 'finished' | 'measured' | 'dropped' | 'forget' | 'job_ended'>;
+export type Gate = Pick<UsageGate, 'pick' | 'started' | 'finished' | 'measured' | 'unmeasured' | 'dropped' | 'forget' | 'job_ended'>;
 
 /** A wait the gate or a limit set (Python's `snapshot.Wait`): until when, and why. */
 export type Wait = { until: Date | null; reason: string };
@@ -428,8 +428,9 @@ export class Runner {
       this._last_gate.delete(start.repo);
       this.gate.forget(start.label);
       this.say(`Usage gate, ${start.repo}: ${start.kind} fits${verdict.onFallback ? ', on its fallback' : ''}`);
-      // counted from now, so the next repo's verdict counts this one
-      this.gate.started({ id: start.label, kind: start.kind, choice: verdict.choice }, verdict.cost);
+      // counted from now, so the next repo's verdict counts this one; the jobs a stopped runner
+      // left running spend beside it (`shared_with`)
+      this.gate.started({ id: start.label, kind: start.kind, choice: verdict.choice }, verdict.cost, undefined, running);
       this._admitted.push([start.label, start.kind, start.then]);
       starts.push(new Start({ ...start, choice: verdict.choice, cost: verdict.cost }));
     }
@@ -498,7 +499,7 @@ export class Runner {
           // after the job and its record, as Python's `gate.measured` reads usage before the worker
           // ends (so `--once` records it before it returns).
           this.gate.finished(start.label);
-          await this._measured(this.gate.measured(start.label));
+          await this._measured(this.gate, start.label);
         } else {
           this.gate.dropped(start.label);
           // A thread ran though the pass started nothing (a decision whose retry never reached its
@@ -517,15 +518,20 @@ export class Runner {
     }
   }
 
-  /** Until the job's measurement is recorded, or `measure_wait` seconds pass. */
-  private async _measured(recorded: Promise<void>): Promise<void> {
+  /** Until the job's measurement is recorded: on T3's reading after it, or, with none within
+   *  `measure_wait` seconds, with no `after` and the error (Python's `gate.measured`). Rejects when
+   *  the record can't be written. */
+  private async _measured(gate: Gate, label: string): Promise<void> {
+    const recorded = gate.measured(label);
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const waited = new Promise<void>((resolve) => { timer = setTimeout(resolve, this.measure_wait * 1000); });
+    const waited = new Promise<'unread'>((resolve) => { timer = setTimeout(() => resolve('unread'), this.measure_wait * 1000); });
     try {
-      await Promise.race([recorded, waited]);
+      if (await Promise.race([recorded, waited]) !== 'unread') return;
     } finally {
       clearTimeout(timer);
     }
+    void gate.unmeasured(label, 'no reading after the job');
+    await recorded;
   }
 
   /** A builder job's thread was seen to end outside a measured pass (`settle`): the next check

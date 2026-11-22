@@ -44,7 +44,7 @@ export type Pick =
 
 /** `account` is null until T3 names the login of the job's provider. */
 type Running = Omit<RunningJob, 'account'> & { account: string | null; job: GateJob; before: Reading; started: Date; beside: Set<string> };
-type Ended = Running & { ended: Date; recorded: () => void };
+type Ended = Running & { ended: Date; recorded: () => void; failed: (e: unknown) => void };
 
 export class UsageGate {
   private source: CatalogSource;
@@ -220,8 +220,10 @@ export class UsageGate {
 
   /** The job started on `choice`, let in at `cost` on the reading `before` (T3's reading now
    *  unless given: a job watched again after a restart passes the one it was let in on, never one
-   *  taken mid-run). It counts as running until `finished`. */
-  started(job: GateJob, cost: Cost, before: Reading = this.reading(job.choice)) {
+   *  taken mid-run). It counts as running until `finished`. The jobs running `elsewhere` on its
+   *  login (a stopped runner's, still running) spend beside it, so its record names them too
+   *  (Python's `Runner._launch` adds `_busy`'s labels to the worker's `shared`). */
+  started(job: GateJob, cost: Cost, before: Reading = this.reading(job.choice), elsewhere: readonly Elsewhere[] = []) {
     this.placeJobs();
     const account = this.usage(job.choice.provider)?.account ?? null;
     const r: Running = { id: job.id, account, cost, job, before, started: this.now(), beside: new Set() };
@@ -230,6 +232,14 @@ export class UsageGate {
       if (account !== null ? other.account !== account : other.account !== null || other.job.choice.provider !== job.choice.provider) continue;
       other.beside.add(job.id);
       r.beside.add(other.id);
+    }
+    const catalog = this.source.current().catalog;
+    for (const e of elsewhere) {
+      if (this.running.has(e.id) || e.id === job.id) continue;
+      const choice = e.choice ?? (catalog ? kindModels(this.settings().jobs, e.kind, catalog).choice : null);
+      if (!choice) continue;
+      const theirs = this.usage(choice.provider)?.account ?? null;
+      if (account !== null ? theirs === account : theirs === null && choice.provider === job.choice.provider) r.beside.add(e.id);
     }
     this.held.delete(job.id);
     this.running.set(job.id, r);
@@ -255,16 +265,40 @@ export class UsageGate {
     if (r.account !== null) this.lastEnd.set(r.account, at);
     else this.unplacedEnd.set(r.job.choice.provider, at);
     let recorded = () => {};
-    this.recording.set(id, new Promise<void>((resolve) => { recorded = resolve; }));
-    this.toMeasure.push({ ...r, ended: at, recorded: () => { this.recording.delete(id); recorded(); } });
-    void this.measure();
+    let failed: (e: unknown) => void = () => {};
+    const recording = new Promise<void>((resolve, reject) => { recorded = resolve; failed = reject; });
+    // a failed write is the worker's to hear of (`measured`); a lane that doesn't wait for it
+    // isn't left with a rejection nothing handles
+    recording.catch(() => {});
+    this.recording.set(id, recording);
+    this.toMeasure.push({
+      ...r, ended: at,
+      recorded: () => { this.recording.delete(id); recorded(); },
+      failed: (e) => { this.recording.delete(id); failed(e); },
+    });
+    const u = this.usage(r.job.choice.provider);
+    // T3 reads no usage for this provider: no reading will come, so its record is written now
+    if (u?.unavailable === 'unsupported') void this.unmeasured(id, `T3 reads no usage for ${u.name || u.label}`);
+    else void this.measure();
   }
 
   /** Settles once the ended job `id`'s record is written (at once for one not waiting to be
    *  measured), so the run loop's worker can wait for it, as Python's `gate.measured` records a
-   *  job's usage before its worker ends. */
+   *  job's usage before its worker ends. It rejects when the record can't be written. */
   measured(id: string): Promise<void> {
     return this.recording.get(id) ?? Promise.resolve();
+  }
+
+  /** The ended job `id`, if still waiting for T3's reading after it, is recorded now with no
+   *  `after` and `error`, as Python's `gate.measured` records a failed after-job read. */
+  unmeasured(id: string, error: string): Promise<void> {
+    this.measuring = this.measuring.then(async () => {
+      const e = this.toMeasure.find((x) => x.id === id);
+      if (!e) return;
+      this.toMeasure = this.toMeasure.filter((x) => x !== e);
+      await this.write(e, null, error);
+    });
+    return this.measuring;
   }
 
   /** A job let in that never reached a thread (T3 refused it, a leftover branch): it stops
@@ -291,17 +325,28 @@ export class UsageGate {
       this.toMeasure = this.toMeasure.filter((e) => !ready.includes(e));
       for (const e of ready) {
         const u = this.usage(e.job.choice.provider)!;
-        const after = reading(u.checkedAt, u.windows);
-        await this.log.append({
-          ...e.job.choice, kind: e.job.kind, at: e.ended.toISOString(), job: e.id,
-          before: e.before, after, spent: e.before.checkedAt ? spentOf(e.before, after) : null,
-          ...(e.beside.size ? { sharedWith: [...e.beside] } : {}),
-        });
-        e.recorded();
-
+        await this.write(e, reading(u.checkedAt, u.windows), null);
       }
     });
     return this.measuring;
+  }
+
+  /** Appends the ended job's record: `after` T3's reading after it, or null with the `error`. A
+   *  write that fails is its waiting worker's to say (`measured` rejects), as Python's worker
+   *  logs a failed record; the measurements after it go on. */
+  private async write(e: Ended, after: Reading | null, error: string | null): Promise<void> {
+    try {
+      await this.log.append({
+        ...e.job.choice, kind: e.job.kind, at: e.ended.toISOString(), job: e.id,
+        before: e.before, after, spent: after && e.before.checkedAt ? spentOf(e.before, after) : null,
+        ...(error ? { error } : {}),
+        ...(e.beside.size ? { sharedWith: [...e.beside] } : {}),
+      });
+    } catch (err) {
+      e.failed(err);
+      return;
+    }
+    e.recorded();
   }
 
   /** Settles once every measurement under way is written (the tests wait on it). */

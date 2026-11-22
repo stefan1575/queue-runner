@@ -49,6 +49,8 @@ class T3Usage implements CatalogSource {
   reads: Read[];
   at = 0;
   read_at: Date | null = null;
+  /** Why T3 has no windows for the provider (`unsupported`: it reads none for it), or null. */
+  unavailable: string | null = null;
   private listeners = new Set<(s: CatalogState) => void>();
   private clock: () => Date;
 
@@ -62,8 +64,8 @@ class T3Usage implements CatalogSource {
     const checkedAt = r === 'none' ? null : (this.read_at ?? this.clock()).toISOString();
     const usage: ProviderUsage = {
       provider: 'claudeAgent', driver: 'claudeAgent', account: 'claude-login', label: 'Claude', name: 'Claude',
-      checkedAt, resetCredits: null, unavailable: null,
-      windows: r === 'none' ? [] : [
+      checkedAt: this.unavailable ? null : checkedAt, resetCredits: null, unavailable: this.unavailable,
+      windows: r === 'none' || this.unavailable ? [] : [
         { id: 'five_hour', kind: 'session', label: 'Session', usedPercent: r.five, resetsAt: r.five_reset?.toISOString() ?? null, minutes: 300 },
         { id: 'seven_day', kind: 'weekly', label: 'Weekly', usedPercent: r.week, resetsAt: r.week_reset?.toISOString() ?? null, minutes: 10_080 },
       ],
@@ -113,6 +115,8 @@ class Harness {
   /** How long a worker waits for its job's measurement: none, unless a case delivers T3's reading
    *  while the job's worker waits for it. */
   measure_wait = 0;
+  /** The cost log's append fails (a full disk, say). */
+  cost_log_fails = false;
 
   constructor(repos: Repo[], poll_seconds: number, now: Date) {
     this.repos = repos;
@@ -128,7 +132,9 @@ class Harness {
   }
 
   async make(github: any, t3: any, git: any = new FakeGit()): Promise<Runner> {
-    this.gate = new UsageGate(this.usage, () => this.settings, await CostLog.open(join(dir, 'state', 'usage.jsonl')), () => this.now);
+    const costs = await CostLog.open(join(dir, 'state', 'usage.jsonl'));
+    if (this.cost_log_fails) costs.append = async () => { throw new Error('ENOSPC: no space left on device'); };
+    this.gate = new UsageGate(this.usage, () => this.settings, costs, () => this.now);
     this.runner = new Runner(this.config, {
       github, t3, git, jobs: this.log, gate: this.gate, now: () => this.now, measure_wait: this.measure_wait,
       out: () => {}, log_line: (l) => this.lines.push(l), user: async () => 'the user',
@@ -156,6 +162,31 @@ class Harness {
 
   runner_log(): string {
     return this.lines.join('\n');
+  }
+
+  /** T3 reads usage again (`next`, a minute on) once a job's worker waits for its measurement, as
+   *  Python's `gate.measured` reads after the job. */
+  reads_after_job(next: Read): void {
+    const make = this.make.bind(this);
+    this.make = async (...args) => {
+      const r = await make(...args);
+      const gate = this.gate!;
+      const measured = gate.measured.bind(gate);
+      gate.measured = (id) => {
+        const recorded = measured(id);
+        void Promise.resolve().then(() => {
+          this.now = new Date(this.now.getTime() + 60_000);
+          this.usage.read_again(null, next);
+        });
+        return recorded;
+      };
+      return r;
+    };
+  }
+
+  /** The cost records on disk. */
+  async records(): Promise<UsageRecord[]> {
+    return (await readFile(join(dir, 'state', 'usage.jsonl'), 'utf8')).trim().split('\n').map((l) => JSON.parse(l));
   }
 }
 
@@ -199,10 +230,28 @@ describe('RunTest', () => {
     expect(h.log.jobs()[0]!.outcome).toBe('done-no-pr');
   });
 
-  // a decision on the failure comes between the two builds
-  test.todo('test_a_failed_run_is_recorded_and_its_issue_not_picked_again (decisions, #226)');
-  // a decision on its question
-  test.todo('test_a_run_waiting_for_an_answer_holds_its_issue (decisions, #226)');
+  test('test_a_failed_run_is_recorded_and_its_issue_not_picked_again', async () => {
+    const gh = new FakeGitHubWithPulls({ issues: [issue(4), issue(5)] });
+    const t3 = new FakeT3([[1, 'interrupted']]);
+    await h.run_main(['--once'], gh, t3);   // the build (the decision on its failure and the next build: #226's)
+    expect(t3.starts.map((s) => s.branch)).toEqual(['claude/a-ticket-4']);
+    const failed = h.log.jobs()[0]!;
+    expect([failed.issue, failed.exit_code, failed.outcome, failed.status]).toEqual([4, 1, 'failed', 'interrupted']);
+    expect(failed.error).toBe('It broke.');
+    expect(h.log.held_issues('first')).toEqual(new Set([4]));
+  });
+  // the decision on its failure, between the two builds, and the build of #5 after it
+  test.todo('test_a_failed_run_is_recorded_and_its_issue_not_picked_again: the decision and the next build (decisions, #226)');
+
+  test('test_a_run_waiting_for_an_answer_holds_its_issue', async () => {
+    const gh = new FakeGitHubWithPulls({ issues: [issue(4)] });
+    const t3 = new FakeT3([[2, 'waiting']]);
+    await h.run_main(['--once'], gh, t3);
+    expect(h.log.jobs()[0]!.outcome).toBe('waiting');
+    expect(h.log.held_issues('first')).toEqual(new Set([4]));
+  });
+  // the decision on its question, then a pass with nothing to start
+  test.todo('test_a_run_waiting_for_an_answer_holds_its_issue: the decision on its question (decisions, #226)');
 
   test('test_a_waiting_job_is_recorded_done_once_its_thread_completes', async () => {
     const gh = new FakeGitHubWithPulls({ issues: [issue(4)], pulls_by_branch: { 'claude/a-ticket-4': PR } });
@@ -383,7 +432,7 @@ describe('RunTest', () => {
     const calls: unknown[][] = [];
     const gate: Gate = {
       pick: (id, kind, elsewhere) => { calls.push(['pick', id, elsewhere]); return { fits: false, until: null, hold: { why: 'reading', provider: 'Claude', checkedAt: null, stale: 'none' } }; },
-      started: () => {}, finished: () => {}, measured: async () => {}, dropped: () => {}, forget: () => {},
+      started: () => {}, finished: () => {}, measured: async () => {}, unmeasured: async () => {}, dropped: () => {}, forget: () => {},
       job_ended: (kind, key, choice) => { calls.push(['job_ended', kind, key, choice]); },
     };
     const r = new Runner(h.config, { github: new FakeGitHubWithPulls({ issues: [issue(5)] }) as any, t3, git: new FakeGit() as any, jobs: h.log, gate,
@@ -419,26 +468,47 @@ describe('RunTest', () => {
     h.usage = new T3Usage(() => h.now, { five: 10, week: 20, five_reset: new Date(FAR), week_reset: new Date(FAR) });
     h.measure_wait = 60;
     // T3 reads usage again after the job ends, once its worker waits for that reading
-    const make = h.make.bind(h);
-    h.make = async (...args) => {
-      const r = await make(...args);
-      const gate = h.gate!;
-      const measured = gate.measured.bind(gate);
-      gate.measured = (id) => {
-        const recorded = measured(id);
-        void Promise.resolve().then(() => {
-          h.now = new Date(h.now.getTime() + 60_000);
-          h.usage.read_again(null, { five: 35, week: 24, five_reset: new Date(FAR), week_reset: new Date(FAR) });
-        });
-        return recorded;
-      };
-      return r;
-    };
+    h.reads_after_job({ five: 35, week: 24, five_reset: new Date(FAR), week_reset: new Date(FAR) });
     await h.run_main(['--once'], new FakeGitHubWithPulls({ issues: [issue(4)] }), new FakeT3([[0, 'completed']]));
 
     // read at once, with no reading delivered after --once returned
-    const records: UsageRecord[] = (await readFile(join(dir, 'state', 'usage.jsonl'), 'utf8')).trim().split('\n').map((l) => JSON.parse(l));
+    const records = await h.records();
     expect(records.map((r) => [r.job, r.spent])).toEqual([['build first#4', { five_hour: 25, seven_day: 4 }]]);
+  });
+
+  test("a single build's --once with no reading after the job within the wait records it with none (review 1 of #261, F1)", async () => {
+    h.usage = new T3Usage(() => h.now, { five: 10, week: 20, five_reset: new Date(FAR), week_reset: new Date(FAR) });
+    h.measure_wait = 0.05;   // T3 never reads again
+    const [code] = await h.run_main(['--once'], new FakeGitHubWithPulls({ issues: [issue(4)] }), new FakeT3([[0, 'completed']]));
+    expect(code).toBe(0);
+    const records = await h.records();
+    expect(records.map((r) => [r.job, r.after, r.spent, r.error])).toEqual([['build first#4', null, null, 'no reading after the job']]);
+    expect(records[0]!.before.windows.five_hour!.used).toBe(10);
+    // a reading that comes later records nothing more
+    h.usage.read_again(null, { five: 35, week: 24, five_reset: new Date(FAR), week_reset: new Date(FAR) });
+    await h.gate!.settled();
+    expect((await h.records()).length).toBe(1);
+  });
+
+  test("a single build's --once on a provider T3 reads no usage for records it at once (review 1 of #261, F1)", async () => {
+    h.usage.unavailable = 'unsupported';
+    h.measure_wait = 60;   // more than the test's own timeout: it mustn't wait for a reading that can't come
+    const [code] = await h.run_main(['--once'], new FakeGitHubWithPulls({ issues: [issue(4)] }), new FakeT3([[0, 'completed']]));
+    expect(code).toBe(0);
+    expect((await h.records()).map((r) => [r.job, r.after, r.error])).toEqual([['build first#4', null, 'T3 reads no usage for Claude']]);
+  });
+
+  test("a usage record that can't be written is logged and releases the worker (review 1 of #261, F6)", async () => {
+    h.usage = new T3Usage(() => h.now, { five: 10, week: 20, five_reset: new Date(FAR), week_reset: new Date(FAR) });
+    h.measure_wait = 60;
+    h.cost_log_fails = true;
+    h.reads_after_job({ five: 35, week: 24, five_reset: new Date(FAR), week_reset: new Date(FAR) });
+    const [code] = await h.run_main(['--once'], new FakeGitHubWithPulls({ issues: [issue(4)] }), new FakeT3([[0, 'completed']]));
+    expect(code).toBe(0);
+    expect(h.log.jobs()[0]!.outcome).toBe('done-no-pr');
+    expect(h.runner_log()).toContain('build first#4: recording its usage failed:');
+    expect(h.runner_log()).toContain('ENOSPC');
+    await h.gate!.settled();   // the gate's measurements go on
   });
 
   test('while a worker runs, the planner looks at the wall clock every 30 seconds, so a sleeping PC holds it no longer (#255 F15)', async () => {
@@ -668,6 +738,16 @@ describe('SideBySideTest', () => {
     expect(h.built()).toEqual(['second']);
     expect(h.runner_log()).toContain('build first#3 is still running in');
   });
+
+  test("a job a dead runner left running on the same login shares the new job's sample (review 1 of #261, F5)", async () => {
+    await h.write_events({ event: 'start', job: 'dead', kind: 'build', repo: 'first', issue: 3, branch: 'claude/x-3',
+      title: 'Queue runner build: first#3', at: '2026-11-15T11:00:00+00:00' });
+    const t3 = new FakeT3([[0, 'completed']]);
+    t3.add('mcp:dead', 'Queue runner build: first#3', 'running', '2026-11-15T11:00:01.000Z');
+    await h.once(t3);
+    const records = await h.measured();
+    expect(records.map((r) => [r.job, r.sharedWith])).toEqual([['build second#7', ['build first#3']]]);
+  });
 });
 
 describe('RestartTest (serving itself, #237)', () => {
@@ -774,15 +854,14 @@ describe('GatingTest', () => {
   });
 
   test('test_a_build_that_fits_starts_and_records_usage_before_and_after', async () => {
-    h.usage = new T3Usage(() => h.now, usage(10, 20), usage(35, 24));
+    h.usage = new T3Usage(() => h.now, usage(10, 20));
+    h.measure_wait = 60;
+    h.reads_after_job(usage(35, 24));   // T3's next reading, after the job ended
     const t3 = new FakeT3([[0, 'completed']]);
     await h.run_main(['--once'], gh(), t3);
     expect(t3.starts.length).toBe(1);
     expect(h.log.jobs().length).toBe(1);
-    h.now = new Date(NOW.getTime() + 600_000);
-    h.usage.read_again();   // T3's next reading, after the job ended
-    await h.gate!.settled();
-    const records: UsageRecord[] = (await readFile(join(dir, 'state', 'usage.jsonl'), 'utf8')).trim().split('\n').map((l) => JSON.parse(l));
+    const records = await h.records();
     expect(records.length).toBe(1);
     // the app's gate keeps one record per job, under the label it let the job in by
     expect([records[0]!.kind, records[0]!.job]).toEqual(['build', 'build first#4']);
@@ -836,9 +915,8 @@ describe('GatingTest', () => {
 
 // --- tests/test_usage_budget.py -------------------------------------------------------------------
 
-// TimelineTest, BudgetTest, FailedCallTest, AfterJobTest and MeasuredRaceTest are left out: they
-// test the five-minute budget on Claude's usage endpoint and its cached reading, and T3 reads usage
-// now.
+// TimelineTest, BudgetTest, FailedCallTest and AfterJobTest are left out: they test the five-minute
+// budget on Claude's usage endpoint and its cached reading, and T3 reads usage now.
 
 describe('EndedElsewhereTest', () => {
   // A builder thread that ends outside a measured pass (PR 67's review 1, F1): a stopped runner's
@@ -1007,6 +1085,34 @@ describe('EndedElsewhereTest', () => {
   });
 });
 
+describe('MeasuredRaceTest', () => {
+  // PR 67's review 2, a nit: the other lane telling the gate a job ended while this job's
+  // measurement is under way doesn't cost this job its sample.
+  test('test_a_job_ended_in_the_other_lane_mid_read_keeps_this_jobs_reading', async () => {
+    const SGT = 8 * 3_600_000;
+    const t = (hh: number, mm: number, ss = 0) => new Date(Date.UTC(2026, 10, 16, hh, mm, ss) - SGT);
+    const h = new Harness([served('queue-runner', 'C:/qr', 'stefan1575/queue-runner')], 300, t(14, 1, 49));
+    const read: Read = { five: 10, week: 10, five_reset: t(18, 0), week_reset: t(23, 0) };
+    h.usage = new T3Usage(() => h.now, read);   // 14:01:49
+    await h.make(new FakeGitHubWithPulls(), new FakeT3());
+    const gate = h.gate!;
+    const verdict = gate.pick('j1', 'fix');
+    expect(verdict.fits).toBe(true);
+    if (!verdict.fits) return;
+    gate.started({ id: 'j1', kind: 'fix', choice: verdict.choice }, verdict.cost);
+    h.now = t(14, 11, 49);                         // a 10-minute job
+    gate.finished('j1');
+    h.now = t(14, 11, 50);
+    h.usage.read_again(null, { ...read, five: 30 });   // T3 reads after the job
+    h.now = t(14, 11, 51);
+    gate.job_ended('review', 'the-sol-lanes-fallback-review');   // before the record is written
+    await gate.measured('j1');
+    const last = (await h.records()).at(-1)!;
+    expect(last.job).toBe('j1');
+    expect(last.after).not.toBeNull();
+  });
+});
+
 describe('DeadFallbackReviewTest (reviews, #222)', () => {
   // A stopped runner's fallback review whose thread runs on in T3 (PR 67's review 2, F2). Python's
   // class also runs EndedElsewhereTest's cases (but its first two) with a reviewer set.
@@ -1016,5 +1122,15 @@ describe('DeadFallbackReviewTest (reviews, #222)', () => {
   test.todo('test_the_sol_lanes_own_review_now_runs_beside_the_claude_lane');
   test.todo('test_a_review_that_never_started_a_thread_is_counted_failed_and_holds_nothing');
   test.todo('test_t3_unreadable_keeps_both_lanes_off_it');
-  test.todo("EndedElsewhereTest's cases with a reviewer set");
+  // EndedElsewhereTest's cases but its first two, with a reviewer set
+  test.todo('test_a_waiting_job_answered_and_ended_since_holds_the_next_job_too, with a reviewer set');
+  test.todo('test_a_waiting_job_that_ran_on_stefans_answer_and_asks_again_holds_the_next_job, with a reviewer set');
+  test.todo('test_a_waiting_job_still_on_the_run_that_asked_holds_nothing, with a reviewer set');
+  test.todo('test_a_run_on_stefans_answer_is_told_to_the_gate_once, with a reviewer set');
+  test.todo('test_a_run_on_stefans_answer_no_pass_saw_running_holds_the_next_job, with a reviewer set');
+  // (test_a_dead_runners_live_run_settled_holds_the_next_job_too, with a reviewer set, is left out with
+  // EndedElsewhereTest's: the live steps are dropped from the port.)
+  test.todo('test_jobs_settled_that_never_reached_a_thread_hold_nothing, with a reviewer set');
+  test.todo('test_a_decision_thread_whose_retry_never_reached_the_job_holds_the_next_job, with a reviewer set');
+  test.todo('test_a_pass_whose_job_reached_no_thread_holds_nothing, with a reviewer set');
 });
