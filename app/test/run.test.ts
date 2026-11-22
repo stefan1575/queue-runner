@@ -14,9 +14,9 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import { run } from '../src/app.ts';
 import { CostLog } from '../src/cost-log.ts';
-import type { UsageRecord } from '../src/costs.ts';
+import { expectedCost, type UsageRecord } from '../src/costs.ts';
 import { DEFAULT_JOBS, type Catalog, type ModelChoice } from '../src/jobs.ts';
-import { BUSY, GATED, IDLE, local_minute, Runner, Start, STARTED, type Config, type Did, type Gate, type Repo } from '../src/run.ts';
+import { BUSY, GATED, IDLE, local_minute, MEASURE_WAIT, Runner, Start, STARTED, type Config, type Did, type Gate, type Repo } from '../src/run.ts';
 import { LOCK_FILE, runner_lock } from '../src/runner-lock.ts';
 import { DEFAULT_SETTINGS, type Settings } from '../src/settings.ts';
 import { JobLog } from '../src/state.ts';
@@ -115,8 +115,14 @@ class Harness {
   /** How long a worker waits for its job's measurement: none, unless a case delivers T3's reading
    *  while the job's worker waits for it. */
   measure_wait = 0;
-  /** The cost log's append fails (a full disk, say). */
+  /** The wait's sleep, on the test's clock: unless a case passes time itself, none passes, so a
+   *  wait of any length ends only when the reading comes. */
+  measure_sleep: ((seconds: number) => Promise<void>) | null = null;
+  /** The cost log's writes fail on its file (`usage.jsonl` is made a folder once it's open). */
   cost_log_fails = false;
+  costs: CostLog | null = null;
+  /** The served repos at each pass's start (the app's `ServedRepos.take`), or null: `repos` only. */
+  served: (() => { repos: readonly Repo[]; unread: readonly (string | null)[] }) | null = null;
 
   constructor(repos: Repo[], poll_seconds: number, now: Date) {
     this.repos = repos;
@@ -133,11 +139,14 @@ class Harness {
 
   async make(github: any, t3: any, git: any = new FakeGit()): Promise<Runner> {
     const costs = await CostLog.open(join(dir, 'state', 'usage.jsonl'));
-    if (this.cost_log_fails) costs.append = async () => { throw new Error('ENOSPC: no space left on device'); };
+    if (this.cost_log_fails) await mkdir(join(dir, 'state', 'usage.jsonl'), { recursive: true });
+    this.costs = costs;
     this.gate = new UsageGate(this.usage, () => this.settings, costs, () => this.now);
     this.runner = new Runner(this.config, {
       github, t3, git, jobs: this.log, gate: this.gate, now: () => this.now, measure_wait: this.measure_wait,
+      sleep: this.measure_sleep ?? ((s) => (s > 0 ? new Promise<void>(() => {}) : Promise.resolve())),
       out: () => {}, log_line: (l) => this.lines.push(l), user: async () => 'the user',
+      ...(this.served ? { served: this.served } : {}),
     });
     return this.runner;
   }
@@ -478,9 +487,17 @@ describe('RunTest', () => {
 
   test("a single build's --once with no reading after the job within the wait records it with none (review 1 of #261, F1)", async () => {
     h.usage = new T3Usage(() => h.now, { five: 10, week: 20, five_reset: new Date(FAR), week_reset: new Date(FAR) });
-    h.measure_wait = 0.05;   // T3 never reads again
+    // T3 never reads again; the wait is the runner's own five minutes, on the test's clock (review
+    // 2 of #261, F14), as Python's case passes its injected sleep
+    h.measure_wait = MEASURE_WAIT;
+    h.usage.read_at = h.now;   // T3's reading stays the one it took before the job
+    const slept: number[] = [];
+    h.measure_sleep = async (s) => {
+      slept.push(s);
+      h.now = new Date(h.now.getTime() + s * 1000);
+    };
     const [code] = await h.run_main(['--once'], new FakeGitHubWithPulls({ issues: [issue(4)] }), new FakeT3([[0, 'completed']]));
-    expect(code).toBe(0);
+    expect([code, slept]).toEqual([0, [300]]);
     const records = await h.records();
     expect(records.map((r) => [r.job, r.after, r.spent, r.error])).toEqual([['build first#4', null, null, 'no reading after the job']]);
     expect(records[0]!.before.windows.five_hour!.used).toBe(10);
@@ -507,8 +524,10 @@ describe('RunTest', () => {
     expect(code).toBe(0);
     expect(h.log.jobs()[0]!.outcome).toBe('done-no-pr');
     expect(h.runner_log()).toContain('build first#4: recording its usage failed:');
-    expect(h.runner_log()).toContain('ENOSPC');
+    expect(h.runner_log()).toContain('EISDIR');   // the write really failed, on the test's file
     await h.gate!.settled();   // the gate's measurements go on
+    // and the gate learns nothing from a sample that isn't on disk (review 2 of #261, F12)
+    expect(h.costs!.records()).toEqual([]);
   });
 
   test('while a worker runs, the planner looks at the wall clock every 30 seconds, so a sleeping PC holds it no longer (#255 F15)', async () => {
@@ -659,15 +678,26 @@ class SideHarness extends Harness {
     );
   }
 
-  /** The cost records after the three learned, once T3 has read usage after the jobs ended. */
+  /** Each job's worker gets T3's reading after it while it waits for its measurement (`used(30)`,
+   *  a minute on, from `used(10)` before), as Python's cases read usage inside the worker
+   *  (`tests/test_side_by_side.py`), so `--once` records each before it returns (review 2 of #261,
+   *  F13). */
+  reads_in_worker(): void {
+    this.usage = new T3Usage(() => this.now, used(10));
+    this.measure_wait = MEASURE_WAIT;
+    this.reads_after_job(used(30));
+  }
+
+  /** The cost records after the three learned, as `--once` left them: nothing is read after it. */
   async measured(): Promise<UsageRecord[]> {
-    this.now = new Date(this.now.getTime() + 60_000);
-    this.usage.read_again();
-    await this.gate!.settled();
     const text = await readFile(join(dir, 'state', 'usage.jsonl'), 'utf8');
     return text.trim().split('\n').map((l) => JSON.parse(l)).filter((r) => !String(r.job).startsWith('learned-'));
   }
 }
+
+/** What the gate expects a build to cost now, from the samples it learned from. */
+const learned = (h: Harness) => expectedCost(h.costs!.records(), { ...CLAUDE, kind: 'build' },
+  [{ id: 'five_hour', kind: 'session' }, { id: 'seven_day', kind: 'weekly' }]).cost;
 
 /** A reading `five`% into a 5-hour window resetting in 3 hours, `week`% into a week resetting in 3
  *  days (Python's `used`). */
@@ -744,9 +774,12 @@ describe('SideBySideTest', () => {
       title: 'Queue runner build: first#3', at: '2026-11-15T11:00:00+00:00' });
     const t3 = new FakeT3([[0, 'completed']]);
     t3.add('mcp:dead', 'Queue runner build: first#3', 'running', '2026-11-15T11:00:01.000Z');
+    h.reads_in_worker();
     await h.once(t3);
     const records = await h.measured();
-    expect(records.map((r) => [r.job, r.sharedWith])).toEqual([['build second#7', ['build first#3']]]);
+    expect(records.map((r) => [r.job, r.sharedWith, r.spent])).toEqual([['build second#7', ['build first#3'], { five_hour: 20, seven_day: 0 }]]);
+    // a measured sample, beside a job on the same login: it teaches nothing
+    expect(learned(h)).toEqual({ five_hour: 10, seven_day: 2 });
   });
 });
 
@@ -788,21 +821,30 @@ describe('GateTest', () => {
 
   test('test_two_jobs_at_once_teach_the_learned_costs_nothing', async () => {
     await h.learn();
+    h.reads_in_worker();
     await h.once(new Together([[0, 'completed'], [0, 'completed']]));
     const records = await h.measured();
     expect(records.length).toBe(2);
+    // each measured inside its worker, and the overlap keeps both out of what's learned
+    expect(records.map((r) => r.spent)).toEqual([{ five_hour: 20, seven_day: 0 }, { five_hour: 20, seven_day: 0 }]);
+    expect(learned(h)).toEqual({ five_hour: 10, seven_day: 2 });
     const shared = new Map(records.map((r) => [r.job, r.sharedWith]));
     expect([...shared.values()].every((v) => v?.length)).toBe(true);
     expect([...shared.values()].flatMap((v) => v!).sort()).toEqual(['build first#4', 'build second#7']);
   });
 
   test('test_one_job_alone_still_teaches', async () => {
+    await h.learn();
     h.gh.by_repo.set('second', []);
+    h.reads_in_worker();
     await h.once();
     const records = await h.measured();
     expect(records.length).toBe(1);
     expect(records[0]!.sharedWith).toBeUndefined();
     expect(records[0]!.kind).toBe('build');
+    expect(records[0]!.spent).toEqual({ five_hour: 20, seven_day: 0 });
+    // the gate learned the solo cost: the largest of the recent solo samples
+    expect(learned(h)).toEqual({ five_hour: 20, seven_day: 2 });
   });
 });
 
@@ -1133,4 +1175,75 @@ describe('DeadFallbackReviewTest (reviews, #222)', () => {
   test.todo('test_jobs_settled_that_never_reached_a_thread_hold_nothing, with a reviewer set');
   test.todo('test_a_decision_thread_whose_retry_never_reached_the_job_holds_the_next_job, with a reviewer set');
   test.todo('test_a_pass_whose_job_reached_no_thread_holds_nothing, with a reviewer set');
+});
+
+describe("a repo not read yet: its open jobs settled as far as they can be without it (review 2 of #261, F11)", () => {
+  /** A dead runner's build in `third`, a served repo that hasn't read, its thread `status` in T3
+   *  (found by its id: the repo's folder isn't known). */
+  async function left_open(h: SideHarness, status: string, thread_id: string | null = 'mcp:dead'): Promise<FakeT3> {
+    await h.write_events({ event: 'start', job: 'dead', kind: 'build', repo: 'third', issue: 3, branch: 'claude/x-3',
+      title: 'Queue runner build: third#3', at: '2026-11-15T11:00:00+00:00', ...(thread_id ? { thread_id } : {}) });
+    const t3 = new FakeT3([[0, 'completed'], [0, 'completed']]);
+    if (thread_id) t3.add(thread_id, 'Queue runner build: third#3', status, '2026-11-15T11:00:01.000Z');
+    return t3;
+  }
+
+  test("its running thread counts beside another repo's build on the same login: in the gate's estimate and in shared_with", async () => {
+    const h = new SideHarness();
+    await h.learn();
+    h.gh.by_repo.set('first', []);
+    h.served = () => ({ repos: h.repos, unread: ['third'] });
+    const t3 = await left_open(h, 'running');
+    h.reads_in_worker();
+    await h.once(t3);
+    expect(h.built()).toEqual(['second']);
+    const records = await h.measured();
+    expect(records.map((r) => [r.job, r.sharedWith])).toEqual([['build second#7', ['build third#3']]]);
+    expect(h.log.jobs().find((j) => j.id === 'dead')!.outcome).toBeNull();   // still running: nothing recorded
+  });
+
+  /** A gate that records what it's told, and lets nothing in. */
+  function told(): [Gate, unknown[][]] {
+    const calls: unknown[][] = [];
+    return [{
+      pick: (id, _kind, elsewhere) => { calls.push(['pick', id, (elsewhere ?? []).map((e) => e.id)]); return { fits: false, until: null, hold: { why: 'reading', provider: 'Claude', checkedAt: null, stale: 'none' } }; },
+      started: () => {}, finished: () => {}, measured: async () => {}, unmeasured: async () => {}, dropped: () => {}, forget: () => {},
+      job_ended: (kind, key, choice) => { calls.push(['job_ended', kind, key, choice]); },
+    }, calls];
+  }
+
+  test('its ended thread is told to the gate once, and its end is recorded once the repo joins, without telling it again', async () => {
+    const h = new SideHarness();
+    let unread = ['third'];
+    const third = served('third', `${dir}/third`);
+    h.served = () => ({ repos: unread.length ? h.repos : [...h.repos, third], unread });
+    const t3 = await left_open(h, 'completed');
+    const [gate, calls] = told();
+    const r = new Runner(h.config, { github: h.gh as any, t3, git: new FakeGit() as any, jobs: h.log, gate, now: () => h.now,
+      out: () => {}, log_line: () => {}, served: () => h.served!() });
+    await r.run_pass();
+    expect(calls.filter((c) => c[0] === 'job_ended')).toEqual([['job_ended', 'build', null, null]]);
+    expect(h.log.jobs().find((j) => j.id === 'dead')!.outcome).toBeNull();   // its end waits for its repo's base
+    await r.run_pass();
+    expect(calls.filter((c) => c[0] === 'job_ended').length).toBe(1);   // told once
+    unread = [];
+    await r.run_pass();
+    expect(h.log.jobs().find((j) => j.id === 'dead')!.outcome).toBe('done-no-pr');
+    expect(calls.filter((c) => c[0] === 'job_ended').length).toBe(1);   // not told again
+  });
+
+  test("one whose thread can't be found without the repo counts as running, and is never closed as not-started", async () => {
+    const h = new SideHarness();
+    h.served = () => ({ repos: h.repos, unread: [null] });   // a repo whose name isn't known yet
+    const t3 = await left_open(h, '', null);
+    const [gate, calls] = told();
+    const r = new Runner(h.config, { github: h.gh as any, t3, git: new FakeGit() as any, jobs: h.log, gate, now: () => h.now,
+      out: () => {}, log_line: () => {}, served: () => h.served!() });
+    await r.run_pass();
+    expect(h.log.jobs().find((j) => j.id === 'dead')!.outcome).toBeNull();
+    expect(calls).toEqual([
+      ['pick', 'build first#4', ['build third#3']],
+      ['pick', 'build second#7', ['build third#3']],
+    ]);
+  });
 });

@@ -29,14 +29,15 @@ const stamp = (line: string) => console.error(`${new Date().toISOString()} ${lin
 async function runner(out: (line: string) => void) {
   const state = stateDir();
   const settings = await SettingsStore.open(state);
-  const served = await ServedRepos.read(mcp, github, settings.get().repos, out);
+  const served = await ServedRepos.list(mcp, github, settings.get().repos, out);
   const catalog = T3Catalog.start(ws);
   started.catalog = catalog;
-  const unread = await firstCatalog(catalog);
+  // each served repo read once, side by side, while T3 names its models
+  const [unread] = await Promise.all([firstCatalog(catalog), served.read_once()]);
   if (unread !== null) out(`T3's providers and models couldn't be read (${unread}); the usage gate starts no job this pass`);
   return makeRunner({
-    config: runConfig(served.repos, state), state, settings: () => settings.get(), catalog, mcp,
-    user: async () => settings.get().name ?? 'the user', out, log_line: stamp, unread: () => served.names(),
+    config: runConfig([], state), state, settings: () => settings.get(), catalog, mcp,
+    user: async () => settings.get().name ?? 'the user', out, log_line: stamp, served: () => served.take(),
   });
 }
 

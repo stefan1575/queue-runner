@@ -44,11 +44,21 @@ export class CostLog {
     return this.all;
   }
 
+  /** The record appended, as Python's `append_record` writes it: a torn last line (a crash, or a
+   *  write that failed partway) is cut off first, and the record is kept, for what the gate
+   *  learns, only once its write succeeded, so the gate learns only from complete records on disk. */
   async append(record: UsageRecord): Promise<void> {
-    this.all = [...this.all, record];
     const write = this.writing.then(async () => {
       await mkdir(dirname(this.file), { recursive: true });
+      let text: Buffer | null = null;
+      try {
+        text = await readFile(this.file);
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e;
+      }
+      if (text?.length && text[text.length - 1] !== 0x0a) await truncate(this.file, text.lastIndexOf(0x0a) + 1);
       await appendFile(this.file, `${JSON.stringify(record)}\n`);
+      this.all = [...this.all, record];
     });
     this.writing = write.catch(() => {});
     return write;
