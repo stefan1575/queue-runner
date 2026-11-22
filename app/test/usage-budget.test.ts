@@ -236,76 +236,6 @@ describe('EndedElsewhereTest', () => {
     h = new EndedElsewhere();
   });
 
-  test("a dead runner's job that ends holds the next job for a reading after it", async () => {
-    h.a_build('running');
-    h.endpoint.five = 10;
-    await h.tick();   // 14:01:49: 10% while the job runs
-    expect(await h.r.run_pass()).toBe(BUSY);
-    h.clock.at(14, 2, 49);
-    h.endpoint.five = 90;   // what the job spent
-    h.t3.set_status('mcp:old', 'completed');
-    await h.assert_held_until_the_next_read();
-  });
-
-  test("a dead runner's job found ended on the first pass counts too", async () => {
-    h.a_build('completed');
-    h.endpoint.five = 10;
-    await h.tick();   // read before the pass settled it
-    h.clock.at(14, 2, 49);
-    h.endpoint.five = 90;
-    await h.assert_held_until_the_next_read();
-  });
-
-  test('a waiting job answered and ended since holds the next job too', async () => {
-    const job = h.a_build();
-    h.log.ended(job.id, { exit_code: 2, outcome: 'waiting', thread_id: 'mcp:w' });
-    h.t3.add('mcp:w', job.title, 'running');   // Stefan answered it in T3
-    h.endpoint.five = 10;
-    await h.tick();
-    expect(await h.r.run_pass()).toBe(BUSY);
-    h.clock.at(14, 2, 49);
-    h.endpoint.five = 90;
-    h.t3.set_status('mcp:w', 'completed');
-    await h.assert_held_until_the_next_read();
-  });
-
-  test("a waiting job that ran on stefan's answer and asks again holds the next job", async () => {
-    h.a_waiting_build();
-    h.ran_again('mcp:w', 'running');   // Stefan answered it in T3
-    h.endpoint.five = 10;
-    await h.tick();
-    expect(await h.r.run_pass()).toBe(BUSY);
-    h.clock.at(14, 2, 49);
-    h.endpoint.five = 90;
-    h.t3.set_status('mcp:w', 'waiting');   // it ran, and asks him again
-    await h.assert_held_until_the_next_read();
-    expect(h.log.jobs()[0]!.outcome).toBe('waiting');
-  });
-
-  test("a run on stefan's answer is told to the gate once", async () => {
-    h.a_waiting_build();
-    h.ran_again('mcp:w', 'waiting');
-    h.endpoint.five = 10;
-    await h.tick();
-    h.clock.at(14, 2, 49);
-    h.endpoint.five = 90;
-    await h.assert_held_until_the_next_read();   // its next pass decides on 14:06:49's
-    h.clock.at(14, 8);
-    await h.r.run_pass();
-    expect(h.gate.ended).toEqual(t(14, 2, 49));   // the same run: not told again
-  });
-
-  test("a run on stefan's answer no pass saw running holds the next job", async () => {
-    h.a_waiting_build();
-    h.endpoint.five = 10;
-    await h.tick();
-    h.clock.at(14, 2, 49);
-    h.endpoint.five = 90;
-    h.ran_again('mcp:w', 'waiting');   // ran and asked again, all between passes
-    await h.assert_held_until_the_next_read();
-    expect(h.log.jobs()[0]!.outcome).toBe('waiting');
-  });
-
   test('jobs settled that never reached a thread hold nothing', async () => {
     h.a_build();   // no thread in T3: not-started
     await h.tick();
@@ -356,7 +286,15 @@ describe('EndedElsewhereTest', () => {
 // cost with the build it may continue doesn't fit beside 38%, so nothing starts; without it the
 // build of #5 would start and be measured.
 describe('EndedElsewhereTest, turned on by decisions (#226)', () => {
+  // Python's next job in each is a decision on the build, which the gate holds; until #226 the
+  // runner holds that repo instead, so the gate is never asked (review 1 of PR #276).
+  it.todo('test_a_dead_runners_job_that_ends_holds_the_next_job_for_a_reading_after_it');
+  it.todo('test_a_dead_runners_job_found_ended_on_the_first_pass_counts_too');
+  it.todo('test_a_waiting_job_answered_and_ended_since_holds_the_next_job_too');
+  it.todo('test_a_waiting_job_that_ran_on_stefans_answer_and_asks_again_holds_the_next_job');
   it.todo('test_a_waiting_job_still_on_the_run_that_asked_holds_nothing');
+  it.todo('test_a_run_on_stefans_answer_is_told_to_the_gate_once');
+  it.todo('test_a_run_on_stefans_answer_no_pass_saw_running_holds_the_next_job');
 });
 
 // A dead runner's Opus fallback review (PR 67's review 2, F2): its own cases, and

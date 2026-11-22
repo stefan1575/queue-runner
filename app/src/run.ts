@@ -259,6 +259,7 @@ export class Runner {
   private readonly _said_switch = new Map<string, string | null>();
   private _said_unknown: string | null = null;   // control.json stops a repo not served (37)
   private readonly _said_red = new Map<string, string>();   // a repo's red base, said once per head (#98)
+  private readonly _said_held = new Map<string, string>();   // a repo held for a part not ported yet (`_hold`)
 
   constructor(config: Config, { github, t3, git, out, log_line, toaster = null, gate = null, now = null, waker = null,
     effort = null }: RunnerOptions) {
@@ -273,7 +274,7 @@ export class Runner {
     if (this.effort.say === null) this.effort.say = (line) => this.say(line);
     this.toaster = toaster ?? new NoToaster();
     this.fixer = new Fixer();
-    this.decider = new Decider();
+    this.decider = new Decider(config, { github, jobs: this.jobs, say: (line) => this.say(line) });
     this.asking = new AskThreads();
     this.prefixes = new Prefixes();
     this.answers = new GitHubAnswers();
@@ -402,13 +403,9 @@ export class Runner {
       return new Start(name, old.kind, null, () => this.continue_job(old, text, { marks }), Runner._name(old));
     }
     const case_ = await this.decider.next_case({ repos: only });
-    if (case_) {
-      const label = `decision ${name}#${case_.number}`;
-      const cont = (old: Job, message: string, options?: { limit?: boolean; marks?: Record<string, unknown> | null }) =>
-        this.continue_job(old, message, options);
-      if (this.decider.direct_answer(case_)) return new Start(name, null, null, () => this.decider.run(case_, cont), label);
-      const then = case_.allowed.some((a) => a === 'retry' || a === 'answer') ? case_.about.kind : null;
-      return new Start(name, 'decision', then, () => this.decider.run(case_, cont), label);
+    if (case_) {   // Python starts a decision here: until #226 the repo is held instead
+      this._hold(name, `${case_.name}: decisions are ported in #226, so nothing else starts in ${name} meanwhile`);
+      return null;
     }
     const fix = await this.next_fix(only);
     if (fix) return new Start(name, 'fix', null, () => this.run_fix(...fix), `fix ${name}#${fix[1].number}`);
@@ -424,12 +421,23 @@ export class Runner {
       return null;
     }
     this._said_red.delete(name);
+    this._said_held.delete(name);
     const job = await pick(repo as Repo & { github: string }, this.github, this.jobs.held_issues(name) as Set<number>);
     if (job !== null) {
       return new Start(name, 'build', null, () => this.run_build(job as BuildJob & { repo: Repo }),
         `build ${name}#${job.issue.number}`);
     }
     return null;
+  }
+
+  /** A repo held for the pass because Python would start a part here that a later ticket ports (a
+   *  stand-in may do less than Python, never something else): it starts nothing, and `text` is said
+   *  once, and again when it changes. */
+  _hold(name: string, text: string): void {
+    if (this._said_held.get(name) !== text) {
+      this._said_held.set(name, text);
+      this.say(text);
+    }
   }
 
   /** Since when the repo's work has waited for a Claude job: when its last one ended (one that never

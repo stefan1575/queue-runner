@@ -4,9 +4,10 @@
 // start, no title to change, no stop in `control.json`, no wake task, no toast, no effort read
 // back. None reads a file, T3 or GitHub. A method only a later part reaches throws, naming the
 // ticket that ports it: nothing here can call it until that ticket does.
-import type { Repo } from './config.ts';
-import type { PullRequest } from './github-seam.ts';
-import type { Job } from './state.ts';
+import { type Config, type Repo, working } from './config.ts';
+import { type GhCli, PullRequest } from './github-seam.ts';
+import { err_str, type_name } from './python.ts';
+import { type Job, type JobLog, NOT_SENT, NOT_STARTED, REVIEWED } from './state.ts';
 
 /** A part the run loop has no caller for until its ticket: thrown if it is ever reached. */
 export class NotPorted extends Error {
@@ -129,24 +130,124 @@ export type Reviewer = {
 
 // --- `decisions.py` (#226) ----------------------------------------------------------------------
 
-/** A case the flow doesn't cover, for a decision thread (`decisions.Case`). */
-export type Case = { readonly repo: Repo; readonly number: number; readonly about: Job; readonly allowed: readonly string[] };
+/** The questions a decision answers, and what each allows (`decisions.QUESTIONS`). */
+export const QUESTIONS: Readonly<Record<string, readonly string[]>> = {
+  'approach-note': ['approach-note', 'stop'],
+  reply: ['fix', 'carry-on', 'hold', 'stop'],
+  failed: ['retry', 'close', 'stop'],
+  waiting: ['answer', 'stop'],
+  'no-pr': ['retry', 'close', 'stop'],
+};
+/** A job's outcome -> its case (`decisions.ENDED`). */
+export const ENDED: Readonly<Record<string, string>> = { failed: 'failed', waiting: 'waiting', 'done-no-pr': 'no-pr' };
 
-/** How a decision picks up the earlier job (`Runner.continue_job`). */
-export type ContinueJob = (old: Job, message: string, options?: { limit?: boolean; marks?: Record<string, unknown> | null }) => Promise<string>;
+/** A case the flow doesn't cover, for a decision thread (`decisions.Case`). Stefan's words since a
+ *  stop (`said`) are read with the decision itself (#226). */
+export class Case {
+  readonly question: string;
+  readonly repo: Repo;
+  readonly number: number;
+  readonly about: Job;
+  readonly pr: PullRequest | null;
+  constructor(question: string, repo: Repo, number: number, about: Job, pr: PullRequest | null = null) {
+    [this.question, this.repo, this.number, this.about, this.pr] = [question, repo, number, about, pr];
+    Object.freeze(this);
+  }
 
-/** `decisions.Decider`: no case to decide until #226. */
+  get allowed(): string[] {
+    return QUESTIONS[this.question]!.filter((a) => a !== 'close' || this.about.kind === 'build');
+  }
+
+  get name(): string {
+    return `decision ${this.repo.name}#${this.number} (${this.question})`;
+  }
+}
+
+/** `stops.approach_review`: the runner's newest review of the PR (any head, not released), if it's
+ *  an approach note. */
+function approach_review(jobs: JobLog, repo: Repo, n: number): Job | null {
+  const reviews = jobs.on('review', repo.name, n).filter((j) => j.outcome !== null && REVIEWED.has(j.outcome));
+  const last = reviews.at(-1);
+  return last && last.outcome === 'approach-note' ? last : null;
+}
+
+/** `stops.undecided_replies`: stops on the PR Stefan answered by a reply that no decision has read
+ *  yet, oldest first. */
+function undecided_replies(jobs: JobLog, repo: Repo, n: number): Job[] {
+  const pos = new Map(jobs.jobs().map((j, i) => [j.id, i]));
+  const read = jobs.on('decision', repo.name, n, null, true)
+    .filter((d) => d.question === 'reply' && d.outcome !== NOT_STARTED).map((d) => pos.get(d.id)!);
+  return jobs.on('stop', repo.name, n)
+    .filter((s) => s.outcome === 'answered' && s.answer === 'replied' && !read.some((p) => p > pos.get(s.id)!));
+}
+
+/** `decisions.Decider`, the part that finds the cases (`next_case`, `cases`), ported so the run loop
+ *  knows where Python would start a decision: it holds that repo until #226 ports the decision
+ *  itself (its brief, thread and acts), and starts nothing else there in its place. */
 export class Decider {
-  async next_case(_options: { repos?: readonly string[] | null } = {}): Promise<Case | null> {
+  readonly config: Config;
+  readonly github: Pick<GhCli, 'open_pulls'>;
+  readonly jobs: JobLog;
+  readonly say: (line: string) => void;
+  constructor(config: Config, { github, jobs, say }: { github: Pick<GhCli, 'open_pulls'>; jobs: JobLog; say: (line: string) => void }) {
+    [this.config, this.github, this.jobs, this.say] = [config, github, jobs, say];
+  }
+
+  /** The first case to decide, in the working repos (or in `repos` of them: the Claude lane chooses
+   *  each repo's job apart, #50). */
+  async next_case({ repos = null }: { repos?: readonly string[] | null } = {}): Promise<Case | null> {
+    for (const repo of working(this.config)) {
+      if (repos !== null && !repos.includes(repo.name)) continue;
+      if (!repo.github) continue;
+      try {
+        for (const case_ of await this.cases(repo)) return case_;
+      } catch (e) {   // GitHub down: fix rounds and builds may still go on
+        this.say(`decisions on ${repo.name}: reading GitHub failed (${type_name(e)}: ${err_str(e)})`);
+      }
+    }
     return null;
   }
 
-  direct_answer(_case: Case): unknown {
-    throw new NotPorted('Decider.direct_answer', '#226');
-  }
-
-  async run(_case: Case, _continue_thread: ContinueJob): Promise<string> {
-    throw new NotPorted('Decider.run', '#226');
+  /** The cases waiting for a decision in this repo, in the order they're taken. */
+  async cases(repo: Repo): Promise<Case[]> {
+    const jobs = this.jobs;
+    const found: Case[] = [];
+    const prs = new Map((await this.github.open_pulls(repo as Repo & { github: string })).map((p) => [p.number, p]));
+    const numbers = [...prs.keys()].sort((a, b) => a - b);
+    for (const n of numbers) {
+      const pr = prs.get(n)!;
+      if (jobs.writer(repo.name, pr.branch)) continue;
+      // The newest review, on whatever head it was: the note is about that review.
+      const r = approach_review(jobs, repo, n);
+      if (r && !jobs.decided(r.id) && !jobs.stopped(repo.name, n, r.sha!, 'approach-note')) {
+        found.push(new Case('approach-note', repo, n, r, new PullRequest({ ...pr, head_sha: r.sha ?? '' })));
+      }
+    }
+    for (const n of numbers) {
+      // One reply may answer several stops: one decision reads it, about the newest Approach note
+      // among them if there is one.
+      const waiting = undecided_replies(jobs, repo, n);
+      if (waiting.length) {
+        const s = [...waiting].reverse().find((w) => w.stop === 'approach-note') ?? waiting.at(-1)!;
+        found.push(new Case('reply', repo, n, s, prs.get(n)!));
+      }
+    }
+    const newest = new Map<string, [string, number | null, Job]>();   // each issue's newest build and each PR's newest fix
+    for (const j of jobs.jobs()) {   // one that never reached a thread is no newer job: it never ran
+      if ((j.kind === 'build' || j.kind === 'fix') && j.repo === repo.name
+        && j.outcome !== NOT_SENT && j.outcome !== NOT_STARTED) {
+        newest.set(`${j.kind}#${j.issue}`, [j.kind, j.issue, j]);
+      }
+    }
+    const ordered = [...newest.values()].sort((a, b) => (a[1] ?? 0) - (b[1] ?? 0));
+    for (const [kind, n, j] of ordered) {
+      if (j.open || j.outcome === null || !Object.hasOwn(ENDED, j.outcome) || !j.thread_id || jobs.decided(j.id)
+        || !jobs.on(kind, repo.name, n).some((o) => o.id === j.id)) continue;   // a release settled it
+      const pr = kind === 'fix' ? prs.get(n!) ?? null : null;
+      if (kind === 'fix' && (pr === null || (j.outcome === 'failed' && pr.head_sha !== j.sha))) continue;
+      found.push(new Case(ENDED[j.outcome]!, repo, n!, j, pr));
+    }
+    return found;
   }
 }
 
