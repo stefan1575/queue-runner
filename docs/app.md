@@ -323,7 +323,8 @@ loop, below); the tests drive it on fake T3's events.
   after it ended, with `spent` per window (null for one that reset meanwhile) and `sharedWith`
   when another job ran on the same login meanwhile (then it teaches nothing). With no reading after
   it, `after` and `spent` are null and `error` says why (Python's failed after-job read). A torn last line is
-  cut off; a bad line before it is an error. No plan setting: #118 closed it, the costs being
+  cut off, at the start and before each append, and a record counts for what's learned only once
+  it's written; a bad line before it is an error. No plan setting: #118 closed it, the costs being
   percents that follow a plan change.
 - **Your share** (Settings, Your share; `shares`, keyed `<driver>/<window id>`): one row per
   provider per weekly window, the percent kept (0% by default) and how many hours before the
@@ -362,8 +363,11 @@ comment, as in Python, and `docs/claude-lane.md` is the behaviour.
   it ends, as Python's `gate.measured` reads usage in the worker, so `--once` records it before it
   returns; it waits five minutes at most (Python's wait for the usage endpoint's budget), and a
   measurement still unread then is recorded with no `after` (`unmeasured`), as is one on a provider
-  T3 marks `unsupported`, at once. A record that can't be written is logged and the worker ends, as
-  Python's worker logs it. The jobs a stopped runner
+  T3 marks `unsupported`, at once. The wait is the Runner's `sleep` (`wall_sleep` unless given), as
+  Python's gate takes its `sleep`, so tests pass it on their own clock. A record that can't be
+  written is logged and the worker ends, as Python's worker logs it; the cost log keeps a record,
+  for what the gate learns, only once its write succeeded, and cuts a torn last line before each
+  append, as Python's `append_record` does (review 2 of #261, F12). The jobs a stopped runner
   left running are passed to `pick`, each on the model its start record says it was launched on
   (`choice`, the app's own field: Python's lanes have one account each and write none) at its
   expected cost there, and to `started`, so a new job on the same login names them in `sharedWith`
@@ -372,23 +376,32 @@ comment, as in Python, and `docs/claude-lane.md` is the behaviour.
 - **The config** (`src/run-wiring.ts`, `ServedRepos`) is Python's `Config` and `Repo`, from the
   projects served at start as Python reads config.toml: each T3 project Settings switched to
   Served with a GitHub remote, named by its GitHub `owner/name`, in its folder, on its base
-  (GitHub's default branch, read before the first pass) and merged by whom Settings says, in T3's
-  order of projects (which breaks a tie between repos' work, as config.toml's order does). A
-  remote two served projects share is served from the first, and the others are said.
-- **Repos are independent**, as in Python, whose config needs no network (review 1 of #261, F4).
-  A served project whose folder is missing, whose remote gh can't read (or that has none) or whose
-  base can't be read is named in one line ("… isn't served until it's read: why"), and the repos
-  that read start and settle without it. The desktop app reads it again every 30 seconds
-  (`joinWhenRead`), says its reason again only when that changes, and it joins the loop at the
-  next pass once it reads (`Runner.join`), after the repos served already. `--once` runs the repos
-  that read, names the rest and exits 0. A build or fix left open in a repo that hasn't read
-  waits for it (said once): it isn't recorded until its repo joins, and the pass goes on. Only the
+  (GitHub's default branch, read with the repo) and merged by whom Settings says, in T3's order of
+  projects (which breaks a tie between repos' work, as config.toml's order does). A remote two
+  served projects share is served from the one that reads first, and the other is said.
+- **Repos are independent**, as in Python, whose config needs no network (review 1 of #261, F4;
+  review 2, F9 to F11). Listing T3's projects reads no repo. Each served repo's read (its folder,
+  its remote, its base) runs on its own, at most one in flight per repo: none waits for another's,
+  and the first pass doesn't wait for them. One that fails is named in one line ("… isn't served
+  until it's read: why"), said again only when its reason changes; the desktop app tries it again
+  30 seconds after it failed (`ServedRepos.start`). A read that ends is kept until the planner
+  takes it at the start of a pass (`ServedRepos.take`, the Runner's `served`), so a repo is either
+  unread or in the planner's repos for a whole pass, never in neither; the planner is the only one
+  that changes its repo list. A read that ends with the repo read wakes the next pass sooner
+  (`Runner.wake`), as T3's events bring one (#68); it carries nothing. `--once` reads each repo
+  once, side by side, runs the repos that read, names the rest and exits 0.
+- **A job open in a repo not read yet** is settled as far as Python's settle goes without the
+  repo's GitHub name and base (said once: "… waits for … to be read"). Its thread is looked up by
+  its id (the repo's folder isn't known); a running one counts as running, for the gate's
+  admission and other jobs' `sharedWith`, and one that has ended is told to the gate at once (once).
+  Its end is recorded once the repo joins, without telling the gate again. A job whose thread
+  can't be found without the repo counts as running: an unknown is never taken as ended. Only the
   projects served at start can join; a change to Served or who merges is taken up at the next
-  start (picking it up while the loop runs is #260). Only T3's project list not reading holds
-  every repo: `--once` exits 1, and the desktop app says why once and tries again every 30
-  seconds (as Python waits for T3's server at logon). The pause after an idle pass is Python's
-  300 seconds. Once every served repo has read, a job open in a repo the config doesn't have is
-  Python's: one its end is recorded for fails its pass, as `self.repos[job.repo]` raises.
+  start (picking it up while the loop runs is #260). Only T3's project list not reading holds every
+  repo: `--once` exits 1, and the desktop app says why once and tries again every 30 seconds (as
+  Python waits for T3's server at logon). The pause after an idle pass is Python's 300 seconds.
+  Once every served repo has read, a job open in a repo the config doesn't have is Python's: one
+  its end is recorded for fails its pass, as `self.repos[job.repo]` raises.
 - **Its job log** is `run-loop-jobs.jsonl` in the state folder, in Python's format (The job log,
   below). The desktop app's `jobs.jsonl` from before the port is `src/job-log.ts`'s format (a job's
   repo named by T3 project id), so it's left in place and unread.
