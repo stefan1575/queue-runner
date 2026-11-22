@@ -738,9 +738,10 @@ Node has no byte lock, so `runner_lock` opens `runner.lock` with no sharing (lib
 Python has `with`. `string.Template` and reading a template with universal newlines are spelled
 out in `src/build-brief.ts`, so the brief is Python's text.
 
-Pending: test_effort's `test_the_served_config_runs_claude_jobs_at_medium` reads the runner's
-real `config.toml` and asserts Stefan's effort, which a test here may not (Test it, above), and
-test_templates' `test_builder_and_reviewer_hold_screenshots_to_the_same_finish_line` and
+Left out: test_effort's `test_the_served_config_runs_claude_jobs_at_medium`, which reads the
+runner's real `config.toml` and asserts Stefan's effort, which a test here may not (Test it,
+above; #172). Pending: test_templates'
+`test_builder_and_reviewer_hold_screenshots_to_the_same_finish_line` and
 `test_screenshots_go_where_the_review_reads_them` read `fix.md` and `review.md`, which the fix and
 reviews ports (#223, #222) copy in.
 

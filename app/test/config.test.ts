@@ -48,9 +48,9 @@ describe('ConfigTest', () => {
     expect(() => load_config(write_config(dir, '[claude]\neffort = "ultrathink"\n'))).toThrow(/effort/);
   });
 
-  // Reads the runner's own config and asserts the effort Stefan set there, which the app's tests
-  // may not (docs/app.md, Test it, #172): left pending until that clash is settled.
-  it.todo('the served config runs claude jobs at medium');
+  // test_the_served_config_runs_claude_jobs_at_medium is left out of the port (#172): it reads
+  // the runner's real config.toml and asserts the effort Stefan set there, a real setting the
+  // app's tests don't hold (docs/app.md, Test it).
 });
 
 // tests/test_fallback.py
