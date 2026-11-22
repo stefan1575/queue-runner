@@ -19,8 +19,8 @@ import { type ChildProcessWithoutNullStreams, spawn } from 'node:child_process';
 import { existsSync, readdirSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { which } from './deps.ts';
-import { type Json, get, head, is_dict, py_eq, py_str, truthy } from './python.ts';
+import { list2cmdline, which } from './deps.ts';
+import { type Json, get, head, is_dict, json_dumps, py_eq, py_str, truthy } from './python.ts';
 
 export const TIMEOUT = 20;   // seconds for the whole call: T3 allows 20 for its probe
 export const CLIENT = { name: 'queue-runner', title: 'Queue runner', version: '1' };
@@ -139,6 +139,21 @@ class Lines {
   }
 }
 
+const WIN = process.platform === 'win32';
+
+/** `subprocess.Popen(command, stdin=PIPE, stdout=PIPE, stderr=DEVNULL,
+ *  creationflags=CREATE_NO_WINDOW)`. On Windows Popen hands `list2cmdline(command)` to
+ *  CreateProcess, which runs a `.cmd` or `.bat` (an npm shim) through cmd.exe; Node's spawn
+ *  refuses those, so they go through cmd.exe here, as the dependencies' install does
+ *  (`src/deps.ts`). */
+function popen(command: string[]): ChildProcessWithoutNullStreams {
+  const options = { stdio: ['pipe', 'pipe', 'ignore'] as ['pipe', 'pipe', 'ignore'], windowsHide: true };
+  const child = WIN && /\.(cmd|bat)$/i.test(command[0]!)
+    ? spawn(process.env.COMSPEC || 'cmd.exe', ['/d', '/s', '/c', `"${list2cmdline(command)}"`], { ...options, windowsVerbatimArguments: true })
+    : spawn(command[0]!, command.slice(1), options);
+  return child as unknown as ChildProcessWithoutNullStreams;
+}
+
 /** Python's `type(e).__name__` for a process that didn't start. */
 function os_error_name(e: NodeJS.ErrnoException): string {
   if (e.code === 'ENOENT') return 'FileNotFoundError';
@@ -171,7 +186,7 @@ export class CodexUsage {
       if (!codex) throw new CodexUsageError("Codex is not installed where the runner looks (PATH, or the Codex app's own copy)");
       command = [codex, 'app-server'];
     }
-    const proc = spawn(command[0]!, command.slice(1), { stdio: ['pipe', 'pipe', 'ignore'], windowsHide: true }) as unknown as ChildProcessWithoutNullStreams;
+    const proc = popen(command);
     const started = await new Promise<NodeJS.ErrnoException | null>((resolve) => {
       proc.once('spawn', () => resolve(null));
       proc.once('error', resolve);
@@ -184,10 +199,10 @@ export class CodexUsage {
     const pumped = this.pump(proc, lines);
     const deadline = performance.now() + this.timeout * 1000;
     try {
-      CodexUsage._send(proc, { id: 1, method: 'initialize', params: { clientInfo: CLIENT, capabilities: { experimentalApi: true } } });
+      await CodexUsage._send(proc, { id: 1, method: 'initialize', params: { clientInfo: CLIENT, capabilities: { experimentalApi: true } } });
       await CodexUsage._answer(lines, 1, deadline, 'initialize');
-      CodexUsage._send(proc, { method: 'initialized' });
-      CodexUsage._send(proc, { id: 2, method: 'account/rateLimits/read', params: null });
+      await CodexUsage._send(proc, { method: 'initialized' });
+      await CodexUsage._send(proc, { id: 2, method: 'account/rateLimits/read', params: null });
       const got = await CodexUsage._answer(lines, 2, deadline, 'the usage request');
       return [this.clock(), parse(got)];
     } finally {
@@ -229,9 +244,16 @@ export class CodexUsage {
     });
   }
 
-  static _send(proc: ChildProcessWithoutNullStreams, message: Json): void {
-    if (!proc.stdin.writable) throw new CodexUsageError("Codex's app server stopped before it answered");
-    proc.stdin.write(`${JSON.stringify(message)}\n`);
+  /** Python's `stdin.write` and `flush`: done once the line is in the pipe, an error if the
+   *  server's end is closed. */
+  static async _send(proc: ChildProcessWithoutNullStreams, message: Json): Promise<void> {
+    try {
+      await new Promise<void>((resolve, reject) => {
+        proc.stdin.write(`${json_dumps(message, false)}\n`, (e) => (e ? reject(e) : resolve()));
+      });
+    } catch {
+      throw new CodexUsageError("Codex's app server stopped before it answered");
+    }
   }
 
   /** The result of request `id`; notifications and anything else are skipped. */

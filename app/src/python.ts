@@ -172,8 +172,8 @@ export const by_code_point = (a: string, b: string) => {
 
 /** `json.dumps(x, sort_keys=True)`: `, ` and `: ` between items, every dict's keys in code-point
  *  order, and everything outside printable ASCII as `\uXXXX` (`ensure_ascii`). A whole number is
- *  an int, as `py_str` reads one. */
-export function json_dumps(x: Json): string {
+ *  an int, as `py_str` reads one. With `sort_keys` false, `json.dumps(x)`: the keys in order. */
+export function json_dumps(x: Json, sort_keys = true): string {
   if (x === null || x === undefined) return 'null';
   if (x === true) return 'true';
   if (x === false) return 'false';
@@ -185,9 +185,9 @@ export function json_dumps(x: Json): string {
   if (typeof x === 'string') {
     return JSON.stringify(x).replace(/[^\x20-\x7e]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`);
   }
-  if (Array.isArray(x)) return `[${x.map(json_dumps).join(', ')}]`;
-  const keys = Object.keys(x).sort(by_code_point);
-  return `{${keys.map((k) => `${json_dumps(k)}: ${json_dumps(x[k])}`).join(', ')}}`;
+  if (Array.isArray(x)) return `[${x.map((v) => json_dumps(v, sort_keys)).join(', ')}]`;
+  const keys = sort_keys ? Object.keys(x).sort(by_code_point) : Object.keys(x);
+  return `{${keys.map((k) => `${json_dumps(k)}: ${json_dumps(x[k], sort_keys)}`).join(', ')}}`;
 }
 
 /** `f'{x:.0f}'`: the nearest whole number, a tie to the even one, as Python rounds a float. */

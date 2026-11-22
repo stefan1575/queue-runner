@@ -3,7 +3,9 @@
 // The responses are real ones (2026-11-16, ids and the account replaced; the Python tests' own,
 // `tests/fixtures/codex`); the app server is `fixtures/codex/fake-app-server.mjs`, run by this
 // Node, so no test starts Codex or reads a login.
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 import { CodexUsage, CodexUsageError, LimitWindow, Limits, parse } from '../src/codex-usage.ts';
@@ -85,6 +87,26 @@ describe('ReadTest', () => {
   test('no answer in time is an error', async () => {
     const e = await raises(() => codex(WITH, ['--silent'], 1).read());
     expect(e.message).toContain('did not answer');
+  });
+
+  // Review 1 on PR #267: a write to a server whose stdin has closed is Python's error at once,
+  // not a wait for the deadline.
+  test('a server that closes its stdin stopped before it answered', async () => {
+    const e = await raises(() => codex(WITH, ['--close-stdin'], 60).read());
+    expect(e.message).toBe("Codex's app server stopped before it answered");
+  });
+
+  // Review 1 on PR #267: Popen runs the `.cmd` shim `which` finds (npm's), as CreateProcess does.
+  test.runIf(process.platform === 'win32')('a codex found as a .cmd shim is started', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'qr-codex-'));
+    try {
+      const shim = join(dir, 'codex.cmd');
+      writeFileSync(shim, `@"${process.execPath}" "${FAKE}" "${WITH}" %*\r\n`);
+      const [when, limits] = await new CodexUsage({ command: null, find: () => shim, clock: () => NOW }).read();
+      expect([when, limits.plan, limits.resets]).toEqual([NOW, 'plus', 3]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
   test('no codex is an error', async () => {
