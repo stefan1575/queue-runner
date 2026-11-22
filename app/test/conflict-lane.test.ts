@@ -7,7 +7,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
-import type { BuildRepo } from '../src/build-lane.ts';
+import type { BuildRepo } from '../src/repos.ts';
 import { ConflictLane, MAX_CONFLICT_ROUNDS, NO_CHECKS_GRACE_MS, type ConflictLaneDoors } from '../src/conflict-lane.ts';
 import { MAX_FAILED_MERGES } from '../src/merge-lane.ts';
 import { MAX_FAILED } from '../src/review-lane.ts';

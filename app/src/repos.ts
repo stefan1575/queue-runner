@@ -12,6 +12,12 @@ import type { T3Mcp } from './t3/mcp.ts';
 import type { ProjectFeed, T3Project } from './t3/project-feed.ts';
 
 /** A repo as the window shows it. */
+/** A repo the app's review, fix, merge and conflict lanes work in: a served T3 project. `github` is
+ *  null only for a live check's sandbox, which has no GitHub. `merge` says who merges its clean PRs
+ *  (#156): the app, or the user (the default). Kept here from the app's build lane, which the run
+ *  loop's port replaced (#219), until those lanes' ports replace them (#222 to #224). */
+export type BuildRepo = { id: string; title: string; folder: string; github: string | null; merge?: Merger };
+
 export type Repo = {
   id: string;
   title: string;

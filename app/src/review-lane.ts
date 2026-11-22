@@ -45,7 +45,7 @@ import type { Deps } from './review/deps.ts';
 import { testsNote } from './review/deps.ts';
 import { decide, nextRound, readReviews, ReviewFailed, runnerPost, type Comment, type Decision, type Review } from './review/ledger.ts';
 import { FinishFailed, GitHubPoster, PostFailed, type GitHubPosts, type Poster } from './review/post.ts';
-import type { BuildRepo } from './build-lane.ts';
+import type { BuildRepo } from './repos.ts';
 import { ThreadSettler } from './settle.ts';
 import { retryAfter, type Retry } from './t3/project-feed.ts';
 import { NoAnswer } from './t3/seams.ts';

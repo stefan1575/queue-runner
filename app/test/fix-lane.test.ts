@@ -7,7 +7,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
-import type { BuildRepo } from '../src/build-lane.ts';
+import type { BuildRepo } from '../src/repos.ts';
 import { FixLane, type FixLaneDoors } from '../src/fix-lane.ts';
 import type { MergePull, ReviewPull } from '../src/github.ts';
 import { JobLog, type Job } from '../src/job-log.ts';

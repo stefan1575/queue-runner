@@ -10,19 +10,12 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { BuildLane, servedRepos } from '../build-lane.ts';
-import { CostLog } from '../cost-log.ts';
-import { GitCli } from '../git.ts';
+import { main as runner_main } from '../app.ts';
+import { GitCli } from '../git-seam.ts';
+import { GhCli } from '../github-seam.ts';
 import { GhGitHub, ghCli } from '../github.ts';
-import { JobLog } from '../job-log.ts';
-import { Deps } from '../review/deps.ts';
-import { ReviewLane } from '../review-lane.ts';
-import { FixLane } from '../fix-lane.ts';
-import { MergeLane } from '../merge-lane.ts';
-import { ConflictLane } from '../conflict-lane.ts';
-import { UsageGate } from '../usage-gate.ts';
 import { windowsPlatform } from '../platform/windows.ts';
-import { checkJobs, DEFAULT_JOBS } from '../jobs.ts';
+import { checkJobs, DEFAULT_JOBS, model } from '../jobs.ts';
 import { Repositories } from '../repos.ts';
 import { checkShares } from '../shares.ts';
 import { usageFromProviders } from '../usage.ts';
@@ -33,13 +26,14 @@ import { T3Mcp } from '../t3/mcp.ts';
 import { T3ProjectFeed } from '../t3/project-feed.ts';
 import { fetchHttp, nodeConnect, runtimeAddress, T3_CLI, t3Cli } from '../t3/real.ts';
 import { T3Ws } from '../t3/ws.ts';
+import { T3Server } from '../t3-seam.ts';
 import { sampleRepos, sampleSetup } from './sample.ts';
 import { checkSetup, SetupChecks, shownSetup, type SetupReport, type SetupSource } from '../setup.ts';
 import { stateFolder } from '../state-folder.ts';
 import { CHANNELS } from './bridge.ts';
 import { startDesktop, type Shell } from './shell.ts';
 import { T3TimeFormat } from '../t3/time-format.ts';
-import { briefName, RunnerView } from './view.ts';
+import { RunnerView } from './view.ts';
 
 const here = dirname(fileURLToPath(import.meta.url)); // desktop-dist/
 const assets = join(here, '..', 'desktop');
@@ -119,47 +113,6 @@ async function main() {
 
   if (shootTo) return shoot(shootTo, settings);
 
-  // The build lane (docs/app.md, Builds): served repos only; until the cutover only the sandboxes
-  // are ever served (Rules).
-  const gate = new UsageGate(catalog, () => settings.get(), await CostLog.open(join(state, 'usage.jsonl')));
-  const log = await JobLog.open(join(state, 'jobs.jsonl'));
-  gate.limitsFrom(log.jobs()); // a provider the last run saw run out stays held until its reset
-  const say = (line: string) => console.log(`${new Date().toISOString()} ${line}`);
-  const user = async () => briefName(view.get()) ?? 'the user';
-  const lane = new BuildLane({
-    repos: () => servedRepos(repos.list()), github, git: new GitCli(), mcp: t3Doors!.mcp, ws: t3Doors!.ws, gate,
-    catalog: () => catalog.current().catalog, jobs: () => settings.get().jobs, user, log, exists: existsSync, say,
-  });
-  // The review lane (docs/app.md, Reviews): every open PR in a served repo, one review at a time.
-  // A review that ends tells the fix and merge lanes; a fix round that ends tells the review lane
-  // (its pushed head is reviewed next); a merge tells the build lane (docs/app.md, Fix rounds and
-  // merges). A conflict round that ends tells the review lane too; a review, a fix round or a merge
-  // that ends tells the conflict lane, since each may free a conflicted PR's turn (Conflict rounds).
-  const lanes: { fixes?: FixLane; merges?: MergeLane; conflicts?: ConflictLane } = {};
-  const reviews = new ReviewLane({
-    repos: () => servedRepos(repos.list()), github, git: new GitCli(), deps: new Deps(join(state, 'deps')),
-    mcp: t3Doors!.mcp, ws: t3Doors!.ws, gate, catalog: () => catalog.current().catalog, jobs: () => settings.get().jobs,
-    toolFree: () => settings.get().toolFreeInstances, user, log, stateDir: state, say,
-    ended: () => { void lanes.fixes?.pass(); void lanes.merges?.pass(); void lanes.conflicts?.pass(); },
-  });
-  const fixes = new FixLane({
-    repos: () => servedRepos(repos.list()), github, git: new GitCli(), mcp: t3Doors!.mcp, ws: t3Doors!.ws, gate,
-    catalog: () => catalog.current().catalog, jobs: () => settings.get().jobs, user, log, exists: existsSync, say,
-    ended: () => { void reviews.pass(); void lanes.conflicts?.pass(); },
-  });
-  const merges = new MergeLane({
-    repos: () => servedRepos(repos.list()), github, git: new GitCli(), mcp: t3Doors!.mcp, log, say,
-    merged: () => { void lane.pass(); void lanes.conflicts?.pass(); }, headMoved: () => void reviews.pass(),
-  });
-  const conflicts = new ConflictLane({
-    repos: () => servedRepos(repos.list()), github, git: new GitCli(), mcp: t3Doors!.mcp, ws: t3Doors!.ws, gate,
-    catalog: () => catalog.current().catalog, user, log, exists: existsSync, say,
-    ended: () => void reviews.pass(),
-  });
-  lanes.fixes = fixes;
-  lanes.merges = merges;
-  lanes.conflicts = conflicts;
-
   const shell: Shell = {
     singleInstance(onSecondStart) {
       if (!app.requestSingleInstanceLock()) return false;
@@ -188,44 +141,20 @@ async function main() {
     hidden: process.argv.includes('--hidden'),
   });
   if (!desktop) return;
-  // Builds the log shows open are watched again before any pass, so a restart keeps one build per
-  // repo; then a pass on each change that may let one start.
-  void lane.start().then(() => {
-    gate.onChange(() => lane.usageChanged());
-    // a repo switched on or off passes at once; GitHub is polled for new tickets every 5 minutes
-    let servedKey = '';
-    repos.onChange(() => {
-      const key = servedRepos(repos.list()).map((r) => r.id).sort().join(' ');
-      if (key !== servedKey) { servedKey = key; void lane.pass(); }
+  // The run loop (`src/run.ts`, ported from Python's), pass after pass, as `cli.py`'s bare command
+  // runs it: only with `--config` naming a config that serves the sandboxes, until the cutover
+  // (docs/app.md, Rules). Its T3 names each model's effort option as T3's catalog does now.
+  const configAt = process.argv.indexOf('--config');
+  const doors = t3Doors as { mcp: T3Mcp; ws: T3Ws } | null;
+  if (configAt > 0 && process.argv[configAt + 1] && doors) {
+    const t3 = new T3Server(doors.mcp, (provider, m) => {
+      const known = catalog.current().catalog;
+      return known ? model(known, { provider, model: m })?.effortOption ?? null : null;
     });
-    setInterval(() => void lane.pass(), 5 * 60_000);
-  });
-  // An open review the log shows is carried on with first; then a pass on each change that may
-  // let one start, and every minute for PRs and their checks, as today's runner polls them.
-  void reviews.start().then(() => {
-    gate.onChange(() => reviews.usageChanged());
-    repos.onChange(() => void reviews.pass());
-    setInterval(() => void reviews.pass(), 60_000);
-  });
-  // Fix rounds the log shows open are watched again first; then a pass on usage, the repos and
-  // every minute, beside the reviews. Merges and marks pass on the same minute (checks and replies
-  // are read from GitHub), and on the repos changing.
-  void fixes.start().then(() => {
-    gate.onChange(() => fixes.usageChanged());
-    repos.onChange(() => void fixes.pass());
-    setInterval(() => void fixes.pass(), 60_000);
-  });
-  // Conflict rounds the log shows open are watched again first; then a pass on usage, the repos
-  // and every minute (GitHub works out whether a PR conflicts in its own time).
-  void conflicts.start().then(() => {
-    gate.onChange(() => conflicts.usageChanged());
-    repos.onChange(() => void conflicts.pass());
-    setInterval(() => void conflicts.pass(), 60_000);
-  });
-  void merges.pass().then(() => {
-    repos.onChange(() => void merges.pass());
-    setInterval(() => void merges.pass(), 60_000);
-  });
+    const out = (s: string) => process.stdout.write(s);
+    void runner_main(['--config', process.argv[configAt + 1]!], { github: new GhCli(), git: new GitCli(), t3 }, out)
+      .then((code) => console.log(`the run loop ended (exit ${code})`), (e) => console.error('the run loop stopped on an error:', e));
+  }
   view.onChange((v) => win?.webContents.send(CHANNELS.changed, v));
   // The window only hides; the app lives in the tray until Quit.
   app.on('window-all-closed', () => {});

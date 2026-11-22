@@ -255,7 +255,7 @@ describe('GateTest', () => {
     h = new Harness();
   });
 
-  test("with room for one build the first in config.toml gets it on a tie", async () => {
+  test('with room for one build the first in the config gets it on a tie', async () => {
     await h.run_main(['--once'], { usage: used(30) });   // 30 + 60 fits; 30 + 60 + 60 not
     expect(h.built()).toEqual(['first']);
     expect(h.runner_log()).toContain('Claude lane waits on second: build would fit alone, but the Claude job '
