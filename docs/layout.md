@@ -96,7 +96,8 @@ What each module and script is for.
 - `app/`: the TypeScript rebuild (spec #68), apart from `queue_runner/`: `src/t3/` (T3's seams,
   sign-in, MCP and WebSocket; `src/t3/thread-end.ts`, a run's end from its events),
   `src/github.ts`, `src/projects.ts`, `src/app.ts` (the command line), the run loop ported from
-  Python (`src/run.ts`, wired in `src/run-wiring.ts`; on the ported job log `src/state.ts`, seams
+  Python (`src/run.ts`, wired in `src/run-wiring.ts`, each served repo read from its folder in
+  `src/repo-folder.ts`; on the ported job log `src/state.ts`, seams
   `src/github-seam.ts`, `src/git-seam.ts`, `src/t3-seam.ts` and picker `src/build-picker.ts`; the
   build brief `src/briefs/build.ts` and the rules the briefs share in `src/briefs/rules.ts`), the
   old lanes' `src/picker.ts`, `src/job-log.ts`, `src/git.ts` and `src/settle.ts`, the review lane (`src/review-lane.ts`, `src/review/`,

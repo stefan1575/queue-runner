@@ -12,7 +12,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { GhGitHub, ghCli } from '../github.ts';
 import { wall_sleep } from '../run.ts';
-import { makeRunner, runConfig, ServedRepos, waitForRepos } from '../run-wiring.ts';
+import { makeRunner, runConfig, servedRepos, waitForRepos } from '../run-wiring.ts';
 import { RunnerBusy, runner_lock } from '../runner-lock.ts';
 import { windowsPlatform } from '../platform/windows.ts';
 import { checkJobs, DEFAULT_JOBS } from '../jobs.ts';
@@ -159,19 +159,18 @@ async function main() {
   }
   if (release) {
     app.on('will-quit', release);
-    // The projects served at start are the loop's, as Python reads config.toml: a change to Served
-    // or who merges is taken up at the app's next start (#260). Repos are independent: each one's
-    // read is its own, one that can't be read is named and read again 30 seconds after it failed,
-    // and it joins at the pass after it reads, which its read brings sooner.
+    // The projects served at start are the loop's, as Python reads config.toml: each one's GitHub
+    // name and base read from its folder (no network call). A change to Served or who merges, or a
+    // folder that couldn't be read, is taken up at the app's next start (#260); one that can't be
+    // read is named and does no work, and the others carry on.
     const mcp = t3Doors!.mcp;
     void (async () => {
-      const served = await waitForRepos(() => ServedRepos.list(mcp, github, settings.get().repos, say), say);
+      const served = await waitForRepos(() => servedRepos(mcp, settings.get().repos, say), say);
       const runner = await makeRunner({
-        config: runConfig([], state), state, settings: () => settings.get(),
+        config: runConfig(served.repos, state), state, settings: () => settings.get(),
         catalog, mcp, user: async () => briefName(view.get()) ?? 'the user', out: () => {}, log_line: say,
-        served: () => served.take(),
+        unread: served.unread,
       });
-      served.start(() => runner.wake());
       await runner.run_forever((seconds) => wall_sleep(seconds));
     })().catch((e) => say(`the run loop stopped: ${(e as Error).stack ?? e}`));
   }

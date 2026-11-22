@@ -121,8 +121,8 @@ class Harness {
   /** The cost log's writes fail on its file (`usage.jsonl` is made a folder once it's open). */
   cost_log_fails = false;
   costs: CostLog | null = null;
-  /** The served repos at each pass's start (the app's `ServedRepos.take`), or null: `repos` only. */
-  served: (() => { repos: readonly Repo[]; unread: readonly (string | null)[] }) | null = null;
+  /** The served repos whose folders couldn't be read at start (`RunnerOptions.unread`). */
+  unread: (string | null)[] = [];
 
   constructor(repos: Repo[], poll_seconds: number, now: Date) {
     this.repos = repos;
@@ -146,7 +146,7 @@ class Harness {
       github, t3, git, jobs: this.log, gate: this.gate, now: () => this.now, measure_wait: this.measure_wait,
       sleep: this.measure_sleep ?? ((s) => (s > 0 ? new Promise<void>(() => {}) : Promise.resolve())),
       out: () => {}, log_line: (l) => this.lines.push(l), user: async () => 'the user',
-      ...(this.served ? { served: this.served } : {}),
+      unread: this.unread,
     });
     return this.runner;
   }
@@ -1177,9 +1177,9 @@ describe('DeadFallbackReviewTest (reviews, #222)', () => {
   test.todo('test_a_pass_whose_job_reached_no_thread_holds_nothing, with a reviewer set');
 });
 
-describe("a repo not read yet: its open jobs settled as far as they can be without it (review 2 of #261, F11)", () => {
-  /** A dead runner's build in `third`, a served repo that hasn't read, its thread `status` in T3
-   *  (found by its id: the repo's folder isn't known). */
+describe("a served repo whose folder couldn't be read: its open jobs count as running until a later start (Stefan's decision on #261)", () => {
+  /** A dead runner's build in `third`, a served repo whose folder didn't read, its thread `status` in
+   *  T3. */
   async function left_open(h: SideHarness, status: string, thread_id: string | null = 'mcp:dead'): Promise<FakeT3> {
     await h.write_events({ event: 'start', job: 'dead', kind: 'build', repo: 'third', issue: 3, branch: 'claude/x-3',
       title: 'Queue runner build: third#3', at: '2026-11-15T11:00:00+00:00', ...(thread_id ? { thread_id } : {}) });
@@ -1188,11 +1188,21 @@ describe("a repo not read yet: its open jobs settled as far as they can be witho
     return t3;
   }
 
+  /** The threads `t3` is asked about, by id (`show`) or by project (`list`). */
+  function asked(t3: FakeT3): string[] {
+    const seen: string[] = [];
+    const show = t3.show.bind(t3);
+    const list = t3.list.bind(t3);
+    t3.show = async (id, m) => { seen.push(id); return show(id, m); };
+    t3.list = async (project) => { seen.push(project); return list(project); };
+    return seen;
+  }
+
   test("its running thread counts beside another repo's build on the same login: in the gate's estimate and in shared_with", async () => {
     const h = new SideHarness();
     await h.learn();
     h.gh.by_repo.set('first', []);
-    h.served = () => ({ repos: h.repos, unread: ['third'] });
+    h.unread = ['third'];
     const t3 = await left_open(h, 'running');
     h.reads_in_worker();
     await h.once(t3);
@@ -1212,35 +1222,60 @@ describe("a repo not read yet: its open jobs settled as far as they can be witho
     }, calls];
   }
 
-  test('its ended thread is told to the gate once, and its end is recorded once the repo joins, without telling it again', async () => {
+  test('its ended thread counts as running, never as ended, and fails no pass; a later start where the folder reads records its end', async () => {
     const h = new SideHarness();
-    let unread = ['third'];
-    const third = served('third', `${dir}/third`);
-    h.served = () => ({ repos: unread.length ? h.repos : [...h.repos, third], unread });
+    h.unread = ['third'];
     const t3 = await left_open(h, 'completed');
+    const seen = asked(t3);
     const [gate, calls] = told();
+    const said: string[] = [];
     const r = new Runner(h.config, { github: h.gh as any, t3, git: new FakeGit() as any, jobs: h.log, gate, now: () => h.now,
-      out: () => {}, log_line: () => {}, served: () => h.served!() });
+      out: (l) => said.push(l), log_line: () => {}, unread: h.unread });
+    await r.run_pass();   // no KeyError: the other repos are chosen and gated
     await r.run_pass();
-    expect(calls.filter((c) => c[0] === 'job_ended')).toEqual([['job_ended', 'build', null, null]]);
-    expect(h.log.jobs().find((j) => j.id === 'dead')!.outcome).toBeNull();   // its end waits for its repo's base
-    await r.run_pass();
-    expect(calls.filter((c) => c[0] === 'job_ended').length).toBe(1);   // told once
-    unread = [];
-    await r.run_pass();
+    expect(calls).toEqual([1, 2].flatMap(() => [
+      ['pick', 'build first#4', ['build third#3']],
+      ['pick', 'build second#7', ['build third#3']],
+    ]));
+    expect(h.log.jobs().find((j) => j.id === 'dead')!.outcome).toBeNull();
+    expect(seen).toEqual([]);   // its thread isn't looked at
+    expect(said.filter((l) => l.includes('third'))).toEqual([
+      "build third#3 waits for third's folder to be read at a later start; it counts as running till then",
+    ]);
+    // the next start, where third's folder reads
+    const later = new Runner({ ...h.config, repos: [...h.repos, served('third', `${dir}/third`)] }, { github: h.gh as any, t3,
+      git: new FakeGit() as any, jobs: h.log, gate, now: () => h.now, out: () => {}, log_line: () => {} });
+    await later.run_pass();
     expect(h.log.jobs().find((j) => j.id === 'dead')!.outcome).toBe('done-no-pr');
-    expect(calls.filter((c) => c[0] === 'job_ended').length).toBe(1);   // not told again
+    expect(calls.filter((c) => c[0] === 'job_ended')).toEqual([['job_ended', 'build', null, null]]);
   });
 
-  test("one whose thread can't be found without the repo counts as running, and is never closed as not-started", async () => {
+  test('one in a repo whose name was never read either, with no thread id, counts as running and is never closed as not-started', async () => {
     const h = new SideHarness();
-    h.served = () => ({ repos: h.repos, unread: [null] });   // a repo whose name isn't known yet
+    h.unread = [null];
     const t3 = await left_open(h, '', null);
     const [gate, calls] = told();
     const r = new Runner(h.config, { github: h.gh as any, t3, git: new FakeGit() as any, jobs: h.log, gate, now: () => h.now,
-      out: () => {}, log_line: () => {}, served: () => h.served!() });
+      out: () => {}, log_line: () => {}, unread: h.unread });
     await r.run_pass();
     expect(h.log.jobs().find((j) => j.id === 'dead')!.outcome).toBeNull();
+    expect(calls).toEqual([
+      ['pick', 'build first#4', ['build third#3']],
+      ['pick', 'build second#7', ['build third#3']],
+    ]);
+  });
+
+  test("a job there waiting for the user's answer counts as running too, and its thread isn't read", async () => {
+    const h = new SideHarness();
+    h.unread = ['third'];
+    const t3 = await left_open(h, 'completed');
+    h.log.ended('dead', { exit_code: 2, outcome: 'waiting', thread_id: 'mcp:dead', run_id: 'run:mcp:dead:1' });
+    const seen = asked(t3);
+    const [gate, calls] = told();
+    const r = new Runner(h.config, { github: h.gh as any, t3, git: new FakeGit() as any, jobs: h.log, gate, now: () => h.now,
+      out: () => {}, log_line: () => {}, unread: h.unread });
+    await r.run_pass();
+    expect([h.log.jobs().find((j) => j.id === 'dead')!.outcome, seen]).toEqual(['waiting', []]);
     expect(calls).toEqual([
       ['pick', 'build first#4', ['build third#3']],
       ['pick', 'build second#7', ['build third#3']],

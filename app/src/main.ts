@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import { run } from './app.ts';
 import { GhGitHub } from './github.ts';
-import { firstCatalog, jobLog, makeRunner, runConfig, ServedRepos } from './run-wiring.ts';
+import { firstCatalog, jobLog, makeRunner, runConfig, servedRepos } from './run-wiring.ts';
 import { runner_lock } from './runner-lock.ts';
 import { SettingsStore } from './settings.ts';
 import { APP_DATA_NAME, savedStateFolder } from './state-folder.ts';
@@ -22,22 +22,22 @@ const started: { catalog: T3Catalog | null } = { catalog: null };
 const stateDir = () => savedStateFolder(join(process.env.APPDATA ?? '', APP_DATA_NAME, 'machine.json'));
 const stamp = (line: string) => console.error(`${new Date().toISOString()} ${line}`);
 
-/** The run loop on the desktop app's own state folder and settings, its served repos read now, as
- *  Python reads config.toml (`--once`). What it says goes to the output and the app's log line. A
- *  served repo that can't be read is named and left out of the pass, and a job open there waits for
- *  it; T3's projects not listing throws T3Error, and the pass doesn't run. */
+/** The run loop on the desktop app's own state folder and settings, its served repos read now from
+ *  their folders, as Python reads config.toml (`--once`). What it says goes to the output and the
+ *  app's log line. A served repo whose folder can't be read is named and does no work, and a job
+ *  open there counts as running; T3's projects not listing throws T3Error, and the pass doesn't
+ *  run. */
 async function runner(out: (line: string) => void) {
   const state = stateDir();
   const settings = await SettingsStore.open(state);
-  const served = await ServedRepos.list(mcp, github, settings.get().repos, out);
   const catalog = T3Catalog.start(ws);
   started.catalog = catalog;
-  // each served repo read once, side by side, while T3 names its models
-  const [unread] = await Promise.all([firstCatalog(catalog), served.read_once()]);
+  // the served repos' folders read while T3 names its models
+  const [served, unread] = await Promise.all([servedRepos(mcp, settings.get().repos, out), firstCatalog(catalog)]);
   if (unread !== null) out(`T3's providers and models couldn't be read (${unread}); the usage gate starts no job this pass`);
   return makeRunner({
-    config: runConfig([], state), state, settings: () => settings.get(), catalog, mcp,
-    user: async () => settings.get().name ?? 'the user', out, log_line: stamp, served: () => served.take(),
+    config: runConfig(served.repos, state), state, settings: () => settings.get(), catalog, mcp,
+    user: async () => settings.get().name ?? 'the user', out, log_line: stamp, unread: served.unread,
   });
 }
 
