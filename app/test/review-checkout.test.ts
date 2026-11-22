@@ -5,9 +5,14 @@ import { execFileSync } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, expect, test } from 'vitest';
+import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { GitCli, prRef } from '../src/git.ts';
 import { Deps, READY, testsNote, type Install } from '../src/review/deps.ts';
+
+// Every case and its set-up run real git: under load (a parallel run beside other work) they took
+// over Vitest's defaults (5s a test, 10s a hook), and the clean-up then found git still in the
+// clone (EBUSY) (#269).
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
 
 let dir: string;
 let clone: string;

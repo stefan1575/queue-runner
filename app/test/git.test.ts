@@ -87,6 +87,10 @@ const tracking = (clone: string, base: string) => {
   }
 };
 
+// These two run real git in temp folders: under load (a parallel run beside other work) one took
+// over 5s, Vitest's default, and the clean-up then found git still in the clone (EBUSY) (#269).
+const REAL_GIT = { timeout: 30_000 };
+
 /** A bare origin with `main` and `trunk` (one commit ahead), and a clone of it. */
 async function origin(cloneArgs: string[]) {
   dir = await mkdtemp(join(tmpdir(), 'qr-git-'));
@@ -101,14 +105,14 @@ async function origin(cloneArgs: string[]) {
   return { clone: join(dir, 'clone'), trunk: git(work, 'rev-parse', 'trunk') };
 }
 
-test("a single-branch clone of main fetching trunk gets origin/trunk, which its refspec alone wouldn't make", async () => {
+test("a single-branch clone of main fetching trunk gets origin/trunk, which its refspec alone wouldn't make", REAL_GIT, async () => {
   const { clone, trunk } = await origin(['--single-branch', '--branch', 'main']);
   expect(tracking(clone, 'trunk')).toBeNull();
   await new GitCli().fetch(clone, 'trunk');
   expect(tracking(clone, 'trunk')).toBe(trunk);
 });
 
-test("a clone whose origin/<base> is behind has it moved to origin's newest", async () => {
+test("a clone whose origin/<base> is behind has it moved to origin's newest", REAL_GIT, async () => {
   const { clone, trunk } = await origin(['--branch', 'main']);
   git(clone, 'update-ref', 'refs/remotes/origin/trunk', 'refs/remotes/origin/main');
   await new GitCli().fetch(clone, 'trunk');
