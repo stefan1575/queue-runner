@@ -13,7 +13,6 @@ class Repo:
     github: str | None  # owner/name; None for a repo with no GitHub (the live-check sandbox)
     path: str          # local clone; T3's project for its jobs
     base: str = 'main'
-    review_table: bool = False   # a posted review adds a row to the PR body's `## Review` table
     # Who merges a clean PR (ticket 17, `merge.py`): 'runner' (it merges itself), or 'stefan'
     # (it labels the PR `ready-for-stefan` and toasts once; Stefan merges, and the runner notices).
     merge: str = 'runner'
@@ -121,7 +120,7 @@ def load_config(path: str = DEFAULT_CONFIG) -> Config:
     with open(path, 'rb') as f:
         raw = tomllib.load(f)
     repos = [Repo(name=r['name'], github=r.get('github'), path=_path(r['path']),
-                  base=r.get('base', 'main'), review_table=bool(r.get('review_table')),
+                  base=r.get('base', 'main'),
                   merge=_merge(r))
              for r in raw.get('repos', [])]
     claude, sol = raw.get('claude', {}), raw.get('sol', {})

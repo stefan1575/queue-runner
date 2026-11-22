@@ -32,7 +32,7 @@ second runner out: it logs `a second runner started (pid N) and exited at once` 
 `--review` and the running lane never run two at once.
 
 `config.toml` names the repos it serves (GitHub repo, local clone, base branch, and
-`review_table` for a repo whose PR bodies keep a `## Review` table, `merge = "stefan"` for one whose PRs Stefan
+`merge = "stefan"` for one whose PRs Stefan
 merges himself: `docs/claude-lane.md`, Stefan merges), in an order that breaks ties between repos' work
 (`docs/claude-lane.md`, Two lanes); the runner's `state_dir` and `log_dir` (`~/.queue-runner/`, outside every served repo);
 `runs_dir`, `checkouts_dir` and `deps_dir` for reviews; `poll_seconds`, the pause after a pass that started

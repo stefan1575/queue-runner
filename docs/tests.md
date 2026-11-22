@@ -60,7 +60,7 @@ fallback review, either lane seeing it end first) and `MeasuredRaceTest` (the ot
 job ended mid-read), and `tests/test_review2_fallback_settle.py` (PR 67's review 2, as Sol wrote
 it).
 The Opus fallback: `tests/test_fallback.py` (through the Sol seam, `FakeT3` and
-`FakeGitHubForReviews`: the thread and its brief, the comment, status, Review row and
+`FakeGitHubForReviews`: the thread and its brief, the comment, status and
 `decision.json` naming it, the effort read back in the label, failed and waiting threads, the
 gate holding it back and learning its cost, `--gate`'s line, the switch back to Sol after the
 reset, a clean fallback review merging or marking ready, a blocking one's fix round through the

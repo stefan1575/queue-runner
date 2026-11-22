@@ -71,8 +71,7 @@ The review loop's rules and words are `docs/flow.md`, The review loop; a served 
    `<!-- sol-finding owner/name#N ID -->` line (an open issue with that line, the old script's
    footer for the PR and ID, or the same title is linked instead of filed again); the comment,
    linking them, its ledger recording each issue's URL (`issue`); `sol-review` on H, never the
-   PR's head now; with `review_table`, a row in the PR body's `## Review` table, read afresh
-   (`with_review_row`, ported from the old script). The comment is the review's record: if it
+   PR's head now. The comment is the review's record: if it
    can't be posted the review is `failed` and the PR is reviewed again. A failure after it is
    said and left. A filing that fails is marked `unfiled` in the ledger, and the next review
    files it. Issues go before the comment, as the old script did, so the comment can link them;
@@ -185,8 +184,8 @@ doesn't wait: a PR that needs a review gets one from a T3 thread on the Claude m
 - **The label** (`fallback.label`): "Opus 5.5 high, fallback while Sol is out", with the effort
   the run used, read back (`Effort.used`), else the config's. It's in the comment's heading
   (`## Sol review N · V · <label>`, so `HEADING` still reads it) and byline, the `sol-review`
-  status's description (`<label>: Clean: ...`; the context stays `sol-review`), the Review row
-  (`[Review N, <label>](...)`) and `decision.json`'s `reviewer`. The hidden marker is the same,
+  status's description (`<label>: Clean: ...`; the context stays `sol-review`) and
+  `decision.json`'s `reviewer`. The hidden marker is the same,
   so the review counts as any other: **a clean fallback review merges** (or marks
   `ready-for-stefan`), and a blocking one gets a fix round.
 - **The job record:** kind `review` with `reviewer` `opus-fallback` in its start record, and the

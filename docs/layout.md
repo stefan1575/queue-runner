@@ -44,8 +44,7 @@ What each module and script is for.
 - `queue_runner/stops.py`: stops for Stefan: which, the `needs-info` issue, the PR comment, the
   toast, and holding the PR until he answers.
 - `queue_runner/toast.py` and `assets/icon.png`: the runner's own Windows toast.
-- `queue_runner/post.py`: posting a review: follow-up issues, the comment, `sol-review`, the
-  PR body's Review row.
+- `queue_runner/post.py`: posting a review: follow-up issues, the comment and `sol-review`.
 - `queue_runner/sol.py`: the Sol seam and its codex-sol.sh adapter.
 - `queue_runner/fallback.py`: the Opus fallback reviewer while Sol is out of usage: the Sol
   seam over a T3 thread, gated, and its label (issue #69).
