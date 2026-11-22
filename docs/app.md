@@ -369,18 +369,26 @@ comment, as in Python, and `docs/claude-lane.md` is the behaviour.
   expected cost there, and to `started`, so a new job on the same login names them in `sharedWith`
   (Python's `_launch` adds `_busy`'s labels); one seen to end holds that model's login for T3's
   next reading.
-- **The config** (`src/run-wiring.ts`, `readRepos`) is Python's `Config` and `Repo`, read once at
-  start as Python reads config.toml: each T3 project Settings switched to Served with a GitHub
-  remote, named by its GitHub `owner/name`, in its folder, on its base (GitHub's default branch,
-  read before the first pass) and merged by whom Settings says, in T3's order of projects (which
-  breaks a tie between repos' work, as config.toml's order does). A remote two served projects
-  share is served from the first, and the others are said. If T3's projects, a served repo's
-  remote or its base can't be read, the loop doesn't start on part of them: `--once` says why and
-  exits 1, and the desktop app says why once and tries again every 30 seconds (as Python waits
-  for T3's server at logon). A change to Served or who merges is taken up at the next start
-  (picking it up while the loop runs is #260). The pause after an idle pass is Python's 300
-  seconds. A job open in a repo the config doesn't have fails its pass when its end is recorded,
-  as Python's `self.repos[job.repo]` raises.
+- **The config** (`src/run-wiring.ts`, `ServedRepos`) is Python's `Config` and `Repo`, from the
+  projects served at start as Python reads config.toml: each T3 project Settings switched to
+  Served with a GitHub remote, named by its GitHub `owner/name`, in its folder, on its base
+  (GitHub's default branch, read before the first pass) and merged by whom Settings says, in T3's
+  order of projects (which breaks a tie between repos' work, as config.toml's order does). A
+  remote two served projects share is served from the first, and the others are said.
+- **Repos are independent**, as in Python, whose config needs no network (review 1 of #261, F4).
+  A served project whose folder is missing, whose remote gh can't read (or that has none) or whose
+  base can't be read is named in one line ("… isn't served until it's read: why"), and the repos
+  that read start and settle without it. The desktop app reads it again every 30 seconds
+  (`joinWhenRead`), says its reason again only when that changes, and it joins the loop at the
+  next pass once it reads (`Runner.join`), after the repos served already. `--once` runs the repos
+  that read, names the rest and exits 0. A build or fix left open in a repo that hasn't read
+  waits for it (said once): it isn't recorded until its repo joins, and the pass goes on. Only the
+  projects served at start can join; a change to Served or who merges is taken up at the next
+  start (picking it up while the loop runs is #260). Only T3's project list not reading holds
+  every repo: `--once` exits 1, and the desktop app says why once and tries again every 30
+  seconds (as Python waits for T3's server at logon). The pause after an idle pass is Python's
+  300 seconds. Once every served repo has read, a job open in a repo the config doesn't have is
+  Python's: one its end is recorded for fails its pass, as `self.repos[job.repo]` raises.
 - **Its job log** is `run-loop-jobs.jsonl` in the state folder, in Python's format (The job log,
   below). The desktop app's `jobs.jsonl` from before the port is `src/job-log.ts`'s format (a job's
   repo named by T3 project id), so it's left in place and unread.

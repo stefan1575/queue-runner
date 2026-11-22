@@ -12,7 +12,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { GhGitHub, ghCli } from '../github.ts';
 import { wall_sleep } from '../run.ts';
-import { makeRunner, readRepos, runConfig, waitForRepos } from '../run-wiring.ts';
+import { joinWhenRead, makeRunner, runConfig, ServedRepos, waitForRepos } from '../run-wiring.ts';
 import { RunnerBusy, runner_lock } from '../runner-lock.ts';
 import { windowsPlatform } from '../platform/windows.ts';
 import { checkJobs, DEFAULT_JOBS } from '../jobs.ts';
@@ -159,15 +159,20 @@ async function main() {
   }
   if (release) {
     app.on('will-quit', release);
-    // The served repos are read once, before the first pass, as Python reads config.toml: a change
-    // to Served or who merges is taken up at the app's next start.
+    // The projects served at start are read before the first pass, as Python reads config.toml: a
+    // change to Served or who merges is taken up at the app's next start (#260). Repos are
+    // independent: one that can't be read is named, read again every 30 seconds, and joins the
+    // loop once it reads.
     const mcp = t3Doors!.mcp;
     void (async () => {
-      const served = await waitForRepos(() => readRepos(mcp, github, settings.get().repos, say), say);
+      const served = await waitForRepos(() => ServedRepos.read(mcp, github, settings.get().repos, say), say);
       const runner = await makeRunner({
-        config: runConfig(served, state), state, settings: () => settings.get(),
+        config: runConfig([...served.repos], state), state, settings: () => settings.get(),
         catalog, mcp, user: async () => briefName(view.get()) ?? 'the user', out: () => {}, log_line: say,
+        unread: () => served.names(),
       });
+      void joinWhenRead(served, (repo) => runner.join(repo))
+        .catch((e) => say(`reading the served repos again stopped: ${(e as Error).stack ?? e}`));
       await runner.run_forever((seconds) => wall_sleep(seconds));
     })().catch((e) => say(`the run loop stopped: ${(e as Error).stack ?? e}`));
   }

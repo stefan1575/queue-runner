@@ -1,13 +1,13 @@
 // The command line: `--list` prints every T3 project with its GitHub remote and changes nothing.
 // It exits 1 when gh failed for any project (each such project says what gh said). `--once` runs
 // one pass of each lane (`Runner.run_once`, as `cli.py` has it), under the state folder's
-// one-run-loop lock the desktop app holds too, on the served repos read at its start, and
+// one-run-loop lock the desktop app holds too, on the served repos that read at its start (each
+// one that can't is named, and its jobs wait), and
 // `--release NAME#N` lets the picker take a held issue again, NAME a repo's GitHub `owner/name` the
 // job log has jobs in, from the job log alone (#219).
 import type { GitHub } from './github.ts';
 import { formatProjects, listProjects } from './projects.ts';
 import type { Runner } from './run.ts';
-import { ConfigError } from './run-wiring.ts';
 import { RunnerBusy } from './runner-lock.ts';
 import type { JobLog } from './state.ts';
 import type { T3Mcp } from './t3/mcp.ts';
@@ -50,10 +50,6 @@ export async function run(argv: string[], doors: Doors, out: (s: string) => void
     try {
       const runner = await doors.runner(line);
       await runner.run_once();
-    } catch (e) {
-      if (!(e instanceof ConfigError)) throw e;
-      out(`The served repos couldn't be read: ${e.message}\n`);
-      return 1;
     } finally {
       release();
     }

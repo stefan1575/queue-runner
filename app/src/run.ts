@@ -79,9 +79,9 @@ export const FALLBACK_REVIEW = 'review';
 export type Repo = { readonly name: string; readonly github: string | null; readonly path: string; readonly base: string;
   readonly merge: Merger; readonly local_issues?: boolean };
 
-/** Python's `Config`, from the app's Settings and Repositories, read once at start as Python reads
- *  config.toml (`src/run-wiring.ts`): the served repos, the state folder and the pause after an idle
- *  pass. */
+/** Python's `Config`, from the app's Settings and Repositories, the projects served at start, as
+ *  Python reads config.toml (`src/run-wiring.ts`): the served repos that read (one that reads later
+ *  joins, `Runner.join`), the state folder and the pause after an idle pass. */
 export type Config = { readonly repos: readonly Repo[]; readonly state_dir: string; readonly poll_seconds: number };
 
 export type GitHub = PickerGitHub & Pick<GhCli, 'issue_comments' | 'pull_for_branch' | 'pull'>;
@@ -211,6 +211,10 @@ export type RunnerOptions = {
   clock?: () => number;
   /** How long a worker waits for its job's measurement (`MEASURE_WAIT`). */
   measure_wait?: number;
+  /** The served repos not read yet (the app's `ServedRepos.names`): each one's `owner/name`, null
+   *  where it isn't known. A job open in one waits for it to join (`join`). Python's config needs no
+   *  network, so it has none. */
+  unread?: () => readonly (string | null)[];
 };
 
 export class Runner {
@@ -228,7 +232,12 @@ export class Runner {
   job_choice: (kind: JobKind) => ModelChoice | null;
   user: () => Promise<string>;
   exists: (path: string) => boolean;
+  unread: () => readonly (string | null)[];
   gate_until: Date | null = null;
+  /** The repos that read since the last pass began (`join`), and the open jobs said to wait for
+   *  theirs. */
+  private _joining: Repo[] = [];
+  private _said_waits = new Set<string>();
   /** What the gate last said, per repo (null key: the account's usage limit), so it's said once. */
   private _last_gate = new Map<string | null, string>();
   /** The builder jobs running in this runner's workers, one per repo (#50), and a signal set
@@ -269,6 +278,24 @@ export class Runner {
     this.job_choice = o.job_choice ?? (() => null);
     this.user = o.user ?? (async () => 'the user');
     this.exists = o.exists ?? (() => false);
+    this.unread = o.unread ?? (() => []);
+  }
+
+  /** A served repo that read after the loop started: it joins at the next pass's start, after the
+   *  repos served already (whose order breaks a tie). */
+  join(repo: Repo): void {
+    this._joining.push(repo);
+  }
+
+  /** Whether an open job's repo hasn't read yet: not in the config, and named among the unread, or
+   *  an unread one's name isn't known. It waits for that repo, said once. */
+  private _waits_for_repo(job: Job): boolean {
+    if (this._repo(job.repo)) return false;
+    const unread = this.unread();
+    if (!unread.includes(job.repo) && !unread.includes(null)) return false;
+    if (!this._said_waits.has(job.id)) this.say(`${name_of(job)} waits for ${job.repo} to be read`);
+    this._said_waits.add(job.id);
+    return true;
   }
 
   say(line: string): void {
@@ -314,6 +341,10 @@ export class Runner {
    *  Starts nothing itself. */
   async plan(): Promise<Start[] | Did> {
     this.gate_until = null;   // a wait from an earlier pass is that pass's
+    if (this._joining.length) {
+      this.config = { ...this.config, repos: [...this.config.repos, ...this._joining] };
+      this._joining = [];
+    }
     const busy = await this.settle();
     // (thread titles' prefixes are the decisions ticket's; the user's stops the switches ticket's)
     if (this._orphan_review) {   // a stopped runner's fallback review runs on: nothing starts beside it
@@ -572,6 +603,7 @@ export class Runner {
       }
       if (job.kind === 'live') continue;   // the live steps are dropped from the port
       if (job.kind !== 'build' && job.kind !== 'fix') continue;   // an open review or merge is the reviewer lane's
+      if (this._waits_for_repo(job)) continue;   // its repo hasn't read: its end is recorded once it joins
       const thread = await this._find_thread(job);
       if (thread === null) {
         this.jobs.ended(job.id, { exit_code: null, outcome: NOT_STARTED, error: 'No T3 thread was found for this job.' });
@@ -586,7 +618,7 @@ export class Runner {
       }
     }
     for (const job of this.jobs.waiting_jobs()) {
-      if (mine.has(job.repo)) continue;
+      if (mine.has(job.repo) || this._waits_for_repo(job)) continue;
       let thread: Thread;
       try {
         [thread] = await this.t3.show(job.thread_id!);
