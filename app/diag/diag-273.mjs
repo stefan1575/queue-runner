@@ -7,9 +7,9 @@ import { join } from 'node:path';
 const sh = (c, a) => { const r = spawnSync(c, a, { encoding: 'utf8' }); console.log(`$ ${c} ${a.join(' ')} -> ${r.status} ${r.error ?? ''}\n${r.stdout}${r.stderr}`); };
 console.log('tmpdir', tmpdir(), 'TEMP', process.env.TEMP, 'TMP', process.env.TMP);
 console.log('PATH', process.env.PATH);
-for (const k of Object.keys(process.env).sort()) console.log('ENV', k, '=', k.match(/TOKEN|SECRET/) ? '***' : process.env[k]);
+// env dump removed
 sh('where', ['icacls']);
-sh('whoami', ['/all']);
+sh('C:\Windows\System32\whoami.exe', ['/priv']);
 const base = mkdtempSync(join(tmpdir(), 'd273-'));
 const folder = join(base, 'x');
 mkdirSync(folder); writeFileSync(join(folder, 'f.txt'), 'x');
