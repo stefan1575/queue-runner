@@ -88,7 +88,7 @@ function isfile_sync(p: string): boolean {
 
 /** `shutil.which(cmd)`: the first match on PATH, with PATHEXT's extensions on Windows and the
  *  current folder first there (Windows' `NeedCurrentDirectoryForExePath`), else null. */
-function which(cmd: string): string | null {
+export function which(cmd: string): string | null {
   const path = process.env.PATH;
   if (!path) return null;
   const dirs = path.split(delimiter);
