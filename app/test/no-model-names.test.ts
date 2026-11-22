@@ -16,8 +16,10 @@ const GITHUB_FACING = ["'claude/'", "'CLAUDE.md'", "'GPT-6.2 Sol at effort high,
 // Files ported one-to-one from Python (#263), where the providers' names are Python's: the gate's
 // messages ("no Claude job starts"), the Claude login's file and endpoint (`claudeAiOauth`,
 // `CLAUDE_CONFIG_DIR`, `~/.claude`, `api.anthropic.com`, the user agent T3 sends) and Codex's app
-// server, its command and its folder. The cutover's rules apply to them after the port (#68).
-const PORTED_FROM_PYTHON = new Set(['src/job-gate.ts', 'src/claude-usage.ts', 'src/codex-usage.ts'].map((f) => join(f)));
+// server, its command and its folder. The config (#219) has Python's defaults and keys: the
+// provider instances, the model, the review providers and Claude Code's effort levels. The
+// cutover's rules apply to them after the port (#68).
+const PORTED_FROM_PYTHON = new Set(['src/job-gate.ts', 'src/claude-usage.ts', 'src/codex-usage.ts', 'src/config.ts'].map((f) => join(f)));
 const NAMES = /\b(?:claude\w*|codex|opus|sonnet|haiku|fable|gpt[\w.-]*|anthropic|openai|chatgpt|gemini|grok)\b/gi;
 
 export function modelNames(source: string): string[] {
