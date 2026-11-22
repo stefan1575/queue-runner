@@ -410,7 +410,11 @@ comment, as in Python, and `docs/claude-lane.md` is the behaviour.
   pass, as `self.repos[job.repo]` raises, and one with no thread is closed as not-started.
 - **The cost log at start** drops everything after its last newline before it parses, as Python's
   `read_records` does (review 3 of #261, F19), so a record whose newline was lost is never learned
-  from, and cuts it off the disk.
+  from, and cuts it off the disk. One that can't be read (a bad complete line, or a read error)
+  stops nothing at start: the loop settles, and every job the gate is asked about is held with why
+  ("usage.jsonl is unreadable (…): no job starts until it is fixed or removed"), the file read again
+  at each ask till it reads, as Python's gate reads it at each check (`gate.py:297`; review 1 of
+  #262, F3).
 - **Its job log** is `run-loop-jobs.jsonl` in the state folder, in Python's format (The job log,
   below). The desktop app's `jobs.jsonl` from before the port is `src/job-log.ts`'s format (a job's
   repo named by T3 project id), so it's left in place and unread.

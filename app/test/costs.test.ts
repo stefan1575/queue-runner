@@ -91,10 +91,15 @@ describe('learned costs', () => {
     expect((await CostLog.open(file)).records()).toEqual([r]);   // the same before a reopen and after
   });
 
-  test('a bad line before the last is an error', async () => {
+  test('a bad line before the last is an error at each ask, not at the open, and the file is read again till it reads (review 1 of #262, F3)', async () => {
     dir = await mkdtemp(join(tmpdir(), 'qr-costs-'));
     const file = join(dir, 'usage.jsonl');
-    await writeFile(file, `nope\n${JSON.stringify(rec(opusMedium, 4, 1))}\n`);
-    await expect(CostLog.open(file)).rejects.toThrow(CostLogError);
+    const r = rec(opusMedium, 4, 1);
+    await writeFile(file, `nope\n${JSON.stringify(r)}\n`);
+    const log = await CostLog.open(file);
+    expect(() => log.records()).toThrow(CostLogError);
+    expect(() => log.records()).toThrow("line 1 isn't a record");
+    await writeFile(file, `${JSON.stringify(r)}\n`);   // fixed
+    expect(log.records()).toEqual([r]);
   });
 });

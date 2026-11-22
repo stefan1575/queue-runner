@@ -24,7 +24,8 @@
 // - **Whose login:** a job started before T3 has named its provider's login (a build watched again
 //   on a cold start, before T3's first catalog) is given it once T3 does, so it counts against
 //   that login whichever came first (#154 F10).
-import type { CostLog } from './cost-log.ts';
+import { CostLogError, type CostLog } from './cost-log.ts';
+import type { UsageRecord } from './costs.ts';
 import { expectedCost, reading, spentOf, type Cost, type Reading } from './costs.ts';
 import { AFTER_RESET_MS, checkJob, LIMIT_UNKNOWN_MS, type GateJob, type Hold, type RunningJob, type Verdict } from './gate.ts';
 import { kindModels, model, type JobKind, type ModelChoice } from './jobs.ts';
@@ -127,12 +128,19 @@ export class UsageGate {
 
   private checkReading(job: GateJob, u: ProviderUsage | undefined, elsewhere: readonly Elsewhere[]): Verdict {
     this.placeJobs();
+    let records: UsageRecord[];
+    try {
+      records = this.log.records();
+    } catch (e) {
+      if (!(e instanceof CostLogError)) throw e;
+      return { fits: false, until: null, hold: { why: 'unreadable', error: e.message } };
+    }
     const catalog = this.source.current().catalog;
     const m = catalog ? model(catalog, job.choice) : undefined;
     const running: RunningJob[] = [...this.running.values()].filter((r): r is Running & RunningJob => r.account !== null);
     return checkJob({
       job, usage: u, model: { id: job.choice.model, ...(m ? { label: m.label } : {}) },
-      running: [...running, ...this.runningElsewhere(elsewhere)], shares: this.settings().shares, records: this.log.records(),
+      running: [...running, ...this.runningElsewhere(elsewhere, records)], shares: this.settings().shares, records,
       now: this.now(), lastEnd: u ? this.lastEnd.get(u.account) ?? null : null,
     });
   }
@@ -140,7 +148,7 @@ export class UsageGate {
   /** The jobs running elsewhere that the gate doesn't hold, each on the model it was launched on
    *  (else its kind's own model) at its expected cost there. One T3 hasn't named the login of yet
    *  counts nowhere. */
-  private runningElsewhere(elsewhere: readonly Elsewhere[]): RunningJob[] {
+  private runningElsewhere(elsewhere: readonly Elsewhere[], records: UsageRecord[]): RunningJob[] {
     const catalog = this.source.current().catalog;
     if (!catalog) return [];
     const out: RunningJob[] = [];
@@ -149,7 +157,7 @@ export class UsageGate {
       const choice = e.choice ?? kindModels(this.settings().jobs, e.kind, catalog).choice;
       const u = choice ? this.usage(choice.provider) : undefined;
       if (!choice || !u?.account) continue;
-      out.push({ id: e.id, account: u.account, cost: expectedCost(this.log.records(), { ...choice, kind: e.kind }, u.windows).cost });
+      out.push({ id: e.id, account: u.account, cost: expectedCost(records, { ...choice, kind: e.kind }, u.windows).cost });
     }
     return out;
   }

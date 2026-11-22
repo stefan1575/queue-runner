@@ -926,6 +926,26 @@ describe('GatingTest', () => {
     expect(h.runner_log()).toContain("T3 has no reading of Claude's usage yet");
   });
 
+  test("an unreadable usage.jsonl stops no settling: --once records the job that ended, then holds new ones with why, till it reads (review 1 of #262, F3)", async () => {
+    const gh = new FakeGitHubWithPulls({ issues: [issue(4), issue(5)], pulls_by_branch: { 'claude/a-ticket-4': PR } });
+    const job = h.log.started({ kind: 'build', repo: 'first', issue: 4, branch: 'claude/a-ticket-4', title: 'Queue runner build: first#4' });
+    const t3 = new FakeT3([[0, 'completed']]);
+    t3.add('mcp:old', job.title, 'completed');
+    await mkdir(join(dir, 'state'), { recursive: true });
+    const costs = join(dir, 'state', 'usage.jsonl');
+    await writeFile(costs, 'nope\n');   // a malformed complete line
+    const [code] = await h.run_main(['--once'], gh, t3);
+    expect(code).toBe(0);
+    expect([h.log.jobs()[0]!.thread_id, h.log.jobs()[0]!.outcome]).toEqual(['mcp:old', 'done']);
+    expect(t3.starts).toEqual([]);
+    expect(h.runner_log()).toContain('usage.jsonl is unreadable (');
+    expect(h.runner_log()).toContain('no job starts until it is fixed or removed');
+    // removed: the next ask reads it again, and the build starts
+    await rm(costs);
+    expect(await h.runner!.run_pass()).toBe(STARTED);
+    expect(t3.starts.map((s) => s.branch)).toEqual(['claude/a-ticket-5']);
+  });
+
   test.todo('test_pause_and_resume_work_between_passes (the switches, #229)');
 
   // test_a_changed_reserve_holds_the_week_back is left out: gate.json's reserve (the app's Your

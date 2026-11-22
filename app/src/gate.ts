@@ -33,7 +33,10 @@ export type Hold =
    *  F22). It holds a provider T3 reads no usage for too, which nothing else would. */
   | { why: 'limit'; kind: JobKind; provider: string; at: string | null }
   /** No reading to decide on: it waits for T3's next one. */
-  | { why: 'reading'; provider: string; checkedAt: string | null; stale: 'none' | 'before-end' | 'old' };
+  | { why: 'reading'; provider: string; checkedAt: string | null; stale: 'none' | 'before-end' | 'old' }
+  /** The cost log (`usage.jsonl`) can't be read: nothing starts until it's fixed or removed, as
+   *  Python's gate holds (review 1 of #262, F3). */
+  | { why: 'unreadable'; error: string };
 
 export type Verdict =
   | { fits: true; cost: Cost; ungated?: true }
@@ -102,6 +105,7 @@ export function holdText(h: Hold, when: (d: Date) => string): string {
       ? `T3 hasn't read ${h.provider}'s usage since the last job there ended (last read ${at})`
       : `T3 last read ${h.provider}'s usage at ${at}, over ${STALE_AFTER_MS / 60_000} minutes ago`;
   }
+  if (h.why === 'unreadable') return `usage.jsonl is unreadable (${h.error}): no job starts until it is fixed or removed`;
   if (h.why === 'limit') return `a job on ${h.provider} ran out of usage; ${h.at ? `it resets at ${when(new Date(h.at))}` : 'T3 gave no time it resets'}`;
   const needs = `this ${h.kind} needs about ${pct(h.need)}`;
   if (h.why === 'window') return h.at ? `${h.window} resets at ${when(new Date(h.at))}; ${needs}` : `${h.window} is ${pct(h.used)} used; ${needs}`;
