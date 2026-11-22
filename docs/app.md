@@ -64,6 +64,12 @@ the settings tickets export as `SETTINGS_PATH` (`test/real-settings.ts` lists th
 time to pass or a real file watcher to fire, and a `vi.waitFor` waits only on the test's own fakes (`FakeT3.address`, the settings and the job log in `test/memory-files.ts`), never on real file I/O, which a test awaits; `test/no-real-time.test.ts` fails a test that reads
 the real clock or runs on a real timer that no `vi.useFakeTimers()` around it fakes (a `toFake` list fakes only what it names), naming it (`test/real-time.ts`). Both checks read every app test file, `renderer/test/` included (`test/app-test-files.ts`).
 
+**A test on real git allows 30 seconds**, its set-up too (#269). Run beside other work, a case
+that takes 2 to 6 seconds alone went past Vitest's defaults (5 s a test, 10 s a hook), and its
+clean-up then found git still in the folder (`EBUSY`). And a test's clean-up stops what the test
+started before it removes its temp folder: a lane's `afterEach` stops the lane and awaits its
+`idle()`, so no round still writes there (`ENOTEMPTY`, #245).
+
 ## Rules for every rebuild ticket
 
 - **T3 and GitHub only.** No reads of T3's database or settings, of Claude's or Codex's files,
