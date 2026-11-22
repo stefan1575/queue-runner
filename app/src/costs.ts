@@ -39,6 +39,8 @@ export type UsageRecord = CostKey & {
   job: string;
   before: Reading;
   after: Reading | null;
+  /** Why it has no `after`: T3 gave no reading after the job (Python's failed after-job read). */
+  error?: string;
   /** What it spent of each window: null for a window that reset while it ran. */
   spent: Record<string, number | null> | null;
   /** Other jobs that ran on the same login meanwhile: their spending is in it too, so it

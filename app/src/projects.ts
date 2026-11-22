@@ -7,8 +7,9 @@ export type Project = { id: string; title: string; folder: string; remote: Remot
 
 const PAGE = 100;
 
-/** T3's projects, every page of `t3_project_list`, each matched to its GitHub remote. */
-export async function listProjects(mcp: Pick<T3Mcp, 'call'>, github: GitHub): Promise<Project[]> {
+/** T3's projects, every page of `t3_project_list`, with no remote read: each one's id, title and
+ *  folder. */
+export async function t3Projects(mcp: Pick<T3Mcp, 'call'>): Promise<Omit<Project, 'remote' | 'failure'>[]> {
   const found: any[] = [];
   let cursor: number | null = 0;
   while (cursor !== null) {
@@ -17,10 +18,14 @@ export async function listProjects(mcp: Pick<T3Mcp, 'call'>, github: GitHub): Pr
     const next = page?.nextCursor;
     cursor = typeof next === 'number' && next > cursor ? next : null;
   }
-  return Promise.all(found.map(async (p): Promise<Project> => {
-    const project = { id: p.id, title: p.title, folder: p.workspaceRoot };
+  return found.map((p) => ({ id: p.id, title: p.title, folder: p.workspaceRoot }));
+}
+
+/** T3's projects, every page of `t3_project_list`, each matched to its GitHub remote. */
+export async function listProjects(mcp: Pick<T3Mcp, 'call'>, github: GitHub): Promise<Project[]> {
+  return Promise.all((await t3Projects(mcp)).map(async (project): Promise<Project> => {
     try {
-      return { ...project, remote: await github.remoteOf(p.workspaceRoot) };
+      return { ...project, remote: await github.remoteOf(project.folder) };
     } catch (e) {
       if (!(e instanceof GitHubError)) throw e;
       return { ...project, remote: null, failure: e.message };

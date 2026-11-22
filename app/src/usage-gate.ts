@@ -14,21 +14,29 @@
 //   reset T3 gave (and `AFTER_RESET_MS`), or `LIMIT_UNKNOWN_MS` with none, so the next job goes to
 //   the fallback, even on a provider T3 reads no usage for (#155 F22). A reading T3 takes after
 //   the hold began decides instead, and one with room ends it (a reset credit gives usage back
-//   early, #155 F25); a provider T3 reads no usage for has no such reading. The job log's ends
-//   restore it on a start (`limitsFrom`).
+//   early, #155 F25); a provider T3 reads no usage for has no such reading. (After a restart the
+//   run loop reads the limits the job log recorded itself, as Python's `Runner.choose` does.)
+// - **Ended elsewhere:** a job's thread the gate didn't let in, seen to end (a stopped runner's
+//   job settled, one the user answered in T3): the next check on its login decides on a reading
+//   T3 takes after now, as after a job it let in (`job_ended`, Python's `gate.job_ended`).
+// - **Running elsewhere:** the jobs a stopped runner left running are passed to `pick`, each
+//   counted at its kind's model and expected cost (Python's `check(..., running=...)`).
 // - **Whose login:** a job started before T3 has named its provider's login (a build watched again
 //   on a cold start, before T3's first catalog) is given it once T3 does, so it counts against
 //   that login whichever came first (#154 F10).
 import type { CostLog } from './cost-log.ts';
-import { reading, spentOf, type Cost, type Reading } from './costs.ts';
+import { expectedCost, reading, spentOf, type Cost, type Reading } from './costs.ts';
 import { AFTER_RESET_MS, checkJob, LIMIT_UNKNOWN_MS, type GateJob, type Hold, type RunningJob, type Verdict } from './gate.ts';
-import type { Job } from './job-log.ts';
 import { kindModels, model, type JobKind, type ModelChoice } from './jobs.ts';
 import type { Settings } from './settings.ts';
 import type { CatalogSource } from './t3/catalog-source.ts';
 import type { ProviderUsage } from './usage.ts';
 
 export type Held = { hold: Hold; until: Date | null; since: Date };
+/** A job running that the gate didn't let in (a stopped runner's): its id and kind. */
+/** A job running that the gate didn't let in: `choice` the model it was launched on, when its
+ *  record names one (else its kind's model now). */
+export type Elsewhere = { id: string; kind: JobKind; choice?: ModelChoice | null };
 /** Where a job runs, once the gate lets it in: its kind's model, or its fallback. */
 export type Pick =
   | { fits: true; choice: ModelChoice; onFallback: boolean; cost: Cost }
@@ -36,7 +44,7 @@ export type Pick =
 
 /** `account` is null until T3 names the login of the job's provider. */
 type Running = Omit<RunningJob, 'account'> & { account: string | null; job: GateJob; before: Reading; started: Date; beside: Set<string> };
-type Ended = Running & { ended: Date };
+type Ended = Running & { ended: Date; recorded: () => void; failed: (e: unknown) => void };
 
 export class UsageGate {
   private source: CatalogSource;
@@ -53,6 +61,11 @@ export class UsageGate {
    *  held, and the reset T3 gave. */
   private limited = new Map<string, { since: Date; until: Date; resetAt: string | null }>();
   private listeners = new Set<() => void>();
+  /** The keys `job_ended` was told, so each counts once. */
+  private told = new Set<string>();
+  /** Each ended job waiting for its measurement: settled once its record is written. */
+  private recording = new Map<string, Promise<void>>();
+
 
   constructor(source: CatalogSource, settings: () => Settings, log: CostLog, now = () => new Date()) {
     this.source = source;
@@ -98,8 +111,8 @@ export class UsageGate {
     }
   }
 
-  /** Whether this job, on this model, fits now. */
-  check(job: GateJob): Verdict {
+  /** Whether this job, on this model, fits now, beside the jobs running `elsewhere` too. */
+  check(job: GateJob, elsewhere: readonly Elsewhere[] = []): Verdict {
     const u = this.usage(job.choice.provider);
     const limit = this.limited.get(job.choice.provider);
     // a reading taken since the hold began decides instead of it: one with room ends the hold
@@ -107,34 +120,72 @@ export class UsageGate {
     if (limit && this.now() < limit.until && !fresher) {
       return { fits: false, until: limit.until, hold: { why: 'limit', kind: job.kind, provider: u?.name ?? job.choice.provider, at: limit.resetAt } };
     }
-    const v = this.checkReading(job, u);
+    const v = this.checkReading(job, u, elsewhere);
     if (limit && (v.fits || this.now() >= limit.until)) this.limited.delete(job.choice.provider);
     return v;
   }
 
-  private checkReading(job: GateJob, u: ProviderUsage | undefined): Verdict {
+  private checkReading(job: GateJob, u: ProviderUsage | undefined, elsewhere: readonly Elsewhere[]): Verdict {
     this.placeJobs();
     const catalog = this.source.current().catalog;
     const m = catalog ? model(catalog, job.choice) : undefined;
+    const running: RunningJob[] = [...this.running.values()].filter((r): r is Running & RunningJob => r.account !== null);
     return checkJob({
       job, usage: u, model: { id: job.choice.model, ...(m ? { label: m.label } : {}) },
-      running: [...this.running.values()].filter((r): r is Running & RunningJob => r.account !== null), shares: this.settings().shares, records: this.log.records(),
+      running: [...running, ...this.runningElsewhere(elsewhere)], shares: this.settings().shares, records: this.log.records(),
       now: this.now(), lastEnd: u ? this.lastEnd.get(u.account) ?? null : null,
     });
   }
 
+  /** The jobs running elsewhere that the gate doesn't hold, each on the model it was launched on
+   *  (else its kind's own model) at its expected cost there. One T3 hasn't named the login of yet
+   *  counts nowhere. */
+  private runningElsewhere(elsewhere: readonly Elsewhere[]): RunningJob[] {
+    const catalog = this.source.current().catalog;
+    if (!catalog) return [];
+    const out: RunningJob[] = [];
+    for (const e of elsewhere) {
+      if (this.running.has(e.id)) continue;
+      const choice = e.choice ?? kindModels(this.settings().jobs, e.kind, catalog).choice;
+      const u = choice ? this.usage(choice.provider) : undefined;
+      if (!choice || !u?.account) continue;
+      out.push({ id: e.id, account: u.account, cost: expectedCost(this.log.records(), { ...choice, kind: e.kind }, u.windows).cost });
+    }
+    return out;
+  }
+
+  /** A job of this kind the gate didn't let in was seen to end now (a stopped runner's, one the
+   *  user answered in T3): the next check on the login it ran on (`choice`, the model it was
+   *  launched on; else its kind's model now) waits for a reading T3 takes after now. With `key`,
+   *  only the first telling counts. */
+  job_ended(kind: JobKind, key: string | null = null, launched: ModelChoice | null = null) {
+    if (key !== null) {
+      if (this.told.has(key)) return;
+      this.told.add(key);
+    }
+    const catalog = this.source.current().catalog;
+    const choice = launched ?? (catalog ? kindModels(this.settings().jobs, kind, catalog).choice : null);
+    if (!choice) return;
+    const at = this.now();
+    const account = this.usage(choice.provider)?.account;
+    if (account) {
+      if (at > (this.lastEnd.get(account) ?? new Date(0))) this.lastEnd.set(account, at);
+    } else this.unplacedEnd.set(choice.provider, at);
+  }
+
   /** Where a job of this kind runs now: its own model when that fits, else its fallback when that
-   *  fits, else held with its own model's reason. Held jobs are kept in `holds()`. */
-  pick(id: string, kind: JobKind): Pick {
+   *  fits, else held with its own model's reason, beside the jobs running `elsewhere` too. Held
+   *  jobs are kept in `holds()`. */
+  pick(id: string, kind: JobKind, elsewhere: readonly Elsewhere[] = []): Pick {
     const catalog = this.source.current().catalog;
     const models = catalog ? kindModels(this.settings().jobs, kind, catalog) : null;
     if (!models?.choice) {
       return this.hold(id, { fits: false, until: null, hold: { why: 'reading', provider: 'any provider', checkedAt: null, stale: 'none' } });
     }
-    const own = this.check({ id, kind, choice: models.choice });
+    const own = this.check({ id, kind, choice: models.choice }, elsewhere);
     if (own.fits) return this.letIn(id, { fits: true, choice: models.choice, onFallback: false, cost: own.cost });
     if (models.fallback) {
-      const fb = this.check({ id, kind, choice: models.fallback });
+      const fb = this.check({ id, kind, choice: models.fallback }, elsewhere);
       if (fb.fits) return this.letIn(id, { fits: true, choice: models.fallback, onFallback: true, cost: fb.cost });
     }
     return this.hold(id, own);
@@ -169,8 +220,10 @@ export class UsageGate {
 
   /** The job started on `choice`, let in at `cost` on the reading `before` (T3's reading now
    *  unless given: a job watched again after a restart passes the one it was let in on, never one
-   *  taken mid-run). It counts as running until `finished`. */
-  started(job: GateJob, cost: Cost, before: Reading = this.reading(job.choice)) {
+   *  taken mid-run). It counts as running until `finished`. The jobs running `elsewhere` on its
+   *  login (a stopped runner's, still running) spend beside it, so its record names them too
+   *  (Python's `Runner._launch` adds `_busy`'s labels to the worker's `shared`). */
+  started(job: GateJob, cost: Cost, before: Reading = this.reading(job.choice), elsewhere: readonly Elsewhere[] = []) {
     this.placeJobs();
     const account = this.usage(job.choice.provider)?.account ?? null;
     const r: Running = { id: job.id, account, cost, job, before, started: this.now(), beside: new Set() };
@@ -179,6 +232,14 @@ export class UsageGate {
       if (account !== null ? other.account !== account : other.account !== null || other.job.choice.provider !== job.choice.provider) continue;
       other.beside.add(job.id);
       r.beside.add(other.id);
+    }
+    const catalog = this.source.current().catalog;
+    for (const e of elsewhere) {
+      if (this.running.has(e.id) || e.id === job.id) continue;
+      const choice = e.choice ?? (catalog ? kindModels(this.settings().jobs, e.kind, catalog).choice : null);
+      if (!choice) continue;
+      const theirs = this.usage(choice.provider)?.account ?? null;
+      if (account !== null ? theirs === account : theirs === null && choice.provider === job.choice.provider) r.beside.add(e.id);
     }
     this.held.delete(job.id);
     this.running.set(job.id, r);
@@ -192,15 +253,8 @@ export class UsageGate {
     if (!was || until > was.until) this.limited.set(provider, { since: endedAt, until, resetAt: Number.isNaN(reset) ? null : resetAt });
   }
 
-  /** The usage limits the job log's ends recorded, so a start holds what the last run held. */
-  limitsFrom(jobs: Job[]) {
-    for (const j of jobs) {
-      if (j.end && (j.end.outcome === 'usage-limit' || j.end.outcome === 'out-of-usage')) this.outOfUsage(j.choice.provider, j.end.resetAt ?? null, new Date(j.end.at));
-    }
-  }
-
-  /** The job's thread ended: it's measured on T3's next reading of its provider. Ended on its
-   *  usage limit (`limit`), its provider is held until the reset. */
+  /** The job's thread ended: it's measured on T3's next reading of its provider (`measured`).
+   *  Ended on its usage limit (`limit`), its provider is held until the reset. */
   finished(id: string, limit?: { resetAt: string | null }) {
     const r = this.running.get(id);
     if (!r) return;
@@ -210,8 +264,41 @@ export class UsageGate {
     const at = this.now();
     if (r.account !== null) this.lastEnd.set(r.account, at);
     else this.unplacedEnd.set(r.job.choice.provider, at);
-    this.toMeasure.push({ ...r, ended: at });
-    void this.measure();
+    let recorded = () => {};
+    let failed: (e: unknown) => void = () => {};
+    const recording = new Promise<void>((resolve, reject) => { recorded = resolve; failed = reject; });
+    // a failed write is the worker's to hear of (`measured`); a lane that doesn't wait for it
+    // isn't left with a rejection nothing handles
+    recording.catch(() => {});
+    this.recording.set(id, recording);
+    this.toMeasure.push({
+      ...r, ended: at,
+      recorded: () => { this.recording.delete(id); recorded(); },
+      failed: (e) => { this.recording.delete(id); failed(e); },
+    });
+    const u = this.usage(r.job.choice.provider);
+    // T3 reads no usage for this provider: no reading will come, so its record is written now
+    if (u?.unavailable === 'unsupported') void this.unmeasured(id, `T3 reads no usage for ${u.name || u.label}`);
+    else void this.measure();
+  }
+
+  /** Settles once the ended job `id`'s record is written (at once for one not waiting to be
+   *  measured), so the run loop's worker can wait for it, as Python's `gate.measured` records a
+   *  job's usage before its worker ends. It rejects when the record can't be written. */
+  measured(id: string): Promise<void> {
+    return this.recording.get(id) ?? Promise.resolve();
+  }
+
+  /** The ended job `id`, if still waiting for T3's reading after it, is recorded now with no
+   *  `after` and `error`, as Python's `gate.measured` records a failed after-job read. */
+  unmeasured(id: string, error: string): Promise<void> {
+    this.measuring = this.measuring.then(async () => {
+      const e = this.toMeasure.find((x) => x.id === id);
+      if (!e) return;
+      this.toMeasure = this.toMeasure.filter((x) => x !== e);
+      await this.write(e, null, error);
+    });
+    return this.measuring;
   }
 
   /** A job let in that never reached a thread (T3 refused it, a leftover branch): it stops
@@ -238,15 +325,28 @@ export class UsageGate {
       this.toMeasure = this.toMeasure.filter((e) => !ready.includes(e));
       for (const e of ready) {
         const u = this.usage(e.job.choice.provider)!;
-        const after = reading(u.checkedAt, u.windows);
-        await this.log.append({
-          ...e.job.choice, kind: e.job.kind, at: e.ended.toISOString(), job: e.id,
-          before: e.before, after, spent: e.before.checkedAt ? spentOf(e.before, after) : null,
-          ...(e.beside.size ? { sharedWith: [...e.beside] } : {}),
-        });
+        await this.write(e, reading(u.checkedAt, u.windows), null);
       }
     });
     return this.measuring;
+  }
+
+  /** Appends the ended job's record: `after` T3's reading after it, or null with the `error`. A
+   *  write that fails is its waiting worker's to say (`measured` rejects), as Python's worker
+   *  logs a failed record; the measurements after it go on. */
+  private async write(e: Ended, after: Reading | null, error: string | null): Promise<void> {
+    try {
+      await this.log.append({
+        ...e.job.choice, kind: e.job.kind, at: e.ended.toISOString(), job: e.id,
+        before: e.before, after, spent: after && e.before.checkedAt ? spentOf(e.before, after) : null,
+        ...(error ? { error } : {}),
+        ...(e.beside.size ? { sharedWith: [...e.beside] } : {}),
+      });
+    } catch (err) {
+      e.failed(err);
+      return;
+    }
+    e.recorded();
   }
 
   /** Settles once every measurement under way is written (the tests wait on it). */

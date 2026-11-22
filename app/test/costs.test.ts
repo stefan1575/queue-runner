@@ -1,5 +1,5 @@
 // Expected costs, learned per provider, model, effort and kind from the app's own records (#153).
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, test } from 'vitest';
@@ -61,6 +61,23 @@ describe('learned costs', () => {
     await log.append(r2);
     expect((await CostLog.open(file)).records()).toEqual([r, r2]);
     expect(await readFile(file, 'utf8')).toBe(`${JSON.stringify(r)}\n${JSON.stringify(r2)}\n`);
+  });
+
+  test('a record whose write fails is kept nowhere, and a torn tail left since the log was opened is cut before the next append (review 2 of #261, F12)', async () => {
+    dir = await mkdtemp(join(tmpdir(), 'qr-costs-'));
+    const file = join(dir, 'usage.jsonl');
+    const log = await CostLog.open(file);
+    // the write fails on the file itself: it's a folder now
+    await mkdir(file);
+    await expect(log.append(rec(opusMedium, 4, 1))).rejects.toThrow();
+    expect(log.records()).toEqual([]);   // the gate learns nothing from it
+    await rm(file, { recursive: true });
+    // a write cut off partway (as the failed one might have been), then a sound one
+    const r = rec(opusMedium, 5, 1);
+    await writeFile(file, '{"kind":"bu');
+    await log.append(r);
+    expect(await readFile(file, 'utf8')).toBe(`${JSON.stringify(r)}\n`);
+    expect(log.records()).toEqual([r]);
   });
 
   test('a bad line before the last is an error', async () => {
