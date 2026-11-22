@@ -1,6 +1,6 @@
 # The Claude lane
 
-What the Claude lane does each pass: builds, fix and conflict rounds, decisions, ask threads, live steps, and the repos Stefan merges or keeps local tickets for.
+What the Claude lane does each pass: builds, fix and conflict rounds, decisions, ask threads, live steps, and the repos Stefan merges.
 
 ## Two lanes
 
@@ -378,24 +378,3 @@ pass says `merged`, the live run says `live` (the log, and a **Live.** comment o
   the one collection the dashboard's Inbox is written from too (`docs/dashboard.md`, The Inbox's asks).
 - `--once --dry-run`'s merge lines say `would mark ready for Stefan at H` (or `ready for Stefan
   at H`) instead of `would merge`.
-
-## Local tickets
-
-`tickets.py` (ticket 12). A repo whose `config.toml` entry says `issues = "local"` keeps its
-tickets as markdown, `.scratch/<feature>/issues/NN-<slug>.md` (its
-`docs/agents/issue-tracker.md`). **No repo is local by default**; Stefan turns one on.
-
-- **Status:** the first `Status:` line above `## Comments`, in either form (`Status: x` or
-  `**Status:** x`), with or without a trailing date or note: `done (2026-11-10)`, `done.` and
-  `needs-info (2026-11-10: ...)` read as their first word. Done is `done` (or `resolved`, a
-  wayfinding child's done).
-- **Blockers:** the numbers on the first `Blocked by:` line (`05`, `01, 02`,
-  `03-sol-review-dry-run.md`, `#04`; words and dates in brackets and `None` name nothing), in
-  the ticket's own feature folder. A blocker with no file blocks.
-- **Picking** (`pick_ticket`): `ready-for-agent`, every blocker done, lowest number first, a tie
-  going to the feature first by name. Numbers repeat across features, so a ticket is
-  `<feature>/NN`. Checked on 2026-11-10 against every ticket in personal-ops and royal-bully-ops
-  (128): each has a status this reads.
-- **Not built:** the Claude lane skips local repos, and `--once --dry-run` only names the
-  next ticket. The no-remote flow was dropped (ticket 12): queue-runner moved to GitHub and
-  personal-ops is not served (Stefan, 2026-11-10).

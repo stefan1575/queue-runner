@@ -341,9 +341,7 @@ class Runner:
         if fix := self.next_fix(repos=only):
             return Start(name, 'fix', None, lambda: self.run_fix(*fix),
                          f'fix {name}#{fix[1].number}')
-        if not repo.github or repo.local_issues:
-            # No GitHub issues to pick from: a local-ticket repo (`tickets.py`) is only named by
-            # --dry-run.
+        if not repo.github:   # no GitHub issues to pick from
             return None
         if red := red_base(self.jobs, name, repo.base):   # no build from a red base (#98)
             text = (f'{name}: no build starts while {repo.base} fails its checks ({red.reason}; '

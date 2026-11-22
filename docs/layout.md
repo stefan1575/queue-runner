@@ -9,7 +9,6 @@ What each module and script is for.
   PR on one, or an open PR that closes it or that GitHub links to it by hand), not a spec with
   open sub-issues (its children are the work); lowest number first. The job branches `claude/<slug>-<issue>` from
   `origin/<base>`. `pickable` yields every build in that order (the dashboard's queue).
-- `queue_runner/tickets.py`: local tickets: status, blockers and the next one (ticket 12).
 - `queue_runner/brief.py` and `templates/<kind>.md`: a job's brief, filled from the issue and the
   repo; no handoff files.
 - `queue_runner/github.py`: the GitHub seam and its `gh api` adapter.

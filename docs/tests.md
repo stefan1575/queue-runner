@@ -80,8 +80,6 @@ real build, decision, continued job, fix round and live run with `FakeFiles`). E
 start names them on `FakeT3` (which requires them): also the conflict round
 (`test_conflicts.py`), the Opus review (`test_fallback.py`) and the ask thread
 (`test_ask_threads.py`). The MCP launch and wait: `tests/test_t3.py` (`FakeMcp`).
-Local tickets: `tests/test_tickets.py` (both status forms, blocker lines, a sandbox git repo
-with three tickets in a blocker chain) and `LocalTicketsDryRunTest` in `tests/test_cli.py`.
 Live steps: `tests/test_live.py` (the answer block, the batch from `FakeLiveGit`, about to land,
 each outcome and its stop, a restart through the real `Runner`); `GitCli`'s first-parent log and
 changed files in `tests/test_git.py`.

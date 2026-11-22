@@ -267,7 +267,7 @@ class Reader:
         """Reads every served repo once (with `github`, a `Memo` the pass shares, else its own)."""
         gh = github if github is not None else Memo(self.github)
         for repo in self.config.repos:
-            if not repo.github or repo.local_issues:
+            if not repo.github:
                 continue
             try:
                 got = read_repo(self.config, gh, self.git, self.jobs, repo, now=self.clock)

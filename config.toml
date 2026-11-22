@@ -58,7 +58,3 @@ name = "queue-runner"
 github = "stefan1575/queue-runner"
 path = "~/Code/Personal/queue-runner"
 base = "main"
-
-# A repo whose tickets are local markdown (`.scratch/<feature>/issues/NN-<slug>.md`, ticket 12)
-# would say `issues = "local"`; the runner only names its next ticket in `--once --dry-run` and
-# builds none (no served repo needs it: Stefan, 2026-11-10).

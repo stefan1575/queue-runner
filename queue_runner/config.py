@@ -19,16 +19,9 @@ class Repo:
     live_doc: str | None = None
     live_migrations: str = 'supabase/migrations'
     live_functions: str = 'supabase/functions'
-    # Where its tickets are (ticket 12, `tickets.py`): 'github' (issues), or 'local' (markdown
-    # under `.scratch/*/issues/`). No repo is local unless its entry says so.
-    issues: str = 'github'
     # Who merges a clean PR (ticket 17, `merge.py`): 'runner' (it merges itself), or 'stefan'
     # (it labels the PR `ready-for-stefan` and toasts once; Stefan merges, and the runner notices).
     merge: str = 'runner'
-
-    @property
-    def local_issues(self) -> bool:
-        return self.issues == 'local'
 
     @property
     def stefan_merges(self) -> bool:
@@ -86,14 +79,6 @@ def _path(p: str) -> str:
     return os.path.normpath(os.path.expanduser(p))
 
 
-def _issues(entry: dict) -> str:
-    issues = entry.get('issues', 'github')
-    if issues not in ('github', 'local'):
-        raise ValueError(f"repo {entry['name']}: issues must be 'github' or 'local', "
-                         f"not {issues!r}")
-    return issues
-
-
 def _merge(entry: dict) -> str:
     merge = entry.get('merge', 'runner')
     if merge not in ('runner', 'stefan'):
@@ -145,7 +130,7 @@ def load_config(path: str = DEFAULT_CONFIG) -> Config:
                   live_doc=r.get('live_doc') or None,
                   live_migrations=r.get('live_migrations', 'supabase/migrations'),
                   live_functions=r.get('live_functions', 'supabase/functions'),
-                  issues=_issues(r), merge=_merge(r))
+                  merge=_merge(r))
              for r in raw.get('repos', [])]
     claude, sol = raw.get('claude', {}), raw.get('sol', {})
     state_dir = _path(raw['state_dir'])
