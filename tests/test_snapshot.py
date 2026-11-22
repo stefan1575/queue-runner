@@ -194,10 +194,6 @@ class LanesTest(unittest.TestCase):
         self.assertEqual(lane(snap, 'sol')['state'], 'idle')
         self.assertEqual(snap['knob'], {'paused': True, 'reserve': 5.0})   # one word: the switch
 
-    def test_gate_jsons_old_pause_reads_stopped_too(self):
-        snap = snapshot.build(facts(switch=stopped(claude=('after-job', NOW, 'gate'))))
-        self.assertEqual(lane(snap, 'claude')['state'], 'stopped')
-
     def test_now_reads_stopped_after_the_job_until_stop_now_is_built(self):
         snap = snapshot.build(facts(switch=stopped(claude=('now', NOW, 'control')),
                                     jobs=[job('build', 212, 3)]))
@@ -503,7 +499,7 @@ class ContractTest(unittest.TestCase):
 
     def test_the_real_snapshot_has_the_samples_keys(self):
         for snap in (snapshot.build(busy_facts()), snapshot.build(facts()),
-                     snapshot.build(facts(switch=stopped(claude=('after-job', NOW, 'gate'))))):
+                     snapshot.build(facts(switch=stopped(claude=('after-job', NOW, 'control'))))):
             self.assertEqual(set(snap), set(self.samples[0]) - {'sample'})
             self.holds(snap['lanes'], lambda s: s['lanes'], 'a lane')
             self.holds([l['job'] for l in snap['lanes'] if l['job']],

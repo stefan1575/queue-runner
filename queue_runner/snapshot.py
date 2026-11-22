@@ -96,7 +96,7 @@ class Facts:
     repos: list = field(default_factory=list)
     jobs: list = field(default_factory=list)     # state.Job, the job log folded
     knob: Knob | None = Knob()                   # gate.json; None: unreadable
-    # Each lane's stop (control.json, or gate.json's older pause), as read for this snapshot.
+    # Each lane's stop (control.json), as read for this snapshot.
     switch: control.Switch = control.Switch()
     claude_model: str = 'claude-opus-5-5'
     review_provider: str = 'chatgpt'   # config.toml's `[review] provider` (issue #76)

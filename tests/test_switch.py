@@ -83,52 +83,17 @@ path = "{self.dir}"
             return f.read()
 
 
-class TodaysPauseTest(Harness):
-    def test_a_runner_started_paused_through_gate_json_with_no_control_json_starts_no_claude_job(
-            self):
-        self.put('gate.json', {'paused': True, 'reserve': 5.0})
-        self.run_main([], passes=3)
-        self.assertEqual(self.t3.starts, [])
-        self.assertEqual(self.log.jobs(), [])
-        self.assertFalse(os.path.exists(os.path.join(self.state, 'control.json')))
-
-    def test_once_too(self):
-        self.put('gate.json', {'paused': True, 'reserve': 5.0})
-        self.run_main(['--once'])
-        self.assertEqual(self.t3.starts, [])
-
-
 def control(**lanes):
     return {'version': 1, 'written_at': '2026-11-15T19:58:00+08:00',
             'lanes': {k: {'stop': v, 'at': '2026-11-15T19:58:00+08:00'} for k, v in lanes.items()},
             'repo_order': []}
 
 
-class OldPauseTest(Harness):
-    def test_an_entry_for_the_claude_lane_wins_over_gate_jsons_pause_either_way(self):
-        self.put('gate.json', {'paused': True, 'reserve': 5.0})
-        self.put('control.json', control(claude=None))
-        self.run_main(['--once'])
-        self.assertEqual(len(self.t3.starts), 1)
-        self.put('gate.json', {'paused': False, 'reserve': 5.0})
-        self.put('control.json', control(claude='after-job'))
-        self.run_main(['--once'])
-        self.assertEqual(self.t3.starts, [])
-
-    def test_an_entry_for_the_other_lane_leaves_gate_jsons_pause_standing(self):
-        self.put('gate.json', {'paused': True, 'reserve': 5.0})
-        self.put('control.json', control(sol=None))
-        self.run_main(['--once'])
-        self.assertEqual(self.t3.starts, [])
-
+class SwitchReadTest(Harness):
     def test_the_switch_says_where_the_stop_came_from_and_since_when(self):
         from queue_runner import control as ctl
-        self.put('gate.json', {'paused': True, 'reserve': 5.0})
-        at = datetime.datetime(2026, 11, 14, 9, 30, tzinfo=UTC).timestamp()
-        os.utime(os.path.join(self.state, 'gate.json'), (at, at))
         s = ctl.read(self.state)
-        self.assertEqual(s.stop('claude'), ctl.Stop('after-job', datetime.datetime.fromtimestamp(
-            at, UTC), 'gate'))
+        self.assertEqual(s.stop('claude'), ctl.Stop())
         self.assertFalse(s.holds('sol'))
         self.assertIsNone(s.written_at)
         self.put('control.json', control(claude='now'))
@@ -142,7 +107,7 @@ class OldPauseTest(Harness):
         from queue_runner.gate import Knob, read_knob, write_knob
         write_knob(self.state, Knob(reserve=12.5))
         self.assertEqual(self.read('gate.json'), {'reserve': 12.5})
-        self.put('gate.json', {'paused': True, 'reserve': 7})
+        self.put('gate.json', {'paused': True, 'reserve': 7})   # another key: only the reserve
         self.assertEqual(read_knob(self.state), Knob(reserve=7.0))
 
 
@@ -220,22 +185,6 @@ class CliTest(Harness):
         self.run_main(['--once'])
         self.assertEqual(len(self.t3.starts), 1)
 
-    def test_the_old_pause_is_carried_over_and_gate_json_keeps_the_reserve(self):
-        self.put('gate.json', {'paused': True, 'reserve': 7.0})
-        self.run_main(['--pause', 'sol'])   # says nothing of Claude: its old pause stands
-        self.assertEqual(self.lanes(), {'claude': 'after-job', 'sol': 'after-job'})
-        self.assertEqual(self.read('gate.json'), {'reserve': 7.0})
-        self.run_main(['--once'])
-        self.assertEqual(self.t3.starts, [])
-
-    def test_a_new_reserve_carries_the_old_pause_over_too(self):
-        self.put('gate.json', {'paused': True, 'reserve': 5.0})
-        self.run_main(['--reserve', '9'])
-        self.assertEqual(self.read('gate.json'), {'reserve': 9.0})
-        self.assertEqual(self.lanes(), {'claude': 'after-job'})
-        self.run_main(['--once'])
-        self.assertEqual(self.t3.starts, [])
-
     def test_an_unreadable_control_json_is_written_afresh_as_the_page_does(self):
         self.put('control.json', '{ torn')
         code, out = self.run_main(['--pause'])
@@ -247,7 +196,7 @@ class CliTest(Harness):
 
 class SaysTest(Harness):
     def test_gate_says_stopped_by_stefan_and_how_to_resume_from_either_end(self):
-        self.put('gate.json', {'paused': True, 'reserve': 5.0})
+        self.put('control.json', control(claude='after-job'))
         code, out = self.run_main(['--gate'])
         self.assertEqual(code, 0)
         self.assertNotIn('paused', out)
@@ -562,10 +511,8 @@ class ControlValidationTest(unittest.TestCase):
         self.addCleanup(tmp.cleanup)
         self.state = tmp.name
 
-    def test_a_lane_without_a_stop_does_not_override_the_old_pause(self):
+    def test_a_lane_without_a_stop_is_unreadable_and_holds_the_lane(self):
         from queue_runner import control as ctl
-        with open(os.path.join(self.state, 'gate.json'), 'w', encoding='utf-8') as f:
-            json.dump({'paused': True, 'reserve': 5}, f)
         _put(self.state, {'lanes': {'claude': {}}})
         switch = ctl.read(self.state)
         self.assertIsNotNone(switch.error)

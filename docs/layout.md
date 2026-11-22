@@ -56,8 +56,8 @@ What each module and script is for.
   app-server` (ticket 42).
 - `queue_runner/gate.py`: the usage gate: `decide()` beside the jobs running (`Running`),
   Stefan's knob (`gate.json`), learned costs (`usage.jsonl`).
-- `queue_runner/control.py`: each lane's switch: reading `control.json` (and gate.json's older
-  pause), writing it for `--pause` and `--resume`, and what the runner says (ticket 30); each
+- `queue_runner/control.py`: each lane's switch: reading `control.json`, writing it for
+  `--pause` and `--resume`, and what the runner says (ticket 30); each
   repo's stop, `stopped_repos` (ticket 37); each ask's
   entry, `Switch.asks`, read only (ticket 36).
 - `queue_runner/config.py`: the served repos and the runner's folders; the stopped repos

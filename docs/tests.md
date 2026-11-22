@@ -153,8 +153,8 @@ order and a stopped repo, a limited job and the running one, decisions, conflict
 PR status, left alone included; timelines and activity; GitHub down; and a real issue, feature,
 PR, queue entry and activity row held to the sample's keys); `WorkTest` and `--snapshot`'s
 GitHub read in `tests/test_snapshot_runner.py`; `GhCli.work_issues` in `tests/test_github.py`.
-Stopping a lane: `tests/test_switch.py` (today's gate.json pause through the run loop, each
-stop through `main` and `Runner.run_once`, the older pause against an entry, `--pause` and
+Stopping a lane: `tests/test_switch.py` (each
+stop through `main` and `Runner.run_once`, `--pause` and
 `--resume`, the same file from the CLI's writer and `serve.App.write_control`, `--gate` and the
 dry run's words, an unreadable control.json in every shape, read and repaired from both
 ends, the wake tasks a stopped lane doesn't set, and a Stop asked mid-review or mid-merge).

@@ -8,7 +8,7 @@ Limits). Sol isn't gated.
   wouldn't fit the week even then waits for the weekly reset.
 - **Stefan's knob** is `<state_dir>/gate.json` (`reserve`), set with `--reserve N`; the runner
   reads it before every Claude job, so it works while it runs. Stopping a lane isn't the gate's:
-  it's `control.json` (`control.py`), and an older `paused` here is read there.
+  it's `control.json` (`control.py`).
 - **Expected cost** per job kind (build, fix, decision), in percent of each window, is learned from
   `<state_dir>/usage.jsonl`: one record per Claude job pass, usage before and after. With fewer
   than `SAMPLES` usable records it's the cautious `DEFAULTS`; then the largest of the last `RECENT`.
@@ -178,7 +178,6 @@ def read_knob(state_dir: str) -> Knob:
             raw = json.load(f)
     except FileNotFoundError:
         return Knob()
-    # An older `paused` in it is control.py's to read.
     return Knob(reserve=float(raw.get('reserve', DEFAULT_RESERVE)))
 
 

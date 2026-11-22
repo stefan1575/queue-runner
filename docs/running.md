@@ -159,11 +159,6 @@ on; `"now"` is read as `"after-job"` until ticket 34.
   to (review 2's F9). A `repos`
   that isn't an object names no repo and is dropped. The page reads control.json through the
   same repair (`App.control`), so it shows those lanes stopped.
-- **The older pause:** with `paused: true` in gate.json and no `claude` entry in control.json,
-  the Claude lane is stopped (since gate.json's mtime). An entry, either way, wins. The CLI's
-  `ask` (and `--reserve`, through `carry_over`) moves that pause into control.json and leaves
-  gate.json with `reserve` only; the runner itself writes neither file. Today's runner was
-  paused that way, so restarting onto this code starts no Claude job.
 - **Wake tasks:** a stopped lane sets none (`Runner.wake_times`).
 - `--gate` prints each lane's switch first (and each kind `waits: the Claude lane is stopped by
   Stefan` while it is); `--once --dry-run` says a stopped lane's line before what it would do

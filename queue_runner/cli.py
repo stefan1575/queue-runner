@@ -198,8 +198,6 @@ def _knob(config, args, out) -> int:
         read_knob(config.state_dir)
     except (OSError, ValueError) as e:   # set afresh
         print(f'gate.json was unreadable ({e}); writing it afresh.', file=out)
-    else:
-        control.carry_over(config.state_dir, _now_iso())   # an older pause in it stands
     write_knob(config.state_dir, Knob(reserve=args.reserve))
     print(f'The weekly reserve is {args.reserve:g}%. A running runner reads this before its '
           'next Claude job.', file=out)

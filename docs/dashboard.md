@@ -57,7 +57,7 @@ python3 -m dashboard    # http://queue.localhost/ is the runner's; http://localh
   written ...`, then `... is written again`) and never stops a lane. `build(Facts)` is pure, one
   small function per part; `Snapshots` gathers the facts: the job log (each lane's open jobs),
   each lane's switch (`control.read`: a stopped lane is `stopped`, `stopped.at` when Stefan
-  asked, or gate.json's mtime for the older pause; `stopping` while its job still runs; an
+  asked; `stopping` while its job still runs; an
   unreadable control.json makes an idle lane `waiting` with the reason; `control_read_at` is
   the `written_at` of the control.json the snapshot read, since each lane reads it again before
   it starts anything; `knob.paused` is whether the Claude lane is stopped), gate.json's reserve, the learned costs (`CostBook.learned`), the Claude lane's wait as its last
