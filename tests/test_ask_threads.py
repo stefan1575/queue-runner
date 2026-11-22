@@ -503,15 +503,6 @@ class SnapshotTest(ThreadCase):
         self.assertEqual((a['go']['url'], a['also']['where']), (ask.link, 'github'))
         self.assertIn('You decided in T3.', [t['text'] for t in a['timeline']])
 
-    def test_asks_that_are_not_a_pr_stop_offer_no_thread(self):
-        self.noted()
-        live = self.r.jobs.started(kind='stop', repo='first', issue=20, branch='claude/red-5',
-                                   title='t', sha=td.H2, stop='live')
-        self.r.jobs.ended(live.id, exit_code=None, outcome='filed', reason='its live steps')
-        asks = {a['id']: a for a in self.snap()['asks']}
-        self.assertIsNone(asks[f'stop-{live.id}']['decide'])
-        self.assertEqual(asks[f'stop-{self.jobs("stop")[0].id}']['decide']['state'], 'offered')
-
     def test_decide_and_also_have_the_samples_keys(self):
         from dashboard import sample
         samples = [s for s in (sample.build(n) for n in sample.STATES) if s['asks'] is not None]

@@ -13,13 +13,11 @@ from queue_runner.config import Config, Repo
 from queue_runner.run import Runner
 from queue_runner.state import JobLog
 from tests.fakes import FakeGitHubForReviews, issue
-from tests.test_live import FakeLiveGit
+from tests.fakes_t3 import FakeReviewGit
 
 UTC = datetime.timezone.utc
 NOW = datetime.datetime(2026, 11, 15, 12, 0, tzinfo=UTC)
 WRITTEN = '2026-11-15T19:58:00+08:00'
-A, B = 'a' * 40, 'b' * 40
-M1 = 'supabase/migrations/20261101000000_one.sql'
 LD, GB = 'leads-dashboard', 'game-backdrop'
 
 
@@ -60,7 +58,7 @@ class PerRepoGitHub(FakeGitHubForReviews):
 
 class Harness(unittest.TestCase):
     """game-backdrop (a ready issue, first in config.toml, as it is since 2026-11-15) and
-    leads-dashboard (live steps)."""
+    leads-dashboard."""
 
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
@@ -70,28 +68,21 @@ class Harness(unittest.TestCase):
         os.makedirs(self.state)
         self.repos = [Repo(name=GB, github=f'owner/{GB}', path=os.path.join(self.dir, GB)),
                       Repo(name=LD, github=f'owner/{LD}', path=os.path.join(self.dir, LD),
-                           live_doc='docs/agents/lovable-cloud.md', merge='stefan')]
+                           merge='stefan')]
         self.config = Config(repos=list(self.repos), state_dir=self.state,
                              log_dir=os.path.join(self.dir, 'logs'))
         self.jobs = JobLog(os.path.join(self.state, 'jobs.jsonl'))
         self.gh = PerRepoGitHub(issues={GB: [issue(5, 'Backdrop', 'Draw it.')]})
-        self.git = FakeLiveGit(base=A)
+        self.git = FakeReviewGit()
         self.lines = []
 
     def put(self, data):
         with open(os.path.join(self.state, 'control.json'), 'w', encoding='utf-8') as f:
             f.write(data if isinstance(data, str) else json.dumps(data))
 
-    def merged_since_live(self):
-        """leads-dashboard's live steps are due: its base moved from A (live) to B, PR #209."""
-        job = self.jobs.started(kind='live', repo=LD, issue=200, branch='main',
-                                title=f'Queue runner live: {LD}', sha=A, head=A)
-        self.jobs.ended(job.id, exit_code=None, outcome='assumed')
-        self.git.base = B
-        self.git.ancestors.add((A, B))
-        self.git.logs[(A, B)] = [{'sha': '1' * 40,
-                                  'subject': 'Merge pull request #209 from owner/claude/x-1'}]
-        self.git.changes[(A, B)] = [('A', M1)]
+    def leads_ready(self):
+        """leads-dashboard has a ready issue too, #3."""
+        self.gh.by_repo_issues[LD] = [issue(3, 'Leads', 'List them.')]
 
     def runner(self, t3=None, sol=None):
         from tests.fakes_t3 import FakeT3
@@ -114,19 +105,19 @@ class FirstRunTest(Harness):
     """Stefan's first real run: game-backdrop first, leads-dashboard served but stopped."""
 
     def test_with_leads_dashboard_stopped_the_first_job_is_game_backdrops_build(self):
-        self.merged_since_live()
+        self.leads_ready()
         self.put(control([GB, LD], lanes={'claude': None}, **{LD: 'after-job'}))
         self.run_loop(self.runner())
         self.assertEqual(self.titles()[:1], [f'Queue runner build: {GB}#5'])
-        self.assertNotIn(f'Queue runner live: {LD}', self.titles())
-        self.assertEqual([j.kind for j in self.jobs.jobs() if j.repo == LD], ['live'])
+        self.assertNotIn(f'Queue runner build: {LD}#3', self.titles())
+        self.assertEqual([j.kind for j in self.jobs.jobs() if j.repo == LD], [])
 
-    def test_without_the_stop_its_live_steps_start_beside_game_backdrops_build(self):   # #50
-        self.merged_since_live()
+    def test_without_the_stop_its_build_starts_beside_game_backdrops_build(self):   # #50
+        self.leads_ready()
         self.put(control([GB, LD], lanes={'claude': None}))
         runner = self.runner()
         runner.take_stops()
-        self.assertEqual({s.repo: s.kind for s in runner.choose()}, {GB: 'build', LD: 'live'})
+        self.assertEqual({s.repo: s.kind for s in runner.choose()}, {GB: 'build', LD: 'build'})
 
 
 class ClaudeLaneTest(Harness):
@@ -463,7 +454,7 @@ class CliSaysTest(Harness):
         with open(self.toml, 'w', encoding='utf-8') as f:
             f.write(f'state_dir = "{d}/state"\nlog_dir = "{d}/logs"\n'
                     f'\n[[repos]]\nname = "{LD}"\ngithub = "owner/{LD}"\npath = "{d}/{LD}"\n'
-                    f'live_doc = "docs/agents/lovable-cloud.md"\nmerge = "stefan"\n'
+                    f'merge = "stefan"\n'
                     f'\n[[repos]]\nname = "{GB}"\ngithub = "owner/{GB}"\npath = "{d}/{GB}"\n')
 
     def main(self, *args):
@@ -484,19 +475,19 @@ class CliSaysTest(Harness):
         self.assertIn('control.json stops old-repo, which is not served: ignored', out)
         self.assertNotIn(f'{GB} is stopped', out)
 
-    def test_the_dry_run_says_so_and_would_build_game_backdrop_not_go_live(self):
-        self.merged_since_live()
+    def test_the_dry_run_says_so_and_would_build_game_backdrop_not_leads_dashboard(self):
+        self.leads_ready()
         self.put(control([GB, LD], **{LD: 'after-job'}))
         out = self.main('--once', '--dry-run')
         self.assertIn(f'dry run: {LD} is stopped by Stefan: neither lane takes up its work', out)
-        self.assertNotIn('Would start the live steps', out)
+        self.assertNotIn('#3 Leads', out)
         self.assertIn(f'issue:  #5 Backdrop', out)
         self.assertEqual(self.t3.starts, [])
 
-    def test_without_the_stop_the_dry_run_would_go_live(self):   # the control
-        self.merged_since_live()
+    def test_without_the_stop_the_dry_run_would_build_leads_dashboard(self):   # the control
+        self.leads_ready()
         self.put(control([GB, LD]))
-        self.assertIn(f'Would start the live steps on {LD}', self.main('--once', '--dry-run'))
+        self.assertIn('issue:  #3 Leads', self.main('--once', '--dry-run'))
 
 
 class SampleTest(unittest.TestCase):

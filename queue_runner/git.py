@@ -204,28 +204,8 @@ class GitCli:
         return gone
 
 
-    # --- live steps after merges ----------------------------------------------------------------
-
     def sha(self, path: str, ref: str) -> str:
         return self._ok(['-C', path, 'rev-parse', '--verify', f'{ref}^{{commit}}']).strip()
-
-    def first_parent(self, path: str, a: str, b: str) -> list[dict]:
-        """The commits on `b`'s first-parent line since `a`, oldest first (a merged PR is one
-        merge commit): [{sha, subject}]."""
-        out = self._ok(['-C', path, 'log', '--reverse', '--first-parent', '--format=%H%x09%s',
-                        f'{a}..{b}'])
-        return [dict(zip(('sha', 'subject'), line.split('	', 1)))
-                for line in out.splitlines() if line]
-
-    def name_status(self, path: str, a: str, b: str) -> list[tuple[str, str]]:
-        """The files `b` changed since `a`: [(status letter, path)], renames as their new path."""
-        out = self._ok(['-C', path, 'diff', '--name-status', '--no-renames', a, b])
-        found = []
-        for line in out.splitlines():
-            parts = line.split('	')
-            if len(parts) >= 2:
-                found.append((parts[0][:1], parts[-1]))
-        return found
 
 
 def _same_path(p: str) -> str:

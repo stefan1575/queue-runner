@@ -205,7 +205,7 @@ def _threads(jobs, repo) -> list[Waiting]:
 
 
 # What the runner does after Stefan's answer, until it's done: the jobs on the PR after it.
-ACTING = ('decision', 'fix', 'review', 'merge', 'ready', 'live', 'build')
+ACTING = ('decision', 'fix', 'review', 'merge', 'ready', 'build')
 
 
 def _when(stamp: str) -> datetime.datetime:

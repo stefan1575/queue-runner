@@ -2,11 +2,11 @@
 the last collection (`inbox.Inbox`) and the job log into the snapshot's `asks` and `answered`, in
 the shape `dashboard/sample.py` builds: each written to be picked up cold, a week later.
 
-- `kind`: `broken` (a failed check, a live run that stopped, a base branch failing its checks:
+- `kind`: `broken` (a failed check, a base branch failing its checks:
   issue #98, one ask for the repo), `stuck` (a review stop, an approach
   note, a fix round that pushed nothing, a conflict a round couldn't resolve), `decision` (a
-  decision's stop on a PR, a build a decision left to Stefan, a thread waiting for his answer,
-  steps only he can do after a live run) or `merge` (ready for him to merge). Listed in that
+  decision's stop on a PR, a build a decision left to Stefan, a thread waiting for his answer)
+  or `merge` (ready for him to merge). Listed in that
   order, oldest first inside a kind.
 - `about` is the first prose of the issue a PR closes (its "What to build" or "Summary" when it
   has one), else of the PR or issue itself, clipped. `because` is the stop's own reason, with
@@ -21,8 +21,7 @@ from .stops import KINDS, number_of
 
 ORDER = ('broken', 'stuck', 'decision', 'merge')
 KIND = {'review': 'stuck', 'approach-note': 'stuck', 'no-push': 'stuck', 'conflict': 'stuck',
-        'decision': 'decision', 'live-todo': 'decision', 'failed-check': 'broken',
-        'live': 'broken'}
+        'decision': 'decision', 'failed-check': 'broken'}
 REVIEWED = ('clean', 'blocking', 'stop', 'approach-note')
 SKIPPED = ('not-started', 'not-sent')
 ABOUT_MAX = 300
@@ -178,9 +177,6 @@ class Story:
                 if j.outcome == 'merged':
                     add(j.ended_at or j.started_at, j, 'You merged it.'
                         if 'Stefan' in (j.reason or '') else 'The runner merged it.')
-            for j in self.jobs:
-                if j.kind == 'live' and j.repo == repo and (j.issue == n or n in (j.prs or [])):
-                    add(j.ended_at or j.started_at, j, self._live(j))
         for j in self.on('decision', repo, n):
             # A decision that writes a note or stops files its stop before it ends: told at its
             # start, so it reads before the stop it filed.
@@ -297,19 +293,6 @@ class Story:
         return None
 
     @staticmethod
-    def _live(j) -> str | None:
-        return {
-            'live': 'Its live steps ran, and it went live.',
-            'partial': 'Its live steps went part of the way' + (f': {clip(j.reason, 200)}'
-                                                                 if j.reason else '') + '.',
-            'stop': 'Its live steps stopped at a question' + (f': {clip(j.reason, 200)}'
-                                                              if j.reason else '') + '.',
-            'failed': 'Its live steps failed' + (f': {clip(j.reason or j.error, 200)}'
-                                                 if j.reason or j.error else '') + '.',
-            'usage-limit': "Its live steps were cut off by Claude's usage limit.",
-        }.get(j.outcome, 'Its live steps started.' if j.open else None)
-
-    @staticmethod
     def _decision(j) -> str | None:
         if j.open:
             return 'A decision thread is deciding what to do next.'
@@ -337,11 +320,9 @@ class Story:
     def _stop(j) -> str:
         on = f', on needs-info issue #{number_of(j.link)}' if j.link else ''
         h7 = (j.sha or '')[:7]
-        if j.stop == 'live-todo':
-            return f'It went live, with steps only you can do{on}.'
         lead = {'failed-check': f'A check failed on {h7}, so the runner',
-                'conflict': f'It conflicted with its base at {h7}, so the runner',
-                'live': 'Its live steps stopped, so the runner'}.get(j.stop, 'The runner')
+                'conflict': f'It conflicted with its base at {h7}, so the runner'}.get(
+                    j.stop, 'The runner')
         return f'{lead} stopped the PR and brought it to you{on}.'
 
 
@@ -424,16 +405,6 @@ def _stop_ask(story, w, repo) -> dict:
         situation = 'A decision on this PR needs your answer.'
         because = "A decision thread couldn't settle it, and left the question to you."
         question = sentence(reason)
-    elif s.stop == 'live':
-        situation = f'PR #{n} is merged, but its live steps stopped before it went live.'
-        question = 'What should the next live run do?'
-        options = _options([('a reply', 'The next live run reads your words first'),
-                            ('close the issue', 'The next live run takes the batch up as it '
-                                                'is')])
-    else:   # live-todo
-        situation = f'PR #{n} is live, with steps only you can do.'
-        question = 'Have you done the steps only you can do?'
-        options = _options([('close the issue', 'Says they are done')])
     if review and s.stop in ('review', 'approach-note', 'no-push') and story.open_now(review):
         because += ' ' + story.open_now(review)
     return {'situation': situation, 'because': because, 'question': question,
@@ -458,12 +429,11 @@ def _base_ask(story, w, repo) -> dict:
 def _merge_ask(story, w, repo) -> dict:
     r = w.job.round if w.job else None
     h7 = (w.head or '')[:7]
-    live = ' Its live steps follow your merge.' if repo and repo.live_doc else ''
     return {'situation': 'This PR is reviewed clean and ready for you to merge.',
             'because': (f'Clean on {h7}' + (f' after review {r}' if r else '')
                         + ', checks passed, no conflict, nothing said since.'
                         + (f' In {repo.name} the merge is yours.' if repo else '')),
-            'question': "Merge it when you've looked." + live, 'options': [],
+            'question': "Merge it when you've looked.", 'options': [],
             'go': {'label': 'Open PR to merge', 'where': 'github', 'url': w.url}}
 
 
@@ -536,8 +506,6 @@ def ask(story, w, repos) -> dict:
              for n, title in w.holds_up]
     if w.kind == 'base':
         holds.append(f'Every new build in {w.repo}')
-    if w.kind == 'stop' and w.job.stop == 'live':
-        holds.append(f'Every later live run in {w.repo}')
     a['holds_up'] = holds
     a['timeline'] = story.steps(w.repo, w.number, w.on_pr)
     order = ['id', 'kind', 'repo', 'ref', 'pr', 'subject', 'since', 'situation', 'about',

@@ -718,8 +718,7 @@ case for case in `test/git-seam.test.ts`, against a real git repo in a temp fold
 `tests/fakes_t3.py`'s `FakeGit` and `FakeReviewGit` in `test/fakes.ts`. It runs the same git
 commands and reads their answers the same way, with Python's names: `GitError`, `run_git`,
 `GitCli` and its calls (`fetch`, `has_branch`, `free_branch`, `commits`, `fetch_pr`, `evidence`,
-`checkout`, `remove_checkout`, `sweep_stale`, `remove_worktree`, `log`, `first_parent`,
-`name_status` and the rest). What each call does is the module's own comment, as in Python.
+`checkout`, `remove_checkout`, `sweep_stale`, `remove_worktree`, `log`, `sha` and the rest). What each call does is the module's own comment, as in Python.
 `remove_checkout` unlinks the checkout's `node_modules` first, with the ported `Deps.unlink`
 (The dependencies, below). Deleting goes by Python's calls on Windows (`src/python-files.ts`,
 which the dependencies port shares): Node's `unlink` and

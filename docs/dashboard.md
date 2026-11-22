@@ -99,8 +99,8 @@ python3 -m dashboard    # http://queue.localhost/ is the runner's; http://localh
   order, then the feature whose first open ticket has the lowest number, a finished one last; each with `tickets`, its
   tickets' `repo#n` keys in the order they're built: what has started first, furthest along first, then a blocker
   before what it blocks, lowest number first, one not marked ready last), `issues` (with `pick`, the order ready work is
-  built in, and `state`: `done` only once it's live, `merged` while it's merged and its live
-  steps haven't run, `review` and `fixing` in a PR, `building`, `you`, `ready`, `blocked`,
+  built in, and `state`: `done`, `merged` (the page's state for merged and not live; the runner
+  writes none since the live steps went, #265), `review` and `fixing` in a PR, `building`, `you`, `ready`, `blocked`,
   `not-ready`), `prs` (each with its timeline by head), `activity` (what happened, newest first),
   `costs` (what the gate expects each kind of Claude job to take), `roles` (which lane does each
   kind of job) and `knob` (`gate.json`). A lane and a plan name their `provider` (`claude`,
@@ -231,10 +231,10 @@ python3 -m dashboard    # http://queue.localhost/ is the runner's; http://localh
   Important findings still open ("Open now: F3, ..."), an approach note's first paragraph after
   it; `timeline` the job log on that PR or issue, oldest first, a whole sentence per step (a
   build, each review and the kinds of problem it raised, each fix or conflict round, decisions,
-  stops, answers, ready marks, merges, live runs, `--release`s; a tie goes to the job written
+  stops, answers, ready marks, merges, `--release`s; a tie goes to the job written
   first). **Kinds:** a review stop, approach note, `no-push` and `conflict` are `stuck`; a
-  failed check, a `live` stop and a base stop (once per repo, #98) `broken`; a decision's stop
-  on a PR, a build a decision left to him, a waiting thread and `live-todo` `decision`; a ready
+  failed check and a base stop (once per repo, #98) `broken`; a decision's stop
+  on a PR, a build a decision left to him and a waiting thread `decision`; a ready
   PR `merge`. Listed broken, stuck, decision, merge, oldest first inside a kind. **Ids** are
   stable: `stop-<job>`, `decision-<decision job>`, `thread-<job>`, `merge-<repo>-<n>-<head7>`,
   `base-<job>`. An approach note
@@ -249,28 +249,25 @@ python3 -m dashboard    # http://queue.localhost/ is the runner's; http://localh
   Inbox, through one `work.Memo` (each GitHub call once for both: about 80 `gh` calls and a
   minute for the three served repos, 2026-11-15, half of it the Inbox's). It goes through the
   lanes' own code, so the queues are what the lanes take up: `Decider.cases`,
-  `LiveSteps.batch(record=False)` on a git that never fetches (`work.NoFetch`) and a stopper that
-  files nothing, `Fixer.candidates`, `picker.pickable` (every build `pick` could take, in its
+  `Fixer.candidates`, `picker.pickable` (every build `pick` could take, in its
   order), `Reviewer.candidates`, and `Merger.steps` (the merge re-check step by step: `why_not`
   is its first failing step). Issues come from `GhCli.work_issues` (one paged GraphQL query:
   labels, parent, sub-issues, native blockers). Every repo is read, a stopped one too, and
   `--snapshot` reads the same way. **GitHub down:** a repo it can't read keeps its last good
   read, and the GitHub source says so (`work.stale_github`, after the Inbox's line). **A
-  part failing on its own** (the builds, what's in flight, decisions, live steps, what's merged
-  and not live, the findings, fix rounds or reviews, or one PR's merge re-check, reviews, or
+  part failing on its own** (the builds, what's in flight, decisions, the findings, fix rounds
+  or reviews, or one PR's merge re-check, reviews, or
   its own reading in the lanes' readers, said there as `reading it failed`) keeps that part
   from the last good read (`work.kept`, `RepoRead.failed`; a PR's own parts only while its
   head is the same), and the repo is stale, since its last whole read, until a read has every
   part. **The
   lists** (`work.lists`, `work.queue`) are written from the last read and the job log now, in
   `Facts.repos`' order, a stopped repo's work left out of both queues. **The Claude lane's
-  queue** is `Runner.choose`'s order: the jobs a limit cut off, decisions, live steps (ref the
-  batch's newest PR), fix and conflict rounds (only those that may go now: the next conflicted
+  queue** is `Runner.choose`'s order: the jobs a limit cut off, decisions, fix and conflict rounds (only those that may go now: the next conflicted
   PR waits), then builds in the picker's order; its open job isn't listed again. **The reviewing
   lane's** is the PRs Sol would review now. **Issues:** each repo's open issues but its specs
   and maps (an issue with sub-issues is a feature) and the runner's `needs-info` issues, plus
-  each feature's closed sub-issues (`done`, or `merged` while a merge commit since the last live
-  run names its branch). An issue with an open PR takes its PR's family (`you` while it's held or
+  each feature's closed sub-issues (`done`). An issue with an open PR takes its PR's family (`you` while it's held or
   ready for him, `fixing` while a round is queued or running, else `review`), with the PR's
   status as `note`; then an ask on it is `you`; a build the job log holds says what it left
   (`building`, or `you` with the `--release` that frees it; a build a release settled holds

@@ -454,8 +454,8 @@ class SolStopsAfterItsJobTest(unittest.TestCase):
 
     def runner(self, sol):
         from queue_runner.run import Runner
-        from tests.test_live import FakeLiveGit
-        git = FakeLiveGit()
+        from tests.fakes_t3 import FakeReviewGit
+        git = FakeReviewGit()
         git.heads = {p.number: p.head_sha for p in self.gh.prs}
         return Runner(self.config, github=self.gh, t3=FakeT3([]), git=git, out=io.StringIO(),
                       log_line=lambda _: None, sol=sol)

@@ -143,7 +143,7 @@ def build(name: str = DEFAULT, base: datetime | None = None, control: dict | Non
                 "about": "A Client's page shows the Twilio tracking number assigned to them, once their Twilio account is verified.",
                 "because": "Clean on a0d5f6f, checks passed, no conflict, nothing said since. In leads-dashboard the merge is yours.",
                 "story": ["Thu: built, PR #207 opened", "Review 1: one problem, fixed", "Today: review 2 clean"],
-                "question": "Merge it when you've looked. Its live steps follow your merge.",
+                "question": "Merge it when you've looked.",
                 "holds_up": [],
                 "go": {"label": "Open PR to merge", "where": "github", "url": GH[LD] + "/pull/207"},
                 "why": ["Clean on a0d5f6f after review 2. Checks passed, no conflict, nothing said since."],
@@ -256,14 +256,12 @@ def build(name: str = DEFAULT, base: datetime | None = None, control: dict | Non
             {"kind": "build", "label": "Build", "session": 60, "week": 15, "basis": "The cautious default, until 3 builds are recorded"},
             {"kind": "fix", "label": "Fix round", "session": 34, "week": 6, "basis": "The largest of the last 5"},
             {"kind": "decision", "label": "Decision", "session": 15, "week": 4, "basis": "The cautious default"},
-            {"kind": "live", "label": "Live steps", "session": 20, "week": 5, "basis": "The cautious default"},
         ],
         # Which lane does each kind of job (Settings).
         "roles": [
             {"job": "Build", "what": "A new issue becomes a PR", "lane": "claude"},
             {"job": "Fix", "what": "Answers a blocking review, or merges main into a PR that conflicts", "lane": "claude"},
             {"job": "Decision", "what": "Decides a case the fixed flow doesn't cover", "lane": "claude"},
-            {"job": "Live steps", "what": "After a merge, makes it live", "lane": "claude"},
             {"job": "Review", "what": "Reviews each PR head", "lane": "sol"},
         ],
         # In build order (`_order`, below): the page shows them as they come. Each gets `tickets`,
@@ -326,11 +324,6 @@ _TIMELINES = {
         (30, "Claude started building #214."),
         (14, "The build stopped before writing the form's required fields: the issue doesn't say whether the form is required."),
         (12, "A decision thread couldn't settle it from the issue, so it came to you."),
-    ],
-    "ask-live": [
-        (DAY + 130, "You merged PR #198."),
-        (9, "The live steps deployed it and applied the first of its 2 migrations."),
-        (6, "The second migration failed: column \"owner_id\" already exists. The live run stopped there and came to you."),
     ],
     "ask-qr4": [
         (70, "Claude built it and opened PR #4, in 2 commits."),
@@ -439,7 +432,7 @@ def _prs(ago) -> list[dict]:
             "repo": LD, "n": 207, "issue": 191, "title": "A Client's Twilio number on their page",
             "head": "a0d5f6f", "branch": "claude/a-client-s-twilio-191", "url": GH[LD] + "/pull/207",
             "status": "Ready for you to merge",
-            "next": "You merge it. Its live steps follow your merge.",
+            "next": "You merge it.",
             "checks": [
                 {"label": "Clean on a0d5f6f", "ok": True}, {"label": "Checks passed on a0d5f6f", "ok": True},
                 {"label": "No conflict", "ok": True}, {"label": "Nothing said since the review", "ok": True},
@@ -511,10 +504,9 @@ def _activity(prs: list[dict], ago) -> list[dict]:
     rows += [
         e(35, "claude", "Started building #212", "Archive view for old callers", repo=LD, ref="#212"),
         e(52, "claude", "The build of #214 stopped with a question", "A decision thread couldn't answer it", "you", repo=LD, ref="#214"),
-        e(95, "you", "Merged PR #203", "Ring-to number in the call log; its live steps are still to run", repo=LD, ref="PR #203"),
+        e(95, "you", "Merged PR #203", "Ring-to number in the call log", repo=LD, ref="PR #203"),
         e(399, "runner", "Runner started", "On commit 66a5ea1, after its own PR #2 merged"),
         e(402, "runner", "Merged PR #2", "Clean on its head, checks passed", "ok", repo=QR, ref="PR #2"),
-        e(day + 95, "claude", "Went live: PR #198 and PR #201", "2 migrations applied, 1 function deployed", "ok", repo=LD, ref="PR #201"),
         e(day + 130, "you", "Merged PR #201", "Caller notes on the caller's page", repo=LD, ref="PR #201"),
         e(day + 300, "runner", "Claude waited 2 h for its session to reset", "A fix round needed 34% and 21% was left"),
     ]
@@ -545,15 +537,6 @@ def _vary(snap: dict, name: str, ago, ahead) -> None:
             status="Merged, not live yet", next="Its live steps run after the review of PR #210.")
     elif name == "many":
         snap["asks"] += [
-            {"id": "ask-live", "kind": "broken", "repo": LD, "ref": "PR #198", "pr": None, "subject": "Caller notes", "since": ago(6),
-             "situation": "The live steps for PR #198 stopped halfway.",
-             "about": "Notes a rep writes about a caller, shown on the caller's page. You merged it yesterday.",
-             "because": "The second migration failed: column \"owner_id\" already exists. The first is applied, so the database sits between the two.",
-             "story": ["Yesterday: you merged PR #198", "Today: deployed, migration 1 of 2 applied", "Migration 2 failed"],
-             "question": "What should happen to the second migration?",
-             "holds_up": ["Every later live run in leads-dashboard"],
-             "go": {"label": "Decide in T3", "where": "t3", "url": T3 + "136ab19d-14d7-4f6a-a235-4e1ac0ebb043"},
-             "why": ["Deployed; 1 of 2 migrations applied.", "20261114_number_owner.sql failed: column \"owner_id\" already exists."]},
             {"id": "ask-qr4", "kind": "stuck", "repo": QR, "ref": "PR #4", "pr": 4, "subject": "Wake tasks survive DST", "since": ago(3),
              "situation": "The tests failed for a reason the change doesn't explain.",
              "about": "Wake tasks are named with their UTC offset, so a clock change can't merge two of them.",

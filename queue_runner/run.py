@@ -4,7 +4,7 @@ time.
 The Claude lane settles what earlier passes left open, then chooses each working repo's job (#50:
 the repos run side by side, each in a worker thread of its own that blocks on its T3
 thread's run while its job runs): a decision on a case the flow doesn't cover (`decisions.py`), then
-the repo's live steps after merges (`live.py`), then a fix round on a PR the runner found blocking
+a fix round on a PR the runner found blocking
 (`fix.py`), before any new build, so open PRs finish first. The usage gate lets each in only
 when it fits beside the jobs still running, the repo whose work has waited longest first. The
 lane plans again whenever a job ends. The Sol lane (`review.py`) reviews at most one PR a pass,
@@ -27,7 +27,6 @@ from .stops import CONFLICT
 from .fallback import OPUS_KINDS
 from .gate import CLAUDE_KINDS, FALLBACK_REVIEW
 from . import limits as lim
-from .live import LiveSteps
 from .lock import RunnerBusy, runner_lock  # noqa: F401 (the CLI takes them from here)
 from .merge import Merger
 from .picker import BuildJob, pick
@@ -180,12 +179,6 @@ class Runner:
                                  limits=limits, now=self.now)   # and stale ones settled (#72)
         from .waiting import GitHubAnswers   # a waiting thread's question answered on GitHub
         self.answers = GitHubAnswers(config, github=github, jobs=self.jobs, say=self.say)
-        self.live = LiveSteps(config, github=github, git=git, t3=t3, jobs=self.jobs,
-                              say=self.say, stopper=stopper,
-                              merger=Merger(config, github=github, git=git, jobs=self.jobs,
-                                            say=self.say),
-                              limit=self._limit, find_thread=self._find_thread, now=self.now,
-                              effort=self.effort)
         self._last_why: dict[tuple[str, int], str | None] = {}
         # For the dashboard's snapshot (`snapshot.py`, continuous mode): the Claude lane's wait as
         # its last pass left it (a snapshot.Wait, or None), the titles of the issues and PRs the
@@ -274,7 +267,7 @@ class Runner:
         has one, or GATED while a job a usage limit cut off may not resume yet (the limit is the
         whole account's: nothing starts in any repo). In each repo: a job a limit cut off, an
         ask thread Stefan asked for, a decision (none needs a thread when Stefan's own words
-        answer it: `kind` None), the repo's live steps, a fix round, a build, in that order."""
+        answer it: `kind` None), a fix round, a build, in that order."""
         off = stopped(self.config)   # a stopped repo's limited job waits for its Resume (37)
         limited = [j for j in self.jobs.limited_jobs() if j.repo not in off]
         ahead = [j for j in limited if j.resume_at and self.now() < _when(j.resume_at)]
@@ -290,12 +283,11 @@ class Runner:
             return GATED
         self._last_gate.pop(None, None)
         switch = control.read(self.config.state_dir)
-        found, live_waits = [], []
+        found = []
         for repo in working(self.config):
             if repo.name in skip or self._resting(repo.name):
                 continue
             start = self._choose_in(repo, limited, switch)
-            live_waits.append(self.live.wait_until)
             if start is not None:
                 found.append(start)
         if not found:
@@ -303,8 +295,7 @@ class Runner:
                 self.say('Nothing to start: no PR needs a fix round, and no repo has an '
                          'unblocked ready-for-agent issue that isn\'t already being built or '
                          'held.')
-            # a live run's limit: the wake task for it
-            self.gate_until = min(filter(None, live_waits), default=None)
+            self.gate_until = None
             return IDLE
         order = [r.name for r in self.config.repos]
         return sorted(found, key=lambda s: (self._waited(s.repo), order.index(s.repo)))
@@ -312,7 +303,6 @@ class Runner:
     def _choose_in(self, repo: Repo, limited, switch):
         """This repo's Claude job now, as a Start, or None."""
         name, only = repo.name, (repo.name,)
-        self.live.wait_until = None
         if mine := [j for j in limited if j.repo == name]:
             old = mine[0]
             return Start(name, old.kind, None, lambda: self.recover(old), self._name(old))
@@ -336,8 +326,6 @@ class Runner:
             then = case.about.kind if {'retry', 'answer'} & set(case.allowed) else None
             return Start(name, 'decision', then,
                          lambda: self.decider.run(case, self.continue_job), label)
-        if live := self.live.next(repos=only):
-            return Start(name, 'live', None, lambda: self.live.run(*live), f'live {name}')
         if fix := self.next_fix(repos=only):
             return Start(name, 'fix', None, lambda: self.run_fix(*fix),
                          f'fix {name}#{fix[1].number}')
@@ -642,12 +630,6 @@ class Runner:
                 self.jobs.ended(job.id, exit_code=None, outcome=NOT_STARTED,
                                 error='The runner stopped mid-decision.')
                 self.say(f'{self._name(job)}: cut off with its runner; decided again')
-                continue
-            if job.kind == 'live':
-                if self.live.settle(job):
-                    busy[job.repo] = (self._name(job), job.kind)
-                elif next(j for j in self.jobs.jobs() if j.id == job.id).thread_id:
-                    self._thread_ended()   # its thread ran and has ended
                 continue
             if job.kind not in ('build', 'fix'):
                 continue   # an open review or merge is the Sol lane's to settle

@@ -292,7 +292,7 @@ class BuildTest(RunnerHarness):
         self.assertEqual(self.told('effort'), [])
 
 
-class FixAndLiveTest(RunnerHarness):
+class FixTest(RunnerHarness):
     def test_a_fix_round_starts_the_same_way_and_records_its_effort(self):
         import io
         from queue_runner.github import Issue
@@ -318,42 +318,6 @@ class FixAndLiveTest(RunnerHarness):
         self.assertEqual(named(start), NAMED)
         [fix] = self.jobs('fix')
         self.assertEqual((fix.outcome, fix.effort), ('pushed', 'high'))
-
-    def test_a_live_run_starts_the_same_way_and_records_its_effort(self):
-        from tests.test_live import B, live_reply
-        import tests.test_live as tl
-        harness = tl.LiveHarness('setUp')
-        harness.setUp()
-        self.addCleanup(harness.doCleanups)
-        effort = self.effort(FakeFiles(efforts={'mcp:t1': 'xhigh'}))
-        effort.config = harness.config
-        effort.say = harness.said.append
-
-        def live():
-            from queue_runner.live import LiveSteps
-            from queue_runner.merge import Merger
-            from queue_runner.stops import Stopper
-            h = harness
-            stopper = Stopper(h.config, github=h.gh, jobs=h.jobs, say=h.said.append,
-                              toaster=h.toaster)
-            return LiveSteps(h.config, github=h.gh, git=h.git, t3=h.t3, jobs=h.jobs,
-                             say=h.said.append, stopper=stopper,
-                             merger=Merger(h.config, github=h.gh, git=h.git, jobs=h.jobs,
-                                           say=h.said.append),
-                             find_thread=h.find, now=lambda: tl.NOW, effort=effort)
-
-        self.assertIsNone(live().next())   # first sight
-        harness.merged()
-        harness.t3.outcomes = [(0, 'completed', live_reply())]
-        steps = live()
-        steps.run(*steps.next())
-        [start] = harness.t3.starts
-        self.assertEqual((*named(start), start['worktree']), (*NAMED, B))
-        job = harness.jobs.live('first')[-1]
-        self.assertEqual((job.outcome, job.effort), ('live', 'xhigh'))
-        self.assertTrue(any('live first ran at effort xhigh, not high' in s
-                            for s in harness.said), harness.said)
-
 
 if __name__ == '__main__':
     unittest.main()

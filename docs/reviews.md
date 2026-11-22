@@ -15,7 +15,7 @@ The review loop's rules and words are `docs/flow.md`, The review loop; a served 
 3. **Merge** (`merge.Merger`, also right after a clean review is posted). A PR merges once the
    runner's own newest review of its head H is `clean` (a clean review that stops for Stefan is
    `stop`). Just before, it's read again: open, still at H (moved: nothing is tried, and Sol
-   reviews the new head), not a draft, no Claude job writing to it, no live run open in the repo, its newest review comment
+   reviews the new head), not a draft, no Claude job writing to it, its newest review comment
    the clean one on H, checks passed on H (`sol-review` not counted), no conflict, nothing said
    on it since that review (bots, `*[bot]`, aside) and no unresolved review thread. Why not is
    logged once. Then `PUT pulls/<n>/merge` with `sha=H` and `merge_method=merge` (a merge
@@ -23,9 +23,7 @@ The review loop's rules and words are `docs/flow.md`, The review loop; a served 
    Two failed merges on H leave it until a push or `--release`. After the merge the worktrees of
    the PR's build and fix jobs are removed with their local branches (`GitCli.remove_worktree`:
    gone from `git worktree list` counts, since T3 may hold the empty folder), and one that
-   can't be is said, and their threads are settled (`docs/stops.md`, Settling threads). The repo's live
-   steps run later in the Claude
-   lane (`docs/claude-lane.md`, Live steps). **In a repo Stefan merges** (`merge = "stefan"`), the PR is marked
+   can't be is said, and their threads are settled (`docs/stops.md`, Settling threads). **In a repo Stefan merges** (`merge = "stefan"`), the PR is marked
    `ready-for-stefan` instead, and his merge is noticed on a later pass (`docs/claude-lane.md`, Stefan merges).
    **Merge job records** (kind `merge`): `sha` H, `head` the merge commit; outcomes `merged`,
    `head-moved`, `failed`.

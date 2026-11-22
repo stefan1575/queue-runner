@@ -36,7 +36,7 @@ never counts it, and `--gate` prints it as its own line, held by the reviewing l
 - **Which reading a check decides on:** one taken after the last Claude job ended and no older
   than 30 minutes (`STALE_AFTER`), even if the latest call failed. A 429 beside such a reading
   never holds the lane. "Ended" is any Claude thread the runner sees end (`Gate.job_ended`): a
-  measured job's, and outside a measured pass a dead runner's build, fix or live job settled, a
+  measured job's, and outside a measured pass a dead runner's build or fix job settled, a
   waiting job that ran on Stefan's answer (ended, or asking again: a `latest_run_id` newer than the run its end record names, told once by that run id, seen running or not, #85), a decision thread whose
   retry or answer never reached its job (PR 67's review 1, F1), and a dead runner's Opus review
   (the fallback, or config.toml's) whose thread has ended (review 2, F2: The Opus fallback, The
@@ -173,11 +173,11 @@ the runner should confirm the log line `<thread> stopped on a usage limit; T3 sa
 ## The effort
 
 `effort.py` (ticket 39; Stefan, 2026-11-15: "keep it at high by default", until his Claude Max
-plan ends). Every Claude job (build, fix or conflict round, decision, live run) is meant to run
+plan ends). Every Claude job (build, fix or conflict round, decision) is meant to run
 at `[claude] effort` (`high`).
 
 - **Every job names its provider, model and effort** (issue #119): builds, fix and conflict
-  rounds, decisions, live steps, Opus reviews and ask threads start through T3's MCP launch
+  rounds, decisions, Opus reviews and ask threads start through T3's MCP launch
   (`T3Cli.start`/`launch`, `docs/t3.md`) with `effort.claude_job`: `[claude]`'s provider, model
   and effort, whatever the T3 project's default model is. A continued job (`t3 thread send`)
   keeps its thread's selection. Checked live on 2026-11-17 (`docs/t3.md`).

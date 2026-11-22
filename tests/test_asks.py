@@ -245,35 +245,18 @@ class KindsTest(KindsCase):
             'The build of #130 stopped to ask a question.',
             "A decision thread couldn't answer the thread's question, so it came to you."])
 
-    def test_a_failed_check_and_a_stopped_live_run_are_broken(self):
+    def test_a_failed_check_is_broken(self):
         self.gh.check_states[H1] = Checks('failed', ('test',))
         self.job('stop', 154, 'filed', branch='claude/twilio-120', sha=H1, stop='failed-check',
                  reason='a check failed on aaaaaaa (test)',
                  link='https://github.com/owner/first/issues/40')
-        self.job('live', 150, 'stop', branch=None, sha=H2, head=H3, prs=[150],
-                 reason='Migration 2 failed: column "owner_id" already exists')
-        merged, listed = full_pr(150, 'claude/notes-110', H2, title='Caller notes'), self.gh.pull
-        self.gh.pull = lambda repo, n: merged if n == 150 else listed(repo, n)   # not open
-        self.job('stop', 150, 'filed', branch='claude/notes-110', sha=H2, stop='live',
-                 reason='the live steps stopped: Migration 2 failed',
-                 link='https://github.com/owner/first/issues/41')
-        asks = {a['ref']: a for a in self.snap()['asks']}
-        check, live = asks['PR #154'], asks['PR #150']
+        check = {a['ref']: a for a in self.snap()['asks']}['PR #154']
         self.assertEqual((check['kind'], check['situation']),
                          ('broken', 'A check failed on aaaaaaa.'))
         self.assertEqual(check['because'], 'A check failed on aaaaaaa (test).')
         self.assertEqual(self.texts(check), [
             'A check failed on aaaaaaa, so the runner stopped the PR and brought it to you, on '
             'needs-info issue #40.'])
-        self.assertEqual((live['kind'], live['subject']), ('broken', 'Caller notes'))
-        self.assertEqual(live['situation'], 'PR #150 is merged, but its live steps stopped before '
-                                            'it went live.')
-        self.assertEqual(live['holds_up'], ['Every later live run in first'])
-        self.assertEqual(self.texts(live), [
-            'Its live steps stopped at a question: Migration 2 failed: column "owner_id" already '
-            'exists.',
-            'Its live steps stopped, so the runner stopped the PR and brought it to you, on '
-            'needs-info issue #41.'])
 
     def test_broken_then_stuck_then_decision_then_merge_oldest_first_inside_a_kind(self):
         self.ready()

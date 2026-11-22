@@ -32,8 +32,6 @@ What each module and script is for.
   brief, the answer and acting on it.
 - `queue_runner/fix.py`, `templates/fix.md` and `templates/conflict.md`: which PRs get a fix
   round or a conflict round, and their briefs.
-- `queue_runner/live.py` and `templates/live.md`: live steps after merges: the batch, about to
-  land, the brief, the answer and its stops.
 - `queue_runner/merge.py`: the pre-merge re-check, the expected-head merge and the worktrees
   removed after; in a repo Stefan merges, the `ready-for-stefan` mark and noticing his merge.
 - `queue_runner/inbox.py`: `--inbox`, everything waiting on Stefan: `collect`, the one

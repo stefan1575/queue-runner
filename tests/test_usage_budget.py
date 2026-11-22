@@ -263,8 +263,7 @@ class AfterJobTest(Harness):
 
 class EndedElsewhereTest(Harness):
     """A Claude thread that ends outside a measured pass (PR 67's review 1, F1): a dead runner's
-    job settled, a waiting job Stefan answered that has since ended, a dead runner's live run,
-    or a decision thread whose retry never reached its job. The next check decides only on a
+    job settled, a waiting job Stefan answered that has since ended, or a decision thread whose retry never reached its job. The next check decides only on a
     reading taken after the runner saw it end, as after a measured job."""
 
     def setUp(self):
@@ -285,11 +284,6 @@ class EndedElsewhereTest(Harness):
         if status:
             self.t3.add('mcp:old', job.title, status)
         return job
-
-    def a_live_run(self):
-        return self.log.started(kind='live', repo='queue-runner', issue=13, branch='main',
-                                title='Queue runner live: queue-runner', sha='a' * 40,
-                                head='b' * 40)
 
     def assert_held_until_the_next_read(self):
         """The pass after the job ended: held on the reading from before it, until the endpoint
@@ -388,24 +382,8 @@ class EndedElsewhereTest(Harness):
         self.assert_held_until_the_next_read()
         self.assertEqual(self.log.jobs()[0].outcome, 'waiting')
 
-    def test_a_dead_runners_live_run_settled_holds_the_next_job_too(self):
-        self.a_live_run()
-
-        def settle(job):                               # LiveSteps.settle: its thread ended
-            self.log.ended(job.id, exit_code=0, outcome='live', thread_id='mcp:live')
-            return False
-        self.r.live.settle = settle
-        self.endpoint.five = 10
-        self.tick()
-        self.clock.at(14, 2, 49)
-        self.endpoint.five = 90
-        self.assert_held_until_the_next_read()
-
     def test_jobs_settled_that_never_reached_a_thread_hold_nothing(self):
         self.a_build()                                 # no thread in T3: not-started
-        self.a_live_run()
-        self.r.live.settle = lambda job: (
-            self.log.ended(job.id, exit_code=None, outcome='not-started'), False)[1]
         self.tick()
         self.clock.at(14, 2, 49)
         self.assertEqual(self.r.run_pass(), STARTED)   # a build, on the 14:01:49 reading

@@ -179,10 +179,10 @@ the Repositories card's Stop and Resume (`apply_control`'s `{"repo", "stop"}`) a
 and `--resume NAME` (`control.ask(..., repos=[NAME])`; a lane's id and `all` keep their meaning, and
 any other name is refused with exit 2).
 
-- **A stopped repo gets nothing from either lane:** no decision, live run, fix or conflict round,
+- **A stopped repo gets nothing from either lane:** no decision, fix or conflict round,
   limit recovery or build in the Claude lane; no stop filed, merge, ready mark, noticing of
   Stefan's merge or review in the Sol lane. Each of those goes through `config.working(config)`,
-  the served repos less the stopped ones (`decisions.next_case`, `live.served`, `Runner.next_fix`,
+  the served repos less the stopped ones (`decisions.next_case`, `Runner.next_fix`,
   `Runner.choose`'s builds and limited jobs, `stops.stop_pass`, `merge.merge_pass`,
   `Reviewer.review_pass`); `config.repos` keeps every repo for what is only looked up or shown (a
   job's own repo when it's settled, the Inbox, the snapshot). The other repos' jobs go on.
@@ -195,8 +195,8 @@ any other name is refused with exit 2).
   once (`control.json stops old-repo, which is not served: ignored`). An entry the page couldn't
   have written (`"now"`, not an object) makes control.json unreadable, as a lane's does.
 - **Its asks stay in the Inbox** (`inbox.collect` reads every repo); stopping the work answers
-  nothing. **Its waits set no wake task:** a stopped repo's limited job and live run are skipped,
-  so they set no `gate_until`. The usage limit is the account's, so another repo's job may then
+  nothing. **Its waits set no wake task:** a stopped repo's limited job is skipped,
+  so it sets no `gate_until`. The usage limit is the account's, so another repo's job may then
   start and meet the gate or the limit itself.
 - `--gate` lists the stopped repos after the lanes; `--once --dry-run` says them first and lists
   no job for them.

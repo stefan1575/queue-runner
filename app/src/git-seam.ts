@@ -28,7 +28,7 @@ export class GitError extends Error {
 /** What git answered: its exit code, stdout and stderr. */
 export type Run = (args: string[]) => Promise<[number, string, string]>;
 
-/** A commit as `commits`, `log` and `first_parent` read it: `{sha, subject}` zipped from one
+/** A commit as `commits` and `log` read it: `{sha, subject}` zipped from one
  *  `%H<tab>%s` line, so a line with no tab has no subject, as in Python. */
 export type Commit = { sha: string; subject?: string };
 
@@ -268,28 +268,8 @@ export class GitCli {
     return gone;
   }
 
-  // --- live steps after merges ----------------------------------------------------------------
-
   async sha(path: string, ref: string): Promise<string> {
     return strip(await this._ok(['-C', path, 'rev-parse', '--verify', `${ref}^{commit}`]));
-  }
-
-  /** The commits on `b`'s first-parent line since `a`, oldest first (a merged PR is one
-   *  merge commit): [{sha, subject}]. */
-  async first_parent(path: string, a: string, b: string): Promise<Commit[]> {
-    const out = await this._ok(['-C', path, 'log', '--reverse', '--first-parent', '--format=%H%x09%s', `${a}..${b}`]);
-    return splitlines(out).filter((line) => line).map(commit);
-  }
-
-  /** The files `b` changed since `a`: [[status letter, path]], renames as their new path. */
-  async name_status(path: string, a: string, b: string): Promise<[string, string][]> {
-    const out = await this._ok(['-C', path, 'diff', '--name-status', '--no-renames', a, b]);
-    const found: [string, string][] = [];
-    for (const line of splitlines(out)) {
-      const parts = line.split('\t');
-      if (parts.length >= 2) found.push([parts[0]!.slice(0, 1), parts[parts.length - 1]!]);
-    }
-    return found;
   }
 }
 

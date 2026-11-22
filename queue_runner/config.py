@@ -14,11 +14,6 @@ class Repo:
     path: str          # local clone; T3's project for its jobs
     base: str = 'main'
     review_table: bool = False   # a posted review adds a row to the PR body's `## Review` table
-    # Live steps after merges (ticket 11, `live.py`): the repo's doc that says how a merge goes
-    # live (None: the repo has none), and where its migrations and edge functions live.
-    live_doc: str | None = None
-    live_migrations: str = 'supabase/migrations'
-    live_functions: str = 'supabase/functions'
     # Who merges a clean PR (ticket 17, `merge.py`): 'runner' (it merges itself), or 'stefan'
     # (it labels the PR `ready-for-stefan` and toasts once; Stefan merges, and the runner notices).
     merge: str = 'runner'
@@ -127,9 +122,6 @@ def load_config(path: str = DEFAULT_CONFIG) -> Config:
         raw = tomllib.load(f)
     repos = [Repo(name=r['name'], github=r.get('github'), path=_path(r['path']),
                   base=r.get('base', 'main'), review_table=bool(r.get('review_table')),
-                  live_doc=r.get('live_doc') or None,
-                  live_migrations=r.get('live_migrations', 'supabase/migrations'),
-                  live_functions=r.get('live_functions', 'supabase/functions'),
                   merge=_merge(r))
              for r in raw.get('repos', [])]
     claude, sol = raw.get('claude', {}), raw.get('sol', {})

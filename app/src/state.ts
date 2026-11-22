@@ -19,9 +19,9 @@
 // `updated`, `update-failed` (GitHub refused: a conflict) or `moved`, or `own-failure` (a check
 // the base doesn't fail failed on H too) or `cleared` (nothing fails on H any more)) and
 // `decision` (a one-off decision thread, or Stefan's reply read directly, on a case the
-// flow doesn't cover: `about` the job it decides on, its outcome the action taken) and `live` (a
-// repo's live steps after merges: `sha` where the last live run reached, `head` the base's commit
-// this one brings live).
+// flow doesn't cover: `about` the job it decides on, its outcome the action taken). The log may
+// still hold `live` jobs from the removed live steps after merges (#265): they read as any other
+// ended job, and nothing acts on them.
 //
 // A build or fix started by a decision continues an earlier job's thread: its start record has
 // `thread_id` (that thread) and `about` (the earlier job). A job that picks up an earlier one (a
@@ -170,8 +170,6 @@ export type JobFields = {
   question: string | null;       // a decision: which question
   context: number | null;        // usage-limit: the thread's context in tokens (null: unknown)
   last_request: string | null;   // usage-limit: when its last real request started
-  applied: unknown[];            // live: the migrations its thread applied
-  prs: unknown[];                // live: the PRs merged in its batch
   cause: string | null;          // a fix: `conflict` for a conflict round, else null
   resume: Record<string, unknown> | null;   // a job picking up an earlier one: in place or fresh, and why
   effort: string | null;         // a build or fix: the effort its run used, read back
@@ -187,15 +185,15 @@ const DEFAULTS: Omit<JobFields, Required_> = {
   ended_at: null, thread_id: null, link: null, run_id: null, exit_code: null, status: null,
   outcome: null, commits: [], pr: null, worktree: null, error: null, sha: null, round: null,
   verdict: null, signals: [], run_dir: null, resume_at: null, head: null, stop: null, reason: null,
-  answer: null, about: null, question: null, context: null, last_request: null, applied: [],
-  prs: [], cause: null, resume: null, effort: null, reviewer: null, base: null, runs: [],
+  answer: null, about: null, question: null, context: null, last_request: null,
+  cause: null, resume: null, effort: null, reviewer: null, base: null, runs: [],
 };
 
 export interface Job extends Readonly<JobFields> {}
 /** A job as the log has it: frozen, changed only by making a new one (`replace`). */
 export class Job {
   constructor(fields: Pick<JobFields, Required_> & Partial<JobFields>) {
-    Object.assign(this, { ...DEFAULTS, commits: [], signals: [], applied: [], prs: [], runs: [] }, fields);
+    Object.assign(this, { ...DEFAULTS, commits: [], signals: [], runs: [] }, fields);
     Object.freeze(this);
   }
 
@@ -209,7 +207,7 @@ const replace = (job: Job, changes: Partial<JobFields>) => new Job({ ...job, ...
 
 export const _END_FIELDS = ['thread_id', 'link', 'run_id', 'exit_code', 'status', 'outcome', 'commits', 'pr',
   'worktree', 'error', 'verdict', 'signals', 'run_dir', 'resume_at', 'head',
-  'reason', 'answer', 'context', 'last_request', 'applied', 'prs', 'effort', 'runs'] as const;
+  'reason', 'answer', 'context', 'last_request', 'effort', 'runs'] as const;
 /** An end record's fields besides `exit_code` and `outcome`, which `ended` takes on their own. */
 export type EndFields = Partial<Pick<JobFields, Exclude<typeof _END_FIELDS[number], 'exit_code' | 'outcome'>>>;
 
@@ -375,8 +373,7 @@ export class JobLog {
   /** The T3 threads the runner started for a PR, oldest first, each once (the settle at its
    *  merge): its build and fix threads, the decisions on it or on one of those jobs (a failed
    *  build's, before the PR existed), and its fallback reviews. Never an ask thread, which is
-   *  settled once decided (a decision acted on from one carries its id), nor a live run's, which
-   *  isn't the PR's. */
+   *  settled once decided (a decision acted on from one carries its id). */
   pr_threads(repo: string, number: number, branch: string): string[] {
     const jobs = this.jobs();
     const writers = this.pr_jobs(repo, number, branch);
@@ -421,13 +418,6 @@ export class JobLog {
   limited_jobs(): Job[] {
     const [jobs, , gone] = this._fold();
     return JobLog._limited(jobs, gone);
-  }
-
-  /** The repo's live jobs, oldest first; without `released`, leaving out those a release settled
-   *  (a release of the batch's newest PR). */
-  live(repo: string, released = true): Job[] {
-    const [jobs, , gone] = this._fold();
-    return jobs.filter((j) => j.kind === 'live' && j.repo === repo && (released || !gone.has(j.id)));
   }
 
   /** Stops filed on this PR that Stefan hasn't answered (or released), oldest first: while

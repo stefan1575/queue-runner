@@ -112,6 +112,36 @@ class JobLogTest(unittest.TestCase):
         self.end(log, self.start(log, 4), exit_code=0, outcome='done')
         self.assertEqual(JobLog(self.path).waiting_jobs(), [])
 
+    def test_an_old_live_runs_records_still_read_as_an_ended_job(self):
+        """The live steps after merges went (#265); leads-dashboard's live runs stay in the log,
+        their end records with `applied` and `prs`."""
+        import json
+        log = JobLog(self.path)
+        self.start(log, 4)
+        job = '20261110-211802-live-leads-dashboard-179-8692e3'
+        with open(self.path, 'a', encoding='utf-8') as f:
+            for r in ({'event': 'start', 'job': job, 'kind': 'live', 'repo': 'leads-dashboard',
+                       'issue': 179, 'branch': 'main', 'title': 'Queue runner live: leads-dashboard',
+                       'at': '2026-11-10T21:18:02+08:00', 'sha': 'ff58c6d', 'round': None,
+                       'head': '1c6808d'},
+                      {'event': 'end', 'job': job, 'at': '2026-11-10T21:18:46+08:00',
+                       'exit_code': 0, 'outcome': 'live', 'thread_id': 'mcp:t9',
+                       'status': 'completed', 'applied': [], 'prs': [179], 'reason': None,
+                       'error': None}):
+                f.write(json.dumps(r) + '\n')
+        reopened = JobLog(self.path)
+        [live] = [j for j in reopened.jobs() if j.id == job]
+        self.assertEqual((live.kind, live.repo, live.issue, live.outcome, live.head, live.open),
+                         ('live', 'leads-dashboard', 179, 'live', '1c6808d', False))
+        self.assertEqual([j.issue for j in reopened.open_jobs()], [4])
+        self.assertEqual(reopened.held_issues('leads-dashboard'), set())
+        from queue_runner import snapshot
+        snap = snapshot.build(snapshot.Facts(
+            now=datetime.datetime(2026, 11, 22, tzinfo=datetime.timezone.utc), repos=[],
+            jobs=reopened.jobs()))
+        claude = next(l for l in snap['lanes'] if l['id'] == 'claude')
+        self.assertEqual([j['kind'] for j in claude['jobs']], ['build'])   # the live run ended
+
 
 class WhenTest(unittest.TestCase):
     def test_a_stamp_keeps_its_offset(self):

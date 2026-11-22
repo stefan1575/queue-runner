@@ -145,6 +145,4 @@ Each stop is recorded on the PR and in one `needs-info` issue per PR, and toaste
 A clean review on the newest commit, checks passed on it, nothing open. Just before merging, the
 runner reads the PR again: the head is still H, its checks passed on H, and no discussion is
 open. If the head moved, it's reviewed again. The merge names the expected head (`sha=H`, a merge
-commit). A repo's live steps that need an AI run in one Claude thread per batch, once no other
-merge is about to land, so chained migrations go live in order. Merged and live are reported
-separately.
+commit).
