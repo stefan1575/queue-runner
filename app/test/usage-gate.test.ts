@@ -232,6 +232,22 @@ describe("jobs the gate did not let in (#219: Python's `job_ended` and `check(ru
     const held = gate.pick('build a#2', 'build', [{ id: 'build a#1', kind: 'build' }]);
     expect(held).toMatchObject({ fits: false, hold: { why: 'running', running: 60, jobs: ['build a#1'] } });
   });
+
+  test('a job running elsewhere counts on the login it was launched on, not its kind\'s model now (#219 F6)', async () => {
+    await t3Reads('2026-11-18T19:06:00Z', () => { window('claudeAgent', 'five_hour').usedPercent = 30; });
+    now = new Date('2026-11-18T19:06:30Z');
+    jobs({ build: { own: OPUS, fallback: SOL } });
+    // launched on its fallback: it runs on Codex's login, leaving Claude's room to this build
+    expect(gate.pick('build a#2', 'build', [{ id: 'build a#1', kind: 'build', choice: SOL }])).toMatchObject({ fits: true, choice: OPUS });
+  });
+
+  test('a job seen to end elsewhere holds the login it was launched on, not its kind\'s model now (#219 F6)', async () => {
+    await t3Reads('2026-11-18T19:06:00Z', () => { window('claudeAgent', 'five_hour').usedPercent = 10; });
+    jobs({ build: { own: OPUS, fallback: null } });
+    now = new Date('2026-11-18T19:07:00Z');
+    gate.job_ended('build', null, SOL);
+    expect(gate.pick('build a#1', 'build')).toMatchObject({ fits: true, choice: OPUS });
+  });
 });
 
 describe('jobs started before T3 names their login (#154 F10)', () => {

@@ -34,7 +34,9 @@ import type { ProviderUsage } from './usage.ts';
 
 export type Held = { hold: Hold; until: Date | null; since: Date };
 /** A job running that the gate didn't let in (a stopped runner's): its id and kind. */
-export type Elsewhere = { id: string; kind: JobKind };
+/** A job running that the gate didn't let in: `choice` the model it was launched on, when its
+ *  record names one (else its kind's model now). */
+export type Elsewhere = { id: string; kind: JobKind; choice?: ModelChoice | null };
 /** Where a job runs, once the gate lets it in: its kind's model, or its fallback. */
 export type Pick =
   | { fits: true; choice: ModelChoice; onFallback: boolean; cost: Cost }
@@ -42,7 +44,7 @@ export type Pick =
 
 /** `account` is null until T3 names the login of the job's provider. */
 type Running = Omit<RunningJob, 'account'> & { account: string | null; job: GateJob; before: Reading; started: Date; beside: Set<string> };
-type Ended = Running & { ended: Date };
+type Ended = Running & { ended: Date; recorded: () => void };
 
 export class UsageGate {
   private source: CatalogSource;
@@ -61,6 +63,9 @@ export class UsageGate {
   private listeners = new Set<() => void>();
   /** The keys `job_ended` was told, so each counts once. */
   private told = new Set<string>();
+  /** Each ended job waiting for its measurement: settled once its record is written. */
+  private recording = new Map<string, Promise<void>>();
+
 
   constructor(source: CatalogSource, settings: () => Settings, log: CostLog, now = () => new Date()) {
     this.source = source;
@@ -132,15 +137,16 @@ export class UsageGate {
     });
   }
 
-  /** The jobs running elsewhere that the gate doesn't hold, each on its kind's own model at its
-   *  expected cost there. One T3 hasn't named the login of yet counts nowhere. */
+  /** The jobs running elsewhere that the gate doesn't hold, each on the model it was launched on
+   *  (else its kind's own model) at its expected cost there. One T3 hasn't named the login of yet
+   *  counts nowhere. */
   private runningElsewhere(elsewhere: readonly Elsewhere[]): RunningJob[] {
     const catalog = this.source.current().catalog;
     if (!catalog) return [];
     const out: RunningJob[] = [];
     for (const e of elsewhere) {
       if (this.running.has(e.id)) continue;
-      const choice = kindModels(this.settings().jobs, e.kind, catalog).choice;
+      const choice = e.choice ?? kindModels(this.settings().jobs, e.kind, catalog).choice;
       const u = choice ? this.usage(choice.provider) : undefined;
       if (!choice || !u?.account) continue;
       out.push({ id: e.id, account: u.account, cost: expectedCost(this.log.records(), { ...choice, kind: e.kind }, u.windows).cost });
@@ -149,15 +155,16 @@ export class UsageGate {
   }
 
   /** A job of this kind the gate didn't let in was seen to end now (a stopped runner's, one the
-   *  user answered in T3): the next check on its kind's login waits for a reading T3 takes after
-   *  now. With `key`, only the first telling counts. */
-  job_ended(kind: JobKind, key: string | null = null) {
+   *  user answered in T3): the next check on the login it ran on (`choice`, the model it was
+   *  launched on; else its kind's model now) waits for a reading T3 takes after now. With `key`,
+   *  only the first telling counts. */
+  job_ended(kind: JobKind, key: string | null = null, launched: ModelChoice | null = null) {
     if (key !== null) {
       if (this.told.has(key)) return;
       this.told.add(key);
     }
     const catalog = this.source.current().catalog;
-    const choice = catalog ? kindModels(this.settings().jobs, kind, catalog).choice : null;
+    const choice = launched ?? (catalog ? kindModels(this.settings().jobs, kind, catalog).choice : null);
     if (!choice) return;
     const at = this.now();
     const account = this.usage(choice.provider)?.account;
@@ -236,8 +243,8 @@ export class UsageGate {
     if (!was || until > was.until) this.limited.set(provider, { since: endedAt, until, resetAt: Number.isNaN(reset) ? null : resetAt });
   }
 
-  /** The job's thread ended: it's measured on T3's next reading of its provider. Ended on its
-   *  usage limit (`limit`), its provider is held until the reset. */
+  /** The job's thread ended: it's measured on T3's next reading of its provider (`measured`).
+   *  Ended on its usage limit (`limit`), its provider is held until the reset. */
   finished(id: string, limit?: { resetAt: string | null }) {
     const r = this.running.get(id);
     if (!r) return;
@@ -247,8 +254,17 @@ export class UsageGate {
     const at = this.now();
     if (r.account !== null) this.lastEnd.set(r.account, at);
     else this.unplacedEnd.set(r.job.choice.provider, at);
-    this.toMeasure.push({ ...r, ended: at });
+    let recorded = () => {};
+    this.recording.set(id, new Promise<void>((resolve) => { recorded = resolve; }));
+    this.toMeasure.push({ ...r, ended: at, recorded: () => { this.recording.delete(id); recorded(); } });
     void this.measure();
+  }
+
+  /** Settles once the ended job `id`'s record is written (at once for one not waiting to be
+   *  measured), so the run loop's worker can wait for it, as Python's `gate.measured` records a
+   *  job's usage before its worker ends. */
+  measured(id: string): Promise<void> {
+    return this.recording.get(id) ?? Promise.resolve();
   }
 
   /** A job let in that never reached a thread (T3 refused it, a leftover branch): it stops
@@ -281,6 +297,8 @@ export class UsageGate {
           before: e.before, after, spent: e.before.checkedAt ? spentOf(e.before, after) : null,
           ...(e.beside.size ? { sharedWith: [...e.beside] } : {}),
         });
+        e.recorded();
+
       }
     });
     return this.measuring;
