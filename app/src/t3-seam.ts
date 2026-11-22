@@ -222,7 +222,10 @@ export class T3Server {
       const inside = rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
       if (inside && (deepest === null || root.length > deepest.root.length)) deepest = { id: p.id, root };
     }
-    if (deepest === null) throw new T3Error(`No T3 Code project holds '${identifier}'`);
+    // T3's CLI's own words, which the run loop reads as the server up (`wait_for_t3`)
+    if (deepest === null) {
+      throw new T3Error(`No T3 Code project matches '${identifier}'. Pass a project id or a path inside a project.`);
+    }
     return deepest.id;
   }
 
