@@ -25,7 +25,8 @@
 // stand-in may do less than Python, never something Python wouldn't: where Python would start a
 // part not ported yet (a decision, a limited job's recovery), the repo is held for the pass
 // (`_hold`). The Runner's own methods that only those parts reach (`continue_job`, `recover`,
-// `_restart`, `run_fix`, `finish_fix`) come with their tickets; `_limit` reads a limit stop from
+// `_restart`, `run_fix`) come with their tickets; `finish_fix` is here, for a dead runner's fix
+// round that `settle` finds ended; `_limit` reads a limit stop from
 // what the run said, as Python does with no `T3Store`, until #227 ports the store.
 import { join as join_path } from 'node:path';
 import type { Usage } from './claude-usage.ts';
@@ -189,9 +190,9 @@ export class Worker {
 }
 
 /** The GitHub calls the run loop and its builds make. */
-export type GitHub = Pick<GhCli, 'ready_issues' | 'issue_state' | 'open_pulls' | 'branches' | 'issue_comments' | 'pull_for_branch'>;
+export type GitHub = Pick<GhCli, 'ready_issues' | 'issue_state' | 'open_pulls' | 'branches' | 'issue_comments' | 'pull_for_branch' | 'pull'>;
 /** The git calls the run loop and its builds make. */
-export type Git = Pick<GitCli, 'fetch' | 'has_branch' | 'commits'>;
+export type Git = Pick<GitCli, 'fetch' | 'has_branch' | 'commits' | 'fetch_pr' | 'log'>;
 /** The usage gate's calls (`job-gate.ts`'s `Gate`). */
 export type UsageGate = Pick<Gate, 'check' | 'after_wait' | 'measured' | 'job_ended'>;
 
@@ -870,10 +871,49 @@ export class Runner {
     throw new NotPorted('Runner.run_fix', '#223');
   }
 
-  /** Records a fix round. Ported in #223. */
-  async finish_fix(_job: Job, _thread_id: string, _exit_code: number, _status: string, _error: string | null,
-    _run_id: string | null): Promise<Job> {
-    throw new NotPorted('Runner.finish_fix', '#223');
+  /** Records a fix round: `pushed` if the PR's head moved, `no-push` if it ended at H (reviewed
+   *  already, so the PR waits for Stefan), `head-unknown` if GitHub couldn't say, else `failed` or
+   *  `waiting`. (A dead runner's fix round is settled here before #223 ports the rounds.) */
+  async finish_fix(job: Job, thread_id: string, exit_code: number, status: string, error: string | null,
+    run_id: string | null): Promise<Job> {
+    const repo = this.repos.get(job.repo);
+    if (repo === undefined) throw new KeyError(py_repr(job.repo));
+    let link: string | null = null, worktree: string | null = null, head: string | null = null;
+    let pr: Record<string, unknown> | null = null;
+    let commits: unknown[] = [], said: Message[] = [];
+    try {
+      let thread: Thread;
+      [thread, said] = await this.t3.show(thread_id);
+      [link, worktree] = [thread.link, thread.worktree_path];
+    } catch (e) {
+      if (!(e instanceof T3Error)) throw e;
+      error = error || `thread show failed: ${e.message}`;
+    }
+    const limit = this._limit(thread_id, run_id, exit_code, error, said);
+    try {
+      const now = await this.github.pull(repo as Repo & { github: string }, job.issue!);
+      head = now.head_sha;
+      pr = { number: now.number, url: now.url, state: now.state };
+      if (head !== job.sha) {
+        await this.git.fetch_pr(repo.path, job.issue!, now.base);
+        commits = await this.git.log(repo.path, job.sha!, head);
+      }
+    } catch (e) {   // the record matters more than its commit list
+      error = error || `reading the PR after the round failed: ${type_name(e)}: ${err_str(e)}`;
+    }
+    const pushed = head !== null && head !== job.sha;
+    const outcome = exit_code === 2 ? 'waiting' : limit ? USAGE_LIMIT : exit_code ? 'failed'
+      : head === null ? 'head-unknown' : pushed ? 'pushed' : 'no-push';
+    this.jobs.ended(job.id, {
+      exit_code, outcome, thread_id, link, run_id, status, commits, pr, worktree, error, head, ...(limit ?? {}),
+      ...this.effort.used(job.repo, Runner._name(job), thread_id, run_id),
+    });
+    const sha = (job.sha ?? 'None').slice(0, 7);
+    const moved = pushed ? `, head ${sha} -> ${head!.slice(0, 7)}, ${commits.length} commits`
+      : head ? `, head still ${sha}` : ', head unknown';
+    this.say(`${Runner._name(job)} ended: ${outcome} (exit ${exit_code}${moved}) ${link || thread_id}`);
+    await this._settle_ended(job, thread_id, outcome);
+    return job;
   }
 
   async finish(job: Job, thread_id: string, exit_code: number, status: string, error: string | null,

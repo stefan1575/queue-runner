@@ -10,6 +10,7 @@ import { main } from '../src/app.ts';
 import { NoToaster, NoWaker } from '../src/later-parts.ts';
 import { JobLog } from '../src/state.ts';
 import { Message } from '../src/t3-seam.ts';
+import { PullRequest } from '../src/github-seam.ts';
 import { FakeGit, FakeGitHubWithPulls, FakeUsage, issue } from './fakes.ts';
 import { FakeT3 } from './fakes-t3.ts';
 
@@ -173,5 +174,37 @@ describe('the switches (#229)', () => {
     const [, out] = await h.once(new FakeGitHubWithPulls({ issues: [issue(4)] }), t3);
     expect(t3.starts).toEqual([]);
     expect(out).toContain('Neither lane starts anything: control.json is unreadable (lane "claude" is not');
+  });
+});
+
+describe('fix rounds (#223)', () => {
+  test("a dead runner's fix round whose thread completed is recorded, and the pass goes on to a build", async () => {
+    const h = new Harness();
+    const fix = h.log.started({ kind: 'fix', repo: 'first', issue: 12, branch: 'claude/red-widget-4',
+      title: 'Queue runner fix: first#12', sha: 'aaaaaaa1111' });   // open: its runner stopped
+    const t3 = new FakeT3([[0, 'completed']]);
+    t3.add('mcp:fix', fix.title, 'completed');
+    const pr = new PullRequest({ number: 12, branch: 'claude/red-widget-4', body: '', head_sha: 'bbbbbbb2222',
+      url: 'https://github.com/owner/first/pull/12' });
+    const [code, out] = await h.once(new FakeGitHubWithPulls({ issues: [issue(5)], prs: [pr] }), t3);
+    expect(code).toBe(0);
+    const ended = h.log.jobs()[0]!;
+    expect([ended.outcome, ended.head, ended.thread_id]).toEqual(['pushed', 'bbbbbbb2222', 'mcp:fix']);
+    expect(out).toContain('fix first#12 ended: pushed (exit 0, head aaaaaaa -> bbbbbbb, 0 commits)');
+    expect(t3.starts).toHaveLength(1);   // the next build
+    expect(h.runner_log()).not.toContain('pass failed');
+  });
+
+  test('GitHub failing on the PR leaves the round head-unknown, and the pass goes on', async () => {
+    const h = new Harness();
+    const fix = h.log.started({ kind: 'fix', repo: 'first', issue: 12, branch: 'claude/red-widget-4',
+      title: 'Queue runner fix: first#12', sha: 'aaaaaaa1111' });
+    const t3 = new FakeT3([[0, 'completed']]);
+    t3.add('mcp:fix', fix.title, 'completed');
+    await h.once(new FakeGitHubWithPulls({ issues: [issue(5)] }), t3);   // no PR #12 to read
+    const ended = h.log.jobs()[0]!;
+    expect(ended.outcome).toBe('head-unknown');
+    expect(ended.error).toContain('reading the PR after the round failed');
+    expect(t3.starts).toHaveLength(1);
   });
 });
