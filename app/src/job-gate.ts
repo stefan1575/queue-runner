@@ -31,6 +31,7 @@ import { closeSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, wr
 import { join } from 'node:path';
 import { CachedUsage, type Clock, type Endpoint, local_minutes, STALE_AFTER, Usage, UsageError, type Window } from './claude-usage.ts';
 import { type Json, float_repr, format_g, get, is_dict, py_float, truthy } from './python.ts';
+import { wall_sleep } from './run.ts';
 import { append_record, read_records, stamp } from './state.ts';
 
 export const DEFAULT_RESERVE = 5.0;
@@ -320,18 +321,6 @@ function spent_get(spent: unknown, window: string): unknown {
 export type RunningJob = readonly [label: string, kind: string, then: string | null];
 export type Sleep = (seconds: number) => Promise<void>;
 
-/** `run.wall_sleep`: sleeps until `seconds` of wall-clock time have passed, in steps of at most
- *  `WALL_STEP`, so a PC that slept and was woken for this time doesn't sleep on (Windows' timers
- *  may not count the time the PC was asleep). The run loop's port (#219) owns it; until then it
- *  is here, where the gate takes it by default. */
-export const WALL_STEP = 30;   // a long sleep looks at the wall clock this often (seconds)
-export async function wall_sleep(seconds: number, step = WALL_STEP): Promise<void> {
-  const end = Date.now() / 1000 + seconds;
-  for (let left = end - Date.now() / 1000; left > 0; left = end - Date.now() / 1000) {
-    await new Promise((r) => setTimeout(r, Math.min(step, left) * 1000));
-  }
-}
-
 /** `check(kind)` before a Claude job; `measured(...)` after it. `reader` is the shared
  *  `CachedUsage` (an endpoint's reader is wrapped in one); `sleep` waits on the wall clock for the
  *  after-job read (`wall_sleep` unless given). */
@@ -454,7 +443,7 @@ export class Gate {
     const ended = this.job_ended();
     const wait = await this.reader.wait_seconds();
     if (wait > 0) {
-      if (this.sleep === null) this.sleep = wall_sleep;
+      if (this.sleep === null) this.sleep = (seconds) => wall_sleep(seconds);
       await this.sleep(wait);
     }
     try {

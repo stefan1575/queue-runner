@@ -23,7 +23,7 @@
 // as "merged" or "gone".
 import { rm } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
-import type { BuildRepo } from './build-lane.ts';
+import type { BuildRepo } from './repos.ts';
 import type { FixGit } from './git.ts';
 import { HeadMoved, type GitHubMerge, type GitHubReview, type MergePull, type ReviewPull } from './github.ts';
 import { REVIEWED, type Job, type JobLog, type Step } from './job-log.ts';

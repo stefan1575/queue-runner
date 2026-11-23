@@ -26,7 +26,7 @@
 // thread had before by `knownRuns`); one without (the app stopped before T3 answered) and a send or
 // launch whose answer was lost (`NoAnswer`) need the user: its repo starts nothing until they answer.
 import { fixBrief, type FixWhere } from './briefs/fix.ts';
-import type { BuildRepo } from './build-lane.ts';
+import type { BuildRepo } from './repos.ts';
 import { holdText } from './gate.ts';
 import type { FixGit } from './git.ts';
 import type { GitHubMerge, GitHubReview, ReviewPull } from './github.ts';

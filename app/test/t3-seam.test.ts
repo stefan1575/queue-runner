@@ -258,6 +258,8 @@ describe('ShowAndListTest', () => {
       expect(await listed(r(), join(root, 'inner', 'src'))).toBe('proj-inner');
       expect(await listed(r(), join(dir, 'link', 'docs'))).toBe(SANDBOX.id);
       await expect(seam(r()).list(dir)).rejects.toBeInstanceOf(T3Error);
+      // as T3's CLI says it, so the run loop's wait_for_t3 reads the server as up
+      await expect(seam(r()).list(dir)).rejects.toThrow(`No T3 Code project matches '${dir}'. Pass a project id or a path inside a project.`);
     });
   });
 

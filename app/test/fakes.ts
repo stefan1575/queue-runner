@@ -102,6 +102,13 @@ export class FakeGitHubWithPulls extends FakeGitHub {
     return this.pulls_by_branch.get(branch) ?? null;
   }
 
+  /** The PR as listed (`prs`), as the runner reads it after a fix round. */
+  async pull(_repo: Repo, number: number): Promise<PullRequest> {
+    const p = this.prs.find((x) => x.number === number);
+    if (!p) throw new Error(`StopIteration: no PR #${number}`);
+    return p;
+  }
+
   async issue(_github: string, number: number): Promise<Issue> {
     const found = this.issues.find((i) => i.number === number);
     if (!found) throw new Error(`StopIteration: no issue #${number}`);
@@ -336,6 +343,18 @@ export class FakeGit {
 
   async commits(_path: string, _base: string, branch: string): Promise<Commit[]> {
     return [...(this.commit_log.get(branch) ?? [])];
+  }
+
+  /** A fix round's PR head fetched: [ref, sha] (the sha `refs` names, else ''). */
+  async fetch_pr(path: string, number: number, base: string): Promise<[string, string]> {
+    this.fetches.push([path, `pr${number}`, base]);
+    const ref = `refs/queue-runner/pr${number}`;
+    return [ref, this.refs.get(ref) ?? ''];
+  }
+
+  /** The commits in `b` not in `a`: `commits` keyed `a..b` (`logKey`). */
+  async log(_path: string, a: string, b: string): Promise<Commit[]> {
+    return [...(this.commit_log.get(logKey(a, b)) ?? [])];
   }
 
   async free_branch(_path: string, branch: string, worktree: string | null): Promise<[string | null, string | null]> {

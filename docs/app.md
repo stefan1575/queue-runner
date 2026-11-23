@@ -9,11 +9,10 @@ Repositories, below), knows which model does each kind of job and launches it (#
 models, below), gates every job on its provider's usage, keeping your share of each week
 (#153; Usage, below), has a Setup page that says what's missing before it can work (#162; Setup,
 below), ships as a Windows installer built by CI on a version tag (#164; The installer,
-below), builds a served repo's next ticket into a PR (#154; Builds, below), reviews every
-open PR on its newest commit, posting the review with its ledger (#155; Reviews, below), and
-closes the loop: a blocking review gets a fix round, and a clean one merges or is marked ready to
-merge (#156; Fix rounds and merges, below), and a PR that conflicts with its base gets a conflict
-round (#157; Conflict rounds, below).
+below), and runs Python's run loop and builds, ported (#219; The run loop and builds, below).
+Its own review, fix, merge and conflict lanes (#155 to #157; Reviews, Fix rounds and merges,
+Conflict rounds, below) no longer run in the desktop app: their live checks still run them, until
+the reviews, fix and merge ports (#222 to #224) bring Python's into the run loop.
 
 ## Run it
 
@@ -298,8 +297,9 @@ Which model does each kind of job (#152: #120's shape on #36's page, as the 2026
 
 The usage gate (#153: #68 stories 20 and 29, #122's design, today's `docs/usage.md` ported per
 provider). `src/usage.ts`, `src/shares.ts`, `src/costs.ts`, `src/cost-log.ts`, `src/gate.ts` (the
-decision, pure) and `src/usage-gate.ts` (the state around it). The lanes that call it are later
-tickets but the build lane (Builds, below); the tests drive it on fake T3's events.
+decision, pure) and `src/usage-gate.ts` (the state around it). The review, fix, merge and conflict
+lanes call it, in their live checks; the run loop calls Python's gate instead (The usage gate,
+ported, below). The tests drive it on fake T3's events.
 
 - **Where each number comes from in T3** (found live 2026-11-19, T3 0.1.9; `pnpm --dir app
   live:usage`): every provider in `subscribeServerConfig`'s `providers` has `usageLimits`:
@@ -357,86 +357,53 @@ tickets but the build lane (Builds, below); the tests drive it on fake T3's even
   open question 8): its jobs can't run anyway. Stefan's 5% of Claude's week is set at the
   cutover, not in code.
 
-## Builds
+## The run loop and builds, ported
 
-The first job end to end (#154): a served repo's next ticket becomes a PR, as today's runner
-builds (`docs/flow.md`, `docs/claude-lane.md`). `src/build-lane.ts`, `src/picker.ts`,
-`src/briefs/build.ts`, `src/briefs/rules.ts`, `src/t3/thread-end.ts`, `src/job-log.ts`, `src/git.ts`.
+Ported from `queue_runner/run.py`'s `Runner` (#219), in `src/run.ts`, with `cli.py`'s `main` for
+`--once`, `--release`, `--reserve` and the bare command in `src/app.ts`. `tests/test_run.py`,
+`tests/test_side_by_side.py`, `tests/test_gating.py` and `tests/test_usage_budget.py` are ported
+case for case in `test/run.test.ts`, `test/side-by-side.test.ts`, `test/gating.test.ts` and
+`test/usage-budget.test.ts`. They keep Python's names: `run_pass`, `dispatch`, `plan`, `choose`,
+`_choose_in`, `_admit`, `_launch`, `_work`, `settle`, `run_build`, `_start`, `finish`,
+`idle_seconds`, `run_once`, `run_forever`, `wait_for_t3`, `wall_sleep` and the rest, with the same
+passes, choices, job-log records and log lines (`docs/flow.md`, `docs/claude-lane.md`). It runs on
+the ported parts: the config, the lock and the build brief, the job log, the GitHub, git and T3
+seams, the picker and Python's usage gate (below). What each does is the module's own comment, as
+in Python.
 
-- **Picking:** the rules are Python's, ported in The picker, below. Builds still call the old
-  `src/picker.ts` until the run loop's port (#219) moves them to the ported one, and
-  `src/picker.ts` goes when its last user moves. Only repos switched to Served with a GitHub
-  remote are read (`servedRepos`). The base is GitHub's default branch.
-- **The brief** (`src/briefs/build.ts`): `templates/build.md` ported, with the user's name
-  (Settings, Name; else the gh account's name, else its login) in place of "Stefan". It names no
-  skill, no slash command and no path outside the repo (`test/brief.test.ts`): where today's brief
-  names the runner's `scripts/evidence.py`, it says in words what that script does (compare the
-  before and after, commit the shots to the `evidence` branch under `pr-<n>/` without touching
-  the job's branch, link each by that commit).
-- **Each rule is written once** (`src/briefs/rules.ts`): a rule more than one brief needs (the
-  Before you push list, today's `templates/check.md` from closed PR #196; the screenshots; what
-  is the user's to decide) is written there and filled into each brief that needs it. The build
-  brief goes through Before you push before it pushes. `test/brief.test.ts` fails a brief file
-  that writes one of them out itself.
-- **Starting:** fetch `origin/<base>` (T3 doesn't), with the refspec named
-  (`+refs/heads/<base>:refs/remotes/origin/<base>`), so the tracking ref is written whatever the
-  clone's own refspec covers (a single-branch clone of another branch); then a leftover local
-  branch of the job's name holds the job (`branch-exists`, said in the log line) and T3 isn't
-  asked; else `launchJob` on the very model the gate let the job in on (its kind's or its
-  fallback; Settings isn't read again) in a worktree from `origin/<base>` on
-  `claude/<slug>-<issue>`, titled `Queue runner build: <project>#<n>`. The served set is asked
-  again after the GitHub reads and right before the launch call: a repo switched off meanwhile
-  gets no gate verdict, or is `not-started`.
-- **After a restart, don't guess** (#154): a job is tied to a thread only by the thread id T3
-  gave its own launch, never by a thread's title, branch or project. A launch that was sent and
-  whose answer was lost (the connection dropped, T3 answered 5xx or unreadably: `NoAnswer`,
-  `src/t3/seams.ts`) may still have started a thread, so it isn't taken as not started: the job
-  ends `needs-user`, is dropped from the gate unmeasured, holds its issue, and its repo starts
-  nothing until the user answers (`BuildLane.answered`, an `answered` line in the job log; the
-  Inbox ticket asks). A launch T3 refused, or one that failed before the call was sent, started
-  nothing: `not-started`.
-- **One ticket at a time per repo** (#179): no build while the repo has an open PR, whoever
-  opened it, read before the ticket is picked and again right before the launch (a PR opened
-  meanwhile makes the job `not-started`). Clean means merged (Fix rounds and merges, below); merged
-  is the end, with no live steps to wait on (#68), and a merge passes the build lane at once.
-- **One build per repo, repos side by side** (#50): each pass takes every served repo with no build
-  running, the one whose last job ended longest ago first (the job log's `lastEnded`). Each asks
-  the usage gate first (`UsageGate.pick`, kind `build`); a held one says its reason once and waits.
-  A pass waits for each build it starts to be launched, so the gate counts it before the next
-  repo's verdict. A repo whose job started no thread (`not-started`, `branch-exists`) rests 5
-  minutes. In the desktop app a pass runs at start, when the served set changes, when T3 reads new
-  usage while a build is held, and every 5 minutes (GitHub is polled for new tickets).
-- **The end comes from T3's thread events** (`src/t3/thread-end.ts`; The WebSocket API, below), not
-  polling: `done` (the run completed; `done-no-pr` when GitHub answered that no PR came from the
-  branch; a lookup that failed is never "none": the end has no `pr`, each pass, a start's
-  included, looks it up again, and a `pr` line records what it found), `waiting` (a
-  pending runtime request: a question to the user), `usage-limit` (with T3's `resetAt`) or
-  `failed` (with the error item's message). A stream that drops opens again after 5 seconds.
-- **The job log** is `jobs.jsonl` in the state folder (`src/job-log.ts`, today's `state.py` cut to
-  a build; the lanes' log until their port tickets replace them, and the port of `state.py` is The
-  job log, below): `start` (the model the gate let it in on, the cost it was let in at and T3's reading it
-  was let in on, `cost` and `before`), `thread` (once T3 names it), `end` and, for a `needs-user`
-  end, `answered` once the user has answered; `settled` once its thread is settled; `pr` once a
-  PR lookup that failed at the end is done.
-  Every build that started holds its issue but `not-started` (releasing is a later ticket). The
-  usage before and after a job are its record in the gate's `usage.jsonl`, by the same job id: the
-  gate counts the job from its let-in and measures it on T3's first reading after its end; a job
-  that got no thread is dropped from the gate unmeasured.
-- **Settling:** once the end is recorded, the thread is settled (`t3_thread_organize {threadId,
-  action: settle}`; #68 story 5). Only threads the app launched are settled (story 13): the id
-  comes from its own launch. One waiting on a question is left for the Inbox ticket and one
-  stopped by a usage limit for the limits ticket; both are recorded as such and left unsettled.
-  A settle is recorded (`settled`); an end with none (the app stopped between the two, or the
-  settle failed) is settled on the next pass, a start's included. A log from before `settled`
-  lines settles its ended builds' threads once more on the first start, which leaves a settled
-  thread as it is.
-- **An app that stopped mid-build:** on start, each build the log shows open is watched again to
-  its end before any pass (so its repo still has one build), reserved in the gate at its logged
-  `cost` and measured from its logged `before`, never from a reading taken mid-run (a line with
-  neither, an older app's, is measured as teaching nothing). One with no saved thread id
-  needs the user, as a lost launch answer does (After a restart, don't guess, above): no thread
-  is adopted for it, and its repo starts nothing until the user answers.
-- **The app's log** is its console for now (`say`): a line per start, hold, end and failure.
+    pnpm --dir app start -- --config <a config naming the sandboxes> --once
+    pnpm --dir app start -- --config <...>                     # pass after pass
+    pnpm --dir app start -- --config <...> --release NAME#N
+    pnpm --dir app start -- --config <...> --reserve PERCENT
+    pnpm --dir app desktop -- --config <...>                   # the desktop app runs it pass after pass
+
+Until the cutover (#165) the run loop starts only with `--config`, on a config that names the
+sandboxes; the repo's `config.toml` stays the Python runner's. The desktop app runs it pass after
+pass when started with `--config`, and runs no lane of its own.
+
+The differences are TypeScript's only. Python's worker threads are async tasks (a worker's `task`,
+awaited where Python joins), `threading.Event` is `Event` and the Sol lane's thread is a task the
+loop stops. Python's locks guard state two threads share; in Node's one thread a section with no
+await in it can't interleave, so only the gate's lock, held across its async checks, is kept
+(`Lock`). The T3 seam names each model's effort option as T3's catalog does (The T3 seam, below),
+read once when `src/main.ts` starts the loop, and live in the desktop app.
+
+**What later tickets bring:** the run loop calls each part a later ticket ports where Python calls
+it, through `src/later-parts.ts`, which keeps Python's names and answers as the part does when
+there's nothing for it: no ask thread (#233), answer on GitHub or title prefix (#232), fix round
+(#223), effort read back (#228), reviewer, so the Sol lane's pass is idle (#222), snapshot (#230),
+toast or wake task (#236), or self-update (#237). A stand-in may do less than Python, never
+something Python wouldn't. So `control.json` is read as Python reads it (its writing, the asks'
+marks and Refresh are #229); a decision's cases are found as Python finds them, and a repo with
+one is held for the pass, starting nothing and saying so once, until #226 ports the decision; a
+usage-limit stop is read from what the run said, as Python reads it with no `T3Store` (#227 ports
+the store), and a limited job due to resume holds its repo the same way until #227 ports the
+recovery. A base stop is read from the job log as Python reads it, and nothing files one until
+#225. `finish_fix` is ported, for a dead runner's fix round found ended; `continue_job` and
+`run_fix`, which only later parts reach, throw `NotPorted` naming their ticket. Python's other flags (`--dry-run` #238, `--review` #222,
+`--gate`, `--pause` and `--resume` #229, `--snapshot` #230, `--inbox` #231, `--stop`) are unknown
+arguments until then. The cases that need those parts are `it.todo`, named as in Python, under
+the ticket that turns them on.
 
 ## Reviews
 
@@ -457,9 +424,10 @@ every open PR in a served repo without a review on its newest commit gets one, w
   or `approach-note` is recorded and posted, and nothing more happens.
 - **One review at a time** (#106 runs them at once later). Each asks the usage gate
   (`UsageGate.pick`, kind `review`): the kind's own model, or its fallback while that provider has
-  no room (#69); held, it says the gate's reason once and the pass ends. A pass runs at start (after
-  an open review is carried on with), on T3's usage and the repos changing, after each review
-  (but not after one whose head moved, so a stale list can't loop it), and every minute.
+  no room (#69); held, it says the gate's reason once and the pass ends. In the desktop app, until
+  the run loop's port replaced the lanes there (#219), a pass ran at start (after an open review
+  is carried on with), on T3's usage and the repos changing, after each review (but not after one
+  whose head moved, so a stale list can't loop it), and every minute; the live check runs one.
 - **No outside tools** (`docs/reviews.md`, A review has no outside tools): a review runs only on
   a T3 provider instance the user named as set up without them, the `toolFreeInstances` setting
   (instance ids; empty on a new install, so no review runs until one is named), as today's
@@ -486,7 +454,7 @@ every open PR in a served repo without a review on its newest commit gets one, w
   `templates/review.md` and today's `_brief`) names the checkout too, leaves the project's clone
   alone, and asks for no posts, no questions and tests in the foreground. Its inputs are in `<state>/runs/<repo>-pr<n>-r<K>-<time>/`, as today's: the diffs,
   `pr.md`, each closed issue with its comments, `conversation.md`, `evidence/`. Its end comes
-  from T3's thread events (Builds); its reply is the run's last assistant message, read whole
+  from T3's thread events (`src/t3/thread-end.ts`); its reply is the run's last assistant message, read whole
   through `t3_thread_read` (`view: messages`, paged, then `textOffset` while truncated; T3's CLI's
   `runResultText`). A read that fails (T3 or GitHub busy a moment) is asked again after a wait,
   never taken as no reply, and so is one T3 cuts short: a continuation or a later message page
@@ -508,7 +476,7 @@ every open PR in a served repo without a review on its newest commit gets one, w
   `head-moved`, `not-started` or `needs-user`. Once the end is recorded the thread is settled, whatever the end
   (nobody answers a review thread), with the builds' settle (`src/settle.ts`: a `settled` line,
   and an end with none settled on the next pass).
-- **After a restart, don't guess** (as Builds): a review the log shows open whose thread id was
+- **After a restart, don't guess** (as the app's build lane had it, #154): a review the log shows open whose thread id was
   saved carries on with that thread, before any other review starts: watched to its end, its reply
   read, decided and posted from its start line and the run folder's `review.json` (what deciding
   needs that the start line doesn't hold), its checkout removed and its thread settled. One posted
@@ -583,7 +551,7 @@ merge half of `src/github.ts` and `src/git.ts`.
   is the round's, watched to its end; the thread gone means nothing ran, and a fresh fixer
   follows; anything else (no new run, or the thread can't be read) ends `needs-user`. Only a
   refusal before the tool ran (a 4xx, a refused token) or a call never sent is `not-started`.
-- **After a restart, don't guess** (as Builds): a round the log shows open with its thread line is
+- **After a restart, don't guess** (as the app's build lane had it, #154): a round the log shows open with its thread line is
   watched again; a send without one is read as above; a fresh fixer's launch without one, or one
   whose answer was lost, ends `needs-user`, and the repo starts nothing until the user answers
   (`FixLane.answered`).
@@ -630,8 +598,10 @@ merge half of `src/github.ts` and `src/git.ts`.
   never counts it. A merge step with no end (the app stopped mid-merge) is read from GitHub on the
   next pass: merged, or failed. A read that fails is said and tried next pass, never taken as
   merged or gone.
-- **When:** the fix lane watches open rounds again at start, then passes on usage, the repos, each
-  review's end and every minute; the merge lane on each review's end, the repos and every minute.
+- **When** (in the desktop app, until the run loop's port replaced the lanes there, #219; the live
+  checks run one pass): the fix lane watched open rounds again at start, then passed on usage, the
+  repos, each review's end and every minute; the merge lane on each review's end, the repos and
+  every minute.
 
 ## Conflict rounds
 
@@ -694,11 +664,12 @@ A PR whose head conflicts with its base gets a conflict round (#157; `docs/flow.
   thread link), written once per PR, head and cause, for the stops ticket (#158), which files and
   shows them. Until then a stop holds the PR's head: no round runs on it, even once the base moves,
   until a new head.
-- **After a restart, don't guess** (as Builds): a round the log shows open with its thread line is
+- **After a restart, don't guess** (as the app's build lane had it, #154): a round the log shows open with its thread line is
   watched again; one without, and a launch whose answer was lost (`NoAnswer`), end `needs-user`,
   and the repo starts nothing until the user answers (`ConflictLane.answered`).
-- **When:** open rounds are watched again at start; then a pass on usage, the repos, each review,
-  fix round and merge that ends, and every minute.
+- **When** (in the desktop app, until the run loop's port replaced the lanes there, #219; the live
+  check runs one round): open rounds were watched again at start; then a pass on usage, the repos,
+  each review, fix round and merge that ends, and every minute.
 
 ## The job log
 
@@ -715,8 +686,8 @@ none interleaves with another and Python's per-file lock has nothing to guard. `
 `Date`, which has no offset of its own: a stamp with one is that instant, a stamp with none is
 this PC's local time, as in Python. A test passes the log its own clock.
 
-Nothing calls it yet: the lanes still write `src/job-log.ts` until the run loop, review, fix and
-merge ports (#219, #222, #223, #224) replace them.
+The run loop writes it (#219). The app's review, fix, merge and conflict lanes still write
+`src/job-log.ts` until the reviews, fix and merge ports (#222, #223, #224) replace them.
 
 ## The config, the lock and the build brief
 
@@ -750,8 +721,7 @@ above; #172). Pending: test_templates'
 `test_screenshots_go_where_the_review_reads_them` read `fix.md` and `review.md`, which the fix and
 reviews ports (#223, #222) copy in.
 
-Nothing calls them yet: builds still brief through `src/briefs/build.ts` and the app's Settings
-and Repositories until the run loop's port (#219, part 2) calls these.
+The run loop and its command line call them (#219).
 
 ## The GitHub seam
 
@@ -769,8 +739,8 @@ block on their own threads. A Python dataclass is a frozen class built from its 
 with Python's defaults, and `replace` stands in for `dataclasses.replace`. A field Python reads
 as `x['key']` is an error when missing, as Python's `KeyError` is.
 
-Nothing calls it yet: the lanes still read and write GitHub through `src/github.ts` until the run
-loop, review, fix and merge ports (#219, #222, #223, #224) move them. `src/github.ts` keeps the
+The run loop calls it (#219). The app's review, fix, merge and conflict lanes still read and write
+GitHub through `src/github.ts` until the reviews, fix and merge ports (#222, #223, #224) move them. `src/github.ts` keeps the
 remote read (`gh repo view`) and gh's failure shape that Repositories and Setup use (GitHub,
 below).
 
@@ -794,8 +764,8 @@ block on their own threads. Python's tuples are arrays and its `None` is `null`.
 can't start, or runs past the timeout, rejects with Node's own error, as Python raises; only a
 non-zero exit is an answer.
 
-Nothing calls it yet: the lanes still use `src/git.ts` until the run loop, review, fix and merge
-ports (#219, #222, #223, #224) move them.
+The run loop calls it (#219). The app's review, fix, merge and conflict lanes still use
+`src/git.ts` until the reviews, fix and merge ports (#222, #223, #224) move them.
 
 ## The dependencies
 
@@ -829,9 +799,9 @@ Two differences are TypeScript's only. The seam's calls are async, so `pick` is 
 reads `\w`, `\d`, `\s` and `\b` as Unicode, where JavaScript's read ASCII, so the patterns spell
 out Python's classes, and `int`, `splitlines` and the sort of references follow Python's.
 
-Nothing calls it yet: builds pick through `src/picker.ts`, and the fix, conflict and review lanes
-read `closedIssues` and `JOB_BRANCH_PREFIX` there, until the run loop, review and fix ports
-(#219, #222, #223) move them.
+The run loop picks through it (#219). The fix, conflict and review lanes and the live build check
+read `closedIssues` and `JOB_BRANCH_PREFIX` in `src/picker.ts`, until the reviews and fix ports
+(#222, #223) move them.
 
 ## The usage gate, ported
 
@@ -861,8 +831,9 @@ no offset of its own: a reset time is written in UTC (`+00:00`). JSON is JavaScr
 ledger, below, has the same limits), and a caught error's text is Node's where Python prints its
 own.
 
-Nothing calls it yet: the app's own usage gate (Usage, above) runs the lanes until the run loop's
-port (#219) calls this one.
+The run loop calls it where Python calls `gate.Gate` (#219): a job let in, a job ended, the jobs
+running. `wall_sleep`, its default after-job wait, is `src/run.ts`'s. The app's own usage gate
+(Usage, above) runs the review, fix, merge and conflict lanes until their ports.
 
 ## The review ledger
 
@@ -921,9 +892,9 @@ The fake for its tests is T3's server answering from responses recorded off the 
 (`test/fixtures/t3/`, copied from the note's fixtures with their names): the app's own MCP client
 reads them, as it reads T3.
 
-Nothing calls it yet: the lanes still launch, wait and settle through `src/launch.ts`,
-`src/t3/thread-end.ts`, `src/t3/thread-reply.ts` and `src/settle.ts` until the run loop, review,
-fix and merge ports (#219, #222, #223, #224) move them.
+The run loop calls it (#219). The app's review, fix, merge and conflict lanes still launch, wait
+and settle through `src/launch.ts`, `src/t3/thread-end.ts`, `src/t3/thread-reply.ts` and
+`src/settle.ts` until the reviews, fix and merge ports (#222, #223, #224) move them.
 
 ## Setup
 
@@ -1100,11 +1071,13 @@ is killed is code -1 with Node's reason in stderr, never a gh exit code (so is t
 - `app/live/build.ts` (`pnpm --dir app live:build [-- --run <instance>:<model>]`): the
   "queue-runner sandbox" project only, like today's `scripts/live_sandbox.py`. A hand-made issue
   (add a line to README, commit, push to `origin`; the sandbox has no GitHub, so no picking, no
-  PR) built through `BuildLane.build`, numbered afresh each run so an earlier run's branch never
-  holds it, on T3's default model at its lowest effort unless `--run` names one; the gate isn't
-  asked. It checks the end was `done`, the branch is on `origin`, the thread ran in its own
-  worktree on the job branch on the asked model, and it was settled. **Run 2026-11-19** on Haiku
-  5.5 at low: all ok, in about 20 seconds.
+  PR) built through the run loop's port, `Runner.run_build` (#219), as Python's check builds
+  through Python's, numbered afresh each run so an earlier run's branch never holds it, on T3's
+  default model at its lowest effort unless `--run` names one, as the config's `[claude]`; the
+  gate isn't asked. Its job log is in a temp folder. It checks the end was `done`, the branch is
+  on `origin`, the thread ran in its own worktree on the job branch on the asked model, and it was
+  settled. **Run 2026-11-19** through the app's build lane, which the port replaced, on Haiku 5.5
+  at low: all ok, in about 20 seconds; not run yet through the port.
 - `app/live/review.ts` (`pnpm --dir app live:review -- (--pr N | --open-pr) --run
   <instance>:<model> [--state <folder>]`): today's `scripts/live_review.py` for the app, dry run. One real review of
   one open PR in `stefan1575/queue-runner-sandbox` only (it refuses another clone), through

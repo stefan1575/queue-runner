@@ -34,7 +34,7 @@
 // app's own launch. One the log shows open with its thread line is watched again; one without, and
 // a launch whose answer was lost (`NoAnswer`), need the user: the repo starts nothing until they
 // answer. What the launch made (a new worktree's branch) is a `made` line (#156 F15).
-import type { BuildRepo } from './build-lane.ts';
+import type { BuildRepo } from './repos.ts';
 import { conflictBrief, type ConflictWhere } from './briefs/conflict.ts';
 import { holdText } from './gate.ts';
 import type { FixGit } from './git.ts';
