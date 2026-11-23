@@ -390,13 +390,17 @@ read once when `src/main.ts` starts the loop, and live in the desktop app.
 
 **What later tickets bring:** the run loop calls each part a later ticket ports where Python calls
 it, through `src/later-parts.ts`, which keeps Python's names and answers as the part does when
-there's nothing for it: no decision (#226), ask thread (#233), answer on GitHub or title prefix
-(#232), fix round (#223), stop in `control.json` (#229), effort read back (#228), reviewer, so the
-Sol lane's pass is idle (#222), snapshot (#230), toast or wake task (#236), or self-update (#237).
-A base stop is read from the job log as Python reads it, and nothing files one until #225. The
-Runner's own methods that only those parts reach (`continue_job`, `recover`, `run_fix`,
-`finish_fix`) throw `NotPorted` naming their ticket, and `_limit` reads no usage-limit stop until
-#227, so such a run ends `failed`. Python's other flags (`--dry-run` #238, `--review` #222,
+there's nothing for it: no ask thread (#233), answer on GitHub or title prefix (#232), fix round
+(#223), effort read back (#228), reviewer, so the Sol lane's pass is idle (#222), snapshot (#230),
+toast or wake task (#236), or self-update (#237). A stand-in may do less than Python, never
+something Python wouldn't. So `control.json` is read as Python reads it (its writing, the asks'
+marks and Refresh are #229); a decision's cases are found as Python finds them, and a repo with
+one is held for the pass, starting nothing and saying so once, until #226 ports the decision; a
+usage-limit stop is read from what the run said, as Python reads it with no `T3Store` (#227 ports
+the store), and a limited job due to resume holds its repo the same way until #227 ports the
+recovery. A base stop is read from the job log as Python reads it, and nothing files one until
+#225. `finish_fix` is ported, for a dead runner's fix round found ended; `continue_job` and
+`run_fix`, which only later parts reach, throw `NotPorted` naming their ticket. Python's other flags (`--dry-run` #238, `--review` #222,
 `--gate`, `--pause` and `--resume` #229, `--snapshot` #230, `--inbox` #231, `--stop`) are unknown
 arguments until then. The cases that need those parts are `it.todo`, named as in Python, under
 the ticket that turns them on.
